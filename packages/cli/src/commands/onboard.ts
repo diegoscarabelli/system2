@@ -37,6 +37,26 @@ export async function onboard(): Promise<void> {
 
   p.intro('System2 Onboarding');
 
+  // Check for existing installation
+  const isExistingInstallation = existsSync(join(SYSTEM2_DIR, '.env')) ||
+                                 existsSync(join(SYSTEM2_DIR, 'app.db'));
+
+  if (isExistingInstallation) {
+    console.log('');
+    console.log('⚠️  System2 is already configured');
+    console.log('');
+    console.log('Found existing installation at ~/.system2/');
+    console.log('');
+    console.log('To start System2, run:');
+    console.log('  system2 start');
+    console.log('');
+    console.log('To reset and start fresh (WARNING: destroys all data):');
+    console.log('  rm -rf ~/.system2');
+    console.log('  system2 onboard');
+    console.log('');
+    process.exit(0);
+  }
+
   try {
 
   // Phase 1: Terminal Prompts (Credentials Only)

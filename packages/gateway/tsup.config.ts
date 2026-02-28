@@ -26,5 +26,14 @@ export default defineConfig({
     }
 
     console.log('✓ Copied agent library files to dist/');
+
+    // Copy schema.sql to dist/db/
+    const srcDb = join(__dirname, 'src', 'db');
+    const destDb = join(__dirname, 'dist', 'db');
+
+    mkdirSync(destDb, { recursive: true });
+    copyFileSync(join(srcDb, 'schema.sql'), join(destDb, 'schema.sql'));
+
+    console.log('✓ Copied schema.sql to dist/');
   },
 });
