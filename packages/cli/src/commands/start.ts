@@ -31,26 +31,26 @@ export async function start(options: { port?: number; noBrowser?: boolean }): Pr
   // Load environment variables from .env
   dotenvConfig({ path: ENV_FILE });
 
-  // Get LLM provider from environment
+  // Get LLM provider and model from environment
   const primaryProvider = process.env.PRIMARY_LLM_PROVIDER as 'anthropic' | 'openai' | 'google';
+  const primaryModel = process.env.PRIMARY_LLM_MODEL;
+
   if (!primaryProvider) {
     console.error('Error: PRIMARY_LLM_PROVIDER not found in .env file');
     process.exit(1);
   }
 
-  // Determine LLM model based on provider
-  const modelMap: Record<string, string> = {
-    anthropic: 'claude-sonnet-4-5',
-    openai: 'gpt-4o',
-    google: 'gemini-3.1-pro',
-  };
+  if (!primaryModel) {
+    console.error('Error: PRIMARY_LLM_MODEL not found in .env file');
+    console.error('Please run: system2 onboard');
+    process.exit(1);
+  }
 
-  const model = modelMap[primaryProvider];
   const port = options.port || 3000;
 
   console.log('Starting System2 Gateway...');
   console.log(`  Provider: ${primaryProvider}`);
-  console.log(`  Model: ${model}`);
+  console.log(`  Model: ${primaryModel}`);
   console.log(`  Port: ${port}`);
   console.log('');
 
@@ -59,7 +59,7 @@ export async function start(options: { port?: number; noBrowser?: boolean }): Pr
     port,
     dbPath: DB_FILE,
     llmProvider: primaryProvider,
-    llmModel: model,
+    llmModel: primaryModel,
     uiDistPath: UI_DIST_PATH,
   });
 

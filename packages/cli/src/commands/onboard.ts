@@ -24,10 +24,62 @@ const UI_DIST_PATH = join(__dirname, '..', '..', 'ui', 'dist');
 
 interface OnboardConfig {
   primaryProvider: 'anthropic' | 'openai' | 'google';
+  primaryModel: string;
   primaryApiKey: string;
   secondaryProvider?: 'anthropic' | 'openai' | 'google';
+  secondaryModel?: string;
   secondaryApiKey?: string;
 }
+
+// Model options per provider with pricing and descriptions
+const MODEL_OPTIONS = {
+  anthropic: [
+    {
+      value: 'claude-haiku-4-5',
+      label: 'Haiku 4.5',
+      hint: '$1/$5/M tokens • Fast & efficient, best for simple tasks',
+    },
+    {
+      value: 'claude-sonnet-4-5',
+      label: 'Sonnet 4.5 (Recommended)',
+      hint: '$3/$15/M tokens • Balanced intelligence & cost',
+    },
+    {
+      value: 'claude-opus-4-5',
+      label: 'Opus 4.5',
+      hint: '$5/$25/M tokens • Flagship performance for complex reasoning',
+    },
+  ],
+  openai: [
+    {
+      value: 'gpt-4o-mini',
+      label: 'GPT-4o-mini',
+      hint: '$0.15/$0.60/M tokens • Ultra-cheap for simple tasks',
+    },
+    {
+      value: 'gpt-4o',
+      label: 'GPT-4o (Recommended)',
+      hint: '$2.50/$10/M tokens • Best balance of capability & cost',
+    },
+    {
+      value: 'o3-mini',
+      label: 'o3-mini',
+      hint: '$1.10/$4.40/M tokens • Advanced reasoning',
+    },
+  ],
+  google: [
+    {
+      value: 'gemini-2.5-flash',
+      label: 'Gemini 2.5 Flash',
+      hint: '$0.15/$0.60/M tokens • Fast & cheap for simple tasks',
+    },
+    {
+      value: 'gemini-3.1-pro',
+      label: 'Gemini 3.1 Pro (Recommended)',
+      hint: '$2/$12/M tokens • 77% on ARC-AGI, best value',
+    },
+  ],
+};
 
 export async function onboard(): Promise<void> {
   console.clear();
@@ -35,26 +87,37 @@ export async function onboard(): Promise<void> {
   p.intro('🦞 System2 Onboarding');
 
   // Phase 1: Terminal Prompts (Credentials Only)
-  const primaryProvider = await p.select({
+  const primaryProvider = (await p.select({
     message: 'Select your primary LLM provider',
     options: [
-      { value: 'anthropic', label: 'Anthropic', hint: 'Claude Opus/Sonnet' },
-      { value: 'openai', label: 'OpenAI', hint: 'GPT-4o' },
-      { value: 'google', label: 'Google', hint: 'Gemini 2.5 Pro' },
+      { value: 'anthropic', label: 'Anthropic', hint: 'Claude models' },
+      { value: 'openai', label: 'OpenAI', hint: 'GPT & o-series models' },
+      { value: 'google', label: 'Google', hint: 'Gemini models' },
     ],
-  }) as 'anthropic' | 'openai' | 'google';
+  })) as 'anthropic' | 'openai' | 'google';
 
   if (p.isCancel(primaryProvider)) {
     p.cancel('Onboarding cancelled');
     process.exit(0);
   }
 
-  const primaryApiKey = await p.password({
+  // Select model for primary provider
+  const primaryModel = (await p.select({
+    message: `Select ${primaryProvider} model`,
+    options: MODEL_OPTIONS[primaryProvider],
+  })) as string;
+
+  if (p.isCancel(primaryModel)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  const primaryApiKey = (await p.password({
     message: `Enter your ${primaryProvider} API key`,
     validate: (value) => {
       if (!value) return 'API key is required';
     },
-  }) as string;
+  })) as string;
 
   if (p.isCancel(primaryApiKey)) {
     p.cancel('Onboarding cancelled');
@@ -72,32 +135,44 @@ export async function onboard(): Promise<void> {
   }
 
   let secondaryProvider: 'anthropic' | 'openai' | 'google' | undefined;
+  let secondaryModel: string | undefined;
   let secondaryApiKey: string | undefined;
 
   if (wantsFallback) {
     // Filter out the primary provider from secondary options
     const secondaryOptions = [
-      { value: 'anthropic', label: 'Anthropic', hint: 'Claude Opus/Sonnet' },
-      { value: 'openai', label: 'OpenAI', hint: 'GPT-4o' },
-      { value: 'google', label: 'Google', hint: 'Gemini 2.5 Pro' },
+      { value: 'anthropic', label: 'Anthropic', hint: 'Claude models' },
+      { value: 'openai', label: 'OpenAI', hint: 'GPT & o-series models' },
+      { value: 'google', label: 'Google', hint: 'Gemini models' },
     ].filter((opt) => opt.value !== primaryProvider);
 
-    secondaryProvider = await p.select({
+    secondaryProvider = (await p.select({
       message: 'Select fallback provider',
       options: secondaryOptions,
-    }) as 'anthropic' | 'openai' | 'google';
+    })) as 'anthropic' | 'openai' | 'google';
 
     if (p.isCancel(secondaryProvider)) {
       p.cancel('Onboarding cancelled');
       process.exit(0);
     }
 
-    secondaryApiKey = await p.password({
+    // Select model for secondary provider
+    secondaryModel = (await p.select({
+      message: `Select ${secondaryProvider} model`,
+      options: MODEL_OPTIONS[secondaryProvider],
+    })) as string;
+
+    if (p.isCancel(secondaryModel)) {
+      p.cancel('Onboarding cancelled');
+      process.exit(0);
+    }
+
+    secondaryApiKey = (await p.password({
       message: `Enter your ${secondaryProvider} API key`,
       validate: (value) => {
         if (!value) return 'API key is required';
       },
-    }) as string;
+    })) as string;
 
     if (p.isCancel(secondaryApiKey)) {
       p.cancel('Onboarding cancelled');
@@ -107,8 +182,10 @@ export async function onboard(): Promise<void> {
 
   const config: OnboardConfig = {
     primaryProvider,
+    primaryModel,
     primaryApiKey,
     secondaryProvider,
+    secondaryModel,
     secondaryApiKey,
   };
 
@@ -142,13 +219,15 @@ async function bootstrap(config: OnboardConfig): Promise<void> {
 
 # Primary LLM Provider
 PRIMARY_LLM_PROVIDER=${config.primaryProvider}
+PRIMARY_LLM_MODEL=${config.primaryModel}
 ${getApiKeyEnvVar(config.primaryProvider)}=${config.primaryApiKey}
 `;
 
-  if (config.secondaryProvider && config.secondaryApiKey) {
+  if (config.secondaryProvider && config.secondaryModel && config.secondaryApiKey) {
     envContent += `
 # Secondary LLM Provider (Fallback)
 SECONDARY_LLM_PROVIDER=${config.secondaryProvider}
+SECONDARY_LLM_MODEL=${config.secondaryModel}
 ${getApiKeyEnvVar(config.secondaryProvider)}=${config.secondaryApiKey}
 `;
   }
@@ -157,15 +236,6 @@ ${getApiKeyEnvVar(config.secondaryProvider)}=${config.secondaryApiKey}
 }
 
 async function launch(config: OnboardConfig, s: ReturnType<typeof p.spinner>): Promise<void> {
-  // Determine LLM model based on provider
-  const modelMap: Record<string, string> = {
-    anthropic: 'claude-sonnet-4-5',
-    openai: 'gpt-4o',
-    google: 'gemini-3.1-pro',
-  };
-
-  const model = modelMap[config.primaryProvider];
-
   // Set API keys in environment (Pi SDK reads from process.env)
   process.env[getApiKeyEnvVar(config.primaryProvider)] = config.primaryApiKey;
   if (config.secondaryProvider && config.secondaryApiKey) {
@@ -177,7 +247,7 @@ async function launch(config: OnboardConfig, s: ReturnType<typeof p.spinner>): P
     port: 3000,
     dbPath: DB_FILE,
     llmProvider: config.primaryProvider,
-    llmModel: model,
+    llmModel: config.primaryModel,
     uiDistPath: UI_DIST_PATH,
   });
 
