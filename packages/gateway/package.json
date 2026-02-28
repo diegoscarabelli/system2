@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sinclair/typebox": "^0.32.0",
     "@system2/shared": "workspace:*",
     "@mariozechner/pi-agent-core": "^0.55.3",
     "@mariozechner/pi-ai": "^0.55.3",

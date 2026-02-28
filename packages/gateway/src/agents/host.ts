@@ -11,6 +11,9 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { DatabaseClient } from '../db/client.js';
 import { createQueryDatabaseTool } from './tools/query-database.js';
+import { createBashTool } from './tools/bash.js';
+import { createReadTool } from './tools/read.js';
+import { createWriteTool } from './tools/write.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -44,11 +47,14 @@ export class AgentHost {
         model,
         tools: [
           createQueryDatabaseTool(this.db),
-          // TODO: Add bash, read, write tools
+          createBashTool(),
+          createReadTool(),
+          createWriteTool(),
           // TODO: Add spawn_conductor tool (Phase 2)
         ],
         thinkingLevel: 'off',
       },
+      // TODO: Configure session persistence via sessionPath
     });
 
     // Subscribe to agent events and forward to listeners

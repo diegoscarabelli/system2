@@ -7,6 +7,7 @@
 
 import { Command } from 'commander';
 import { onboard } from './commands/onboard.js';
+import { start } from './commands/start.js';
 
 const program = new Command();
 
@@ -22,6 +23,16 @@ program
     await onboard();
   });
 
-// TODO: Add 'start' command for subsequent runs (after onboarding)
+program
+  .command('start')
+  .description('Start the System2 gateway server (after onboarding)')
+  .option('-p, --port <number>', 'Port to run the server on', '3000')
+  .option('--no-browser', 'Do not open browser automatically')
+  .action(async (options) => {
+    await start({
+      port: options.port ? parseInt(options.port) : undefined,
+      noBrowser: !options.browser,
+    });
+  });
 
 program.parse();

@@ -57,6 +57,9 @@ importers:
       '@mariozechner/pi-ai':
         specifier: ^0.55.3
         version: 0.55.3(ws@8.19.0)(zod@4.3.6)
+      '@sinclair/typebox':
+        specifier: ^0.32.0
+        version: 0.32.35
       '@system2/shared':
         specifier: workspace:*
         version: link:../shared
@@ -1762,6 +1765,10 @@ packages:
     requiresBuild: true
     dev: true
     optional: true
+
+  /@sinclair/typebox@0.32.35:
+    resolution: {integrity: sha512-Ul3YyOTU++to8cgNkttakC0dWvpERr6RYoHO2W47DLbFvrwBDJUY31B1sImH6JZSYc4Kt4PyHtoPNu+vL2r2dA==}
+    dev: false
 
   /@sinclair/typebox@0.34.48:
     resolution: {integrity: sha512-kKJTNuK3AQOrgjjotVxMrCn1sUJwM76wMszfq1kdU4uYVJjvEWuFQ6HgvLt4Xz3fSmZlTOxJ/Ie13KnIcWQXFA==}

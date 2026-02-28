@@ -6,15 +6,21 @@
 
 import { mkdir, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { fileURLToPath } from 'url';
 import * as p from '@clack/prompts';
 import { Server } from '@system2/gateway';
 import open from 'open';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const SYSTEM2_DIR = join(homedir(), '.system2');
 const ENV_FILE = join(SYSTEM2_DIR, '.env');
 const DB_FILE = join(SYSTEM2_DIR, 'app.db');
+// UI dist path: from CLI dist to ui dist (../../ui/dist)
+const UI_DIST_PATH = join(__dirname, '..', '..', 'ui', 'dist');
 
 interface OnboardConfig {
   primaryProvider: 'anthropic' | 'openai' | 'google';
@@ -160,12 +166,19 @@ async function launch(config: OnboardConfig, s: ReturnType<typeof p.spinner>): P
 
   const model = modelMap[config.primaryProvider];
 
+  // Set API keys in environment (Pi SDK reads from process.env)
+  process.env[getApiKeyEnvVar(config.primaryProvider)] = config.primaryApiKey;
+  if (config.secondaryProvider && config.secondaryApiKey) {
+    process.env[getApiKeyEnvVar(config.secondaryProvider)] = config.secondaryApiKey;
+  }
+
   // Start server
   const server = new Server({
     port: 3000,
     dbPath: DB_FILE,
     llmProvider: config.primaryProvider,
     llmModel: model,
+    uiDistPath: UI_DIST_PATH,
   });
 
   await server.start();
