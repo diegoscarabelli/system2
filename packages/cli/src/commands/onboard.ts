@@ -10,7 +10,7 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import * as p from '@clack/prompts';
-import { Server } from '@system2/gateway';
+import { Server, GUIDE_MODEL_OPTIONS } from '@system2/gateway';
 import open from 'open';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,55 +31,6 @@ interface OnboardConfig {
   secondaryApiKey?: string;
 }
 
-// Model options per provider with pricing and descriptions
-const MODEL_OPTIONS = {
-  anthropic: [
-    {
-      value: 'claude-haiku-4-5',
-      label: 'Haiku 4.5',
-      hint: '$1/$5/M tokens • Fast & efficient, best for simple tasks',
-    },
-    {
-      value: 'claude-sonnet-4-5',
-      label: 'Sonnet 4.5 (Recommended)',
-      hint: '$3/$15/M tokens • Balanced intelligence & cost',
-    },
-    {
-      value: 'claude-opus-4-5',
-      label: 'Opus 4.5',
-      hint: '$5/$25/M tokens • Flagship performance for complex reasoning',
-    },
-  ],
-  openai: [
-    {
-      value: 'gpt-4o-mini',
-      label: 'GPT-4o-mini',
-      hint: '$0.15/$0.60/M tokens • Ultra-cheap for simple tasks',
-    },
-    {
-      value: 'gpt-4o',
-      label: 'GPT-4o (Recommended)',
-      hint: '$2.50/$10/M tokens • Best balance of capability & cost',
-    },
-    {
-      value: 'o3-mini',
-      label: 'o3-mini',
-      hint: '$1.10/$4.40/M tokens • Advanced reasoning',
-    },
-  ],
-  google: [
-    {
-      value: 'gemini-2.5-flash',
-      label: 'Gemini 2.5 Flash',
-      hint: '$0.15/$0.60/M tokens • Fast & cheap for simple tasks',
-    },
-    {
-      value: 'gemini-3.1-pro',
-      label: 'Gemini 3.1 Pro (Recommended)',
-      hint: '$2/$12/M tokens • 77% on ARC-AGI, best value',
-    },
-  ],
-};
 
 export async function onboard(): Promise<void> {
   console.clear();
@@ -104,7 +55,7 @@ export async function onboard(): Promise<void> {
   // Select model for primary provider
   const primaryModel = (await p.select({
     message: `Select ${primaryProvider} model`,
-    options: MODEL_OPTIONS[primaryProvider],
+    options: GUIDE_MODEL_OPTIONS[primaryProvider],
   })) as string;
 
   if (p.isCancel(primaryModel)) {
@@ -159,7 +110,7 @@ export async function onboard(): Promise<void> {
     // Select model for secondary provider
     secondaryModel = (await p.select({
       message: `Select ${secondaryProvider} model`,
-      options: MODEL_OPTIONS[secondaryProvider],
+      options: GUIDE_MODEL_OPTIONS[secondaryProvider],
     })) as string;
 
     if (p.isCancel(secondaryModel)) {
