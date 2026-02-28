@@ -27,7 +27,7 @@ export class DatabaseClient {
   }
 
   private initializeSchema(): void {
-    const schemaPath = join(__dirname, 'schema.sql');
+    const schemaPath = join(__dirname, 'db', 'schema.sql');
     const schema = readFileSync(schemaPath, 'utf-8');
     this.db.exec(schema);
   }
