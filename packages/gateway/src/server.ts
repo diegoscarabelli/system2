@@ -20,7 +20,6 @@ export interface ServerConfig {
   port: number;
   dbPath: string;
   llmProvider: 'anthropic' | 'openai' | 'google';
-  llmModel: string;
   uiDistPath?: string;
 }
 
@@ -38,11 +37,10 @@ export class Server {
     // Initialize database
     this.db = new DatabaseClient(config.dbPath);
 
-    // Initialize agent host
+    // Initialize agent host (reads model from agent library)
     this.agentHost = new AgentHost({
       db: this.db,
       llmProvider: config.llmProvider,
-      llmModel: config.llmModel,
     });
 
     // Set up Express app

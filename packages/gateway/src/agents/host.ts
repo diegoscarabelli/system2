@@ -7,21 +7,31 @@
 import { Agent, type AgentEvent } from '@mariozechner/pi-agent-core';
 import { getModel } from '@mariozechner/pi-ai';
 import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
+import { homedir } from 'os';
 import type { DatabaseClient } from '../db/client.js';
 import { createQueryDatabaseTool } from './tools/query-database.js';
 import { createBashTool } from './tools/bash.js';
 import { createReadTool } from './tools/read.js';
 import { createWriteTool } from './tools/write.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const SYSTEM2_DIR = join(homedir(), '.system2');
+const GUIDE_AGENT_DIR = join(SYSTEM2_DIR, 'agents', 'guide');
+
+interface GuideConfig {
+  name: string;
+  description: string;
+  version: string;
+  models: {
+    anthropic: string;
+    openai: string;
+    google: string;
+  };
+}
 
 export interface AgentHostConfig {
   db: DatabaseClient;
   llmProvider: string;
-  llmModel: string;
   sessionPath?: string;
 }
 
@@ -33,12 +43,22 @@ export class AgentHost {
   constructor(config: AgentHostConfig) {
     this.db = config.db;
 
-    // Load Guide system prompt
-    const systemPromptPath = join(__dirname, 'guide.system.md');
+    // Load Guide agent configuration from library
+    const guideConfigPath = join(GUIDE_AGENT_DIR, 'config.json');
+    const guideConfig: GuideConfig = JSON.parse(readFileSync(guideConfigPath, 'utf-8'));
+
+    // Get model for selected provider from agent library config
+    const llmModel = guideConfig.models[config.llmProvider as keyof typeof guideConfig.models];
+    if (!llmModel) {
+      throw new Error(`No model configured for provider: ${config.llmProvider}`);
+    }
+
+    // Load Guide system prompt from library
+    const systemPromptPath = join(GUIDE_AGENT_DIR, 'system.md');
     const systemPrompt = readFileSync(systemPromptPath, 'utf-8');
 
     // Initialize LLM model
-    const model = getModel(config.llmProvider as any, config.llmModel);
+    const model = getModel(config.llmProvider as any, llmModel);
 
     // Create Guide agent with tools
     this.agent = new Agent({

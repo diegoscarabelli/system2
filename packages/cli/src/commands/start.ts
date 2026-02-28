@@ -4,7 +4,7 @@
  * Starts the System2 gateway server for subsequent runs (after onboarding).
  */
 
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -31,35 +31,32 @@ export async function start(options: { port?: number; noBrowser?: boolean }): Pr
   // Load environment variables from .env
   dotenvConfig({ path: ENV_FILE });
 
-  // Get LLM provider and model from environment
+  // Get LLM provider from environment
   const primaryProvider = process.env.PRIMARY_LLM_PROVIDER as 'anthropic' | 'openai' | 'google';
-  const primaryModel = process.env.PRIMARY_LLM_MODEL;
 
   if (!primaryProvider) {
     console.error('Error: PRIMARY_LLM_PROVIDER not found in .env file');
     process.exit(1);
   }
 
-  if (!primaryModel) {
-    console.error('Error: PRIMARY_LLM_MODEL not found in .env file');
-    console.error('Please run: system2 onboard');
-    process.exit(1);
-  }
+  // Read Guide agent config to display model info
+  const guideConfigPath = join(SYSTEM2_DIR, 'agents', 'guide', 'config.json');
+  const guideConfig = JSON.parse(readFileSync(guideConfigPath, 'utf-8'));
+  const llmModel = guideConfig.models[primaryProvider];
 
   const port = options.port || 3000;
 
   console.log('Starting System2 Gateway...');
   console.log(`  Provider: ${primaryProvider}`);
-  console.log(`  Model: ${primaryModel}`);
+  console.log(`  Model: ${llmModel}`);
   console.log(`  Port: ${port}`);
   console.log('');
 
-  // Start server
+  // Start server (model read from agent library)
   const server = new Server({
     port,
     dbPath: DB_FILE,
     llmProvider: primaryProvider,
-    llmModel: primaryModel,
     uiDistPath: UI_DIST_PATH,
   });
 
