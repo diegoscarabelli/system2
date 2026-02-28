@@ -21,8 +21,8 @@ const ENV_FILE = join(SYSTEM2_DIR, '.env');
 const DB_FILE = join(SYSTEM2_DIR, 'app.db');
 // UI dist path: from CLI dist to ui dist (../../ui/dist)
 const UI_DIST_PATH = join(__dirname, '..', '..', 'ui', 'dist');
-// Agent library source: from CLI dist to gateway src (../../gateway/src/agents/library)
-const AGENT_LIBRARY_SOURCE = join(__dirname, '..', '..', 'gateway', 'src', 'agents', 'library');
+// Agent library source: from CLI dist to gateway dist (../../gateway/dist/agents/library)
+const AGENT_LIBRARY_SOURCE = join(__dirname, '..', '..', 'gateway', 'dist', 'agents', 'library');
 
 interface OnboardConfig {
   primaryProvider: 'anthropic' | 'openai' | 'google';
@@ -35,7 +35,9 @@ interface OnboardConfig {
 export async function onboard(): Promise<void> {
   console.clear();
 
-  p.intro('🦞 System2 Onboarding');
+  p.intro('System2 Onboarding');
+
+  try {
 
   // Phase 1: Terminal Prompts (Credentials Only)
   const primaryProvider = (await p.select({
@@ -126,6 +128,15 @@ export async function onboard(): Promise<void> {
   // Phase 3: Launch
   s.message('Starting gateway server...');
   await launch(config, s);
+  } catch (error: any) {
+    console.error('\n❌ Onboarding failed:');
+    console.error(error.message);
+    if (error.stack) {
+      console.error('\nStack trace:');
+      console.error(error.stack);
+    }
+    process.exit(1);
+  }
 }
 
 async function bootstrap(config: OnboardConfig): Promise<void> {
