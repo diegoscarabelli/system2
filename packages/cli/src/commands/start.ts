@@ -10,6 +10,7 @@ import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { config as dotenvConfig } from 'dotenv';
 import { Server } from '@system2/gateway';
+import matter from 'gray-matter';
 import open from 'open';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -40,9 +41,10 @@ export async function start(options: { port?: number; noBrowser?: boolean }): Pr
   }
 
   // Read Guide agent config to display model info
-  const guideConfigPath = join(SYSTEM2_DIR, 'agents', 'guide', 'config.json');
-  const guideConfig = JSON.parse(readFileSync(guideConfigPath, 'utf-8'));
-  const llmModel = guideConfig.models[primaryProvider];
+  const guideDefinitionPath = join(SYSTEM2_DIR, 'agents', 'guide.md');
+  const guideFile = readFileSync(guideDefinitionPath, 'utf-8');
+  const { data: guideMeta } = matter(guideFile);
+  const llmModel = (guideMeta as any).models[primaryProvider];
 
   const port = options.port || 3000;
 

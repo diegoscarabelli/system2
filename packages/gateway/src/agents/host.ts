@@ -9,6 +9,7 @@ import { getModel } from '@mariozechner/pi-ai';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import matter from 'gray-matter';
 import type { DatabaseClient } from '../db/client.js';
 import { createQueryDatabaseTool } from './tools/query-database.js';
 import { createBashTool } from './tools/bash.js';
@@ -16,9 +17,9 @@ import { createReadTool } from './tools/read.js';
 import { createWriteTool } from './tools/write.js';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
-const GUIDE_AGENT_DIR = join(SYSTEM2_DIR, 'agents', 'guide');
+const AGENTS_DIR = join(SYSTEM2_DIR, 'agents');
 
-interface GuideConfig {
+interface AgentDefinition {
   name: string;
   description: string;
   version: string;
@@ -43,19 +44,17 @@ export class AgentHost {
   constructor(config: AgentHostConfig) {
     this.db = config.db;
 
-    // Load Guide agent configuration from library
-    const guideConfigPath = join(GUIDE_AGENT_DIR, 'config.json');
-    const guideConfig: GuideConfig = JSON.parse(readFileSync(guideConfigPath, 'utf-8'));
+    // Load Guide agent definition from library (Markdown with YAML frontmatter)
+    const guideDefinitionPath = join(AGENTS_DIR, 'guide.md');
+    const guideFile = readFileSync(guideDefinitionPath, 'utf-8');
+    const { data: guideMeta, content: systemPrompt } = matter(guideFile);
+    const guideConfig = guideMeta as AgentDefinition;
 
     // Get model for selected provider from agent library config
     const llmModel = guideConfig.models[config.llmProvider as keyof typeof guideConfig.models];
     if (!llmModel) {
       throw new Error(`No model configured for provider: ${config.llmProvider}`);
     }
-
-    // Load Guide system prompt from library
-    const systemPromptPath = join(GUIDE_AGENT_DIR, 'system.md');
-    const systemPrompt = readFileSync(systemPromptPath, 'utf-8');
 
     // Initialize LLM model
     const model = getModel(config.llmProvider as any, llmModel);

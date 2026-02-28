@@ -17,6 +17,7 @@
     "@system2/shared": "workspace:*",
     "commander": "^11.1.0",
     "dotenv": "^16.3.1",
+    "gray-matter": "^4.0.3",
     "open": "^9.1.0"
   },
   "devDependencies": {
