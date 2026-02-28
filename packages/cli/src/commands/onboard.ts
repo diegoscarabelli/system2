@@ -161,7 +161,7 @@ async function launch(config: OnboardConfig, s: ReturnType<typeof p.spinner>): P
   const modelMap: Record<string, string> = {
     anthropic: 'claude-sonnet-4-5',
     openai: 'gpt-4o',
-    google: 'gemini-2.5-pro',
+    google: 'gemini-3.1-pro',
   };
 
   const model = modelMap[config.primaryProvider];

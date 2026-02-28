@@ -42,7 +42,7 @@ export async function start(options: { port?: number; noBrowser?: boolean }): Pr
   const modelMap: Record<string, string> = {
     anthropic: 'claude-sonnet-4-5',
     openai: 'gpt-4o',
-    google: 'gemini-2.5-pro',
+    google: 'gemini-3.1-pro',
   };
 
   const model = modelMap[primaryProvider];
