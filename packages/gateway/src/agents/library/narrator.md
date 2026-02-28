@@ -5,7 +5,7 @@ version: 1.0.0
 models:
   anthropic: claude-haiku-4-5
   openai: gpt-4o-mini
-  google: gemini-2.5-flash
+  google: gemini-2.0-flash
 ---
 
 # Narrator Agent System Prompt

@@ -5,7 +5,7 @@ version: 1.0.0
 models:
   anthropic: claude-opus-4-5
   openai: gpt-4o
-  google: gemini-3.1-pro
+  google: gemini-3.1-pro-preview
 ---
 
 # Rigor Checker Agent System Prompt

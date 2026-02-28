@@ -50,14 +50,24 @@ export class AgentHost {
     const { data: guideMeta, content: systemPrompt } = matter(guideFile);
     const guideConfig = guideMeta as AgentDefinition;
 
+    console.log('[AgentHost] Guide config loaded:', {
+      name: guideConfig.name,
+      models: guideConfig.models,
+      provider: config.llmProvider,
+    });
+
     // Get model for selected provider from agent library config
     const llmModel = guideConfig.models[config.llmProvider as keyof typeof guideConfig.models];
     if (!llmModel) {
       throw new Error(`No model configured for provider: ${config.llmProvider}`);
     }
 
+    console.log('[AgentHost] Selected model:', llmModel, 'for provider:', config.llmProvider);
+    console.log('[AgentHost] GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? 'SET' : 'NOT SET');
+
     // Initialize LLM model
     const model = getModel(config.llmProvider as any, llmModel);
+    console.log('[AgentHost] Model created:', model ? 'YES' : 'NO', typeof model);
 
     // Create Guide agent with tools
     this.agent = new Agent({

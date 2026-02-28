@@ -3,9 +3,9 @@ name: guide
 description: System2 Guide agent for infrastructure setup and user assistance
 version: 1.0.0
 models:
-  anthropic: claude-opus-4-5
+  anthropic: claude-opus-4.5
   openai: gpt-4o
-  google: gemini-3.1-pro
+  google: gemini-3.1-pro-preview
 ---
 
 # Guide Agent System Prompt
