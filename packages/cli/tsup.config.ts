@@ -8,7 +8,6 @@ export default defineConfig({
   clean: true,
   shims: true,
   external: [
-    'readline/promises',
     'fs/promises',
     'path',
     'os',

@@ -4,12 +4,11 @@
  * Hybrid onboarding: terminal prompts for API keys, then agent-guided infrastructure setup.
  */
 
-import { mkdir, writeFile, copyFile } from 'fs/promises';
+import { mkdir, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import * as readline from 'readline/promises';
-import { stdin as input, stdout as output } from 'process';
+import * as p from '@clack/prompts';
 import { Server } from '@system2/gateway';
 import open from 'open';
 
@@ -25,96 +24,111 @@ interface OnboardConfig {
 }
 
 export async function onboard(): Promise<void> {
-  console.log('');
-  console.log('╔══════════════════════════════════════╗');
-  console.log('║   Welcome to System2 Onboarding      ║');
-  console.log('╚══════════════════════════════════════╝');
-  console.log('');
+  console.clear();
+
+  p.intro('🦞 System2 Onboarding');
 
   // Phase 1: Terminal Prompts (Credentials Only)
-  console.log('Phase 1: Configure LLM Providers\n');
+  const primaryProvider = await p.select({
+    message: 'Select your primary LLM provider',
+    options: [
+      { value: 'anthropic', label: 'Anthropic', hint: 'Claude Opus/Sonnet' },
+      { value: 'openai', label: 'OpenAI', hint: 'GPT-4o' },
+      { value: 'google', label: 'Google', hint: 'Gemini 2.5 Pro' },
+    ],
+  }) as 'anthropic' | 'openai' | 'google';
 
-  const rl = readline.createInterface({ input, output });
-
-  try {
-    // Primary provider
-    console.log('Primary LLM Provider (required):');
-    console.log('  1. Anthropic Claude');
-    console.log('  2. OpenAI');
-    console.log('  3. Google Gemini');
-    const providerChoice = await rl.question('Select provider (1-3): ');
-
-    const providerMap: Record<string, 'anthropic' | 'openai' | 'google'> = {
-      '1': 'anthropic',
-      '2': 'openai',
-      '3': 'google',
-    };
-
-    const primaryProvider = providerMap[providerChoice.trim()];
-    if (!primaryProvider) {
-      console.error('Invalid provider choice');
-      process.exit(1);
-    }
-
-    const primaryApiKey = await rl.question(`Enter ${primaryProvider} API key: `);
-    if (!primaryApiKey.trim()) {
-      console.error('API key is required');
-      process.exit(1);
-    }
-
-    // Secondary provider (optional)
-    console.log('\nSecondary LLM Provider (optional fallback):');
-    console.log('  1. Anthropic Claude');
-    console.log('  2. OpenAI');
-    console.log('  3. Google Gemini');
-    console.log('  4. None');
-    const secondaryChoice = await rl.question('Select provider (1-4, default: 4): ') || '4';
-
-    let secondaryProvider: 'anthropic' | 'openai' | 'google' | undefined;
-    let secondaryApiKey: string | undefined;
-
-    if (secondaryChoice !== '4') {
-      secondaryProvider = providerMap[secondaryChoice.trim()];
-      if (secondaryProvider) {
-        secondaryApiKey = await rl.question(`Enter ${secondaryProvider} API key: `);
-      }
-    }
-
-    rl.close();
-
-    const config: OnboardConfig = {
-      primaryProvider,
-      primaryApiKey: primaryApiKey.trim(),
-      secondaryProvider,
-      secondaryApiKey: secondaryApiKey?.trim(),
-    };
-
-    // Phase 2: Bootstrap
-    console.log('\nPhase 2: Bootstrap System2');
-    await bootstrap(config);
-
-    // Phase 3: Launch
-    console.log('\nPhase 3: Launching System2');
-    await launch(config);
-
-  } catch (error) {
-    console.error('Onboarding failed:', error);
-    process.exit(1);
+  if (p.isCancel(primaryProvider)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
   }
+
+  const primaryApiKey = await p.password({
+    message: `Enter your ${primaryProvider} API key`,
+    validate: (value) => {
+      if (!value) return 'API key is required';
+    },
+  }) as string;
+
+  if (p.isCancel(primaryApiKey)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  const wantsFallback = await p.confirm({
+    message: 'Configure a fallback provider?',
+    initialValue: false,
+  });
+
+  if (p.isCancel(wantsFallback)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  let secondaryProvider: 'anthropic' | 'openai' | 'google' | undefined;
+  let secondaryApiKey: string | undefined;
+
+  if (wantsFallback) {
+    // Filter out the primary provider from secondary options
+    const secondaryOptions = [
+      { value: 'anthropic', label: 'Anthropic', hint: 'Claude Opus/Sonnet' },
+      { value: 'openai', label: 'OpenAI', hint: 'GPT-4o' },
+      { value: 'google', label: 'Google', hint: 'Gemini 2.5 Pro' },
+    ].filter((opt) => opt.value !== primaryProvider);
+
+    secondaryProvider = await p.select({
+      message: 'Select fallback provider',
+      options: secondaryOptions,
+    }) as 'anthropic' | 'openai' | 'google';
+
+    if (p.isCancel(secondaryProvider)) {
+      p.cancel('Onboarding cancelled');
+      process.exit(0);
+    }
+
+    secondaryApiKey = await p.password({
+      message: `Enter your ${secondaryProvider} API key`,
+      validate: (value) => {
+        if (!value) return 'API key is required';
+      },
+    }) as string;
+
+    if (p.isCancel(secondaryApiKey)) {
+      p.cancel('Onboarding cancelled');
+      process.exit(0);
+    }
+  }
+
+  const config: OnboardConfig = {
+    primaryProvider,
+    primaryApiKey,
+    secondaryProvider,
+    secondaryApiKey,
+  };
+
+  // Phase 2: Bootstrap
+  const s = p.spinner();
+  s.start('Creating ~/.system2 directory...');
+
+  await bootstrap(config);
+
+  s.message('Initializing database...');
+
+  // Phase 3: Launch
+  s.message('Starting gateway server...');
+  await launch(config, s);
 }
 
 async function bootstrap(config: OnboardConfig): Promise<void> {
   // Create ~/.system2/ directory structure
   if (!existsSync(SYSTEM2_DIR)) {
     await mkdir(SYSTEM2_DIR, { recursive: true });
-    console.log(`✓ Created ${SYSTEM2_DIR}`);
   }
 
   // Create subdirectories
   await mkdir(join(SYSTEM2_DIR, 'agents'), { recursive: true });
   await mkdir(join(SYSTEM2_DIR, 'projects'), { recursive: true });
   await mkdir(join(SYSTEM2_DIR, 'artifacts'), { recursive: true });
-  console.log('✓ Created directory structure');
 
   // Write .env file
   let envContent = `# System2 Configuration
@@ -134,13 +148,9 @@ ${getApiKeyEnvVar(config.secondaryProvider)}=${config.secondaryApiKey}
   }
 
   await writeFile(ENV_FILE, envContent);
-  console.log('✓ Saved API keys to .env');
-
-  // Initialize app.db (will be created by DatabaseClient with schema)
-  console.log('✓ Initialized app.db');
 }
 
-async function launch(config: OnboardConfig): Promise<void> {
+async function launch(config: OnboardConfig, s: ReturnType<typeof p.spinner>): Promise<void> {
   // Determine LLM model based on provider
   const modelMap: Record<string, string> = {
     anthropic: 'claude-sonnet-4-5',
@@ -150,33 +160,32 @@ async function launch(config: OnboardConfig): Promise<void> {
 
   const model = modelMap[config.primaryProvider];
 
-  console.log(`Starting gateway server...`);
-  console.log(`  Provider: ${config.primaryProvider}`);
-  console.log(`  Model: ${model}`);
-
   // Start server
   const server = new Server({
     port: 3000,
     dbPath: DB_FILE,
     llmProvider: config.primaryProvider,
     llmModel: model,
-    // UI dist path will be set once UI package is built
   });
 
   await server.start();
 
-  // Open browser
-  console.log('\nOpening browser...');
-  await open('http://localhost:3000');
+  s.stop('Gateway running on http://localhost:3000');
+
+  p.outro('✨ System2 is ready!');
 
   console.log('');
-  console.log('✅ System2 is ready!');
-  console.log('');
   console.log('The Guide agent is now active and ready to help you:');
-  console.log('  1. Detect your system and installed tools');
-  console.log('  2. Configure your data stack (databases, orchestration)');
-  console.log('  3. Set up your pipelines repository');
+  console.log('  • Detect your system and installed tools');
+  console.log('  • Configure your data stack (databases, orchestration)');
+  console.log('  • Set up your pipelines repository');
   console.log('');
+  console.log('Opening browser...');
+  console.log('');
+
+  // Open browser
+  await open('http://localhost:3000');
+
   console.log('Press Ctrl+C to stop the server');
   console.log('');
 
