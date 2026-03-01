@@ -5,13 +5,16 @@
  */
 
 import { ThemeProvider, BaseStyles } from '@primer/react';
-import { Chat } from './components/Chat';
+import { Layout } from './components/Layout';
+import { useThemeStore } from './stores/theme';
 
 export function App() {
+  const { colorMode } = useThemeStore();
+
   return (
-    <ThemeProvider>
+    <ThemeProvider colorMode={colorMode === 'dark' ? 'night' : 'day'}>
       <BaseStyles>
-        <Chat />
+        <Layout />
       </BaseStyles>
     </ThemeProvider>
   );

@@ -10,8 +10,6 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import * as p from '@clack/prompts';
-import { Server } from '@system2/gateway';
-import open from 'open';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -145,9 +143,14 @@ export async function onboard(): Promise<void> {
 
   s.message('Initializing database...');
 
-  // Phase 3: Launch
-  s.message('Starting gateway server...');
-  await launch(config, s);
+  s.stop('✓ System2 configured successfully!');
+
+  p.outro('✨ Onboarding complete!');
+
+  console.log('');
+  console.log('To start System2, run:');
+  console.log('  system2 start');
+  console.log('');
   } catch (error: any) {
     console.error('\n❌ Onboarding failed:');
     console.error(error.message);
@@ -194,46 +197,6 @@ ${getApiKeyEnvVar(config.secondaryProvider)}=${config.secondaryApiKey}
   }
 
   await writeFile(ENV_FILE, envContent);
-}
-
-async function launch(config: OnboardConfig, s: ReturnType<typeof p.spinner>): Promise<void> {
-  // Set API keys in environment (Pi SDK reads from process.env)
-  process.env[getApiKeyEnvVar(config.primaryProvider)] = config.primaryApiKey;
-  if (config.secondaryProvider && config.secondaryApiKey) {
-    process.env[getApiKeyEnvVar(config.secondaryProvider)] = config.secondaryApiKey;
-  }
-
-  // Start server (model read from agent library config)
-  const server = new Server({
-    port: 3000,
-    dbPath: DB_FILE,
-    llmProvider: config.primaryProvider,
-    uiDistPath: UI_DIST_PATH,
-  });
-
-  await server.start();
-
-  s.stop('Gateway running on http://localhost:3000');
-
-  p.outro('✨ System2 is ready!');
-
-  console.log('');
-  console.log('The Guide agent is now active and ready to help you:');
-  console.log('  • Detect your system and installed tools');
-  console.log('  • Configure your data stack (databases, orchestration)');
-  console.log('  • Set up your pipelines repository');
-  console.log('');
-  console.log('Opening browser...');
-  console.log('');
-
-  // Open browser
-  await open('http://localhost:3000');
-
-  console.log('Press Ctrl+C to stop the server');
-  console.log('');
-
-  // Keep server running
-  await new Promise(() => {});
 }
 
 function getApiKeyEnvVar(provider: string): string {

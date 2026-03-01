@@ -74,6 +74,13 @@ export class WebSocketHandler {
             content: event.assistantMessageEvent.delta,
           });
         }
+        // Stream thinking blocks
+        else if (event.assistantMessageEvent.type === 'thinking_delta') {
+          this.send({
+            type: 'thinking_chunk',
+            content: event.assistantMessageEvent.delta,
+          });
+        }
         break;
 
       case 'message_end':
@@ -82,9 +89,23 @@ export class WebSocketHandler {
         break;
 
       case 'tool_execution_start':
+        // Format tool input for display - check multiple possible properties
+        // Pi Agent uses 'args' for tool input, not 'toolInput'
+        let inputText = '';
+        const rawInput = event.toolInput ?? (event as any).args;
+        if (rawInput) {
+          try {
+            inputText = typeof rawInput === 'string'
+              ? rawInput
+              : JSON.stringify(rawInput, null, 2);
+          } catch {
+            inputText = String(rawInput);
+          }
+        }
         this.send({
           type: 'tool_call_start',
           name: event.toolName,
+          input: inputText,
         });
         break;
 

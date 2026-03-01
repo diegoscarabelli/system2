@@ -24,23 +24,19 @@ export function Chat() {
       sx={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100vh',
+        height: '100%',
         backgroundColor: 'canvas.default',
       }}
     >
       <Box
         sx={{
-          padding: 3,
+          padding: 2,
           borderBottom: '1px solid',
           borderColor: 'border.default',
-          backgroundColor: 'canvas.subtle',
         }}
       >
-        <Box as="h1" sx={{ fontSize: 3, fontWeight: 'bold', margin: 0 }}>
-          System2
-        </Box>
-        <Box as="p" sx={{ fontSize: 1, color: 'fg.muted', margin: 0 }}>
-          Your AI data team
+        <Box as="h2" sx={{ fontSize: 2, fontWeight: 'bold', margin: 0 }}>
+          Guide
         </Box>
       </Box>
 

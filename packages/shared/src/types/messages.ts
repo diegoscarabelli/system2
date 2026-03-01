@@ -13,6 +13,8 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: 'assistant_chunk'; content: string }
   | { type: 'assistant_end' }
-  | { type: 'tool_call_start'; name: string }
+  | { type: 'thinking_chunk'; content: string }
+  | { type: 'thinking_end' }
+  | { type: 'tool_call_start'; name: string; input?: string }
   | { type: 'tool_call_end'; name: string; result: string }
   | { type: 'error'; message: string };

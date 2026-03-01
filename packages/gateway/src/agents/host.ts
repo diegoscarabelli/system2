@@ -81,7 +81,7 @@ export class AgentHost {
           createWriteTool(),
           // TODO: Add spawn_conductor tool (Phase 2)
         ],
-        thinkingLevel: 'off',
+        thinkingLevel: 'high', // Enable extended thinking for transparency
       },
       // TODO: Configure session persistence via sessionPath
     });

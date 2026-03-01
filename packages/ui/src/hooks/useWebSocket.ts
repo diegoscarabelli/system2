@@ -16,6 +16,9 @@ export function useWebSocket() {
     startAssistantMessage,
     appendAssistantChunk,
     finishAssistantMessage,
+    startThinking,
+    appendThinkingChunk,
+    finishThinking,
     startToolCall,
     finishToolCall,
     setConnected,
@@ -34,9 +37,22 @@ export function useWebSocket() {
       const message = JSON.parse(event.data) as ServerMessage;
 
       switch (message.type) {
+        case 'thinking_chunk':
+          // Start new thinking block if none is active
+          if (!useChatStore.getState().activeThinkingId && message.content) {
+            startThinking();
+          }
+          appendThinkingChunk(message.content);
+          break;
+
+        case 'thinking_end':
+          finishThinking();
+          break;
+
         case 'assistant_chunk':
           // First chunk starts the message
           if (!useChatStore.getState().currentAssistantMessage && message.content) {
+            finishThinking(); // Finish any active thinking
             startAssistantMessage();
           }
           appendAssistantChunk(message.content);
@@ -47,7 +63,7 @@ export function useWebSocket() {
           break;
 
         case 'tool_call_start':
-          startToolCall(message.name);
+          startToolCall(message.name, message.input);
           break;
 
         case 'tool_call_end':

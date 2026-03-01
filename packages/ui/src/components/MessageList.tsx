@@ -1,21 +1,347 @@
 /**
  * Message List Component
  *
- * Displays the conversation history.
+ * Displays the conversation history with a timeline-style UI.
+ * Preserves chronological order of thinking blocks and tool calls.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, Fragment, useState } from 'react';
 import { Box, Text } from '@primer/react';
-import { useChatStore } from '../stores/chat';
+import Markdown from 'react-markdown';
+import { useChatStore, ToolCall, Message, TurnEvent, ThinkingBlock as ThinkingBlockType } from '../stores/chat';
+
+// Markdown wrapper with styling
+function MarkdownContent({ content, muted }: { content: string; muted?: boolean }) {
+  return (
+    <Box
+      sx={{
+        fontSize: 1,
+        color: muted ? 'fg.muted' : 'fg.default',
+        fontStyle: muted ? 'italic' : 'normal',
+        '& p': { margin: 0, marginBottom: 2 },
+        '& p:last-child': { marginBottom: 0 },
+        '& h1, & h2, & h3, & h4, & h5, & h6': {
+          marginTop: 3,
+          marginBottom: 2,
+          fontWeight: 'bold',
+        },
+        '& h1': { fontSize: 3 },
+        '& h2': { fontSize: 2 },
+        '& h3': { fontSize: 1, fontWeight: 'semibold' },
+        '& ul, & ol': { marginTop: 1, marginBottom: 2, paddingLeft: 3 },
+        '& li': { marginBottom: 1 },
+        '& code': {
+          fontFamily: 'mono',
+          backgroundColor: 'neutral.muted',
+          padding: '2px 4px',
+          borderRadius: 1,
+          fontSize: 0,
+        },
+        '& pre': {
+          backgroundColor: 'neutral.muted',
+          padding: 2,
+          borderRadius: 2,
+          overflow: 'auto',
+          marginTop: 2,
+          marginBottom: 2,
+        },
+        '& pre code': {
+          backgroundColor: 'transparent',
+          padding: 0,
+        },
+        '& strong': { fontWeight: 'bold' },
+        '& em': { fontStyle: 'italic' },
+        '& hr': {
+          border: 'none',
+          borderTop: '1px solid',
+          borderColor: 'border.muted',
+          marginTop: 3,
+          marginBottom: 3,
+        },
+        '& a': { color: 'accent.fg' },
+        '& blockquote': {
+          borderLeft: '3px solid',
+          borderColor: 'border.default',
+          paddingLeft: 2,
+          marginLeft: 0,
+          color: 'fg.muted',
+        },
+      }}
+    >
+      <Markdown>{content}</Markdown>
+    </Box>
+  );
+}
+
+// Timeline dot component
+function TimelineDot({ color, pulse }: { color: string; pulse?: boolean }) {
+  return (
+    <Box
+      sx={{
+        width: '8px',
+        height: '8px',
+        borderRadius: '50%',
+        backgroundColor: color,
+        flexShrink: 0,
+        animation: pulse ? 'pulse 1.5s ease-in-out infinite' : undefined,
+        '@keyframes pulse': {
+          '0%, 100%': { opacity: 1 },
+          '50%': { opacity: 0.4 },
+        },
+      }}
+    />
+  );
+}
+
+// Timeline item wrapper
+function TimelineItem({ children, dotColor, pulse, isLast }: {
+  children: React.ReactNode;
+  dotColor: string;
+  pulse?: boolean;
+  isLast?: boolean;
+}) {
+  return (
+    <Box sx={{ display: 'flex', gap: 2, position: 'relative' }}>
+      {/* Vertical line and dot */}
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          paddingTop: '6px',
+        }}
+      >
+        <TimelineDot color={dotColor} pulse={pulse} />
+        {!isLast && (
+          <Box
+            sx={{
+              width: '1px',
+              flex: 1,
+              backgroundColor: 'border.muted',
+              marginTop: 1,
+            }}
+          />
+        )}
+      </Box>
+      {/* Content */}
+      <Box sx={{ flex: 1, paddingBottom: 3, minWidth: 0 }}>
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
+// Tool call display component (collapsible)
+function ToolCallItem({ tc }: { tc: ToolCall }) {
+  const isRunning = tc.status === 'running';
+  const [collapsed, setCollapsed] = useState(false);
+  const hasContent = tc.input || tc.result;
+
+  return (
+    <Box>
+      <Box
+        onClick={() => hasContent && setCollapsed(!collapsed)}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          cursor: hasContent ? 'pointer' : 'default',
+          '&:hover': hasContent ? { opacity: 0.8 } : {},
+        }}
+      >
+        <Text
+          sx={{
+            fontSize: 0,
+            fontWeight: 'semibold',
+            color: isRunning ? 'attention.fg' : 'fg.muted',
+          }}
+        >
+          {isRunning ? '⚙️ ' : '✓ '}{tc.name}
+        </Text>
+        {hasContent && (
+          <Text
+            sx={{
+              fontSize: 0,
+              color: 'fg.muted',
+              transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.15s ease',
+              lineHeight: 1,
+            }}
+          >
+            ^
+          </Text>
+        )}
+      </Box>
+      {!collapsed && tc.input && (
+        <Box sx={{ marginTop: 1 }}>
+          <Text
+            sx={{
+              fontSize: 0,
+              fontWeight: 'semibold',
+              color: 'fg.muted',
+              marginBottom: 1,
+              display: 'block',
+            }}
+          >
+            IN
+          </Text>
+          <Text
+            as="pre"
+            sx={{
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: 'mono',
+              fontSize: 0,
+              color: 'fg.muted',
+              margin: 0,
+              maxHeight: '100px',
+              overflow: 'auto',
+            }}
+          >
+            {tc.input}
+          </Text>
+        </Box>
+      )}
+      {!collapsed && tc.result && (
+        <Box sx={{ marginTop: 1 }}>
+          <Text
+            sx={{
+              fontSize: 0,
+              fontWeight: 'semibold',
+              color: 'fg.muted',
+              marginBottom: 1,
+              display: 'block',
+            }}
+          >
+            OUT
+          </Text>
+          <Text
+            as="pre"
+            sx={{
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: 'mono',
+              fontSize: 0,
+              color: 'fg.muted',
+              margin: 0,
+              maxHeight: '150px',
+              overflow: 'auto',
+            }}
+          >
+            {tc.result}
+          </Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+// Thinking block component (collapsible even while streaming)
+function ThinkingBlock({ thinking }: { thinking: ThinkingBlockType }) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <TimelineItem dotColor="#8b949e" pulse={thinking.isStreaming}>
+      <Box
+        onClick={() => setCollapsed(!collapsed)}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          cursor: 'pointer',
+          '&:hover': { opacity: 0.8 },
+        }}
+      >
+        <Text
+          sx={{
+            fontWeight: 'semibold',
+            fontSize: 0,
+            color: 'fg.muted',
+          }}
+        >
+          {thinking.isStreaming ? 'Thinking...' : 'Thought'}
+        </Text>
+        <Text
+          sx={{
+            fontSize: 0,
+            color: 'fg.muted',
+            transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.15s ease',
+            lineHeight: 1,
+          }}
+        >
+          ^
+        </Text>
+      </Box>
+      {!collapsed && (
+        <Box sx={{ marginTop: 1 }}>
+          <MarkdownContent content={thinking.content} muted />
+        </Box>
+      )}
+    </TimelineItem>
+  );
+}
+
+// Render a single turn event (thinking or tool call)
+function TurnEventItem({ event, isLast }: { event: TurnEvent; isLast?: boolean }) {
+  if (event.type === 'thinking') {
+    return <ThinkingBlock thinking={event.data} />;
+  }
+
+  // Tool call
+  const tc = event.data;
+  return (
+    <TimelineItem
+      dotColor={tc.status === 'running' ? '#d29922' : '#8b949e'}
+      pulse={tc.status === 'running'}
+      isLast={isLast}
+    >
+      <ToolCallItem tc={tc} />
+    </TimelineItem>
+  );
+}
+
+// Render an assistant message with its turn events in chronological order
+function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: boolean }) {
+  const hasTurnEvents = message.turnEvents && message.turnEvents.length > 0;
+
+  return (
+    <Fragment>
+      {/* Turn events in chronological order (thinking blocks and tool calls) */}
+      {hasTurnEvents && message.turnEvents!.map((event) => (
+        <TurnEventItem
+          key={event.type === 'thinking' ? event.data.id : event.data.id}
+          event={event}
+        />
+      ))}
+
+      {/* Response */}
+      <TimelineItem dotColor="#3fb950" isLast={isLast}>
+        <Text
+          sx={{
+            fontWeight: 'semibold',
+            fontSize: 0,
+            color: 'success.fg',
+            marginBottom: 1,
+          }}
+        >
+          Guide
+        </Text>
+        <MarkdownContent content={message.content} />
+      </TimelineItem>
+    </Fragment>
+  );
+}
 
 export function MessageList() {
-  const { messages, currentAssistantMessage, toolCalls } = useChatStore();
+  const { messages, currentAssistantMessage, currentTurnEvents } = useChatStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  const hasCurrentActivity = currentAssistantMessage || currentTurnEvents.length > 0;
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, currentAssistantMessage]);
+  }, [messages, currentAssistantMessage, currentTurnEvents]);
 
   return (
     <Box
@@ -25,113 +351,90 @@ export function MessageList() {
         padding: 3,
       }}
     >
-      {messages.length === 0 && !currentAssistantMessage && (
+      {messages.length === 0 && !hasCurrentActivity && (
         <Box
           sx={{
             textAlign: 'center',
             color: 'fg.muted',
-            paddingTop: 6,
+            paddingTop: 4,
+            fontSize: 0,
           }}
         >
-          <Text sx={{ fontSize: 1 }}>
-            Welcome to System2! The Guide is ready to help you configure your data infrastructure.
-          </Text>
+          Ask the Guide to help configure your data infrastructure.
         </Box>
       )}
 
-      {messages.map((message) => (
-        <Box
-          key={message.id}
-          sx={{
-            marginBottom: 3,
-            padding: 3,
-            backgroundColor:
-              message.role === 'user' ? 'canvas.subtle' : 'canvas.default',
-            borderRadius: 2,
-            border: '1px solid',
-            borderColor: 'border.default',
-          }}
-        >
-          <Text
-            sx={{
-              fontWeight: 'bold',
-              fontSize: 1,
-              color: message.role === 'user' ? 'accent.fg' : 'success.fg',
-              marginBottom: 2,
-            }}
-          >
-            {message.role === 'user' ? 'You' : 'Guide'}
-          </Text>
-          <Text
-            as="pre"
-            sx={{
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontFamily: 'mono',
-              fontSize: 1,
-            }}
-          >
-            {message.content}
-          </Text>
-        </Box>
+      {/* Message history */}
+      {messages.map((message, idx) => {
+        const isLastMessage = idx === messages.length - 1 && !hasCurrentActivity;
+
+        if (message.role === 'user') {
+          return (
+            <TimelineItem
+              key={message.id}
+              dotColor="#58a6ff"
+              isLast={isLastMessage}
+            >
+              <Text
+                sx={{
+                  fontWeight: 'semibold',
+                  fontSize: 0,
+                  color: 'accent.fg',
+                  marginBottom: 1,
+                }}
+              >
+                You
+              </Text>
+              <Text
+                as="pre"
+                sx={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontFamily: 'mono',
+                  fontSize: 1,
+                  margin: 0,
+                }}
+              >
+                {message.content}
+              </Text>
+            </TimelineItem>
+          );
+        }
+
+        // Assistant message with embedded turn events
+        return (
+          <AssistantMessageBlock
+            key={message.id}
+            message={message}
+            isLast={isLastMessage}
+          />
+        );
+      })}
+
+      {/* Current streaming: turn events in chronological order */}
+      {currentTurnEvents.map((event, idx) => (
+        <TurnEventItem
+          key={event.type === 'thinking' ? event.data.id : event.data.id}
+          event={event}
+          isLast={idx === currentTurnEvents.length - 1 && !currentAssistantMessage}
+        />
       ))}
 
-      {/* Current streaming message */}
+      {/* Current streaming: response */}
       {currentAssistantMessage && (
-        <Box
-          sx={{
-            marginBottom: 3,
-            padding: 3,
-            backgroundColor: 'canvas.default',
-            borderRadius: 2,
-            border: '1px solid',
-            borderColor: 'border.default',
-          }}
-        >
+        <TimelineItem dotColor="#3fb950" pulse isLast>
           <Text
             sx={{
-              fontWeight: 'bold',
-              fontSize: 1,
+              fontWeight: 'semibold',
+              fontSize: 0,
               color: 'success.fg',
-              marginBottom: 2,
+              marginBottom: 1,
             }}
           >
             Guide
           </Text>
-          <Text
-            as="pre"
-            sx={{
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontFamily: 'mono',
-              fontSize: 1,
-            }}
-          >
-            {currentAssistantMessage}
-          </Text>
-        </Box>
-      )}
-
-      {/* Tool calls */}
-      {toolCalls.filter((tc) => tc.status === 'running').length > 0 && (
-        <Box
-          sx={{
-            marginBottom: 3,
-            padding: 3,
-            backgroundColor: 'attention.subtle',
-            borderRadius: 2,
-            border: '1px solid',
-            borderColor: 'attention.emphasis',
-          }}
-        >
-          <Text sx={{ fontSize: 1, fontStyle: 'italic' }}>
-            Running tool:{' '}
-            {toolCalls
-              .filter((tc) => tc.status === 'running')
-              .map((tc) => tc.name)
-              .join(', ')}
-          </Text>
-        </Box>
+          <MarkdownContent content={currentAssistantMessage} />
+        </TimelineItem>
       )}
 
       <div ref={messagesEndRef} />

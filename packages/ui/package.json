@@ -13,10 +13,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@primer/octicons-react": "^19.22.0",
     "@primer/react": "^36.8.0",
     "@system2/shared": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
     "zustand": "^4.5.0"
   },
   "devDependencies": {
