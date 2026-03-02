@@ -4,23 +4,16 @@
  * Hybrid onboarding: terminal prompts for API keys, then agent-guided infrastructure setup.
  */
 
-import { mkdir, writeFile, cp } from 'fs/promises';
+import { mkdir, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { homedir } from 'os';
-import { fileURLToPath } from 'url';
 import * as p from '@clack/prompts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { copyConfigTemplateIfMissing } from '../utils/config.js';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
+const AUTH_FILE = join(SYSTEM2_DIR, 'auth.json');
 const ENV_FILE = join(SYSTEM2_DIR, '.env');
-const DB_FILE = join(SYSTEM2_DIR, 'app.db');
-// UI dist path: from CLI dist to ui dist (../../ui/dist)
-const UI_DIST_PATH = join(__dirname, '..', '..', 'ui', 'dist');
-// Agent library source: from CLI dist to gateway dist (../../gateway/dist/agents/library)
-const AGENT_LIBRARY_SOURCE = join(__dirname, '..', '..', 'gateway', 'dist', 'agents', 'library');
 
 interface OnboardConfig {
   primaryProvider: 'anthropic' | 'openai' | 'google';
@@ -33,27 +26,43 @@ interface OnboardConfig {
 export async function onboard(): Promise<void> {
   console.clear();
 
-  p.intro('System2 Onboarding');
-
-  // Check for existing installation
-  const isExistingInstallation = existsSync(join(SYSTEM2_DIR, '.env')) ||
+  // Check for existing installation first
+  const isExistingInstallation = existsSync(join(SYSTEM2_DIR, 'auth.json')) ||
+                                 existsSync(join(SYSTEM2_DIR, '.env')) ||
                                  existsSync(join(SYSTEM2_DIR, 'app.db'));
 
   if (isExistingInstallation) {
+    p.intro('🧠 Welcome back to System2!');
     console.log('');
-    console.log('⚠️  System2 is already configured');
+    console.log('  It looks like you already completed the onboarding.');
+    console.log('  Found existing installation at ~/.system2/');
     console.log('');
-    console.log('Found existing installation at ~/.system2/');
+    console.log('  To start System2, run:');
     console.log('');
-    console.log('To start System2, run:');
-    console.log('  system2 start');
+    console.log('    > \x1b[1msystem2 start\x1b[0m');
     console.log('');
-    console.log('To reset and start fresh (WARNING: destroys all data):');
-    console.log('  rm -rf ~/.system2');
-    console.log('  system2 onboard');
+    console.log('  To reset and start fresh (only if really necessary):');
+    console.log('');
+    console.log('    > \x1b[1mmv ~/.system2 ~/.system2.backup\x1b[0m');
+    console.log('    > \x1b[1msystem2 onboard\x1b[0m');
+    console.log('');
+    console.log('  \x1b[2mNote: This archives all conversation history and context.');
+    console.log('  System2 will no longer remember previous work. However,');
+    console.log('  any data or code you created is preserved in its own');
+    console.log('  directories and remains unaffected.\x1b[0m');
     console.log('');
     process.exit(0);
   }
+
+  p.intro('🧠 Welcome to System2!');
+
+  console.log('');
+  console.log('  The AI multi-agent system for working with data.');
+  console.log('');
+  console.log('  It looks like you\'re just getting started.');
+  console.log('  Before we can get to work, we need at least one');
+  console.log('  LLM provider and an API key for it.');
+  console.log('');
 
   try {
 
@@ -145,11 +154,24 @@ export async function onboard(): Promise<void> {
 
   s.stop('✓ System2 configured successfully!');
 
-  p.outro('✨ Onboarding complete!');
+  p.outro('✨ You\'re all set!');
 
   console.log('');
-  console.log('To start System2, run:');
-  console.log('  system2 start');
+  console.log('  Available commands:');
+  console.log('');
+  console.log('    > \x1b[1msystem2 start\x1b[0m     Launch the gateway and open the browser');
+  console.log('    > \x1b[1msystem2 status\x1b[0m    Check if the gateway is running');
+  console.log('    > \x1b[1msystem2 stop\x1b[0m      Stop the gateway');
+  console.log('');
+  console.log('  ─────────────────────────────────────────────────────────');
+  console.log('');
+  console.log('  Ready to begin? Run:');
+  console.log('');
+  console.log('    > \x1b[1msystem2 start\x1b[0m');
+  console.log('');
+  console.log('  Your browser will open and you\'ll meet the Guide —');
+  console.log('  your personal interface to System2 that provides');
+  console.log('  personalized guidance throughout your analytical journey.');
   console.log('');
   } catch (error: any) {
     console.error('\n❌ Onboarding failed:');
@@ -169,41 +191,42 @@ async function bootstrap(config: OnboardConfig): Promise<void> {
   }
 
   // Create subdirectories
-  await mkdir(join(SYSTEM2_DIR, 'agents'), { recursive: true });
+  // Note: Agent-specific session dirs (e.g., sessions/guide-<uid>/) are created
+  // by AgentHost when agents are initialized, not during onboarding
+  await mkdir(join(SYSTEM2_DIR, 'sessions'), { recursive: true });
   await mkdir(join(SYSTEM2_DIR, 'projects'), { recursive: true });
-  await mkdir(join(SYSTEM2_DIR, 'artifacts'), { recursive: true });
 
-  // Copy agent library from package to ~/.system2/agents/
-  // Library contains agent templates (config.json, system.md, tools definitions)
-  await cp(AGENT_LIBRARY_SOURCE, join(SYSTEM2_DIR, 'agents'), {
-    recursive: true,
-  });
+  // Build auth.json content (Pi SDK AuthStorage format)
+  const auth: Record<string, { type: string; key: string }> = {};
 
-  // Write .env file (API keys only - models defined in agent library)
+  // Map provider to auth.json key
+  auth[config.primaryProvider] = { type: 'api_key', key: config.primaryApiKey };
+
+  if (config.secondaryProvider && config.secondaryApiKey) {
+    auth[config.secondaryProvider] = { type: 'api_key', key: config.secondaryApiKey };
+  }
+
+  // Write auth.json with secure permissions (0600)
+  await writeFile(AUTH_FILE, JSON.stringify(auth, null, 2), { mode: 0o600 });
+
+  // Write .env file (provider selection only, not API keys)
   let envContent = `# System2 Configuration
 # Generated by onboard command
 
 # Primary LLM Provider
 PRIMARY_LLM_PROVIDER=${config.primaryProvider}
-${getApiKeyEnvVar(config.primaryProvider)}=${config.primaryApiKey}
 `;
 
-  if (config.secondaryProvider && config.secondaryApiKey) {
+  if (config.secondaryProvider) {
     envContent += `
 # Secondary LLM Provider (Fallback)
 SECONDARY_LLM_PROVIDER=${config.secondaryProvider}
-${getApiKeyEnvVar(config.secondaryProvider)}=${config.secondaryApiKey}
 `;
   }
 
   await writeFile(ENV_FILE, envContent);
+
+  // Copy config.toml template with documented settings
+  copyConfigTemplateIfMissing();
 }
 
-function getApiKeyEnvVar(provider: string): string {
-  const map: Record<string, string> = {
-    anthropic: 'ANTHROPIC_API_KEY',
-    openai: 'OPENAI_API_KEY',
-    google: 'GEMINI_API_KEY',
-  };
-  return map[provider];
-}

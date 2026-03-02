@@ -15,7 +15,7 @@ const program = new Command();
 
 program
   .name('system2')
-  .description('A multi-agent data platform for solo analysts')
+  .description('The AI multi-agent system for working with data')
   .version('0.1.0');
 
 program
