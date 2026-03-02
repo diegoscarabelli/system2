@@ -1,0 +1,21 @@
+# System2 Configuration
+# Edit this file to customize System2 behavior.
+# All values shown are defaults.
+
+[backup]
+# Hours between automatic backups (minimum: 1)
+cooldown_hours = 24
+
+# Maximum number of automatic backups to keep
+max_backups = 5
+
+[session]
+# Session file size threshold for rotation in MB
+rotation_threshold_mb = 10
+
+[logs]
+# Log file size threshold for rotation in MB
+rotation_threshold_mb = 10
+
+# Maximum number of archived log files to keep
+max_archives = 5

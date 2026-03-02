@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.0.1",
+    "@iarna/toml": "^2.2.5",
     "@system2/gateway": "workspace:*",
     "@system2/shared": "workspace:*",
     "commander": "^11.1.0",
