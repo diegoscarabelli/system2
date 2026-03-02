@@ -54,7 +54,3 @@ system2/
 │   ├── shared/     # Shared TypeScript types
 │   └── ui/         # React chat UI
 ```
-
-## License
-
-MIT
