@@ -12,7 +12,14 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
-  external: ['better-sqlite3'],
+  // Externalize native modules and pi-coding-agent (has CJS dependencies)
+  external: [
+    'better-sqlite3',
+    '@mariozechner/pi-coding-agent',
+    '@mariozechner/pi-agent-core',
+    '@mariozechner/pi-ai',
+    '@mariozechner/pi-tui',
+  ],
   onSuccess: async () => {
     // Copy agent library .md files to dist
     const srcLibrary = join(__dirname, 'src', 'agents', 'library');

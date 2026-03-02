@@ -17,6 +17,7 @@
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.55.3",
     "@mariozechner/pi-ai": "^0.55.3",
+    "@mariozechner/pi-coding-agent": "^0.55.3",
     "@sinclair/typebox": "^0.32.0",
     "@system2/shared": "workspace:*",
     "better-sqlite3": "^11.10.0",

@@ -69,6 +69,9 @@ export class Server {
   }
 
   async start(): Promise<void> {
+    // Initialize agent session before starting server
+    await this.agentHost.initialize();
+
     return new Promise((resolve) => {
       this.httpServer.listen(this.config.port, () => {
         console.log(`System2 Gateway running on http://localhost:${this.config.port}`);

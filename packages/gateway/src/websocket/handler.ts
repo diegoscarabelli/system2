@@ -5,7 +5,7 @@
  */
 
 import type { WebSocket } from 'ws';
-import type { AgentEvent } from '@mariozechner/pi-agent-core';
+import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { ClientMessage, ServerMessage } from '@system2/shared';
 import type { AgentHost } from '../agents/host.js';
 
@@ -64,7 +64,7 @@ export class WebSocketHandler {
     }
   }
 
-  private handleAgentEvent(event: AgentEvent): void {
+  private handleAgentEvent(event: AgentSessionEvent): void {
     switch (event.type) {
       case 'message_update':
         // Stream text as it's generated

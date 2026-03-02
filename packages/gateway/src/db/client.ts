@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 import type { Project, Task, Agent } from '@system2/shared';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -194,6 +195,34 @@ export class DatabaseClient {
     `);
 
     return (stmt.get(status, id) as Agent) || null;
+  }
+
+  /**
+   * Get the Guide agent, creating it if it doesn't exist.
+   * Guide is a singleton - there's only one, with project_id = NULL.
+   */
+  getOrCreateGuideAgent(): Agent {
+    // Check if Guide agent already exists
+    const findStmt = this.db.prepare(
+      'SELECT * FROM agents WHERE type = ? AND project_id IS NULL'
+    );
+    const existing = findStmt.get('guide') as Agent | undefined;
+
+    if (existing) {
+      return existing;
+    }
+
+    // Create new Guide agent with UUID
+    const id = randomUUID();
+    const sessionPath = `sessions/guide-${id}`;
+
+    return this.createAgent({
+      id,
+      type: 'guide',
+      project_id: null,
+      session_path: sessionPath,
+      status: 'idle',
+    });
   }
 
   // Query method for custom queries (used by query_database tool)
