@@ -1,7 +1,8 @@
 /**
  * Onboard Command
  *
- * Hybrid onboarding: terminal prompts for API keys, then agent-guided infrastructure setup.
+ * Interactive setup for new System2 installations.
+ * Prompts for LLM provider and API key, then creates ~/.system2 directory structure.
  */
 
 import { mkdir, writeFile } from 'fs/promises';
@@ -33,42 +34,31 @@ export async function onboard(): Promise<void> {
 
   if (isExistingInstallation) {
     p.intro('🧠 Welcome back to System2!');
-    console.log('');
-    console.log('  It looks like you already completed the onboarding.');
-    console.log('  Found existing installation at ~/.system2/');
-    console.log('');
-    console.log('  To start System2, run:');
-    console.log('');
-    console.log('    > \x1b[1msystem2 start\x1b[0m');
-    console.log('');
-    console.log('  To reset and start fresh (only if really necessary):');
-    console.log('');
-    console.log('    > \x1b[1mmv ~/.system2 ~/.system2.backup\x1b[0m');
-    console.log('    > \x1b[1msystem2 onboard\x1b[0m');
-    console.log('');
-    console.log('  \x1b[2mNote: This archives all conversation history and context.');
-    console.log('  System2 will no longer remember previous work. However,');
-    console.log('  any data or code you created is preserved in its own');
-    console.log('  directories and remains unaffected.\x1b[0m');
-    console.log('');
+    p.note(
+      'Found existing installation at ~/.system2/\n\n' +
+      'To start System2, run:\n' +
+      '  system2 start\n\n' +
+      'To reset and start fresh:\n' +
+      '  mv ~/.system2 ~/.system2.backup\n' +
+      '  system2 onboard',
+      'Already configured'
+    );
+    p.log.info('Note: Resetting archives all conversation history and context. System2 will no longer remember previous work. However, any data or code you created is preserved in its own directories.');
     process.exit(0);
   }
 
-  p.intro('🧠 Welcome to System2!');
+  p.intro('🧠 Welcome to System2, the AI multi-agent system for working with data.');
 
-  console.log('');
-  console.log('  The AI multi-agent system for working with data.');
-  console.log('');
-  console.log('  It looks like you\'re just getting started.');
-  console.log('  Before we can get to work, we need at least one');
-  console.log('  LLM provider and an API key for it.');
-  console.log('');
+  p.note(
+    'Before we can get to work, we need at least one LLM provider and an API key.\n\n' +
+    'This will create ~/.system2, the operational base where System2 stores its database, agent memory, configuration, and analysis artifacts.'
+  );
 
   try {
 
   // Phase 1: Terminal Prompts (Credentials Only)
   const primaryProvider = (await p.select({
-    message: 'Select your primary LLM provider',
+    message: 'Select your primary LLM provider:',
     options: [
       { value: 'anthropic', label: 'Anthropic', hint: 'Claude models' },
       { value: 'openai', label: 'OpenAI', hint: 'GPT & o-series models' },
@@ -82,7 +72,7 @@ export async function onboard(): Promise<void> {
   }
 
   const primaryApiKey = (await p.password({
-    message: `Enter your ${primaryProvider} API key`,
+    message: `Enter your ${primaryProvider} API key:`,
     validate: (value) => {
       if (!value) return 'API key is required';
     },
@@ -115,7 +105,7 @@ export async function onboard(): Promise<void> {
     ].filter((opt) => opt.value !== primaryProvider);
 
     secondaryProvider = (await p.select({
-      message: 'Select fallback provider',
+      message: 'Select fallback provider:',
       options: secondaryOptions,
     })) as 'anthropic' | 'openai' | 'google';
 
@@ -125,7 +115,7 @@ export async function onboard(): Promise<void> {
     }
 
     secondaryApiKey = (await p.password({
-      message: `Enter your ${secondaryProvider} API key`,
+      message: `Enter your ${secondaryProvider} API key:`,
       validate: (value) => {
         if (!value) return 'API key is required';
       },
@@ -154,25 +144,17 @@ export async function onboard(): Promise<void> {
 
   s.stop('✓ System2 configured successfully!');
 
-  p.outro('✨ You\'re all set!');
+  p.note(
+    'system2 start   - Launch the gateway and open the browser\n' +
+    'system2 status  - Check if the gateway is running\n' +
+    'system2 stop    - Stop the gateway',
+    'Available commands'
+  );
 
-  console.log('');
-  console.log('  Available commands:');
-  console.log('');
-  console.log('    > \x1b[1msystem2 start\x1b[0m     Launch the gateway and open the browser');
-  console.log('    > \x1b[1msystem2 status\x1b[0m    Check if the gateway is running');
-  console.log('    > \x1b[1msystem2 stop\x1b[0m      Stop the gateway');
-  console.log('');
-  console.log('  ─────────────────────────────────────────────────────────');
-  console.log('');
-  console.log('  Ready to begin? Run:');
-  console.log('');
-  console.log('    > \x1b[1msystem2 start\x1b[0m');
-  console.log('');
-  console.log('  Your browser will open and you\'ll meet the Guide —');
-  console.log('  your personal interface to System2 that provides');
-  console.log('  personalized guidance throughout your analytical journey.');
-  console.log('');
+  p.outro('✨ Run "system2 start" to begin. Your browser will open and you\'ll meet the Guide.');
+
+  p.log.info('To change providers or API keys later, edit ~/.system2/auth.json directly.');
+
   } catch (error: any) {
     console.error('\n❌ Onboarding failed:');
     console.error(error.message);
