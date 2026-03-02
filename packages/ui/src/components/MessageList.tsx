@@ -5,10 +5,16 @@
  * Preserves chronological order of thinking blocks and tool calls.
  */
 
-import { useEffect, useRef, Fragment, useState } from 'react';
 import { Box, Text } from '@primer/react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
-import { useChatStore, ToolCall, Message, TurnEvent, ThinkingBlock as ThinkingBlockType } from '../stores/chat';
+import {
+  type Message,
+  type ThinkingBlock as ThinkingBlockType,
+  type ToolCall,
+  type TurnEvent,
+  useChatStore,
+} from '../stores/chat';
 
 // Markdown wrapper with styling
 function MarkdownContent({ content, muted }: { content: string; muted?: boolean }) {
@@ -94,7 +100,12 @@ function TimelineDot({ color, pulse }: { color: string; pulse?: boolean }) {
 }
 
 // Timeline item wrapper
-function TimelineItem({ children, dotColor, pulse, isLast }: {
+function TimelineItem({
+  children,
+  dotColor,
+  pulse,
+  isLast,
+}: {
   children: React.ReactNode;
   dotColor: string;
   pulse?: boolean;
@@ -124,9 +135,7 @@ function TimelineItem({ children, dotColor, pulse, isLast }: {
         )}
       </Box>
       {/* Content */}
-      <Box sx={{ flex: 1, paddingBottom: 3, minWidth: 0 }}>
-        {children}
-      </Box>
+      <Box sx={{ flex: 1, paddingBottom: 3, minWidth: 0 }}>{children}</Box>
     </Box>
   );
 }
@@ -156,7 +165,8 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
             color: isRunning ? 'attention.fg' : 'fg.muted',
           }}
         >
-          {isRunning ? '⚙️ ' : '✓ '}{tc.name}
+          {isRunning ? '⚙️ ' : '✓ '}
+          {tc.name}
         </Text>
         {hasContent && (
           <Text
@@ -308,12 +318,13 @@ function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: 
   return (
     <Fragment>
       {/* Turn events in chronological order (thinking blocks and tool calls) */}
-      {hasTurnEvents && message.turnEvents!.map((event) => (
-        <TurnEventItem
-          key={event.type === 'thinking' ? event.data.id : event.data.id}
-          event={event}
-        />
-      ))}
+      {hasTurnEvents &&
+        message.turnEvents?.map((event) => (
+          <TurnEventItem
+            key={event.type === 'thinking' ? event.data.id : event.data.id}
+            event={event}
+          />
+        ))}
 
       {/* Response */}
       <TimelineItem dotColor="#3fb950" isLast={isLast}>
@@ -341,7 +352,7 @@ export function MessageList() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, currentAssistantMessage, currentTurnEvents]);
+  }, []);
 
   return (
     <Box
@@ -370,11 +381,7 @@ export function MessageList() {
 
         if (message.role === 'user') {
           return (
-            <TimelineItem
-              key={message.id}
-              dotColor="#58a6ff"
-              isLast={isLastMessage}
-            >
+            <TimelineItem key={message.id} dotColor="#58a6ff" isLast={isLastMessage}>
               <Text
                 sx={{
                   fontWeight: 'semibold',
@@ -402,13 +409,7 @@ export function MessageList() {
         }
 
         // Assistant message with embedded turn events
-        return (
-          <AssistantMessageBlock
-            key={message.id}
-            message={message}
-            isLast={isLastMessage}
-          />
-        );
+        return <AssistantMessageBlock key={message.id} message={message} isLast={isLastMessage} />;
       })}
 
       {/* Current streaming: turn events in chronological order */}

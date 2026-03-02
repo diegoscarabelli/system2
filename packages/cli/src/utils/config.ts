@@ -5,10 +5,10 @@
  * Falls back to sensible defaults when values aren't specified.
  */
 
-import { existsSync, readFileSync, copyFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
-import { fileURLToPath } from 'url';
+import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import TOML from '@iarna/toml';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -111,11 +111,7 @@ function deepMerge<T extends Record<string, any>>(target: T, source: Partial<T>)
 
   for (const key in source) {
     if (source[key] !== undefined) {
-      if (
-        typeof source[key] === 'object' &&
-        source[key] !== null &&
-        !Array.isArray(source[key])
-      ) {
+      if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
         result[key] = deepMerge(target[key] || {}, source[key]);
       } else {
         result[key] = source[key] as T[Extract<keyof T, string>];
@@ -140,7 +136,7 @@ export function loadConfig(): System2Config {
     const tomlConfig = TOML.parse(content) as TomlConfig;
     const userConfig = convertTomlToConfig(tomlConfig);
     return deepMerge(DEFAULT_CONFIG, userConfig);
-  } catch (error) {
+  } catch (_error) {
     // If parsing fails, return defaults
     console.warn('[Config] Failed to parse config.toml, using defaults');
     return DEFAULT_CONFIG;

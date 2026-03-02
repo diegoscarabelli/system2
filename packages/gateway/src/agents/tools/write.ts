@@ -4,10 +4,10 @@
  * Writes content to files on the filesystem.
  */
 
-import { Type } from '@sinclair/typebox';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { writeFile, mkdir } from 'fs/promises';
-import { resolve, dirname } from 'path';
+import { Type } from '@sinclair/typebox';
 
 export function createWriteTool(): AgentTool<any> {
   const params = Type.Object({
@@ -22,9 +22,10 @@ export function createWriteTool(): AgentTool<any> {
   return {
     name: 'write',
     label: 'Write File',
-    description: 'Write content to a file. Creates parent directories if needed. Overwrites existing files.',
+    description:
+      'Write content to a file. Creates parent directories if needed. Overwrites existing files.',
     parameters: params,
-    execute: async (toolCallId, params, signal, onUpdate) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
         // Resolve path relative to home if not absolute
         const filePath = params.path.startsWith('/')

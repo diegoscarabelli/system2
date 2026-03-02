@@ -5,9 +5,9 @@
  * Copies the compaction summary + kept entries to a new file.
  */
 
-import { readdirSync, statSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const SESSION_FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 
@@ -162,9 +162,7 @@ export function rotateSessionIfNeeded(
   const firstKeptEntryId = compactionEntry.firstKeptEntryId;
 
   if (!firstKeptEntryId) {
-    console.log(
-      '[SessionRotation] Compaction has no firstKeptEntryId, skipping rotation'
-    );
+    console.log('[SessionRotation] Compaction has no firstKeptEntryId, skipping rotation');
     return false;
   }
 
@@ -203,15 +201,13 @@ export function rotateSessionIfNeeded(
   // Write new file
   const newFilename = generateSessionFilename();
   const newFilePath = join(sessionDir, newFilename);
-  const content = newEntries.map((e) => JSON.stringify(e)).join('\n') + '\n';
+  const content = `${newEntries.map((e) => JSON.stringify(e)).join('\n')}\n`;
   writeFileSync(newFilePath, content);
 
   console.log(
     `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries`
   );
-  console.log(
-    `[SessionRotation] Old file archived: ${currentFile.split('/').pop()}`
-  );
+  console.log(`[SessionRotation] Old file archived: ${currentFile.split('/').pop()}`);
 
   return true;
 }

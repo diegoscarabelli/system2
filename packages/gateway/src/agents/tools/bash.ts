@@ -4,10 +4,10 @@
  * Executes shell commands with timeout and workspace constraints.
  */
 
-import { Type } from '@sinclair/typebox';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { Type } from '@sinclair/typebox';
 
 const execAsync = promisify(exec);
 
@@ -26,9 +26,10 @@ export function createBashTool(): AgentTool<any> {
   return {
     name: 'bash',
     label: 'Execute Bash Command',
-    description: 'Execute a shell command and return stdout/stderr. Use for system detection, checking installed tools, running package managers, etc.',
+    description:
+      'Execute a shell command and return stdout/stderr. Use for system detection, checking installed tools, running package managers, etc.',
     parameters: params,
-    execute: async (toolCallId, params, signal, onUpdate) => {
+    execute: async (_toolCallId, params, signal, _onUpdate) => {
       try {
         const { stdout, stderr } = await execAsync(params.command, {
           cwd: params.cwd || process.env.HOME,
@@ -59,7 +60,7 @@ export function createBashTool(): AgentTool<any> {
             error: errorMsg,
             stdout,
             stderr,
-            exitCode: error.code || 1
+            exitCode: error.code || 1,
           },
         };
       }

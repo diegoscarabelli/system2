@@ -5,10 +5,10 @@
  */
 
 import { Box } from '@primer/react';
-import { MessageList } from './MessageList';
-import { MessageInput } from './MessageInput';
-import { useChatStore } from '../stores/chat';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useChatStore } from '../stores/chat';
+import { MessageInput } from './MessageInput';
+import { MessageList } from './MessageList';
 
 export function Chat() {
   const { sendMessage } = useWebSocket();

@@ -4,8 +4,8 @@
  * Manages WebSocket connection to the gateway server.
  */
 
-import { useEffect, useRef } from 'react';
 import type { ClientMessage, ServerMessage } from '@system2/shared';
+import { useEffect, useRef } from 'react';
 import { useChatStore } from '../stores/chat';
 
 const WS_URL = `ws://${window.location.hostname}:3000`;
@@ -92,7 +92,17 @@ export function useWebSocket() {
     return () => {
       ws.close();
     };
-  }, []);
+  }, [
+    appendAssistantChunk,
+    appendThinkingChunk,
+    finishAssistantMessage,
+    finishThinking,
+    finishToolCall,
+    setConnected,
+    startAssistantMessage,
+    startThinking,
+    startToolCall,
+  ]);
 
   const sendMessage = (content: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

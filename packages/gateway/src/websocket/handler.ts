@@ -4,9 +4,9 @@
  * Bridges Pi Agent events to WebSocket clients for real-time chat UI updates.
  */
 
-import type { WebSocket } from 'ws';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { ClientMessage, ServerMessage } from '@system2/shared';
+import type { WebSocket } from 'ws';
 import type { AgentHost } from '../agents/host.js';
 
 export class WebSocketHandler {
@@ -88,16 +88,14 @@ export class WebSocketHandler {
         this.send({ type: 'assistant_end' });
         break;
 
-      case 'tool_execution_start':
+      case 'tool_execution_start': {
         // Format tool input for display - check multiple possible properties
         // Pi Agent uses 'args' for tool input, not 'toolInput'
         let inputText = '';
         const rawInput = event.toolInput ?? (event as any).args;
         if (rawInput) {
           try {
-            inputText = typeof rawInput === 'string'
-              ? rawInput
-              : JSON.stringify(rawInput, null, 2);
+            inputText = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput, null, 2);
           } catch {
             inputText = String(rawInput);
           }
@@ -108,8 +106,9 @@ export class WebSocketHandler {
           input: inputText,
         });
         break;
+      }
 
-      case 'tool_execution_end':
+      case 'tool_execution_end': {
         // Format result as string for display
         let resultText = '';
         if (event.result?.content) {
@@ -124,6 +123,7 @@ export class WebSocketHandler {
           result: event.isError ? `Error: ${resultText}` : resultText,
         });
         break;
+      }
 
       case 'agent_end':
         // Agent finished processing

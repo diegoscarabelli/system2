@@ -62,5 +62,5 @@ body.dark-mode {
 
 /* Remove default textarea resize handle - we use custom resize */
 textarea {
-  resize: none !important;
+  resize: none;
 }

@@ -5,9 +5,7 @@
  */
 
 // Client -> Server messages
-export type ClientMessage =
-  | { type: 'user_message'; content: string }
-  | { type: 'abort' };
+export type ClientMessage = { type: 'user_message'; content: string } | { type: 'abort' };
 
 // Server -> Client messages
 export type ServerMessage =

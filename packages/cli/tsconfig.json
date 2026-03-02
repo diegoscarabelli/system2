@@ -6,8 +6,5 @@
     "lib": ["ES2022"]
   },
   "include": ["src/**/*"],
-  "references": [
-    { "path": "../shared" },
-    { "path": "../gateway" }
-  ]
+  "references": [{ "path": "../shared" }, { "path": "../gateway" }]
 }

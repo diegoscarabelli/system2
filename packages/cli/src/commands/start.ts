@@ -4,24 +4,27 @@
  * Starts the System2 gateway server in the background (detached) with logs to file.
  */
 
-import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-import { spawn } from 'child_process';
-import { config as dotenvConfig } from 'dotenv';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import open from 'open';
-import { rotateLogIfNeeded } from '../utils/log-rotation.js';
 import { backupIfNeeded } from '../utils/backup.js';
+import { rotateLogIfNeeded } from '../utils/log-rotation.js';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
-const ENV_FILE = join(SYSTEM2_DIR, '.env');
+const AUTH_FILE = join(SYSTEM2_DIR, 'auth.json');
 const LOGS_DIR = join(SYSTEM2_DIR, 'logs');
 const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
 const LOG_FILE = join(LOGS_DIR, 'system2.log');
 
-export async function start(options: { port?: number; noBrowser?: boolean; foreground?: boolean }): Promise<void> {
+export async function start(options: {
+  port?: number;
+  noBrowser?: boolean;
+  foreground?: boolean;
+}): Promise<void> {
   // Check if onboarded
-  if (!existsSync(ENV_FILE)) {
+  if (!existsSync(AUTH_FILE)) {
     console.error('Error: System2 has not been onboarded yet.');
     console.error('Please run: system2 onboard');
     process.exit(1);
@@ -29,7 +32,7 @@ export async function start(options: { port?: number; noBrowser?: boolean; foreg
 
   // Check if already running (skip if we're in foreground mode - spawned by background process)
   if (!options.foreground && existsSync(PID_FILE)) {
-    const pid = parseInt(readFileSync(PID_FILE, 'utf-8'));
+    const pid = parseInt(readFileSync(PID_FILE, 'utf-8'), 10);
     try {
       process.kill(pid, 0); // Check if process exists
       console.log('System2 is already running!');
@@ -45,14 +48,12 @@ export async function start(options: { port?: number; noBrowser?: boolean; foreg
     }
   }
 
-  // Load environment variables from .env
-  dotenvConfig({ path: ENV_FILE });
-
-  // Get LLM provider from environment
-  const primaryProvider = process.env.PRIMARY_LLM_PROVIDER as 'anthropic' | 'openai' | 'google';
+  // Read primary provider from auth.json
+  const authConfig = JSON.parse(readFileSync(AUTH_FILE, 'utf-8'));
+  const primaryProvider = authConfig.primary as 'anthropic' | 'openai' | 'google';
 
   if (!primaryProvider) {
-    console.error('Error: PRIMARY_LLM_PROVIDER not found in .env file');
+    console.error('Error: No primary provider configured in auth.json');
     process.exit(1);
   }
 
@@ -86,7 +87,6 @@ export async function start(options: { port?: number; noBrowser?: boolean; foreg
     const server = new Server({
       port,
       dbPath: join(SYSTEM2_DIR, 'app.db'),
-      llmProvider: primaryProvider,
       uiDistPath: join(import.meta.dirname, '..', '..', 'ui', 'dist'),
     });
 
@@ -100,7 +100,7 @@ export async function start(options: { port?: number; noBrowser?: boolean; foreg
     await new Promise(() => {});
   } else {
     // Run in background (detached) - just use foreground mode but spawn it
-    const { openSync } = await import('fs');
+    const { openSync } = await import('node:fs');
     const logFd = openSync(LOG_FILE, 'a');
 
     const child = spawn(
@@ -120,7 +120,7 @@ export async function start(options: { port?: number; noBrowser?: boolean; foreg
     );
 
     // Save PID
-    writeFileSync(PID_FILE, child.pid!.toString());
+    writeFileSync(PID_FILE, child.pid?.toString());
 
     // Detach from parent
     child.unref();
@@ -129,12 +129,12 @@ export async function start(options: { port?: number; noBrowser?: boolean; foreg
     console.log(`  PID: ${child.pid}`);
     console.log(`  Logs: ${LOG_FILE}`);
     console.log('');
-    console.log('To view logs: tail -f ' + LOG_FILE);
+    console.log(`To view logs: tail -f ${LOG_FILE}`);
     console.log('To stop: system2 stop');
     console.log('');
 
     // Wait a moment then check if it's running
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
     // Open browser
     if (!options.noBrowser) {

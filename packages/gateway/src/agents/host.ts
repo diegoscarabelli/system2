@@ -4,26 +4,26 @@
  * Manages the Guide agent session using Pi SDK with JSONL persistence.
  */
 
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
-  AuthStorage,
-  ModelRegistry,
-  SessionManager,
-  createAgentSession,
-  DefaultResourceLoader,
   type AgentSession,
   type AgentSessionEvent,
+  createAgentSession,
+  DefaultResourceLoader,
+  ModelRegistry,
+  SessionManager,
 } from '@mariozechner/pi-coding-agent';
-import { readFileSync, mkdirSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
-import { fileURLToPath } from 'url';
 import matter from 'gray-matter';
 import type { DatabaseClient } from '../db/client.js';
-import { createQueryDatabaseTool } from './tools/query-database.js';
+import { AuthResolver } from './auth-resolver.js';
+import { rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
+import { createQueryDatabaseTool } from './tools/query-database.js';
 import { createReadTool } from './tools/read.js';
 import { createWriteTool } from './tools/write.js';
-import { rotateSessionIfNeeded } from './session-rotation.js';
 import './types.js'; // Import custom message type declarations
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,25 +46,24 @@ interface AgentDefinition {
 
 export interface AgentHostConfig {
   db: DatabaseClient;
-  llmProvider: string;
-  sessionPath?: string;
 }
 
 export class AgentHost {
   private session: AgentSession | null = null;
   private db: DatabaseClient;
-  private authStorage: AuthStorage;
+  private authResolver: AuthResolver;
   private modelRegistry: ModelRegistry;
-  private llmProvider: string;
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
-    this.llmProvider = config.llmProvider;
 
-    // Initialize AuthStorage pointing to ~/.system2/
-    this.authStorage = AuthStorage.create(join(SYSTEM2_DIR, 'auth.json'));
-    this.modelRegistry = new ModelRegistry(this.authStorage);
+    // Initialize AuthResolver with failover support
+    this.authResolver = new AuthResolver();
+    const authStorage = this.authResolver.createAuthStorage();
+    this.modelRegistry = new ModelRegistry(authStorage);
+
+    console.log('[AgentHost] Auth status:', this.authResolver.getStatus());
   }
 
   /**
@@ -98,24 +97,26 @@ export class AgentHost {
     const { data: guideMeta, content: systemPrompt } = matter(guideFile);
     const guideConfig = guideMeta as AgentDefinition;
 
+    const llmProvider = this.authResolver.primaryProvider;
+
     console.log('[AgentHost] Guide config loaded:', {
       name: guideConfig.name,
       models: guideConfig.models,
-      provider: this.llmProvider,
+      provider: llmProvider,
     });
 
     // Get model ID from agent library config
-    const modelId = guideConfig.models[this.llmProvider as keyof typeof guideConfig.models];
+    const modelId = guideConfig.models[llmProvider as keyof typeof guideConfig.models];
     if (!modelId) {
-      throw new Error(`No model configured for provider: ${this.llmProvider}`);
+      throw new Error(`No model configured for provider: ${llmProvider}`);
     }
 
-    console.log('[AgentHost] Selected model:', modelId, 'for provider:', this.llmProvider);
+    console.log('[AgentHost] Selected model:', modelId, 'for provider:', llmProvider);
 
     // Find model using registry
-    const model = this.modelRegistry.find(this.llmProvider, modelId);
+    const model = this.modelRegistry.find(llmProvider, modelId);
     if (!model) {
-      throw new Error(`Model not found: ${this.llmProvider}/${modelId}`);
+      throw new Error(`Model not found: ${llmProvider}/${modelId}`);
     }
 
     console.log('[AgentHost] Model found:', model ? 'YES' : 'NO');
@@ -139,7 +140,7 @@ export class AgentHost {
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
       sessionManager: SessionManager.continueRecent(SYSTEM2_DIR, guideSessionDir),
-      authStorage: this.authStorage,
+      authStorage: this.authResolver.createAuthStorage(),
       modelRegistry: this.modelRegistry,
       resourceLoader,
       model,
@@ -157,7 +158,9 @@ export class AgentHost {
 
     // Subscribe to session events and forward to listeners
     session.subscribe((event) => {
-      this.listeners.forEach((listener) => listener(event));
+      this.listeners.forEach((listener) => {
+        listener(event);
+      });
     });
 
     console.log('[AgentHost] Guide agent session initialized with JSONL persistence');

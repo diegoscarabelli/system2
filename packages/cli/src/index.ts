@@ -8,8 +8,8 @@
 import { Command } from 'commander';
 import { onboard } from './commands/onboard.js';
 import { start } from './commands/start.js';
-import { stop } from './commands/stop.js';
 import { status } from './commands/status.js';
+import { stop } from './commands/stop.js';
 
 const program = new Command();
 
@@ -33,7 +33,7 @@ program
   .option('--foreground', 'Run in foreground (for debugging)')
   .action(async (options) => {
     await start({
-      port: options.port ? parseInt(options.port) : undefined,
+      port: options.port ? parseInt(options.port, 10) : undefined,
       noBrowser: !options.browser,
       foreground: options.foreground,
     });

@@ -4,12 +4,12 @@
  * Manages System2's app.db with WAL mode for concurrent access.
  */
 
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { Agent, Project, Task } from '@system2/shared';
 import Database from 'better-sqlite3';
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { randomUUID } from 'crypto';
-import type { Project, Task, Agent } from '@system2/shared';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -41,12 +41,7 @@ export class DatabaseClient {
       RETURNING *
     `);
 
-    return stmt.get(
-      project.id,
-      project.name,
-      project.description,
-      project.status
-    ) as Project;
+    return stmt.get(project.id, project.name, project.description, project.status) as Project;
   }
 
   getProject(id: string): Project | null {
@@ -56,14 +51,19 @@ export class DatabaseClient {
 
   listProjects(status?: Project['status']): Project[] {
     if (status) {
-      const stmt = this.db.prepare('SELECT * FROM projects WHERE status = ? ORDER BY created_at DESC');
+      const stmt = this.db.prepare(
+        'SELECT * FROM projects WHERE status = ? ORDER BY created_at DESC'
+      );
       return stmt.all(status) as Project[];
     }
     const stmt = this.db.prepare('SELECT * FROM projects ORDER BY created_at DESC');
     return stmt.all() as Project[];
   }
 
-  updateProject(id: string, updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>): Project | null {
+  updateProject(
+    id: string,
+    updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>
+  ): Project | null {
     const fields: string[] = [];
     const values: any[] = [];
 
@@ -119,11 +119,16 @@ export class DatabaseClient {
   }
 
   listTasks(projectId: string): Task[] {
-    const stmt = this.db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at ASC');
+    const stmt = this.db.prepare(
+      'SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at ASC'
+    );
     return stmt.all(projectId) as Task[];
   }
 
-  updateTask(id: string, updates: Partial<Pick<Task, 'status' | 'assigned_agent_id' | 'artifact_path'>>): Task | null {
+  updateTask(
+    id: string,
+    updates: Partial<Pick<Task, 'status' | 'assigned_agent_id' | 'artifact_path'>>
+  ): Task | null {
     const fields: string[] = [];
     const values: any[] = [];
 
@@ -203,9 +208,7 @@ export class DatabaseClient {
    */
   getOrCreateGuideAgent(): Agent {
     // Check if Guide agent already exists
-    const findStmt = this.db.prepare(
-      'SELECT * FROM agents WHERE type = ? AND project_id IS NULL'
-    );
+    const findStmt = this.db.prepare('SELECT * FROM agents WHERE type = ? AND project_id IS NULL');
     const existing = findStmt.get('guide') as Agent | undefined;
 
     if (existing) {

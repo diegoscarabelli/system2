@@ -4,13 +4,13 @@
  * HTTP + WebSocket server that hosts the Guide agent and serves the UI.
  */
 
+import { createServer } from 'node:http';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { DatabaseClient } from './db/client.js';
 import { AgentHost } from './agents/host.js';
+import { DatabaseClient } from './db/client.js';
 import { WebSocketHandler } from './websocket/handler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,7 +19,6 @@ const __dirname = dirname(__filename);
 export interface ServerConfig {
   port: number;
   dbPath: string;
-  llmProvider: 'anthropic' | 'openai' | 'google';
   uiDistPath?: string;
 }
 
@@ -37,10 +36,9 @@ export class Server {
     // Initialize database
     this.db = new DatabaseClient(config.dbPath);
 
-    // Initialize agent host (reads model from agent library)
+    // Initialize agent host (reads provider from auth.json)
     this.agentHost = new AgentHost({
       db: this.db,
-      llmProvider: config.llmProvider,
     });
 
     // Set up Express app
@@ -50,7 +48,7 @@ export class Server {
     // Serve UI static files (if path provided)
     if (config.uiDistPath) {
       this.app.use(express.static(config.uiDistPath));
-      this.app.get('*', (req, res) => {
+      this.app.get('*', (_req, res) => {
         res.sendFile(join(config.uiDistPath!, 'index.html'));
       });
     }

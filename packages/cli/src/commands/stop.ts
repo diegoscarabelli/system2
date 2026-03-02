@@ -4,9 +4,9 @@
  * Stops the System2 gateway server.
  */
 
-import { existsSync, readFileSync, unlinkSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
 const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
@@ -20,7 +20,7 @@ export async function stop(): Promise<void> {
     process.exit(0);
   }
 
-  const pid = parseInt(readFileSync(PID_FILE, 'utf-8'));
+  const pid = parseInt(readFileSync(PID_FILE, 'utf-8'), 10);
 
   try {
     // Check if process exists
@@ -31,7 +31,7 @@ export async function stop(): Promise<void> {
     process.kill(pid, 'SIGTERM');
 
     // Wait a bit for graceful shutdown
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Check if still running
     try {
@@ -39,7 +39,7 @@ export async function stop(): Promise<void> {
       // Still running, force kill
       console.log('Process still running, forcing shutdown...');
       process.kill(pid, 'SIGKILL');
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
     } catch {
       // Process stopped gracefully
     }
@@ -47,7 +47,7 @@ export async function stop(): Promise<void> {
     // Clean up PID file
     unlinkSync(PID_FILE);
     console.log('✓ System2 stopped');
-  } catch (error) {
+  } catch (_error) {
     // Process not running, clean up stale PID file
     console.log('System2 was not running (removing stale PID file)');
     unlinkSync(PID_FILE);

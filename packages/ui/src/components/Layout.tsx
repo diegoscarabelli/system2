@@ -4,11 +4,11 @@
  * Resizable two-panel layout with main content and chat sidebar.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { MoonIcon, SunIcon } from '@primer/octicons-react';
 import { Box, IconButton } from '@primer/react';
-import { SunIcon, MoonIcon } from '@primer/octicons-react';
-import { Chat } from './Chat';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useThemeStore } from '../stores/theme';
+import { Chat } from './Chat';
 
 export function Layout() {
   const [chatWidth, setChatWidth] = useState(33); // percentage
@@ -125,9 +125,7 @@ export function Layout() {
               color: 'fg.muted',
             }}
           >
-            <Box sx={{ fontSize: 1 }}>
-              Chat with the Guide on the right
-            </Box>
+            <Box sx={{ fontSize: 1 }}>Chat with the Guide on the right</Box>
           </Box>
         </Box>
 

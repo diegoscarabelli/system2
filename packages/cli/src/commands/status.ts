@@ -4,9 +4,9 @@
  * Shows the current status of the System2 gateway server.
  */
 
-import { existsSync, readFileSync, statSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
 const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
@@ -33,7 +33,7 @@ export async function status(): Promise<void> {
     process.exit(0);
   }
 
-  const pid = parseInt(readFileSync(PID_FILE, 'utf-8'));
+  const pid = parseInt(readFileSync(PID_FILE, 'utf-8'), 10);
 
   try {
     // Check if process exists
@@ -54,7 +54,7 @@ export async function status(): Promise<void> {
 
     console.log('Commands:');
     console.log('  system2 stop              Stop the server');
-    console.log('  tail -f ' + LOG_FILE);
+    console.log(`  tail -f ${LOG_FILE}`);
     console.log('                            View live logs');
   } catch {
     // Process not running

@@ -5,8 +5,8 @@
  * Features a resizable textarea with a horizontal drag handle.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { Box, Textarea, Button } from '@primer/react';
+import { Box, Button, Textarea } from '@primer/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '../stores/chat';
 
 interface MessageInputProps {
@@ -97,11 +97,7 @@ export function MessageInput({ onSend }: MessageInputProps) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={
-            isConnected
-              ? 'Ask the Guide a question...'
-              : 'Connecting to server...'
-          }
+          placeholder={isConnected ? 'Ask the Guide a question...' : 'Connecting to server...'}
           disabled={!isConnected || isStreaming}
           sx={{
             width: '100%',

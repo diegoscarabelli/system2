@@ -4,10 +4,10 @@
  * Reads file contents from the filesystem.
  */
 
-import { Type } from '@sinclair/typebox';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { readFile } from 'fs/promises';
-import { resolve } from 'path';
+import { Type } from '@sinclair/typebox';
 
 export function createReadTool(): AgentTool<any> {
   const params = Type.Object({
@@ -21,7 +21,7 @@ export function createReadTool(): AgentTool<any> {
     label: 'Read File',
     description: 'Read the contents of a file from the filesystem. Supports text files.',
     parameters: params,
-    execute: async (toolCallId, params, signal, onUpdate) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
         // Resolve path relative to home if not absolute
         const filePath = params.path.startsWith('/')
@@ -35,9 +35,10 @@ export function createReadTool(): AgentTool<any> {
           details: { path: filePath, size: content.length },
         };
       } catch (error: any) {
-        const errorMsg = error.code === 'ENOENT'
-          ? `File not found: ${params.path}`
-          : error.message || String(error);
+        const errorMsg =
+          error.code === 'ENOENT'
+            ? `File not found: ${params.path}`
+            : error.message || String(error);
 
         return {
           content: [{ type: 'text', text: `Error reading file: ${errorMsg}` }],

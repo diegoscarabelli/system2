@@ -10,9 +10,9 @@
  * - backup.max_backups: Number of backups to keep (default: 5)
  */
 
-import { cpSync, existsSync, readdirSync, rmSync, statSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
+import { cpSync, existsSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { loadConfig } from './config.js';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
@@ -54,7 +54,7 @@ function getMostRecentBackupTime(): Date | null {
   const mostRecent = backups[0];
   const timestampStr = mostRecent.replace(BACKUP_PREFIX, '').replace(/-/g, ':');
   // Convert back: 2026-03-02T14:30:00
-  const isoStr = timestampStr.slice(0, 10) + 'T' + timestampStr.slice(11).replace(/:/g, ':');
+  const isoStr = `${timestampStr.slice(0, 10)}T${timestampStr.slice(11).replace(/:/g, ':')}`;
 
   try {
     return new Date(isoStr.replace(/:(\d{2}):(\d{2})$/, ':$1:$2'));

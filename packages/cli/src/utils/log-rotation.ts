@@ -4,7 +4,7 @@
  * Rotates log files when they exceed a size threshold.
  */
 
-import { existsSync, statSync, renameSync, unlinkSync } from 'fs';
+import { existsSync, renameSync, statSync, unlinkSync } from 'node:fs';
 
 export interface LogRotationOptions {
   logFile: string;
