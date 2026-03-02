@@ -4,14 +4,14 @@
  * Starts the System2 gateway server in the background (detached) with logs to file.
  */
 
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { config as dotenvConfig } from 'dotenv';
-import matter from 'gray-matter';
 import open from 'open';
 import { rotateLogIfNeeded } from '../utils/log-rotation.js';
+import { backupIfNeeded } from '../utils/backup.js';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
 const ENV_FILE = join(SYSTEM2_DIR, '.env');
@@ -41,7 +41,7 @@ export async function start(options: { port?: number; noBrowser?: boolean; foreg
     } catch {
       // Process not running, remove stale PID file
       console.log('Removing stale PID file...');
-      require('fs').unlinkSync(PID_FILE);
+      unlinkSync(PID_FILE);
     }
   }
 
@@ -56,17 +56,15 @@ export async function start(options: { port?: number; noBrowser?: boolean; foreg
     process.exit(1);
   }
 
-  // Read Guide agent config to display model info
-  const guideDefinitionPath = join(SYSTEM2_DIR, 'agents', 'guide.md');
-  const guideFile = readFileSync(guideDefinitionPath, 'utf-8');
-  const { data: guideMeta } = matter(guideFile);
-  const llmModel = (guideMeta as any).models[primaryProvider];
-
   const port = options.port || 3000;
+
+  // Automatic backup (only in normal start mode, not foreground spawned by background)
+  if (!options.foreground) {
+    backupIfNeeded();
+  }
 
   console.log('Starting System2 Gateway...');
   console.log(`  Provider: ${primaryProvider}`);
-  console.log(`  Model: ${llmModel}`);
   console.log(`  Port: ${port}`);
   console.log('');
 
