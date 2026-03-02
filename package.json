@@ -16,9 +16,13 @@
     "dev": "pnpm -r --parallel dev",
     "clean": "pnpm -r clean && rm -rf node_modules",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint"
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "check": "biome check ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.5",
     "@types/node": "^20.11.0",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3"
