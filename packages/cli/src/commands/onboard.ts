@@ -192,32 +192,45 @@ export async function onboard(): Promise<void> {
     const fallbackOrder: Provider[] = [];
 
     if (wantsFallback) {
-      // Get available providers (excluding primary)
-      const availableProviders = PROVIDERS.filter((p) => p.value !== primaryProvider);
+      // Iteratively add fallback providers (same UX as primary selection)
+      let availableProviders = PROVIDERS.filter((p) => p.value !== primaryProvider);
 
-      // Multi-select fallback providers
-      const selectedFallbacks = (await p.multiselect({
-        message: 'Select fallback providers (use space to select, enter to confirm):',
-        options: availableProviders.map((provider) => ({
-          value: provider.value,
-          label: provider.label,
-        })),
-        required: true,
-      })) as Provider[];
+      while (availableProviders.length > 0) {
+        const fallbackProvider = (await p.select({
+          message:
+            fallbackOrder.length === 0
+              ? 'Select a fallback provider:'
+              : 'Select another fallback provider:',
+          options: availableProviders,
+        })) as Provider;
 
-      if (p.isCancel(selectedFallbacks)) {
-        p.cancel('Onboarding cancelled');
-        process.exit(0);
-      }
+        if (p.isCancel(fallbackProvider)) {
+          p.cancel('Onboarding cancelled');
+          process.exit(0);
+        }
 
-      // Collect keys for each fallback provider
-      for (const fallbackProvider of selectedFallbacks) {
-        const providerLabel = PROVIDERS.find((p) => p.value === fallbackProvider)?.label;
-        p.log.info(`\nConfiguring ${providerLabel}...`);
-
+        // Collect keys for this fallback provider
         const fallbackKeys = await collectKeysForProvider(fallbackProvider);
         collectedKeys.set(fallbackProvider, fallbackKeys);
         fallbackOrder.push(fallbackProvider);
+
+        // Remove from available list
+        availableProviders = availableProviders.filter((p) => p.value !== fallbackProvider);
+
+        // Ask about adding more (if any remain)
+        if (availableProviders.length > 0) {
+          const addMore = await p.confirm({
+            message: 'Add another fallback provider?',
+            initialValue: false,
+          });
+
+          if (p.isCancel(addMore)) {
+            p.cancel('Onboarding cancelled');
+            process.exit(0);
+          }
+
+          if (!addMore) break;
+        }
       }
     }
 
