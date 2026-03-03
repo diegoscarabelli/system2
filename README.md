@@ -223,6 +223,7 @@ Agents have access to these tools for interacting with the system:
 | `read` | Read file contents | Absolute or home-relative paths |
 | `write` | Write files, create parent directories | Overwrites existing files |
 | `query_database` | Query System2 SQLite database | Read access to projects, tasks, agents |
+| `show_artifact` | Display HTML file in the UI left panel | Path must be within `~/.system2/` |
 
 ### Database Schema
 
@@ -256,6 +257,47 @@ System2 uses SQLite with WAL mode for concurrent access. Schema in `packages/ser
 | session_path | TEXT | Path to JSONL session directory |
 | status | TEXT | `idle`, `working`, `waiting` |
 
+### Artifact Display
+
+Agents produce HTML artifacts (dashboards, reports, plots) as files on disk under `~/.system2/`. The Guide agent curates which artifact to display using the `show_artifact` tool. The HTML content never passes through the LLM — only the file path does.
+
+#### Data Flow
+
+```
+Show:   Guide calls show_artifact({ path: "projects/foo/dashboard.html" })
+          → Server validates path is within ~/.system2/, checks file exists
+          → Server emits { type: 'artifact', url: '/artifacts/projects/foo/dashboard.html' }
+          → UI sets iframe src → browser fetches HTML over HTTP
+
+Reload: Data agent modifies the HTML file on disk
+          → fs.watch fires on the file
+          → Server emits { type: 'artifact', url: '/artifacts/...?t=<timestamp>' }
+          → UI updates iframe src → browser re-fetches (cache-busted)
+```
+
+#### Live Reload
+
+When the Guide shows an artifact, the server starts an `fs.watch` on the file. Any data agent that modifies the file triggers an immediate reload in the UI — no agent action required. The cache-bust query parameter (`?t=<timestamp>`) forces the iframe to re-fetch the updated content.
+
+Only one file is watched at a time. Showing a new artifact closes the previous watcher.
+
+#### Interactive Dashboards
+
+Artifacts run in a sandboxed iframe (`sandbox="allow-scripts"`). For dashboards that need database access, a `postMessage` bridge connects the iframe to the server:
+
+```
+Iframe → postMessage({ type: 'system2:query', requestId, sql })
+  → ArtifactViewer intercepts → fetch('/api/query', { sql })
+    → Server executes SELECT against SQLite → returns { rows, count }
+  → ArtifactViewer posts back → postMessage({ type: 'system2:query_result', requestId, data })
+```
+
+The `/api/query` endpoint only allows `SELECT` queries. The iframe cannot access cookies, storage, or navigate the parent frame due to sandbox restrictions.
+
+#### Persistence
+
+The current artifact URL is stored in `sessionStorage` so it survives page refreshes within the same browser tab.
+
 ## Server & Protocol
 
 ### HTTP/WebSocket Server
@@ -264,6 +306,8 @@ The server (`packages/server/`) runs Express.js with a WebSocket server on the s
 
 - **Default port:** 3000
 - **Static files:** Serves React UI from `packages/ui/dist/`
+- **`/artifacts`:** Serves HTML artifact files from `~/.system2/` (no-cache headers, dotfiles denied)
+- **`/api/query`:** POST endpoint for interactive artifact dashboards (SELECT-only SQL)
 - **Database:** SQLite at `~/.system2/app.db`
 - **Agent host:** Manages Guide agent session with failover support
 
@@ -287,6 +331,8 @@ The server (`packages/server/`) runs Express.js with a WebSocket server on the s
 | `{ type: 'assistant_end' }` | End of assistant response |
 | `{ type: 'tool_call_start', name: string, input?: string }` | Tool execution starting |
 | `{ type: 'tool_call_end', name: string, result: string }` | Tool execution complete |
+| `{ type: 'artifact', url: string }` | Display HTML artifact in left panel (also sent on live reload) |
+| `{ type: 'context_usage', percent, tokens, contextWindow }` | Context window usage after each turn |
 | `{ type: 'ready_for_input' }` | Agent finished, ready for next message |
 | `{ type: 'error', message: string }` | Error occurred |
 
@@ -453,7 +499,7 @@ system2/
 │   │   └── src/
 │   │       ├── agents/
 │   │       │   ├── library/    # Agent definitions (guide.md, conductor.md, ...)
-│   │       │   ├── tools/      # bash, read, write, query-database
+│   │       │   ├── tools/      # bash, read, write, query-database, show-artifact
 │   │       │   ├── host.ts     # AgentHost with failover
 │   │       │   ├── auth-resolver.ts
 │   │       │   ├── retry.ts    # Exponential backoff logic
@@ -470,9 +516,10 @@ system2/
 │   │
 │   └── ui/                     # React chat UI
 │       └── src/
-│           ├── components/     # Chat, MessageList, MessageInput
-│           ├── stores/         # Zustand stores (chat state, message queue)
-│           └── hooks/          # useWebSocket (message sending, queue processing)
+│           ├── components/     # Chat, MessageList, MessageInput, ArtifactViewer
+│           ├── stores/         # Zustand stores (chat, artifact)
+│           ├── hooks/          # useWebSocket (message sending, queue processing)
+│           └── theme/          # Centralized color palette
 ```
 
 ## Contributing
