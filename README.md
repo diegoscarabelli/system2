@@ -296,7 +296,12 @@ The `/api/query` endpoint only allows `SELECT` queries. The iframe cannot access
 
 #### Persistence
 
-The current artifact URL is stored in `sessionStorage` so it survives page refreshes within the same browser tab.
+The UI persists state to `localStorage` so it survives page refreshes and tab closes:
+
+- **Chat history**: Messages and context usage percentage are persisted via Zustand's `persist` middleware (key: `system2:chat`). Transient state (streaming flags, connection status) is not persisted.
+- **Artifact URL**: The current artifact URL is stored under `system2:artifact-url`, so the left panel restores on reload.
+
+On the server side, the agent's full conversation context is maintained in JSONL session files, so reconnecting picks up where you left off.
 
 ## Server & Protocol
 
@@ -386,16 +391,16 @@ The React web interface (`packages/ui/`) provides a responsive chat experience w
 
 #### State Management
 
-The Zustand store (`useChatStore`) manages all UI state:
+The Zustand store (`useChatStore`) manages all UI state. Fields marked with **P** are persisted to `localStorage`:
 
 | State | Type | Description |
 |-------|------|-------------|
-| `messages` | `Message[]` | Conversation history (user, assistant, tool) |
+| `messages` **P** | `Message[]` | Conversation history (user, assistant, tool) |
+| `contextPercent` **P** | `number \| null` | Context window usage percentage |
 | `messageQueue` | `QueuedMessage[]` | Messages waiting to be sent |
 | `currentAssistantMessage` | `string \| null` | Streaming response content |
 | `currentTurnEvents` | `TurnEvent[]` | Thinking blocks and tool calls for current turn |
 | `activeThinkingId` | `string \| null` | Currently streaming thinking block |
-| `activeToolCallId` | `string \| null` | Currently executing tool |
 | `isStreaming` | `boolean` | True while receiving any response chunks |
 | `isWaitingForResponse` | `boolean` | True after send, before first chunk |
 | `isConnected` | `boolean` | WebSocket connection status |

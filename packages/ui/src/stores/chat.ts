@@ -6,6 +6,7 @@
  */
 
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 export interface ToolCall {
   id: string;
@@ -77,178 +78,207 @@ interface ChatState {
   setContextPercent: (percent: number | null) => void;
 }
 
-export const useChatStore = create<ChatState>((set, get) => ({
-  messages: [],
-  currentAssistantMessage: null,
-  currentTurnEvents: [],
-  activeThinkingId: null,
-  isConnected: false,
-  isStreaming: false,
-  isWaitingForResponse: false,
-  messageQueue: [],
-  contextPercent: null,
-
-  addUserMessage: (content: string) => {
-    const message: Message = {
-      id: `msg-${Date.now()}`,
-      role: 'user',
-      content,
-      timestamp: Date.now(),
-    };
-    set((state) => ({
-      messages: [...state.messages, message],
-      // Clear any lingering turn state when user sends new message
+export const useChatStore = create<ChatState>()(
+  persist(
+    (set, get) => ({
+      messages: [],
+      currentAssistantMessage: null,
       currentTurnEvents: [],
       activeThinkingId: null,
-      isWaitingForResponse: true,
-    }));
-  },
-
-  queueMessage: (content: string, isSteering = false) => {
-    const queuedMsg: QueuedMessage = {
-      id: `queued-${Date.now()}`,
-      content,
-      isSteering,
-      timestamp: Date.now(),
-    };
-    set((state) => {
-      // Steering messages go to the front of the queue
-      if (isSteering) {
-        return { messageQueue: [queuedMsg, ...state.messageQueue] };
-      }
-      return { messageQueue: [...state.messageQueue, queuedMsg] };
-    });
-  },
-
-  dequeueMessage: () => {
-    const state = get();
-    if (state.messageQueue.length === 0) return undefined;
-    const [next, ...rest] = state.messageQueue;
-    set({ messageQueue: rest });
-    return next;
-  },
-
-  clearQueue: () => {
-    set({ messageQueue: [] });
-  },
-
-  startAssistantMessage: () => {
-    set({ currentAssistantMessage: '', isStreaming: true, isWaitingForResponse: false });
-  },
-
-  appendAssistantChunk: (chunk: string) => {
-    set((state) => ({
-      currentAssistantMessage: (state.currentAssistantMessage || '') + chunk,
-    }));
-  },
-
-  finishAssistantMessage: () => {
-    const state = get();
-    const content = state.currentAssistantMessage;
-    if (content) {
-      const message: Message = {
-        id: `msg-${Date.now()}`,
-        role: 'assistant',
-        content,
-        timestamp: Date.now(),
-        // Persist turn events in chronological order
-        turnEvents: state.currentTurnEvents.length > 0 ? [...state.currentTurnEvents] : undefined,
-      };
-      set({
-        messages: [...state.messages, message],
-        currentAssistantMessage: null,
-        currentTurnEvents: [],
-        activeThinkingId: null,
-        isStreaming: false,
-      });
-    }
-  },
-
-  startThinking: () => {
-    const thinkingId = `thinking-${Date.now()}`;
-    const thinkingBlock: ThinkingBlock = {
-      id: thinkingId,
-      content: '',
-      isStreaming: true,
-      timestamp: Date.now(),
-    };
-    set((state) => ({
-      currentTurnEvents: [...state.currentTurnEvents, { type: 'thinking', data: thinkingBlock }],
-      activeThinkingId: thinkingId,
+      isConnected: false,
+      isStreaming: false,
       isWaitingForResponse: false,
-    }));
-  },
+      messageQueue: [],
+      contextPercent: null,
 
-  appendThinkingChunk: (chunk: string) => {
-    const state = get();
-    if (!state.activeThinkingId) return;
+      addUserMessage: (content: string) => {
+        const message: Message = {
+          id: `msg-${Date.now()}`,
+          role: 'user',
+          content,
+          timestamp: Date.now(),
+        };
+        set((state) => ({
+          messages: [...state.messages, message],
+          // Clear any lingering turn state when user sends new message
+          currentTurnEvents: [],
+          activeThinkingId: null,
+          isWaitingForResponse: true,
+        }));
+      },
 
-    set((state) => ({
-      currentTurnEvents: state.currentTurnEvents.map((event) =>
-        event.type === 'thinking' && event.data.id === state.activeThinkingId
-          ? { ...event, data: { ...event.data, content: event.data.content + chunk } }
-          : event
-      ),
-    }));
-  },
+      queueMessage: (content: string, isSteering = false) => {
+        const queuedMsg: QueuedMessage = {
+          id: `queued-${Date.now()}`,
+          content,
+          isSteering,
+          timestamp: Date.now(),
+        };
+        set((state) => {
+          // Steering messages go to the front of the queue
+          if (isSteering) {
+            return { messageQueue: [queuedMsg, ...state.messageQueue] };
+          }
+          return { messageQueue: [...state.messageQueue, queuedMsg] };
+        });
+      },
 
-  finishThinking: () => {
-    const state = get();
-    if (!state.activeThinkingId) return;
+      dequeueMessage: () => {
+        const state = get();
+        if (state.messageQueue.length === 0) return undefined;
+        const [next, ...rest] = state.messageQueue;
+        set({ messageQueue: rest });
+        return next;
+      },
 
-    set((state) => ({
-      currentTurnEvents: state.currentTurnEvents.map((event) =>
-        event.type === 'thinking' && event.data.id === state.activeThinkingId
-          ? { ...event, data: { ...event.data, isStreaming: false } }
-          : event
-      ),
-      activeThinkingId: null,
-    }));
-  },
+      clearQueue: () => {
+        set({ messageQueue: [] });
+      },
 
-  startToolCall: (name: string, input?: string) => {
-    // If there's active thinking, finish it first (tool call interrupts thinking)
-    const state = get();
-    if (state.activeThinkingId) {
-      get().finishThinking();
+      startAssistantMessage: () => {
+        set({ currentAssistantMessage: '', isStreaming: true, isWaitingForResponse: false });
+      },
+
+      appendAssistantChunk: (chunk: string) => {
+        set((state) => ({
+          currentAssistantMessage: (state.currentAssistantMessage || '') + chunk,
+        }));
+      },
+
+      finishAssistantMessage: () => {
+        const state = get();
+        const content = state.currentAssistantMessage;
+        if (content) {
+          const message: Message = {
+            id: `msg-${Date.now()}`,
+            role: 'assistant',
+            content,
+            timestamp: Date.now(),
+            // Persist turn events in chronological order
+            turnEvents:
+              state.currentTurnEvents.length > 0 ? [...state.currentTurnEvents] : undefined,
+          };
+          // Note: isStreaming stays true — the agent may still have tool calls
+          // and more responses. It's set to false only on ready_for_input.
+          set({
+            messages: [...state.messages, message],
+            currentAssistantMessage: null,
+            currentTurnEvents: [],
+            activeThinkingId: null,
+          });
+        }
+      },
+
+      startThinking: () => {
+        const thinkingId = `thinking-${Date.now()}`;
+        const thinkingBlock: ThinkingBlock = {
+          id: thinkingId,
+          content: '',
+          isStreaming: true,
+          timestamp: Date.now(),
+        };
+        set((state) => ({
+          currentTurnEvents: [
+            ...state.currentTurnEvents,
+            { type: 'thinking', data: thinkingBlock },
+          ],
+          activeThinkingId: thinkingId,
+          isStreaming: true,
+          isWaitingForResponse: false,
+        }));
+      },
+
+      appendThinkingChunk: (chunk: string) => {
+        const state = get();
+        if (!state.activeThinkingId) return;
+
+        set((state) => ({
+          currentTurnEvents: state.currentTurnEvents.map((event) =>
+            event.type === 'thinking' && event.data.id === state.activeThinkingId
+              ? { ...event, data: { ...event.data, content: event.data.content + chunk } }
+              : event
+          ),
+        }));
+      },
+
+      finishThinking: () => {
+        const state = get();
+        if (!state.activeThinkingId) return;
+
+        set((state) => ({
+          currentTurnEvents: state.currentTurnEvents.map((event) =>
+            event.type === 'thinking' && event.data.id === state.activeThinkingId
+              ? { ...event, data: { ...event.data, isStreaming: false } }
+              : event
+          ),
+          activeThinkingId: null,
+        }));
+      },
+
+      startToolCall: (name: string, input?: string) => {
+        // If there's active thinking, finish it first (tool call interrupts thinking)
+        const state = get();
+        if (state.activeThinkingId) {
+          get().finishThinking();
+        }
+
+        const toolCall: ToolCall = {
+          id: `tool-${Date.now()}`,
+          name,
+          input,
+          status: 'running',
+          timestamp: Date.now(),
+        };
+        set((state) => ({
+          currentTurnEvents: [...state.currentTurnEvents, { type: 'tool_call', data: toolCall }],
+          isStreaming: true,
+          isWaitingForResponse: false,
+        }));
+      },
+
+      finishToolCall: (name: string, result: string) => {
+        set((state) => ({
+          currentTurnEvents: state.currentTurnEvents.map((event) =>
+            event.type === 'tool_call' &&
+            event.data.name === name &&
+            event.data.status === 'running'
+              ? { ...event, data: { ...event.data, status: 'completed' as const, result } }
+              : event
+          ),
+        }));
+      },
+
+      setConnected: (connected: boolean) => {
+        set({ isConnected: connected });
+      },
+
+      setStreaming: (streaming: boolean) => {
+        set({ isStreaming: streaming });
+      },
+
+      setWaitingForResponse: (waiting: boolean) => {
+        set({ isWaitingForResponse: waiting });
+      },
+
+      setContextPercent: (percent: number | null) => {
+        set({ contextPercent: percent });
+      },
+    }),
+    {
+      name: 'system2:chat',
+      storage: {
+        getItem: (name) => {
+          const str = localStorage.getItem(name);
+          return str ? JSON.parse(str) : null;
+        },
+        setItem: (name, value) => localStorage.setItem(name, JSON.stringify(value)),
+        removeItem: (name) => localStorage.removeItem(name),
+      },
+      partialize: (state) =>
+        ({
+          messages: state.messages,
+          contextPercent: state.contextPercent,
+        }) as unknown as ChatState,
     }
-
-    const toolCall: ToolCall = {
-      id: `tool-${Date.now()}`,
-      name,
-      input,
-      status: 'running',
-      timestamp: Date.now(),
-    };
-    set((state) => ({
-      currentTurnEvents: [...state.currentTurnEvents, { type: 'tool_call', data: toolCall }],
-      isWaitingForResponse: false,
-    }));
-  },
-
-  finishToolCall: (name: string, result: string) => {
-    set((state) => ({
-      currentTurnEvents: state.currentTurnEvents.map((event) =>
-        event.type === 'tool_call' && event.data.name === name && event.data.status === 'running'
-          ? { ...event, data: { ...event.data, status: 'completed' as const, result } }
-          : event
-      ),
-    }));
-  },
-
-  setConnected: (connected: boolean) => {
-    set({ isConnected: connected });
-  },
-
-  setStreaming: (streaming: boolean) => {
-    set({ isStreaming: streaming });
-  },
-
-  setWaitingForResponse: (waiting: boolean) => {
-    set({ isWaitingForResponse: waiting });
-  },
-
-  setContextPercent: (percent: number | null) => {
-    set({ contextPercent: percent });
-  },
-}));
+  )
+);

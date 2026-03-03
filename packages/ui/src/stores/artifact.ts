@@ -2,7 +2,7 @@
  * Artifact Store
  *
  * Zustand store for managing artifact display state in the left panel.
- * Persists the current URL to sessionStorage so it survives page refreshes.
+ * Persists the current URL to localStorage so it survives page refreshes.
  */
 
 import { create } from 'zustand';
@@ -18,7 +18,7 @@ interface ArtifactState {
 }
 
 export const useArtifactStore = create<ArtifactState>((set, get) => ({
-  currentUrl: sessionStorage.getItem(STORAGE_KEY),
+  currentUrl: localStorage.getItem(STORAGE_KEY),
   history: [],
 
   showArtifact: (url: string) => {
@@ -26,12 +26,12 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     const history = state.currentUrl ? [...state.history, state.currentUrl] : state.history;
     // Strip cache-bust param for storage (base URL is enough to restore)
     const baseUrl = url.split('?')[0];
-    sessionStorage.setItem(STORAGE_KEY, baseUrl);
+    localStorage.setItem(STORAGE_KEY, baseUrl);
     set({ currentUrl: url, history });
   },
 
   clearArtifact: () => {
-    sessionStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEY);
     set({ currentUrl: null });
   },
 }));
