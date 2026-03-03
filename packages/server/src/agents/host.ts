@@ -17,9 +17,10 @@ import {
   ModelRegistry,
   SessionManager,
 } from '@mariozechner/pi-coding-agent';
+import type { LlmConfig, LlmProvider } from '@system2/shared';
 import matter from 'gray-matter';
 import type { DatabaseClient } from '../db/client.js';
-import { AuthResolver, type Provider } from './auth-resolver.js';
+import { AuthResolver } from './auth-resolver.js';
 import { calculateDelay, categorizeError, shouldFailover, shouldRetry, sleep } from './retry.js';
 import { rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
@@ -48,6 +49,7 @@ interface AgentDefinition {
 
 export interface AgentHostConfig {
   db: DatabaseClient;
+  llmConfig: LlmConfig;
 }
 
 export class AgentHost {
@@ -56,7 +58,7 @@ export class AgentHost {
   private authResolver: AuthResolver;
   private modelRegistry: ModelRegistry;
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
-  private currentProvider: Provider;
+  private currentProvider: LlmProvider;
   private retryAttempts: Map<string, number> = new Map(); // Track retries per error type
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
@@ -65,7 +67,7 @@ export class AgentHost {
     this.db = config.db;
 
     // Initialize AuthResolver with failover support
-    this.authResolver = new AuthResolver();
+    this.authResolver = new AuthResolver(config.llmConfig);
     const authStorage = this.authResolver.createAuthStorage();
     this.modelRegistry = new ModelRegistry(authStorage);
     this.currentProvider = this.authResolver.primaryProvider;
@@ -255,7 +257,7 @@ export class AgentHost {
   /**
    * Reinitialize the agent session with a different provider.
    */
-  private async reinitializeWithProvider(provider: Provider): Promise<void> {
+  private async reinitializeWithProvider(provider: LlmProvider): Promise<void> {
     if (this.isReinitializing) {
       console.log('[AgentHost] Already reinitializing, skipping');
       return;

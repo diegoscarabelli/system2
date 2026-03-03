@@ -7,6 +7,7 @@
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { LlmConfig } from '@system2/shared';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { AgentHost } from './agents/host.js';
@@ -20,6 +21,7 @@ export interface ServerConfig {
   port: number;
   dbPath: string;
   uiDistPath?: string;
+  llmConfig: LlmConfig;
 }
 
 export class Server {
@@ -36,9 +38,10 @@ export class Server {
     // Initialize database
     this.db = new DatabaseClient(config.dbPath);
 
-    // Initialize agent host (reads provider from auth.json)
+    // Initialize agent host with LLM config from config.toml
     this.agentHost = new AgentHost({
       db: this.db,
+      llmConfig: config.llmConfig,
     });
 
     // Set up Express app
