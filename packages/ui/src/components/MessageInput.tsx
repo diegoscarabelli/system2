@@ -118,6 +118,7 @@ export function MessageInput({ onSend, onQueue }: MessageInputProps) {
             mb: 2,
             resize: 'none',
             height: `${inputHeight}px`,
+            '& textarea': { resize: 'none' },
           }}
         />
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
