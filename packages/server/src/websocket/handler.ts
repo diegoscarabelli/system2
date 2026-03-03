@@ -135,22 +135,40 @@ export class WebSocketHandler {
         });
 
         // If show_artifact completed successfully, emit artifact message and watch for changes
-        if (event.toolName === 'show_artifact' && !event.isError && event.result?.details) {
-          const details = event.result.details as { url?: string; absolutePath?: string };
-          if (details.url && details.absolutePath) {
+        if (event.toolName === 'show_artifact' && !event.isError) {
+          const details = event.result?.details as
+            | { url?: string; absolutePath?: string }
+            | undefined;
+          console.log('[WebSocket] show_artifact result:', JSON.stringify(event.result));
+          if (details?.url && details?.absolutePath) {
             this.send({ type: 'artifact', url: details.url });
             this.watchArtifact(details.url, details.absolutePath);
+          } else {
+            console.warn('[WebSocket] show_artifact missing details:', details);
           }
         }
         break;
       }
 
-      case 'agent_end':
+      case 'agent_end': {
         // Agent finished processing
         console.log('Agent finished. Stop reason:', (this.agentHost.state as any).stopReason);
+
+        // Send context usage update
+        const usage = this.agentHost.getContextUsage();
+        if (usage) {
+          this.send({
+            type: 'context_usage',
+            percent: usage.percent,
+            tokens: usage.tokens,
+            contextWindow: usage.contextWindow,
+          });
+        }
+
         // Signal that the agent is ready for the next message
         this.send({ type: 'ready_for_input' });
         break;
+      }
 
       default:
         // Log other events for debugging
@@ -175,17 +193,24 @@ export class WebSocketHandler {
     }
 
     this.artifactUrl = url;
+    console.log('[WebSocket] Watching artifact:', absolutePath);
 
     try {
-      this.artifactWatcher = watch(absolutePath, (eventType) => {
+      this.artifactWatcher = watch(absolutePath, (eventType, filename) => {
+        console.log('[WebSocket] fs.watch event:', eventType, filename);
         if (eventType === 'change') {
           // Cache-bust so the iframe actually reloads
           const bustUrl = `${this.artifactUrl}?t=${Date.now()}`;
+          console.log('[WebSocket] Sending artifact reload:', bustUrl);
           this.send({ type: 'artifact', url: bustUrl });
         }
       });
+
+      this.artifactWatcher.on('error', (err) => {
+        console.error('[WebSocket] Watcher error:', err);
+      });
     } catch (error) {
-      console.error('Failed to watch artifact:', error);
+      console.error('[WebSocket] Failed to watch artifact:', error);
     }
   }
 
