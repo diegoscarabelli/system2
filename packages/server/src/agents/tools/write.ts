@@ -29,9 +29,7 @@ export function createWriteTool(): AgentTool<any> {
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
         // Resolve path relative to home if not absolute
-        const filePath = isAbsolute(params.path)
-          ? params.path
-          : resolve(homedir(), params.path);
+        const filePath = isAbsolute(params.path) ? params.path : resolve(homedir(), params.path);
 
         // Ensure parent directory exists
         const dir = dirname(filePath);
