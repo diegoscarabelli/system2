@@ -1,7 +1,7 @@
 /**
  * Auth Resolver
  *
- * Manages API keys with failover support. Reads System2's auth.json format
+ * Manages API keys with failover support. Accepts LlmConfig from config.toml
  * and provides Pi SDK compatible AuthStorage with automatic key rotation on failure.
  *
  * Failover logic:
@@ -11,37 +11,14 @@
  * 4. Keys in cooldown recover after the cooldown period expires
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { AuthStorage } from '@mariozechner/pi-coding-agent';
-
-const SYSTEM2_DIR = join(homedir(), '.system2');
-const AUTH_FILE = join(SYSTEM2_DIR, 'auth.json');
+import type { LlmConfig, LlmKey, LlmProvider } from '@system2/shared';
 
 /** Default cooldown period: 5 minutes */
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
 
-export type Provider = 'anthropic' | 'openai' | 'google';
-
-interface AuthKey {
-  key: string;
-  label: string;
-}
-
-interface ProviderKeys {
-  keys: AuthKey[];
-}
-
-interface AuthConfig {
-  version: 1;
-  primary: Provider;
-  fallback: Provider[];
-  providers: Record<Provider, ProviderKeys>;
-}
-
 export interface ActiveKey {
-  provider: Provider;
+  provider: LlmProvider;
   keyIndex: number;
   label: string;
 }
@@ -59,20 +36,32 @@ interface KeyCooldown {
  * Manages API key resolution with failover support.
  */
 export class AuthResolver {
-  private config: AuthConfig;
-  private activeKeys: Map<Provider, number> = new Map(); // Provider -> current key index
-  private failedKeys: Set<string> = new Set(); // "provider:index" for permanently failed keys (auth errors)
-  private cooldowns: Map<string, KeyCooldown> = new Map(); // "provider:index" -> cooldown info
+  private config: LlmConfig;
+  private activeKeys: Map<LlmProvider, number> = new Map();
+  private failedKeys: Set<string> = new Set();
+  private cooldowns: Map<string, KeyCooldown> = new Map();
   private cooldownMs: number;
 
-  constructor(authPath: string = AUTH_FILE, cooldownMs: number = DEFAULT_COOLDOWN_MS) {
-    this.config = this.loadConfig(authPath);
+  constructor(llmConfig: LlmConfig, cooldownMs: number = DEFAULT_COOLDOWN_MS) {
+    this.config = this.validateConfig(llmConfig);
     this.cooldownMs = cooldownMs;
 
     // Initialize active key index to 0 for each provider with keys
-    for (const provider of Object.keys(this.config.providers) as Provider[]) {
-      this.activeKeys.set(provider, 0);
+    for (const provider of Object.keys(this.config.providers) as LlmProvider[]) {
+      if (this.config.providers[provider]) {
+        this.activeKeys.set(provider, 0);
+      }
     }
+  }
+
+  /**
+   * Validate the LLM configuration structure.
+   */
+  private validateConfig(config: LlmConfig): LlmConfig {
+    if (!config.primary || !config.providers) {
+      throw new Error('Invalid LLM configuration. Run "system2 onboard" to reconfigure.');
+    }
+    return config;
   }
 
   /**
@@ -97,40 +86,24 @@ export class AuthResolver {
     return false;
   }
 
-  private loadConfig(authPath: string): AuthConfig {
-    if (!existsSync(authPath)) {
-      throw new Error(`Auth file not found: ${authPath}. Run 'system2 onboard' first.`);
-    }
-
-    const content = readFileSync(authPath, 'utf-8');
-    const config = JSON.parse(content);
-
-    // Validate structure
-    if (!config.version || !config.primary || !config.providers) {
-      throw new Error('Invalid auth.json format. Run "system2 onboard" to reconfigure.');
-    }
-
-    return config as AuthConfig;
-  }
-
   /**
    * Get the primary provider.
    */
-  get primaryProvider(): Provider {
+  get primaryProvider(): LlmProvider {
     return this.config.primary;
   }
 
   /**
    * Get ordered list of providers to try (primary first, then fallbacks).
    */
-  get providerOrder(): Provider[] {
+  get providerOrder(): LlmProvider[] {
     return [this.config.primary, ...this.config.fallback];
   }
 
   /**
    * Get the first valid key for a provider.
    */
-  private getFirstValidKey(provider: Provider): AuthKey | undefined {
+  private getFirstValidKey(provider: LlmProvider): LlmKey | undefined {
     const providerConfig = this.config.providers[provider];
     if (!providerConfig) return undefined;
 
@@ -151,7 +124,7 @@ export class AuthResolver {
   /**
    * Get the currently active key for a provider.
    */
-  getActiveKey(provider: Provider): ActiveKey | undefined {
+  getActiveKey(provider: LlmProvider): ActiveKey | undefined {
     const index = this.activeKeys.get(provider) ?? 0;
     const providerConfig = this.config.providers[provider];
 
@@ -190,7 +163,7 @@ export class AuthResolver {
    * @returns true if there's a fallback available (next key or next provider)
    */
   markKeyFailed(
-    provider: Provider,
+    provider: LlmProvider,
     reason: 'auth' | 'rate_limit' | 'transient' = 'transient'
   ): boolean {
     const currentIndex = this.activeKeys.get(provider) ?? 0;
@@ -239,7 +212,7 @@ export class AuthResolver {
    * Get the next provider to try after failure.
    * Returns undefined if no providers are available.
    */
-  getNextProvider(): Provider | undefined {
+  getNextProvider(): LlmProvider | undefined {
     for (const provider of this.providerOrder) {
       const key = this.getActiveKey(provider);
       if (key) {
@@ -256,8 +229,10 @@ export class AuthResolver {
     this.failedKeys.clear();
     this.cooldowns.clear();
     // Reset to first key for each provider
-    for (const provider of Object.keys(this.config.providers) as Provider[]) {
-      this.activeKeys.set(provider, 0);
+    for (const provider of Object.keys(this.config.providers) as LlmProvider[]) {
+      if (this.config.providers[provider]) {
+        this.activeKeys.set(provider, 0);
+      }
     }
     console.log('[AuthResolver] All failures and cooldowns reset');
   }
@@ -282,10 +257,13 @@ export class AuthResolver {
   createAuthStorage(): AuthStorage {
     const data: Record<string, { type: 'api_key'; key: string }> = {};
 
-    for (const provider of Object.keys(this.config.providers) as Provider[]) {
+    for (const provider of Object.keys(this.config.providers) as LlmProvider[]) {
+      const providerConfig = this.config.providers[provider];
+      if (!providerConfig) continue;
+
       const activeKey = this.getActiveKey(provider);
       if (activeKey) {
-        const key = this.config.providers[provider].keys[activeKey.keyIndex];
+        const key = providerConfig.keys[activeKey.keyIndex];
         if (key?.key) {
           data[provider] = { type: 'api_key', key: key.key };
         }
@@ -299,8 +277,8 @@ export class AuthResolver {
    * Get current status for logging/debugging.
    */
   getStatus(): {
-    primary: Provider;
-    activeProvider: Provider | undefined;
+    primary: LlmProvider;
+    activeProvider: LlmProvider | undefined;
     failedKeys: string[];
     cooldowns: { keyId: string; reason: string; expiresIn: number }[];
   } {
