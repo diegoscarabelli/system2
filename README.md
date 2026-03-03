@@ -30,40 +30,75 @@ System2 is an AI data team that automates the full data lifecycle - from data en
 # Install globally
 npm install -g system2
 
-# Interactive setup (creates ~/.system2/, configures LLM providers)
+# Interactive setup - creates ~/.system2/ and writes config.toml
 system2 onboard
 
 # Start the server and open browser
 system2 start
 ```
 
+The `onboard` command walks you through selecting LLM providers, entering API keys, and optionally configuring web search (Brave Search). All settings are written to `~/.system2/config.toml`.
+
 ## Configuration
 
-### LLM Providers
+All System2 settings live in a single file: `~/.system2/config.toml`. This file is created during onboarding and has `0600` permissions since it contains API keys. You can edit it directly at any time.
 
-System2 stores credentials in `~/.system2/auth.json`. Run `system2 onboard` to configure interactively, or edit directly:
+```toml
+# LLM providers and API keys
+[llm]
+primary = "anthropic"
+fallback = ["google", "openai"]
 
-```json
-{
-  "version": 1,
-  "primary": "anthropic",
-  "fallback": ["google", "openai"],
-  "providers": {
-    "anthropic": {
-      "keys": [
-        { "key": "sk-ant-...", "label": "personal" },
-        { "key": "sk-ant-...", "label": "work" }
-      ]
-    },
-    "google": {
-      "keys": [{ "key": "AIza...", "label": "default" }]
-    },
-    "openai": {
-      "keys": [{ "key": "sk-...", "label": "default" }]
-    }
-  }
-}
+[llm.anthropic]
+keys = [
+  { key = "sk-ant-...", label = "personal" },
+  { key = "sk-ant-...", label = "work" },
+]
+
+[llm.google]
+keys = [
+  { key = "AIza...", label = "default" },
+]
+
+[llm.openai]
+keys = [
+  { key = "sk-...", label = "default" },
+]
+
+# Service credentials
+[services.brave_search]
+key = "BSA..."
+
+# Tool settings
+[tools.web_search]
+enabled = true
+max_results = 5
+
+# Operational settings
+[backup]
+cooldown_hours = 24
+max_backups = 5
+
+[session]
+rotation_threshold_mb = 10
+
+[logs]
+rotation_threshold_mb = 10
+max_archives = 5
 ```
+
+### Sections
+
+| Section | Description |
+|---------|-------------|
+| `[llm]` | Primary provider, fallback order, and API keys per provider. Each provider supports multiple labeled keys for rotation and failover. |
+| `[services.*]` | Credentials for external services (e.g., Brave Search). |
+| `[tools.*]` | Enable/disable and configure individual tools (e.g., web search). |
+| `[backup]` | Automatic backup frequency and retention. |
+| `[session]` | Session file rotation threshold. |
+| `[logs]` | Log file rotation threshold and archive retention. |
+
+### LLM Providers
 
 | Provider | Models |
 |----------|--------|
@@ -87,7 +122,7 @@ When API errors occur, System2 automatically retries and fails over to alternate
 2. If no keys remain, try the first fallback provider
 3. Continue through fallback providers in order
 
-**Cooldown recovery:** Keys that fail due to rate limits or transient errors enter a 5-minute cooldown and become available again automatically. Auth errors (invalid/revoked keys) are permanent until you update `auth.json`.
+**Cooldown recovery:** Keys that fail due to rate limits or transient errors enter a 5-minute cooldown and become available again automatically. Auth errors (invalid/revoked keys) are permanent until you update `config.toml`.
 
 ### Data Directory
 
@@ -95,8 +130,7 @@ All System2 data lives in `~/.system2/`:
 
 ```
 ~/.system2/
-├── auth.json       # LLM provider credentials (0600 permissions)
-├── config.toml     # User settings (backup, session, log rotation)
+├── config.toml     # All settings and credentials (0600 permissions)
 ├── app.db          # SQLite database (projects, tasks, agents)
 ├── server.pid      # PID file when server is running
 ├── sessions/       # Agent conversation history (JSONL)
