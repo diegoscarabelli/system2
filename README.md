@@ -21,6 +21,50 @@ system2 onboard
 system2 start
 ```
 
+## CLI
+
+The `system2` command manages the server lifecycle and configuration.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `system2 onboard` | Interactive setup - creates `~/.system2/`, prompts for API keys |
+| `system2 start` | Start the server as a background daemon |
+| `system2 stop` | Gracefully stop the server (SIGTERM, then SIGKILL after 2s) |
+| `system2 status` | Show server status, PID, and log file size |
+
+### Start Options
+
+```bash
+system2 start                  # Default: port 3000, opens browser
+system2 start -p 8080          # Custom port
+system2 start --no-browser     # Don't open browser
+system2 start --foreground     # Run in foreground (logs to stdout)
+```
+
+On each start, System2 automatically:
+- Creates a backup of `~/.system2/` (once per 24h, keeps last 5)
+- Rotates log files if they exceed 10 MB
+
+### Data Directory
+
+All System2 data lives in `~/.system2/`:
+
+```
+~/.system2/
+├── auth.json       # LLM provider credentials (0600 permissions)
+├── config.toml     # User settings (backup, session, log rotation)
+├── app.db          # SQLite database (projects, tasks, agents)
+├── server.pid      # PID file when server is running
+├── sessions/       # Agent conversation history (JSONL)
+├── projects/       # Project workspaces
+└── logs/
+    └── system2.log # Server logs (rotated automatically)
+```
+
+Automatic backups are stored in `~/.system2-auto-backup-<timestamp>/`.
+
 ## Architecture
 
 - **Multi-agent system**: Guide (user-facing), Conductor (project orchestrator), and specialized data agents
