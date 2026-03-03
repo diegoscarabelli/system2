@@ -7,6 +7,7 @@
 
 import type { ClientMessage, ServerMessage } from '@system2/shared';
 import { useCallback, useEffect, useRef } from 'react';
+import { useArtifactStore } from '../stores/artifact';
 import { useChatStore } from '../stores/chat';
 
 const WS_URL = `ws://${window.location.hostname}:3000`;
@@ -93,6 +94,10 @@ export function useWebSocket() {
           // Agent is ready for the next message - process queue if any
           setWaitingForResponse(false);
           processNextQueuedMessage();
+          break;
+
+        case 'artifact':
+          useArtifactStore.getState().showArtifact(message.url);
           break;
 
         case 'error':

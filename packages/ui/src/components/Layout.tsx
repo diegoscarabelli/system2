@@ -8,6 +8,7 @@ import { MoonIcon, SunIcon } from '@primer/octicons-react';
 import { Box, IconButton } from '@primer/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useThemeStore } from '../stores/theme';
+import { ArtifactViewer } from './ArtifactViewer';
 import { Chat } from './Chat';
 
 export function Layout() {
@@ -114,19 +115,7 @@ export function Layout() {
             overflow: 'auto',
           }}
         >
-          <Box
-            sx={{
-              padding: 4,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              color: 'fg.muted',
-            }}
-          >
-            <Box sx={{ fontSize: 1 }}>Chat with the Guide on the right</Box>
-          </Box>
+          <ArtifactViewer />
         </Box>
 
         {/* Resize handle */}
