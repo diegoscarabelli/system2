@@ -43,26 +43,15 @@ function findAutoBackups(): string[] {
 }
 
 /**
- * Get the timestamp of the most recent automatic backup.
+ * Get the creation time of the most recent automatic backup.
  * Returns null if no backups exist.
  */
 function getMostRecentBackupTime(): Date | null {
   const backups = findAutoBackups();
   if (backups.length === 0) return null;
 
-  // Extract timestamp from folder name
-  const mostRecent = backups[0];
-  const timestampStr = mostRecent.replace(BACKUP_PREFIX, '').replace(/-/g, ':');
-  // Convert back: 2026-03-02T14:30:00
-  const isoStr = `${timestampStr.slice(0, 10)}T${timestampStr.slice(11).replace(/:/g, ':')}`;
-
-  try {
-    return new Date(isoStr.replace(/:(\d{2}):(\d{2})$/, ':$1:$2'));
-  } catch {
-    // If parsing fails, check folder mtime
-    const backupPath = join(HOME_DIR, mostRecent);
-    return statSync(backupPath).mtime;
-  }
+  const backupPath = join(HOME_DIR, backups[0]);
+  return statSync(backupPath).birthtime;
 }
 
 /**
