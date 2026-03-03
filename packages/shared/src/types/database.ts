@@ -26,7 +26,7 @@ export interface Task {
 
 export interface Agent {
   id: string; // UUID v4
-  type: 'guide' | 'conductor' | 'narrator' | 'data';
+  type: 'guide' | 'conductor' | 'narrator' | 'reviewer';
   project_id: string | null; // NULL for Guide, set for project-specific agents
   session_path: string; // Path to Pi SDK JSONL session
   status: 'idle' | 'working' | 'waiting';

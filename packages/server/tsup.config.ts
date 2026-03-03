@@ -27,7 +27,7 @@ export default defineConfig({
 
     mkdirSync(destLibrary, { recursive: true });
 
-    const agentFiles = ['guide.md', 'conductor.md', 'narrator.md', 'rigor-checker.md'];
+    const agentFiles = ['guide.md', 'conductor.md', 'narrator.md', 'reviewer.md'];
     for (const file of agentFiles) {
       copyFileSync(join(srcLibrary, file), join(destLibrary, file));
     }

@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,          -- UUID v4
-  type TEXT NOT NULL CHECK(type IN ('guide', 'conductor', 'narrator', 'data')),
+  type TEXT NOT NULL CHECK(type IN ('guide', 'conductor', 'narrator', 'reviewer')),
   project_id TEXT,              -- NULL for Guide, set for project-specific agents
   session_path TEXT NOT NULL,   -- Path to Pi SDK JSONL session
   status TEXT DEFAULT 'idle' CHECK(status IN ('idle', 'working', 'waiting')),
