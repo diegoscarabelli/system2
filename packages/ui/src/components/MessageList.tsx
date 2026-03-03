@@ -15,6 +15,7 @@ import {
   type TurnEvent,
   useChatStore,
 } from '../stores/chat';
+import { colors } from '../theme/colors';
 
 // Brain loader - rotating brain with sequential dots
 function BrainLoader() {
@@ -37,7 +38,7 @@ function BrainLoader() {
         <Text
           sx={{
             fontSize: 1,
-            color: '#ffb444',
+            color: colors.guide,
             animation: 'dot1 1.5s ease-in-out infinite',
             '@keyframes dot1': {
               '0%, 20%': { opacity: 0 },
@@ -50,7 +51,7 @@ function BrainLoader() {
         <Text
           sx={{
             fontSize: 1,
-            color: '#ffb444',
+            color: colors.guide,
             animation: 'dot2 1.5s ease-in-out infinite',
             '@keyframes dot2': {
               '0%, 40%': { opacity: 0 },
@@ -63,7 +64,7 @@ function BrainLoader() {
         <Text
           sx={{
             fontSize: 1,
-            color: '#ffb444',
+            color: colors.guide,
             animation: 'dot3 1.5s ease-in-out infinite',
             '@keyframes dot3': {
               '0%, 60%': { opacity: 0 },
@@ -225,7 +226,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
           sx={{
             fontSize: 0,
             fontWeight: 'semibold',
-            color: '#fd2ef5',
+            color: colors.tool,
           }}
         >
           {isRunning ? '⚙️ ' : '✓ '}
@@ -314,7 +315,7 @@ function ThinkingBlock({ thinking }: { thinking: ThinkingBlockType }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <TimelineItem dotColor="#8b949e" pulse={thinking.isStreaming}>
+    <TimelineItem dotColor={colors.thinking} pulse={thinking.isStreaming}>
       <Box
         onClick={() => setCollapsed(!collapsed)}
         sx={{
@@ -364,11 +365,7 @@ function TurnEventItem({ event, isLast }: { event: TurnEvent; isLast?: boolean }
   // Tool call
   const tc = event.data;
   return (
-    <TimelineItem
-      dotColor={tc.status === 'running' ? '#fd2ef5' : '#fd2ef5'}
-      pulse={tc.status === 'running'}
-      isLast={isLast}
-    >
+    <TimelineItem dotColor={colors.tool} pulse={tc.status === 'running'} isLast={isLast}>
       <ToolCallItem tc={tc} />
     </TimelineItem>
   );
@@ -390,12 +387,12 @@ function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: 
         ))}
 
       {/* Response */}
-      <TimelineItem dotColor="#ffb444" isLast={isLast}>
+      <TimelineItem dotColor={colors.guide} isLast={isLast}>
         <Text
           sx={{
             fontWeight: 'semibold',
             fontSize: 0,
-            color: '#ffb444',
+            color: colors.guide,
             marginBottom: 1,
           }}
         >
@@ -446,12 +443,12 @@ export function MessageList() {
 
         if (message.role === 'user') {
           return (
-            <TimelineItem key={message.id} dotColor="#00aaba" isLast={isLastMessage}>
+            <TimelineItem key={message.id} dotColor={colors.user} isLast={isLastMessage}>
               <Text
                 sx={{
                   fontWeight: 'semibold',
                   fontSize: 0,
-                  color: '#00aaba',
+                  color: colors.user,
                   marginBottom: 1,
                 }}
               >
@@ -479,7 +476,7 @@ export function MessageList() {
 
       {/* Waiting for response indicator */}
       {isWaitingForResponse && currentTurnEvents.length === 0 && !currentAssistantMessage && (
-        <TimelineItem dotColor="#ffb444" pulse isLast>
+        <TimelineItem dotColor={colors.guide} pulse isLast>
           <BrainLoader />
         </TimelineItem>
       )}
@@ -495,12 +492,12 @@ export function MessageList() {
 
       {/* Current streaming: response */}
       {currentAssistantMessage && (
-        <TimelineItem dotColor="#ffb444" pulse isLast>
+        <TimelineItem dotColor={colors.guide} pulse isLast>
           <Text
             sx={{
               fontWeight: 'semibold',
               fontSize: 0,
-              color: '#ffb444',
+              color: colors.guide,
               marginBottom: 1,
             }}
           >
