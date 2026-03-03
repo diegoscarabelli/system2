@@ -156,7 +156,8 @@ export function copyConfigTemplateIfMissing(): void {
   }
 
   // Template is in dist/config/config.toml (copied by tsup build)
-  const templatePath = join(__dirname, '..', 'config', 'config.toml');
+  // __dirname resolves to dist/ since everything is bundled into dist/index.js
+  const templatePath = join(__dirname, 'config', 'config.toml');
 
   if (existsSync(templatePath)) {
     copyFileSync(templatePath, CONFIG_FILE);
