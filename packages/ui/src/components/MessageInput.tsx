@@ -2,13 +2,18 @@
  * Message Input Component
  *
  * Text input for sending messages to the agent.
- * Features a resizable textarea with a horizontal drag handle.
+ * Auto-growing textarea that expands up to 10 lines, then scrolls.
  * Supports queueing messages while the agent is working.
  */
 
-import { Box, Button, Textarea } from '@primer/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Box, Button } from '@primer/react';
+import { useRef, useState } from 'react';
 import { useChatStore } from '../stores/chat';
+
+const LINE_HEIGHT = 20; // px per line
+const MIN_LINES = 1;
+const MAX_LINES = 10;
+const PADDING_Y = 16; // vertical padding inside textarea
 
 interface MessageInputProps {
   onSend: (message: string) => void;
@@ -17,23 +22,24 @@ interface MessageInputProps {
 
 export function MessageInput({ onSend, onQueue }: MessageInputProps) {
   const [input, setInput] = useState('');
-  const [inputHeight, setInputHeight] = useState(80); // pixels
   const { isStreaming, isConnected, messageQueue } = useChatStore();
-  const isDragging = useRef(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
 
     if (isStreaming) {
-      // Queue the message while agent is working
       onQueue(input.trim());
     } else {
-      // Send immediately
       onSend(input.trim());
     }
     setInput('');
+    // Reset textarea height after clearing
+    if (textareaRef.current) {
+      textareaRef.current.style.height = `${MIN_LINES * LINE_HEIGHT + PADDING_Y}px`;
+      textareaRef.current.style.overflowY = 'hidden';
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -43,40 +49,21 @@ export function MessageInput({ onSend, onQueue }: MessageInputProps) {
     }
   };
 
-  const handleMouseDown = useCallback(() => {
-    isDragging.current = true;
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
-  }, []);
+  const autoResize = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
 
-  const handleMouseUp = useCallback(() => {
-    isDragging.current = false;
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-  }, []);
+    // Reset to min height to get accurate scrollHeight
+    textarea.style.height = `${MIN_LINES * LINE_HEIGHT + PADDING_Y}px`;
 
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!isDragging.current || !containerRef.current) return;
-
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const newHeight = containerRect.bottom - e.clientY - 50; // 50px for button area
-
-    // Clamp between 40px and 300px
-    setInputHeight(Math.max(40, Math.min(300, newHeight)));
-  }, []);
-
-  useEffect(() => {
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [handleMouseMove, handleMouseUp]);
+    const maxHeight = MAX_LINES * LINE_HEIGHT + PADDING_Y;
+    const newHeight = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = `${newHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  };
 
   return (
     <Box
-      ref={containerRef}
       as="form"
       onSubmit={handleSubmit}
       sx={{
@@ -86,24 +73,14 @@ export function MessageInput({ onSend, onQueue }: MessageInputProps) {
         flexDirection: 'column',
       }}
     >
-      {/* Resize handle */}
-      <Box
-        onMouseDown={handleMouseDown}
-        sx={{
-          height: '4px',
-          cursor: 'row-resize',
-          backgroundColor: 'border.default',
-          '&:hover': {
-            backgroundColor: 'accent.emphasis',
-          },
-          flexShrink: 0,
-        }}
-      />
-
       <Box sx={{ padding: 3 }}>
-        <Textarea
+        <textarea
+          ref={textareaRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            requestAnimationFrame(autoResize);
+          }}
           onKeyDown={handleKeyDown}
           placeholder={
             !isConnected
@@ -113,12 +90,22 @@ export function MessageInput({ onSend, onQueue }: MessageInputProps) {
                 : 'Ask the Guide a question...'
           }
           disabled={!isConnected}
-          sx={{
+          rows={1}
+          style={{
             width: '100%',
-            mb: 2,
+            marginBottom: '8px',
             resize: 'none',
-            height: `${inputHeight}px`,
-            '& textarea': { resize: 'none' },
+            lineHeight: `${LINE_HEIGHT}px`,
+            padding: '8px 12px',
+            fontFamily: 'inherit',
+            fontSize: '14px',
+            border: '1px solid var(--borderColor-default, #373e47)',
+            borderRadius: '6px',
+            backgroundColor: 'var(--bgColor-default, #0d1117)',
+            color: 'var(--fgColor-default, #e6edf3)',
+            outline: 'none',
+            boxSizing: 'border-box',
+            overflowY: 'hidden',
           }}
         />
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
