@@ -5,7 +5,8 @@
  */
 
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 
@@ -28,9 +29,9 @@ export function createWriteTool(): AgentTool<any> {
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
         // Resolve path relative to home if not absolute
-        const filePath = params.path.startsWith('/')
+        const filePath = isAbsolute(params.path)
           ? params.path
-          : resolve(process.env.HOME || '~', params.path);
+          : resolve(homedir(), params.path);
 
         // Ensure parent directory exists
         const dir = dirname(filePath);

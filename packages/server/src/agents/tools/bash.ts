@@ -5,6 +5,7 @@
  */
 
 import { exec } from 'node:child_process';
+import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -32,7 +33,7 @@ export function createBashTool(): AgentTool<any> {
     execute: async (_toolCallId, params, signal, _onUpdate) => {
       try {
         const { stdout, stderr } = await execAsync(params.command, {
-          cwd: params.cwd || process.env.HOME,
+          cwd: params.cwd || homedir(),
           timeout: 30000, // 30 second timeout
           maxBuffer: 10 * 1024 * 1024, // 10MB buffer
           signal,

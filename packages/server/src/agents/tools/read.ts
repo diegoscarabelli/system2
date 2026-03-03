@@ -5,7 +5,8 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { isAbsolute, resolve } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 
@@ -24,9 +25,9 @@ export function createReadTool(): AgentTool<any> {
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
         // Resolve path relative to home if not absolute
-        const filePath = params.path.startsWith('/')
+        const filePath = isAbsolute(params.path)
           ? params.path
-          : resolve(process.env.HOME || '~', params.path);
+          : resolve(homedir(), params.path);
 
         const content = await readFile(filePath, 'utf-8');
 
