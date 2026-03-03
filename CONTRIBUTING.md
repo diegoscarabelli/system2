@@ -20,6 +20,32 @@ pnpm build        # Build all packages
 pnpm typecheck    # Run TypeScript type checking
 ```
 
+## Building
+
+The monorepo uses [tsup](https://tsup.egoist.dev/) for TypeScript packages and [Vite](https://vite.dev/) for the UI.
+
+```bash
+pnpm build        # Build all packages (respects dependency order)
+```
+
+Build order: `shared` → `gateway` + `ui` (parallel) → `cli`
+
+### Package outputs
+
+| Package | Build tool | Output |
+|---------|------------|--------|
+| `packages/shared` | tsup | `dist/index.js` - shared types and utilities |
+| `packages/gateway` | tsup | `dist/index.js` - HTTP server and agent runtime |
+| `packages/ui` | Vite | `dist/` - static assets (copied to CLI) |
+| `packages/cli` | tsup | `dist/index.js` - CLI entry point |
+
+### Building individual packages
+
+```bash
+pnpm --filter @system2/gateway build   # Build only gateway
+pnpm --filter @system2/cli build       # Build only CLI
+```
+
 ## Code Quality
 
 This project uses [Biome](https://biomejs.dev/) for formatting and linting.
