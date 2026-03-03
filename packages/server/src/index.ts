@@ -1,7 +1,7 @@
 /**
- * System2 Gateway
+ * System2 Server
  *
- * Entry point for the gateway package.
+ * Entry point for the server package.
  */
 
 export { AgentHost, type AgentHostConfig } from './agents/host.js';

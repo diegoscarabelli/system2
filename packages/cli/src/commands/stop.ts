@@ -1,7 +1,7 @@
 /**
  * Stop Command
  *
- * Stops the System2 gateway server.
+ * Stops the System2 server.
  */
 
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';

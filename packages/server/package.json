@@ -1,5 +1,5 @@
 {
-  "name": "@system2/gateway",
+  "name": "@system2/server",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",

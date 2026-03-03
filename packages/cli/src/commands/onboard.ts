@@ -140,17 +140,16 @@ export async function onboard(): Promise<void> {
 
   if (isExistingInstallation) {
     p.intro('🧠 Welcome back to System2!');
-    p.note(
+    p.log.info(
       'Found existing installation at ~/.system2/\n\n' +
         'To start System2, run:\n' +
         '  system2 start\n\n' +
         'To reset and start fresh:\n' +
         '  mv ~/.system2 ~/.system2.backup\n' +
-        '  system2 onboard',
-      'Already configured'
-    );
-    p.log.info(
-      'Resetting archives all conversation history and context. System2 will no longer remember previous work. However, any data or code you created is preserved in its own directories.'
+        '  system2 onboard\n\n' +
+        'Resetting archives all conversation history and context. System2 will no longer ' +
+        'remember previous work. However, any data or code you created is preserved in its ' +
+        'own directories.'
     );
     process.exit(0);
   }
@@ -158,7 +157,9 @@ export async function onboard(): Promise<void> {
   p.intro('🧠 Welcome to System2, the AI multi-agent system for working with data.');
 
   p.log.info(
-    'Before we can get to work, we need at least one LLM provider and an API key. You can configure multiple providers and keys for redundancy and flexibility. This will create ~/.system2, the operational base where System2 lives and works.'
+    'Before we can get to work, we need at least one LLM provider and an API key. ' +
+      'You can configure multiple providers and keys for redundancy and flexibility. ' +
+      'Don\'t worry, you can always change or add providers and keys later by editing ~/.system2/auth.json directly.'
   );
 
   try {
@@ -246,24 +247,24 @@ export async function onboard(): Promise<void> {
 
     // Phase 2: Bootstrap
     const s = p.spinner();
-    s.start('Creating ~/.system2 directory...');
+    s.start('Creating ~/.system2 installation directory...');
 
     await bootstrap(authConfig);
 
-    s.message('Initializing database...');
+    s.message('Initializing System2 database...');
 
     s.stop('✓ System2 configured successfully!');
 
-    p.note(
-      'system2 start   - Launch the gateway and open the browser\n' +
-        'system2 status  - Check if the gateway is running\n' +
-        'system2 stop    - Stop the gateway',
-      'Available commands'
+    p.log.info(
+      'Created the installation directory ~/.system2, where System2 lives and works.\n' +
+        'To change providers or API keys, edit ~/.system2/auth.json directly.\n\n' +
+        'Available commands:\n' +
+        '  system2 start   - Launch the server and open the browser\n' +
+        '  system2 status  - Check if the server is running\n' +
+        '  system2 stop    - Stop the server'
     );
 
-    p.outro('✨ Run "system2 start" to begin. Your browser will open and you\'ll meet the Guide.');
-
-    p.log.info('To change providers or API keys later, edit ~/.system2/auth.json directly.');
+    p.outro('✨ Run "system2 start" to begin. Your browser will open and you\'ll meet the Guide, your interface to System2, which will help you personalize your experience and get to work with your data!');
   } catch (error: any) {
     console.error('\n❌ Onboarding failed:');
     console.error(error.message);

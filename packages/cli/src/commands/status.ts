@@ -1,7 +1,7 @@
 /**
  * Status Command
  *
- * Shows the current status of the System2 gateway server.
+ * Shows the current status of the System2 server.
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs';

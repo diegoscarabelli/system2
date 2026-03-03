@@ -27,7 +27,7 @@ program
 
 program
   .command('start')
-  .description('Start the System2 gateway server (after onboarding)')
+  .description('Start the System2 server (after onboarding)')
   .option('-p, --port <number>', 'Port to run the server on', '3000')
   .option('--no-browser', 'Do not open browser automatically')
   .option('--foreground', 'Run in foreground (for debugging)')
@@ -41,14 +41,14 @@ program
 
 program
   .command('stop')
-  .description('Stop the System2 gateway server')
+  .description('Stop the System2 server')
   .action(async () => {
     await stop();
   });
 
 program
   .command('status')
-  .description('Show System2 gateway server status')
+  .description('Show System2 server status')
   .action(async () => {
     await status();
   });

@@ -1,7 +1,7 @@
 /**
  * Start Command
  *
- * Starts the System2 gateway server in the background (detached) with logs to file.
+ * Starts the System2 server in the background (detached) with logs to file.
  */
 
 import { spawn } from 'node:child_process';
@@ -83,7 +83,7 @@ export async function start(options: {
     console.log('Press Ctrl+C to stop');
     console.log('');
 
-    const { Server } = await import('@system2/gateway');
+    const { Server } = await import('@system2/server');
     const server = new Server({
       port,
       dbPath: join(SYSTEM2_DIR, 'app.db'),

@@ -19,8 +19,8 @@ export default defineConfig({
     'process',
     'url',
     'better-sqlite3',
-    // Gateway dependencies with CJS code
-    '@system2/gateway',
+    // Server dependencies with CJS code
+    '@system2/server',
     '@mariozechner/pi-coding-agent',
     '@mariozechner/pi-agent-core',
     '@mariozechner/pi-ai',

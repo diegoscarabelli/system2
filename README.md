@@ -50,7 +50,7 @@ pnpm typecheck
 system2/
 ├── packages/
 │   ├── cli/        # CLI entry point
-│   ├── gateway/    # HTTP/WebSocket server + agent host
+│   ├── server/     # HTTP/WebSocket server + agent host
 │   ├── shared/     # Shared TypeScript types
 │   └── ui/         # React chat UI
 ```

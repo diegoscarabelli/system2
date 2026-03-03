@@ -29,9 +29,9 @@ importers:
       '@iarna/toml':
         specifier: ^2.2.5
         version: 2.2.5
-      '@system2/gateway':
+      '@system2/server':
         specifier: workspace:*
-        version: link:../gateway
+        version: link:../server
       '@system2/shared':
         specifier: workspace:*
         version: link:../shared
@@ -58,7 +58,7 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
-  packages/gateway:
+  packages/server:
     dependencies:
       '@mariozechner/pi-agent-core':
         specifier: ^0.55.3

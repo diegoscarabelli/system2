@@ -1,7 +1,7 @@
 /**
  * WebSocket Hook
  *
- * Manages WebSocket connection to the gateway server.
+ * Manages WebSocket connection to the server.
  */
 
 import type { ClientMessage, ServerMessage } from '@system2/shared';
