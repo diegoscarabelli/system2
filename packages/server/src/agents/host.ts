@@ -26,6 +26,7 @@ import { rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
 import { createQueryDatabaseTool } from './tools/query-database.js';
 import { createReadTool } from './tools/read.js';
+import { createShowArtifactTool } from './tools/show-artifact.js';
 import { createWriteTool } from './tools/write.js';
 import './types.js'; // Import custom message type declarations
 
@@ -158,6 +159,7 @@ export class AgentHost {
         createBashTool(),
         createReadTool(),
         createWriteTool(),
+        createShowArtifactTool(),
         // TODO: Add spawn_conductor tool (Phase 2)
       ],
       thinkingLevel: 'high', // Enable extended thinking for transparency

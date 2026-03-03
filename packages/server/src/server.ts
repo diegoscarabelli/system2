@@ -5,6 +5,7 @@
  */
 
 import { createServer } from 'node:http';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LlmConfig } from '@system2/shared';
@@ -47,6 +48,38 @@ export class Server {
     // Set up Express app
     this.app = express();
     this.app.use(express.json());
+
+    // Serve artifact files from ~/.system2/
+    const system2Dir = join(homedir(), '.system2');
+    this.app.use(
+      '/artifacts',
+      express.static(system2Dir, {
+        dotfiles: 'deny',
+        setHeaders: (res) => {
+          res.setHeader('Cache-Control', 'no-cache');
+        },
+      })
+    );
+
+    // Query API for interactive artifact dashboards (postMessage bridge)
+    this.app.post('/api/query', (req, res) => {
+      try {
+        const { sql } = req.body;
+        if (!sql || typeof sql !== 'string') {
+          res.status(400).json({ error: 'Missing or invalid sql parameter' });
+          return;
+        }
+        const trimmed = sql.trim().toUpperCase();
+        if (!trimmed.startsWith('SELECT')) {
+          res.status(403).json({ error: 'Only SELECT queries are allowed' });
+          return;
+        }
+        const rows = this.db.query(sql);
+        res.json({ rows, count: rows.length });
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+      }
+    });
 
     // Serve UI static files (if path provided)
     if (config.uiDistPath) {

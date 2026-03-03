@@ -4,6 +4,7 @@
  * Bridges Pi Agent events to WebSocket clients for real-time chat UI updates.
  */
 
+import { type FSWatcher, watch } from 'node:fs';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { ClientMessage, ServerMessage } from '@system2/shared';
 import type { WebSocket } from 'ws';
@@ -13,6 +14,8 @@ export class WebSocketHandler {
   private ws: WebSocket;
   private agentHost: AgentHost;
   private unsubscribe?: () => void;
+  private artifactWatcher?: FSWatcher;
+  private artifactUrl?: string;
 
   constructor(ws: WebSocket, agentHost: AgentHost) {
     this.ws = ws;
@@ -130,6 +133,15 @@ export class WebSocketHandler {
           name: event.toolName,
           result: event.isError ? `Error: ${resultText}` : resultText,
         });
+
+        // If show_artifact completed successfully, emit artifact message and watch for changes
+        if (event.toolName === 'show_artifact' && !event.isError && event.result?.details) {
+          const details = event.result.details as { url?: string; absolutePath?: string };
+          if (details.url && details.absolutePath) {
+            this.send({ type: 'artifact', url: details.url });
+            this.watchArtifact(details.url, details.absolutePath);
+          }
+        }
         break;
       }
 
@@ -156,7 +168,32 @@ export class WebSocketHandler {
     this.send({ type: 'error', message });
   }
 
+  private watchArtifact(url: string, absolutePath: string): void {
+    // Stop previous watcher if any
+    if (this.artifactWatcher) {
+      this.artifactWatcher.close();
+    }
+
+    this.artifactUrl = url;
+
+    try {
+      this.artifactWatcher = watch(absolutePath, (eventType) => {
+        if (eventType === 'change') {
+          // Cache-bust so the iframe actually reloads
+          const bustUrl = `${this.artifactUrl}?t=${Date.now()}`;
+          this.send({ type: 'artifact', url: bustUrl });
+        }
+      });
+    } catch (error) {
+      console.error('Failed to watch artifact:', error);
+    }
+  }
+
   private cleanup(): void {
+    if (this.artifactWatcher) {
+      this.artifactWatcher.close();
+      this.artifactWatcher = undefined;
+    }
     if (this.unsubscribe) {
       this.unsubscribe();
       this.unsubscribe = undefined;
