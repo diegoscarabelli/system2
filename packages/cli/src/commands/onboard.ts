@@ -10,6 +10,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
+import pc from 'picocolors';
 import { copyConfigTemplateIfMissing } from '../utils/config.js';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
@@ -143,13 +144,10 @@ export async function onboard(): Promise<void> {
     p.log.info(
       'Found existing installation at ~/.system2/\n\n' +
         'To start System2, run:\n' +
-        '  system2 start\n\n' +
-        'To reset and start fresh:\n' +
-        '  mv ~/.system2 ~/.system2.backup\n' +
-        '  system2 onboard\n\n' +
-        'Resetting archives all conversation history and context. System2 will no longer ' +
-        'remember previous work. However, any data or code you created is preserved in its ' +
-        'own directories.'
+        `  > ${pc.bold('system2 start')}\n\n` +
+        'To start fresh (this will reset System2, losing memory of all previous work):\n' +
+        `  > ${pc.bold('mv ~/.system2 ~/.system2.backup')}\n` +
+        `  > ${pc.bold('system2 onboard')}`
     );
     process.exit(0);
   }
@@ -199,12 +197,12 @@ export async function onboard(): Promise<void> {
 
       // Multi-select fallback providers
       const selectedFallbacks = (await p.multiselect({
-        message: 'Select fallback providers (in order of preference):',
+        message: 'Select fallback providers (use space to select, enter to confirm):',
         options: availableProviders.map((provider) => ({
           value: provider.value,
           label: provider.label,
         })),
-        required: false,
+        required: true,
       })) as Provider[];
 
       if (p.isCancel(selectedFallbacks)) {
@@ -230,8 +228,8 @@ export async function onboard(): Promise<void> {
       fallback: fallbackOrder,
       providers: {
         anthropic: createEmptyProviderKeys(),
-        openai: createEmptyProviderKeys(),
         google: createEmptyProviderKeys(),
+        openai: createEmptyProviderKeys(),
       },
     };
 
@@ -259,12 +257,12 @@ export async function onboard(): Promise<void> {
       'Created the installation directory ~/.system2, where System2 lives and works.\n' +
         'To change providers or API keys, edit ~/.system2/auth.json directly.\n\n' +
         'Available commands:\n' +
-        '  system2 start   - Launch the server and open the browser\n' +
-        '  system2 status  - Check if the server is running\n' +
-        '  system2 stop    - Stop the server'
+        `  > ${pc.bold('system2 start')}   (launch the server and open the browser)\n` +
+        `  > ${pc.bold('system2 status')}  (check if the server is running)\n` +
+        `  > ${pc.bold('system2 stop')}    (stop the server)`
     );
 
-    p.outro('✨ Run "system2 start" to begin. Your browser will open and you\'ll meet the Guide, your interface to System2, which will help you personalize your experience and get to work with your data!');
+    p.outro(`✨ Run ${pc.bold('system2 start')} to launch. The Guide will help you get started.`);
   } catch (error: any) {
     console.error('\n❌ Onboarding failed:');
     console.error(error.message);
