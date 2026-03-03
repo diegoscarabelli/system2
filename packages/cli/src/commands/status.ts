@@ -5,12 +5,10 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
 
-const SYSTEM2_DIR = join(homedir(), '.system2');
 const IS_WINDOWS = process.platform === 'win32';
-const AUTH_FILE = join(SYSTEM2_DIR, 'auth.json');
 const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
 const LOG_FILE = join(SYSTEM2_DIR, 'logs', 'system2.log');
 
@@ -20,7 +18,7 @@ export async function status(): Promise<void> {
   console.log('');
 
   // Check if configured
-  if (!existsSync(AUTH_FILE)) {
+  if (!existsSync(CONFIG_FILE)) {
     console.log('Status: Not configured');
     console.log('');
     console.log('Run: system2 onboard');
@@ -56,11 +54,7 @@ export async function status(): Promise<void> {
 
     console.log('Commands:');
     console.log('  system2 stop              Stop the server');
-    console.log(
-      IS_WINDOWS
-        ? `  Get-Content "${LOG_FILE}" -Wait`
-        : `  tail -f ${LOG_FILE}`
-    );
+    console.log(IS_WINDOWS ? `  Get-Content "${LOG_FILE}" -Wait` : `  tail -f ${LOG_FILE}`);
     console.log('                            View live logs');
   } catch {
     // Process not running

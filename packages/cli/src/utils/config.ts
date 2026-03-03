@@ -1,25 +1,29 @@
 /**
  * Configuration Utility
  *
- * Manages user-configurable settings stored in ~/.system2/config.toml.
+ * Manages all System2 settings stored in ~/.system2/config.toml.
+ * This includes LLM provider keys, service credentials, tool settings,
+ * and operational settings (backup, session, logs).
+ *
  * Falls back to sensible defaults when values aren't specified.
  */
 
-import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import TOML from '@iarna/toml';
+import type { LlmConfig, LlmProvider, ServicesConfig, ToolsConfig } from '@system2/shared';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const SYSTEM2_DIR = join(homedir(), '.system2');
-const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
+export const SYSTEM2_DIR = join(homedir(), '.system2');
+export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
 
 /**
  * Configuration schema with all available settings.
  */
 export interface System2Config {
+  llm?: LlmConfig;
+  services?: ServicesConfig;
+  tools?: ToolsConfig;
   backup: {
     /** Hours between automatic backups (default: 24) */
     cooldownHours: number;
@@ -39,9 +43,22 @@ export interface System2Config {
 }
 
 /**
- * TOML config structure (snake_case keys).
+ * TOML config structure (snake_case keys as they appear in the file).
  */
 interface TomlConfig {
+  llm?: {
+    primary?: string;
+    fallback?: string[];
+    anthropic?: { keys?: Array<{ key: string; label: string }> };
+    google?: { keys?: Array<{ key: string; label: string }> };
+    openai?: { keys?: Array<{ key: string; label: string }> };
+  };
+  services?: {
+    brave_search?: { key?: string };
+  };
+  tools?: {
+    web_search?: { enabled?: boolean; max_results?: number };
+  };
   backup?: {
     cooldown_hours?: number;
     max_backups?: number;
@@ -56,9 +73,9 @@ interface TomlConfig {
 }
 
 /**
- * Default configuration values.
+ * Default operational configuration values.
  */
-const DEFAULT_CONFIG: System2Config = {
+const DEFAULT_OPERATIONAL: Pick<System2Config, 'backup' | 'session' | 'logs'> = {
   backup: {
     cooldownHours: 24,
     maxBackups: 5,
@@ -73,30 +90,81 @@ const DEFAULT_CONFIG: System2Config = {
 };
 
 /**
- * Convert TOML config (snake_case) to System2Config (camelCase).
+ * Convert TOML LLM section to LlmConfig.
  */
-function convertTomlToConfig(toml: TomlConfig): Partial<System2Config> {
-  const config: Partial<System2Config> = {};
+function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
+  const providers: Partial<Record<LlmProvider, LlmProviderConfig>> = {};
+
+  for (const name of ['anthropic', 'google', 'openai'] as const) {
+    const providerToml = toml[name];
+    if (providerToml?.keys && providerToml.keys.length > 0) {
+      // Filter out empty key slots
+      const validKeys = providerToml.keys.filter((k) => k.key);
+      if (validKeys.length > 0) {
+        providers[name] = { keys: validKeys };
+      }
+    }
+  }
+
+  return {
+    primary: (toml.primary as LlmProvider) ?? 'anthropic',
+    fallback: (toml.fallback as LlmProvider[]) ?? [],
+    providers,
+  };
+}
+
+/**
+ * Convert TOML services section to ServicesConfig.
+ */
+function convertTomlServices(toml: NonNullable<TomlConfig['services']>): ServicesConfig {
+  const services: ServicesConfig = {};
+  if (toml.brave_search?.key) {
+    services.brave_search = { key: toml.brave_search.key };
+  }
+  return services;
+}
+
+/**
+ * Convert TOML tools section to ToolsConfig.
+ */
+function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
+  const tools: ToolsConfig = {};
+  if (toml.web_search) {
+    tools.web_search = {
+      enabled: toml.web_search.enabled ?? false,
+      max_results: toml.web_search.max_results ?? 5,
+    };
+  }
+  return tools;
+}
+
+/**
+ * Convert TOML operational sections (snake_case) to camelCase.
+ */
+function convertTomlOperational(
+  toml: TomlConfig
+): Partial<Pick<System2Config, 'backup' | 'session' | 'logs'>> {
+  const config: Partial<Pick<System2Config, 'backup' | 'session' | 'logs'>> = {};
 
   if (toml.backup) {
     config.backup = {
-      cooldownHours: toml.backup.cooldown_hours ?? DEFAULT_CONFIG.backup.cooldownHours,
-      maxBackups: toml.backup.max_backups ?? DEFAULT_CONFIG.backup.maxBackups,
+      cooldownHours: toml.backup.cooldown_hours ?? DEFAULT_OPERATIONAL.backup.cooldownHours,
+      maxBackups: toml.backup.max_backups ?? DEFAULT_OPERATIONAL.backup.maxBackups,
     };
   }
 
   if (toml.session) {
     config.session = {
       rotationThresholdMB:
-        toml.session.rotation_threshold_mb ?? DEFAULT_CONFIG.session.rotationThresholdMB,
+        toml.session.rotation_threshold_mb ?? DEFAULT_OPERATIONAL.session.rotationThresholdMB,
     };
   }
 
   if (toml.logs) {
     config.logs = {
       rotationThresholdMB:
-        toml.logs.rotation_threshold_mb ?? DEFAULT_CONFIG.logs.rotationThresholdMB,
-      maxArchives: toml.logs.max_archives ?? DEFAULT_CONFIG.logs.maxArchives,
+        toml.logs.rotation_threshold_mb ?? DEFAULT_OPERATIONAL.logs.rotationThresholdMB,
+      maxArchives: toml.logs.max_archives ?? DEFAULT_OPERATIONAL.logs.maxArchives,
     };
   }
 
@@ -106,7 +174,7 @@ function convertTomlToConfig(toml: TomlConfig): Partial<System2Config> {
 /**
  * Deep merge two objects, with source values overriding target.
  */
-function deepMerge<T extends Record<string, any>>(target: T, source: Partial<T>): T {
+function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial<T>): T {
   const result = { ...target };
 
   for (const key in source) {
@@ -124,42 +192,128 @@ function deepMerge<T extends Record<string, any>>(target: T, source: Partial<T>)
 
 /**
  * Load configuration from disk, merging with defaults.
- * Missing values are filled in from defaults.
+ * Missing operational values are filled in from defaults.
  */
 export function loadConfig(): System2Config {
   if (!existsSync(CONFIG_FILE)) {
-    return DEFAULT_CONFIG;
+    return { ...DEFAULT_OPERATIONAL };
   }
 
   try {
     const content = readFileSync(CONFIG_FILE, 'utf-8');
     const tomlConfig = TOML.parse(content) as TomlConfig;
-    const userConfig = convertTomlToConfig(tomlConfig);
-    return deepMerge(DEFAULT_CONFIG, userConfig);
+
+    const config: System2Config = deepMerge(
+      { ...DEFAULT_OPERATIONAL },
+      convertTomlOperational(tomlConfig)
+    );
+
+    if (tomlConfig.llm) {
+      config.llm = convertTomlLlm(tomlConfig.llm);
+    }
+
+    if (tomlConfig.services) {
+      config.services = convertTomlServices(tomlConfig.services);
+    }
+
+    if (tomlConfig.tools) {
+      config.tools = convertTomlTools(tomlConfig.tools);
+    }
+
+    return config;
   } catch (_error) {
-    // If parsing fails, return defaults
     console.warn('[Config] Failed to parse config.toml, using defaults');
-    return DEFAULT_CONFIG;
+    return { ...DEFAULT_OPERATIONAL };
   }
 }
 
 /**
- * Copy the default config.toml template to ~/.system2/ if one doesn't exist.
+ * Build a human-readable config.toml string with comments.
  */
-export function copyConfigTemplateIfMissing(): void {
-  if (existsSync(CONFIG_FILE)) {
-    return;
+export function buildConfigToml(options: {
+  llm?: LlmConfig;
+  services?: ServicesConfig;
+  tools?: ToolsConfig;
+  backup?: System2Config['backup'];
+  session?: System2Config['session'];
+  logs?: System2Config['logs'];
+}): string {
+  const lines: string[] = [
+    '# System2 Configuration',
+    '# This file contains all System2 settings including API keys.',
+    '# Permissions: 0600 (owner read/write only).',
+    '',
+  ];
+
+  // LLM section
+  if (options.llm) {
+    const { primary, fallback, providers } = options.llm;
+    lines.push('[llm]');
+    lines.push(`primary = "${primary}"`);
+    lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
+    lines.push('');
+
+    for (const name of ['anthropic', 'google', 'openai'] as const) {
+      const provider = providers[name];
+      if (provider && provider.keys.length > 0) {
+        lines.push(`[llm.${name}]`);
+        lines.push('keys = [');
+        for (const key of provider.keys) {
+          if (key.key) {
+            lines.push(`  { key = "${key.key}", label = "${key.label}" },`);
+          }
+        }
+        lines.push(']');
+        lines.push('');
+      }
+    }
   }
 
-  if (!existsSync(SYSTEM2_DIR)) {
-    return; // Don't create config before onboarding
+  // Services section
+  if (options.services?.brave_search) {
+    lines.push('[services.brave_search]');
+    lines.push(`key = "${options.services.brave_search.key}"`);
+    lines.push('');
   }
 
-  // Template is in dist/config/config.toml (copied by tsup build)
-  // __dirname resolves to dist/ since everything is bundled into dist/index.js
-  const templatePath = join(__dirname, 'config', 'config.toml');
-
-  if (existsSync(templatePath)) {
-    copyFileSync(templatePath, CONFIG_FILE);
+  // Tools section
+  if (options.tools?.web_search) {
+    lines.push('[tools.web_search]');
+    lines.push(`enabled = ${options.tools.web_search.enabled}`);
+    lines.push(`max_results = ${options.tools.web_search.max_results}`);
+    lines.push('');
   }
+
+  // Operational sections
+  const backup = options.backup ?? DEFAULT_OPERATIONAL.backup;
+  const session = options.session ?? DEFAULT_OPERATIONAL.session;
+  const logs = options.logs ?? DEFAULT_OPERATIONAL.logs;
+
+  lines.push('[backup]');
+  lines.push(`# Hours between automatic backups (minimum: 1)`);
+  lines.push(`cooldown_hours = ${backup.cooldownHours}`);
+  lines.push('');
+  lines.push(`# Maximum number of automatic backups to keep`);
+  lines.push(`max_backups = ${backup.maxBackups}`);
+  lines.push('');
+  lines.push('[session]');
+  lines.push(`# Session file size threshold for rotation in MB`);
+  lines.push(`rotation_threshold_mb = ${session.rotationThresholdMB}`);
+  lines.push('');
+  lines.push('[logs]');
+  lines.push(`# Log file size threshold for rotation in MB`);
+  lines.push(`rotation_threshold_mb = ${logs.rotationThresholdMB}`);
+  lines.push('');
+  lines.push(`# Maximum number of archived log files to keep`);
+  lines.push(`max_archives = ${logs.maxArchives}`);
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+/**
+ * Write config.toml with secure permissions (0600).
+ */
+export function writeConfigFile(content: string): void {
+  writeFileSync(CONFIG_FILE, content, { mode: 0o600 });
 }

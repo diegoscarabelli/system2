@@ -7,14 +7,12 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import open from 'open';
 import { backupIfNeeded } from '../utils/backup.js';
+import { loadConfig, SYSTEM2_DIR } from '../utils/config.js';
 import { rotateLogIfNeeded } from '../utils/log-rotation.js';
 
-const SYSTEM2_DIR = join(homedir(), '.system2');
-const AUTH_FILE = join(SYSTEM2_DIR, 'auth.json');
 const LOGS_DIR = join(SYSTEM2_DIR, 'logs');
 const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
 const LOG_FILE = join(LOGS_DIR, 'system2.log');
@@ -26,7 +24,8 @@ export async function start(options: {
   foreground?: boolean;
 }): Promise<void> {
   // Check if onboarded
-  if (!existsSync(AUTH_FILE)) {
+  const config = loadConfig();
+  if (!config.llm) {
     console.error('Error: System2 has not been onboarded yet.');
     console.error('Please run: system2 onboard');
     process.exit(1);
@@ -50,12 +49,10 @@ export async function start(options: {
     }
   }
 
-  // Read primary provider from auth.json
-  const authConfig = JSON.parse(readFileSync(AUTH_FILE, 'utf-8'));
-  const primaryProvider = authConfig.primary as 'anthropic' | 'openai' | 'google';
+  const primaryProvider = config.llm.primary;
 
   if (!primaryProvider) {
-    console.error('Error: No primary provider configured in auth.json');
+    console.error('Error: No primary provider configured in config.toml');
     process.exit(1);
   }
 
@@ -90,6 +87,7 @@ export async function start(options: {
       port,
       dbPath: join(SYSTEM2_DIR, 'app.db'),
       uiDistPath: join(import.meta.dirname, '..', '..', 'ui', 'dist'),
+      llmConfig: config.llm,
     });
 
     await server.start();
