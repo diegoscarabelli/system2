@@ -96,6 +96,10 @@ export function useWebSocket() {
           processNextQueuedMessage();
           break;
 
+        case 'context_usage':
+          useChatStore.getState().setContextPercent(message.percent);
+          break;
+
         case 'artifact':
           useArtifactStore.getState().showArtifact(message.url);
           break;

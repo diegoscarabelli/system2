@@ -19,5 +19,6 @@ export type ServerMessage =
   | { type: 'tool_call_start'; name: string; input?: string }
   | { type: 'tool_call_end'; name: string; result: string }
   | { type: 'artifact'; url: string }
+  | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number }
   | { type: 'error'; message: string }
   | { type: 'ready_for_input' }; // Signals that the agent is ready for the next message

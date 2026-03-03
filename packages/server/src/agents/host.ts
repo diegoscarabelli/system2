@@ -349,4 +349,11 @@ export class AgentHost {
     }
     return this.session.agent.state;
   }
+
+  /**
+   * Get current context window usage
+   */
+  getContextUsage() {
+    return this.session?.getContextUsage();
+  }
 }

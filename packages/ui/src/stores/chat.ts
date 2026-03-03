@@ -56,6 +56,8 @@ interface ChatState {
   isWaitingForResponse: boolean; // True after user sends, before first chunk arrives
   // Message queue
   messageQueue: QueuedMessage[];
+  // Context window usage
+  contextPercent: number | null;
 
   addUserMessage: (content: string) => void;
   queueMessage: (content: string, isSteering?: boolean) => void;
@@ -72,6 +74,7 @@ interface ChatState {
   setConnected: (connected: boolean) => void;
   setStreaming: (streaming: boolean) => void;
   setWaitingForResponse: (waiting: boolean) => void;
+  setContextPercent: (percent: number | null) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -83,6 +86,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   isWaitingForResponse: false,
   messageQueue: [],
+  contextPercent: null,
 
   addUserMessage: (content: string) => {
     const message: Message = {
@@ -242,5 +246,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setWaitingForResponse: (waiting: boolean) => {
     set({ isWaitingForResponse: waiting });
+  },
+
+  setContextPercent: (percent: number | null) => {
+    set({ contextPercent: percent });
   },
 }));
