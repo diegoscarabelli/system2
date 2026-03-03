@@ -8,13 +8,6 @@ Read `README.md` for general information about the project.
 
 Read `CONTRIBUTING.md` for development setup and code quality rules.
 
-## After Changing Code
+## Before Committing
 
-Run quality checks after every code change:
-
-```bash
-pnpm check
-pnpm build
-```
-
-Fix any issues before considering the task complete.
+Always run quality checks before committing. See `CONTRIBUTING.md` "Before Committing" section for the required commands. Do not commit code that fails these checks.
