@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
+const AUTH_FILE = join(SYSTEM2_DIR, 'auth.json');
 const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
 const LOG_FILE = join(SYSTEM2_DIR, 'logs', 'system2.log');
 
@@ -18,7 +19,7 @@ export async function status(): Promise<void> {
   console.log('');
 
   // Check if configured
-  if (!existsSync(join(SYSTEM2_DIR, '.env'))) {
+  if (!existsSync(AUTH_FILE)) {
     console.log('Status: Not configured');
     console.log('');
     console.log('Run: system2 onboard');
