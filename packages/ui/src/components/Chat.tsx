@@ -12,7 +12,7 @@ import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
 
 export function Chat() {
-  const { sendMessage } = useWebSocket();
+  const { sendMessage, abort } = useWebSocket();
   const { addUserMessage, queueMessage } = useChatStore();
 
   const handleSend = (content: string) => {
@@ -46,7 +46,7 @@ export function Chat() {
       </Box>
 
       <MessageList />
-      <MessageInput onSend={handleSend} onQueue={handleQueue} />
+      <MessageInput onSend={handleSend} onQueue={handleQueue} onAbort={abort} />
     </Box>
   );
 }

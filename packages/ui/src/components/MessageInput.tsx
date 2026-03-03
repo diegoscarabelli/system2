@@ -6,9 +6,11 @@
  * Supports queueing messages while the agent is working.
  */
 
-import { Box, Button } from '@primer/react';
+import { ArrowUpIcon, SquareFillIcon } from '@primer/octicons-react';
+import { Box, IconButton } from '@primer/react';
 import { useRef, useState } from 'react';
 import { useChatStore } from '../stores/chat';
+import { colors } from '../theme/colors';
 
 const LINE_HEIGHT = 20; // px per line
 const MIN_LINES = 1;
@@ -18,11 +20,12 @@ const PADDING_Y = 16; // vertical padding inside textarea
 interface MessageInputProps {
   onSend: (message: string) => void;
   onQueue: (message: string, isSteering?: boolean) => void;
+  onAbort: () => void;
 }
 
-export function MessageInput({ onSend, onQueue }: MessageInputProps) {
+export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
   const [input, setInput] = useState('');
-  const { isStreaming, isConnected, messageQueue } = useChatStore();
+  const { isStreaming, isConnected, messageQueue, contextPercent } = useChatStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -62,6 +65,13 @@ export function MessageInput({ onSend, onQueue }: MessageInputProps) {
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
   };
 
+  const contextColor =
+    contextPercent !== null && contextPercent > 80
+      ? colors.contextCritical
+      : contextPercent !== null && contextPercent > 60
+        ? colors.contextWarn
+        : colors.contextOk;
+
   return (
     <Box
       as="form"
@@ -99,22 +109,94 @@ export function MessageInput({ onSend, onQueue }: MessageInputProps) {
             padding: '8px 12px',
             fontFamily: 'inherit',
             fontSize: '14px',
-            border: '1px solid var(--borderColor-default, #373e47)',
+            border: '1px solid var(--borderColor-default, var(--color-border-default))',
             borderRadius: '6px',
-            backgroundColor: 'var(--bgColor-default, #0d1117)',
-            color: 'var(--fgColor-default, #e6edf3)',
+            backgroundColor: 'var(--bgColor-input, var(--color-canvas-default))',
+            color: 'var(--fgColor-default, var(--color-fg-default))',
             outline: 'none',
             boxSizing: 'border-box',
             overflowY: 'hidden',
           }}
         />
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Button type="submit" disabled={!isConnected || !input.trim()} variant="primary">
-            {isStreaming ? 'Queue' : 'Send'}
-          </Button>
+          {isStreaming && !input.trim() ? (
+            <IconButton
+              type="button"
+              onClick={onAbort}
+              disabled={!isConnected}
+              icon={SquareFillIcon}
+              aria-label="Stop"
+              sx={{
+                backgroundColor: colors.guide,
+                color: 'white',
+                borderRadius: '8px',
+                width: '32px',
+                height: '32px',
+                '&:hover:not([disabled])': { backgroundColor: colors.guideHover },
+              }}
+            />
+          ) : (
+            <IconButton
+              type="submit"
+              disabled={!isConnected || !input.trim()}
+              icon={ArrowUpIcon}
+              aria-label={isStreaming ? 'Queue message' : 'Send message'}
+              sx={{
+                backgroundColor: colors.user,
+                color: 'white',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                '&:hover:not([disabled])': { backgroundColor: colors.userHover },
+                '&[disabled]': { backgroundColor: 'neutral.muted', color: 'fg.muted' },
+              }}
+            />
+          )}
           {messageQueue.length > 0 && (
             <Box sx={{ fontSize: 0, color: 'fg.muted' }}>
               {messageQueue.length} message{messageQueue.length > 1 ? 's' : ''} queued
+            </Box>
+          )}
+          {contextPercent !== null && (
+            <Box
+              sx={{
+                fontSize: 0,
+                color: 'fg.muted',
+                ml: 'auto',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+              }}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                role="img"
+                aria-label={`${Math.round(contextPercent)}% context used`}
+              >
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="7"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeOpacity="0.3"
+                  strokeWidth="2"
+                />
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="7"
+                  fill="none"
+                  stroke={contextColor}
+                  strokeWidth="2"
+                  strokeDasharray={`${(contextPercent / 100) * 44} 44`}
+                  strokeLinecap="round"
+                  transform="rotate(-90 8 8)"
+                />
+              </svg>
+              {Math.round(contextPercent)}% used
             </Box>
           )}
         </Box>
