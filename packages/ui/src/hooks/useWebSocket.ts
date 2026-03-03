@@ -91,7 +91,8 @@ export function useWebSocket() {
           break;
 
         case 'ready_for_input':
-          // Agent is ready for the next message - process queue if any
+          // Agent turn is fully complete - reset streaming state and process queue
+          useChatStore.getState().setStreaming(false);
           setWaitingForResponse(false);
           processNextQueuedMessage();
           break;

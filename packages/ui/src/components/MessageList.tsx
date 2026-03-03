@@ -412,9 +412,12 @@ export function MessageList() {
   const hasCurrentActivity =
     currentAssistantMessage || currentTurnEvents.length > 0 || isWaitingForResponse;
 
+  const scrollTrigger =
+    messages.length + currentTurnEvents.length + (currentAssistantMessage ? 1 : 0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scrollTrigger drives auto-scroll on new content
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
+  }, [scrollTrigger]);
 
   return (
     <Box

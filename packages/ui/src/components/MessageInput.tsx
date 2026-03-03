@@ -7,7 +7,7 @@
  */
 
 import { ArrowUpIcon, SquareFillIcon } from '@primer/octicons-react';
-import { Box, IconButton } from '@primer/react';
+import { Box } from '@primer/react';
 import { useRef, useState } from 'react';
 import { useChatStore } from '../stores/chat';
 import { colors } from '../theme/colors';
@@ -117,39 +117,56 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
         />
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           {(isStreaming || isWaitingForResponse) && !input.trim() ? (
-            <IconButton
+            <Box
+              as="button"
               type="button"
               onClick={onAbort}
               disabled={!isConnected}
-              icon={SquareFillIcon}
               aria-label="Stop"
-              unsafeDisableTooltip
               sx={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 backgroundColor: colors.amber,
                 color: 'white',
+                border: 'none',
                 borderRadius: '8px',
                 width: '32px',
                 height: '32px',
+                cursor: 'pointer',
                 '&:hover:not([disabled])': { backgroundColor: colors.amberHover },
+                '&[disabled]': { opacity: 0.5, cursor: 'not-allowed' },
               }}
-            />
+            >
+              <SquareFillIcon size={16} />
+            </Box>
           ) : (
-            <IconButton
+            <Box
+              as="button"
               type="submit"
               disabled={!isConnected || !input.trim()}
-              icon={ArrowUpIcon}
               aria-label={isStreaming ? 'Queue message' : 'Send message'}
-              unsafeDisableTooltip
               sx={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 backgroundColor: colors.teal,
                 color: 'white',
+                border: 'none',
                 borderRadius: '8px',
                 width: '32px',
                 height: '32px',
+                cursor: 'pointer',
                 '&:hover:not([disabled])': { backgroundColor: colors.tealHover },
-                '&[disabled]': { backgroundColor: 'neutral.muted', color: 'fg.muted' },
+                '&[disabled]': {
+                  backgroundColor: 'neutral.muted',
+                  color: 'fg.muted',
+                  cursor: 'not-allowed',
+                },
               }}
-            />
+            >
+              <ArrowUpIcon size={16} />
+            </Box>
           )}
           {messageQueue.length > 0 && (
             <Box sx={{ fontSize: 0, color: 'fg.muted' }}>
