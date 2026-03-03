@@ -38,7 +38,7 @@ function BrainLoader() {
         <Text
           sx={{
             fontSize: 1,
-            color: colors.guide,
+            color: colors.amber,
             animation: 'dot1 1.5s ease-in-out infinite',
             '@keyframes dot1': {
               '0%, 20%': { opacity: 0 },
@@ -51,7 +51,7 @@ function BrainLoader() {
         <Text
           sx={{
             fontSize: 1,
-            color: colors.guide,
+            color: colors.amber,
             animation: 'dot2 1.5s ease-in-out infinite',
             '@keyframes dot2': {
               '0%, 40%': { opacity: 0 },
@@ -64,7 +64,7 @@ function BrainLoader() {
         <Text
           sx={{
             fontSize: 1,
-            color: colors.guide,
+            color: colors.amber,
             animation: 'dot3 1.5s ease-in-out infinite',
             '@keyframes dot3': {
               '0%, 60%': { opacity: 0 },
@@ -226,7 +226,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
           sx={{
             fontSize: 0,
             fontWeight: 'semibold',
-            color: colors.tool,
+            color: colors.magenta,
           }}
         >
           {isRunning ? '⚙️ ' : '✓ '}
@@ -315,7 +315,7 @@ function ThinkingBlock({ thinking }: { thinking: ThinkingBlockType }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <TimelineItem dotColor={colors.thinking} pulse={thinking.isStreaming}>
+    <TimelineItem dotColor={colors.gray} pulse={thinking.isStreaming}>
       <Box
         onClick={() => setCollapsed(!collapsed)}
         sx={{
@@ -365,7 +365,7 @@ function TurnEventItem({ event, isLast }: { event: TurnEvent; isLast?: boolean }
   // Tool call
   const tc = event.data;
   return (
-    <TimelineItem dotColor={colors.tool} pulse={tc.status === 'running'} isLast={isLast}>
+    <TimelineItem dotColor={colors.magenta} pulse={tc.status === 'running'} isLast={isLast}>
       <ToolCallItem tc={tc} />
     </TimelineItem>
   );
@@ -387,12 +387,12 @@ function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: 
         ))}
 
       {/* Response */}
-      <TimelineItem dotColor={colors.guide} isLast={isLast}>
+      <TimelineItem dotColor={colors.amber} isLast={isLast}>
         <Text
           sx={{
             fontWeight: 'semibold',
             fontSize: 0,
-            color: colors.guide,
+            color: colors.amber,
             marginBottom: 1,
           }}
         >
@@ -443,12 +443,12 @@ export function MessageList() {
 
         if (message.role === 'user') {
           return (
-            <TimelineItem key={message.id} dotColor={colors.user} isLast={isLastMessage}>
+            <TimelineItem key={message.id} dotColor={colors.teal} isLast={isLastMessage}>
               <Text
                 sx={{
                   fontWeight: 'semibold',
                   fontSize: 0,
-                  color: colors.user,
+                  color: colors.teal,
                   marginBottom: 1,
                 }}
               >
@@ -476,7 +476,7 @@ export function MessageList() {
 
       {/* Waiting for response indicator */}
       {isWaitingForResponse && currentTurnEvents.length === 0 && !currentAssistantMessage && (
-        <TimelineItem dotColor={colors.guide} pulse isLast>
+        <TimelineItem dotColor={colors.amber} pulse isLast>
           <BrainLoader />
         </TimelineItem>
       )}
@@ -492,12 +492,12 @@ export function MessageList() {
 
       {/* Current streaming: response */}
       {currentAssistantMessage && (
-        <TimelineItem dotColor={colors.guide} pulse isLast>
+        <TimelineItem dotColor={colors.amber} pulse isLast>
           <Text
             sx={{
               fontWeight: 'semibold',
               fontSize: 0,
-              color: colors.guide,
+              color: colors.amber,
               marginBottom: 1,
             }}
           >

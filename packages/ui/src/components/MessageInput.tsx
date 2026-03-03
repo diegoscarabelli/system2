@@ -25,7 +25,8 @@ interface MessageInputProps {
 
 export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
   const [input, setInput] = useState('');
-  const { isStreaming, isConnected, messageQueue, contextPercent } = useChatStore();
+  const { isStreaming, isWaitingForResponse, isConnected, messageQueue, contextPercent } =
+    useChatStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -66,11 +67,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
   };
 
   const contextColor =
-    contextPercent !== null && contextPercent > 80
-      ? colors.contextCritical
-      : contextPercent !== null && contextPercent > 60
-        ? colors.contextWarn
-        : colors.contextOk;
+    contextPercent !== null && contextPercent > 80 ? colors.critical : colors.amber;
 
   return (
     <Box
@@ -119,20 +116,21 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
           }}
         />
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {isStreaming && !input.trim() ? (
+          {(isStreaming || isWaitingForResponse) && !input.trim() ? (
             <IconButton
               type="button"
               onClick={onAbort}
               disabled={!isConnected}
               icon={SquareFillIcon}
               aria-label="Stop"
+              unsafeDisableTooltip
               sx={{
-                backgroundColor: colors.guide,
+                backgroundColor: colors.amber,
                 color: 'white',
                 borderRadius: '8px',
                 width: '32px',
                 height: '32px',
-                '&:hover:not([disabled])': { backgroundColor: colors.guideHover },
+                '&:hover:not([disabled])': { backgroundColor: colors.amberHover },
               }}
             />
           ) : (
@@ -141,13 +139,14 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
               disabled={!isConnected || !input.trim()}
               icon={ArrowUpIcon}
               aria-label={isStreaming ? 'Queue message' : 'Send message'}
+              unsafeDisableTooltip
               sx={{
-                backgroundColor: colors.user,
+                backgroundColor: colors.teal,
                 color: 'white',
-                borderRadius: '50%',
+                borderRadius: '8px',
                 width: '32px',
                 height: '32px',
-                '&:hover:not([disabled])': { backgroundColor: colors.userHover },
+                '&:hover:not([disabled])': { backgroundColor: colors.tealHover },
                 '&[disabled]': { backgroundColor: 'neutral.muted', color: 'fg.muted' },
               }}
             />
