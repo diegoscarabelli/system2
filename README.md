@@ -240,6 +240,7 @@ The server (`packages/server/`) runs Express.js with a WebSocket server on the s
 | Message | Description |
 |---------|-------------|
 | `{ type: 'user_message', content: string }` | Send user input to agent |
+| `{ type: 'steering_message', content: string }` | Send steering message (inserted ASAP into agent loop) |
 | `{ type: 'abort' }` | Cancel current agent execution |
 
 **Server → Client:**
@@ -252,7 +253,131 @@ The server (`packages/server/`) runs Express.js with a WebSocket server on the s
 | `{ type: 'assistant_end' }` | End of assistant response |
 | `{ type: 'tool_call_start', name: string, input?: string }` | Tool execution starting |
 | `{ type: 'tool_call_end', name: string, result: string }` | Tool execution complete |
+| `{ type: 'ready_for_input' }` | Agent finished, ready for next message |
 | `{ type: 'error', message: string }` | Error occurred |
+
+### Web UI
+
+The React web interface (`packages/ui/`) provides a responsive chat experience while the agent is working.
+
+#### Tech Stack
+
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **React** | 18.2.x | Component framework |
+| **Vite** | 5.x | Build tool and dev server |
+| **Zustand** | 4.5.x | Lightweight state management |
+| **Primer React** | 36.x | GitHub's design system components |
+| **react-markdown** | 10.x | Markdown rendering |
+| **TypeScript** | 5.x | Type safety |
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Chat Component                        │
+│  ┌─────────────────────┐    ┌─────────────────────────────┐ │
+│  │    MessageList      │    │      MessageInput           │ │
+│  │  - Message history  │    │  - Resizable textarea       │ │
+│  │  - Streaming output │    │  - Send/Queue button        │ │
+│  │  - BrainLoader      │    │  - Queue indicator          │ │
+│  └─────────────────────┘    └─────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │   useChatStore    │  Zustand store
+                    │  - messages[]     │
+                    │  - messageQueue[] │
+                    │  - isStreaming    │
+                    │  - isWaiting...   │
+                    └─────────┬─────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │   useWebSocket    │  React hook
+                    │  - sendMessage()  │
+                    │  - sendSteering() │
+                    │  - abort()        │
+                    └─────────┬─────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │    WebSocket      │  ws://localhost:3000
+                    └───────────────────┘
+```
+
+#### State Management
+
+The Zustand store (`useChatStore`) manages all UI state:
+
+| State | Type | Description |
+|-------|------|-------------|
+| `messages` | `Message[]` | Conversation history (user, assistant, tool) |
+| `messageQueue` | `QueuedMessage[]` | Messages waiting to be sent |
+| `currentAssistantMessage` | `string \| null` | Streaming response content |
+| `currentTurnEvents` | `TurnEvent[]` | Thinking blocks and tool calls for current turn |
+| `activeThinkingId` | `string \| null` | Currently streaming thinking block |
+| `activeToolCallId` | `string \| null` | Currently executing tool |
+| `isStreaming` | `boolean` | True while receiving any response chunks |
+| `isWaitingForResponse` | `boolean` | True after send, before first chunk |
+| `isConnected` | `boolean` | WebSocket connection status |
+
+**QueuedMessage interface:**
+```typescript
+interface QueuedMessage {
+  id: string;
+  content: string;
+  isSteering: boolean;  // Priority messages inserted ASAP
+  timestamp: number;
+}
+```
+
+#### WebSocket Hook
+
+The `useWebSocket` hook manages the WebSocket connection and message handling:
+
+- **Connection:** Connects to `ws://{hostname}:3000` on mount
+- **Message sending:** `sendMessage()` for regular messages, `sendSteeringMessage()` for priority
+- **Queue processing:** `processNextQueuedMessage()` sends next queued message when agent is ready
+- **Event handling:** Routes server messages to appropriate store actions
+
+#### Message Flow
+
+1. **User sends message** → `addUserMessage()` adds to history, sets `isWaitingForResponse: true`
+2. **WebSocket sends** → `user_message` or `steering_message` to server
+3. **Server streams response** → Chunks update `currentAssistantMessage` or `currentTurnEvents`
+4. **Response complete** → `assistant_end` triggers `finishAssistantMessage()`
+5. **Agent ready** → `ready_for_input` triggers `processNextQueuedMessage()`
+
+#### Message Queueing
+
+Users can continue typing and queueing messages while the agent is processing:
+
+- **Queue button:** When streaming, the Send button changes to "Queue"
+- **Queue indicator:** Shows count of queued messages below the input
+- **Automatic processing:** Queued messages are sent when `ready_for_input` is received
+- **Steering messages:** Priority messages inserted ASAP into the agent loop (via `streamingBehavior: 'steer'` in pi-coding-agent)
+
+```
+User sends message → Agent processes → ready_for_input → Next queued message sent
+```
+
+#### Loading Indicator
+
+A brain emoji spinner (`BrainLoader` component) appears while waiting for the first response:
+
+- Shows when `isWaitingForResponse` is true and no streaming content exists
+- Disappears when the first `thinking_chunk`, `assistant_chunk`, or `tool_call_start` arrives
+- Animation: Rotating 🧠 with three dots (•••) appearing sequentially with staggered timing
+
+#### Timeline UI
+
+Messages are displayed in a vertical timeline with colored indicators:
+
+| Element | Color | Description |
+|---------|-------|-------------|
+| **You** (user) | `#00aaba` (teal) | User messages |
+| **Guide** (assistant) | `#ffb444` (orange) | Assistant responses |
+| **Tool calls** | `#fd2ef5` (magenta) | Tool execution status |
+| **Thinking** | `#8b949e` (gray) | Extended thinking blocks (collapsible) |
 
 ### Inter-Agent Communication (Planned)
 
@@ -312,8 +437,8 @@ system2/
 │   └── ui/                     # React chat UI
 │       └── src/
 │           ├── components/     # Chat, MessageList, MessageInput
-│           ├── stores/         # Zustand stores (chat, theme)
-│           └── hooks/          # useWebSocket
+│           ├── stores/         # Zustand stores (chat state, message queue)
+│           └── hooks/          # useWebSocket (message sending, queue processing)
 ```
 
 ## Contributing
