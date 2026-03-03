@@ -2,58 +2,29 @@
  * Onboard Command
  *
  * Interactive setup for new System2 installations.
- * Prompts for LLM providers and API keys, then creates ~/.system2 directory structure.
+ * Prompts for LLM providers, API keys, and optional services,
+ * then creates ~/.system2 directory structure with config.toml.
  */
 
 import { existsSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
+import type { LlmConfig, LlmKey, LlmProvider, ServicesConfig, ToolsConfig } from '@system2/shared';
 import pc from 'picocolors';
-import { copyConfigTemplateIfMissing } from '../utils/config.js';
+import { buildConfigToml, CONFIG_FILE, SYSTEM2_DIR, writeConfigFile } from '../utils/config.js';
 
-const SYSTEM2_DIR = join(homedir(), '.system2');
-const AUTH_FILE = join(SYSTEM2_DIR, 'auth.json');
-
-type Provider = 'anthropic' | 'openai' | 'google';
-
-interface AuthKey {
-  key: string;
-  label: string;
-}
-
-interface ProviderKeys {
-  keys: AuthKey[];
-}
-
-interface AuthConfig {
-  version: 1;
-  primary: Provider;
-  fallback: Provider[];
-  providers: Record<Provider, ProviderKeys>;
-}
-
-const PROVIDERS: { value: Provider; label: string }[] = [
+const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
   { value: 'google', label: 'Google (Gemini)' },
   { value: 'openai', label: 'OpenAI (GPT & o-series)' },
 ];
 
-function createEmptyProviderKeys(): ProviderKeys {
-  return {
-    keys: [
-      { key: '', label: '' },
-      { key: '', label: '' },
-    ],
-  };
-}
-
 /**
  * Collect API keys for a provider (iterative)
  */
-async function collectKeysForProvider(provider: Provider): Promise<AuthKey[]> {
-  const keys: AuthKey[] = [];
+async function collectKeysForProvider(provider: LlmProvider): Promise<LlmKey[]> {
+  const keys: LlmKey[] = [];
   const providerLabel = PROVIDERS.find((p) => p.value === provider)?.label || provider;
 
   // First key is required
@@ -132,12 +103,48 @@ async function collectKeysForProvider(provider: Provider): Promise<AuthKey[]> {
   return keys;
 }
 
+/**
+ * Collect optional Brave Search API key for web search.
+ */
+async function collectWebSearchConfig(): Promise<{
+  services?: ServicesConfig;
+  tools?: ToolsConfig;
+}> {
+  const wantsWebSearch = await p.confirm({
+    message: 'Configure web search? (uses Brave Search API)',
+    initialValue: false,
+  });
+
+  if (p.isCancel(wantsWebSearch)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  if (!wantsWebSearch) return {};
+
+  const braveKey = (await p.password({
+    message: 'Enter your Brave Search API key:',
+    validate: (value) => {
+      if (!value) return 'API key is required';
+    },
+  })) as string;
+
+  if (p.isCancel(braveKey)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  return {
+    services: { brave_search: { key: braveKey } },
+    tools: { web_search: { enabled: true, max_results: 5 } },
+  };
+}
+
 export async function onboard(): Promise<void> {
   console.clear();
 
   // Check for existing installation first
-  const isExistingInstallation =
-    existsSync(join(SYSTEM2_DIR, 'auth.json')) || existsSync(join(SYSTEM2_DIR, 'app.db'));
+  const isExistingInstallation = existsSync(CONFIG_FILE) || existsSync(join(SYSTEM2_DIR, 'app.db'));
 
   if (isExistingInstallation) {
     p.intro('🧠 Welcome back to System2!');
@@ -157,17 +164,17 @@ export async function onboard(): Promise<void> {
   p.log.info(
     'Before we can get to work, we need at least one LLM provider and an API key. ' +
       'You can configure multiple providers and keys for redundancy and flexibility. ' +
-      "Don't worry, you can always change or add providers and keys later by editing ~/.system2/auth.json directly."
+      "Don't worry, you can always change or add providers and keys later by editing ~/.system2/config.toml directly."
   );
 
   try {
-    const collectedKeys: Map<Provider, AuthKey[]> = new Map();
+    const collectedKeys: Map<LlmProvider, LlmKey[]> = new Map();
 
     // Step 1: Select primary provider
     const primaryProvider = (await p.select({
       message: 'Select your primary LLM provider:',
       options: PROVIDERS,
-    })) as Provider;
+    })) as LlmProvider;
 
     if (p.isCancel(primaryProvider)) {
       p.cancel('Onboarding cancelled');
@@ -189,10 +196,9 @@ export async function onboard(): Promise<void> {
       process.exit(0);
     }
 
-    const fallbackOrder: Provider[] = [];
+    const fallbackOrder: LlmProvider[] = [];
 
     if (wantsFallback) {
-      // Iteratively add fallback providers (same UX as primary selection)
       let availableProviders = PROVIDERS.filter((p) => p.value !== primaryProvider);
 
       while (availableProviders.length > 0) {
@@ -202,22 +208,19 @@ export async function onboard(): Promise<void> {
               ? 'Select a fallback provider:'
               : 'Select another fallback provider:',
           options: availableProviders,
-        })) as Provider;
+        })) as LlmProvider;
 
         if (p.isCancel(fallbackProvider)) {
           p.cancel('Onboarding cancelled');
           process.exit(0);
         }
 
-        // Collect keys for this fallback provider
         const fallbackKeys = await collectKeysForProvider(fallbackProvider);
         collectedKeys.set(fallbackProvider, fallbackKeys);
         fallbackOrder.push(fallbackProvider);
 
-        // Remove from available list
         availableProviders = availableProviders.filter((p) => p.value !== fallbackProvider);
 
-        // Ask about adding more (if any remain)
         if (availableProviders.length > 0) {
           const addMore = await p.confirm({
             message: 'Add another fallback provider?',
@@ -234,33 +237,25 @@ export async function onboard(): Promise<void> {
       }
     }
 
-    // Build auth config with scaffolding
-    const authConfig: AuthConfig = {
-      version: 1,
+    // Step 4: Ask about web search
+    const { services, tools } = await collectWebSearchConfig();
+
+    // Build LLM config
+    const llmConfig: LlmConfig = {
       primary: primaryProvider,
       fallback: fallbackOrder,
-      providers: {
-        anthropic: createEmptyProviderKeys(),
-        google: createEmptyProviderKeys(),
-        openai: createEmptyProviderKeys(),
-      },
+      providers: {},
     };
 
-    // Populate with collected keys
     for (const [provider, keys] of collectedKeys) {
-      // Start with collected keys, then add empty slots to reach at least 2
-      const providerKeys = [...keys];
-      while (providerKeys.length < 2) {
-        providerKeys.push({ key: '', label: '' });
-      }
-      authConfig.providers[provider] = { keys: providerKeys };
+      llmConfig.providers[provider] = { keys };
     }
 
     // Phase 2: Bootstrap
     const s = p.spinner();
     s.start('Creating ~/.system2 installation directory...');
 
-    await bootstrap(authConfig);
+    await bootstrap({ llm: llmConfig, services, tools });
 
     s.message('Initializing System2 database...');
 
@@ -268,7 +263,7 @@ export async function onboard(): Promise<void> {
 
     p.log.info(
       'Created the installation directory ~/.system2, where System2 lives and works.\n' +
-        'To change providers or API keys, edit ~/.system2/auth.json directly.\n\n' +
+        'To change providers or API keys, edit ~/.system2/config.toml directly.\n\n' +
         'Available commands:\n' +
         `  > ${pc.bold('system2 start')}   (launch the server and open the browser)\n` +
         `  > ${pc.bold('system2 status')}  (check if the server is running)\n` +
@@ -276,18 +271,23 @@ export async function onboard(): Promise<void> {
     );
 
     p.outro(`✨ Run ${pc.bold('system2 start')} to launch. The Guide will help you get started.`);
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
     console.error('\n❌ Onboarding failed:');
-    console.error(error.message);
-    if (error.stack) {
+    console.error(err.message);
+    if (err.stack) {
       console.error('\nStack trace:');
-      console.error(error.stack);
+      console.error(err.stack);
     }
     process.exit(1);
   }
 }
 
-async function bootstrap(authConfig: AuthConfig): Promise<void> {
+async function bootstrap(config: {
+  llm: LlmConfig;
+  services?: ServicesConfig;
+  tools?: ToolsConfig;
+}): Promise<void> {
   // Create ~/.system2/ directory structure
   if (!existsSync(SYSTEM2_DIR)) {
     await mkdir(SYSTEM2_DIR, { recursive: true });
@@ -299,9 +299,11 @@ async function bootstrap(authConfig: AuthConfig): Promise<void> {
   await mkdir(join(SYSTEM2_DIR, 'sessions'), { recursive: true });
   await mkdir(join(SYSTEM2_DIR, 'projects'), { recursive: true });
 
-  // Write auth.json with secure permissions (0600)
-  await writeFile(AUTH_FILE, JSON.stringify(authConfig, null, 2), { mode: 0o600 });
-
-  // Copy config.toml template with documented settings
-  copyConfigTemplateIfMissing();
+  // Write config.toml with all settings and secure permissions (0600)
+  const tomlContent = buildConfigToml({
+    llm: config.llm,
+    services: config.services,
+    tools: config.tools,
+  });
+  writeConfigFile(tomlContent);
 }
