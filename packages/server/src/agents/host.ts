@@ -309,14 +309,20 @@ export class AgentHost {
 
   /**
    * Send a message to the agent
+   * @param content The message content
+   * @param options.isSteering If true, the message is queued as a steering message (inserted ASAP into the agent loop)
    */
-  async prompt(content: string): Promise<void> {
+  async prompt(content: string, options?: { isSteering?: boolean }): Promise<void> {
     if (!this.session) {
       throw new Error('AgentHost not initialized. Call initialize() first.');
     }
     // Store for potential retry on failover
     this.pendingPrompt = content;
-    await this.session.prompt(content);
+
+    // Use streamingBehavior to queue steering messages properly
+    const promptOptions = options?.isSteering ? { streamingBehavior: 'steer' as const } : undefined;
+
+    await this.session.prompt(content, promptOptions);
     // Clear on successful completion (no error triggered failover)
     this.pendingPrompt = null;
   }

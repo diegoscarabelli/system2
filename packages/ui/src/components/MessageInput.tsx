@@ -3,6 +3,7 @@
  *
  * Text input for sending messages to the agent.
  * Features a resizable textarea with a horizontal drag handle.
+ * Supports queueing messages while the agent is working.
  */
 
 import { Box, Button, Textarea } from '@primer/react';
@@ -11,21 +12,28 @@ import { useChatStore } from '../stores/chat';
 
 interface MessageInputProps {
   onSend: (message: string) => void;
+  onQueue: (message: string, isSteering?: boolean) => void;
 }
 
-export function MessageInput({ onSend }: MessageInputProps) {
+export function MessageInput({ onSend, onQueue }: MessageInputProps) {
   const [input, setInput] = useState('');
   const [inputHeight, setInputHeight] = useState(80); // pixels
-  const { isStreaming, isConnected } = useChatStore();
+  const { isStreaming, isConnected, messageQueue } = useChatStore();
   const isDragging = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (input.trim() && !isStreaming) {
+    if (!input.trim()) return;
+
+    if (isStreaming) {
+      // Queue the message while agent is working
+      onQueue(input.trim());
+    } else {
+      // Send immediately
       onSend(input.trim());
-      setInput('');
     }
+    setInput('');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -97,8 +105,14 @@ export function MessageInput({ onSend }: MessageInputProps) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isConnected ? 'Ask the Guide a question...' : 'Connecting to server...'}
-          disabled={!isConnected || isStreaming}
+          placeholder={
+            !isConnected
+              ? 'Connecting to server...'
+              : isStreaming
+                ? 'Type to queue a message...'
+                : 'Ask the Guide a question...'
+          }
+          disabled={!isConnected}
           sx={{
             width: '100%',
             mb: 2,
@@ -106,13 +120,16 @@ export function MessageInput({ onSend }: MessageInputProps) {
             height: `${inputHeight}px`,
           }}
         />
-        <Button
-          type="submit"
-          disabled={!isConnected || isStreaming || !input.trim()}
-          variant="primary"
-        >
-          {isStreaming ? 'Agent is thinking...' : 'Send'}
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Button type="submit" disabled={!isConnected || !input.trim()} variant="primary">
+            {isStreaming ? 'Queue' : 'Send'}
+          </Button>
+          {messageQueue.length > 0 && (
+            <Box sx={{ fontSize: 0, color: 'fg.muted' }}>
+              {messageQueue.length} message{messageQueue.length > 1 ? 's' : ''} queued
+            </Box>
+          )}
+        </Box>
       </Box>
     </Box>
   );

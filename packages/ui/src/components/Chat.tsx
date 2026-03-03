@@ -2,6 +2,7 @@
  * Chat Component
  *
  * Main chat interface combining message list and input.
+ * Supports message queueing while the agent is working.
  */
 
 import { Box } from '@primer/react';
@@ -12,11 +13,15 @@ import { MessageList } from './MessageList';
 
 export function Chat() {
   const { sendMessage } = useWebSocket();
-  const { addUserMessage } = useChatStore();
+  const { addUserMessage, queueMessage } = useChatStore();
 
   const handleSend = (content: string) => {
     addUserMessage(content);
     sendMessage(content);
+  };
+
+  const handleQueue = (content: string, isSteering = false) => {
+    queueMessage(content, isSteering);
   };
 
   return (
@@ -41,7 +46,7 @@ export function Chat() {
       </Box>
 
       <MessageList />
-      <MessageInput onSend={handleSend} />
+      <MessageInput onSend={handleSend} onQueue={handleQueue} />
     </Box>
   );
 }

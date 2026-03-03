@@ -5,7 +5,10 @@
  */
 
 // Client -> Server messages
-export type ClientMessage = { type: 'user_message'; content: string } | { type: 'abort' };
+export type ClientMessage =
+  | { type: 'user_message'; content: string }
+  | { type: 'steering_message'; content: string } // Steering messages are inserted ASAP into the agent loop
+  | { type: 'abort' };
 
 // Server -> Client messages
 export type ServerMessage =
@@ -15,4 +18,5 @@ export type ServerMessage =
   | { type: 'thinking_end' }
   | { type: 'tool_call_start'; name: string; input?: string }
   | { type: 'tool_call_end'; name: string; result: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'ready_for_input' }; // Signals that the agent is ready for the next message

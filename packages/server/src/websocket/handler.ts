@@ -55,6 +55,14 @@ export class WebSocketHandler {
         });
         break;
 
+      case 'steering_message':
+        // Send steering message (inserted ASAP into the agent loop)
+        this.agentHost.prompt(message.content, { isSteering: true }).catch((error) => {
+          console.error('Agent steering prompt failed:', error);
+          this.sendError('Failed to process steering message');
+        });
+        break;
+
       case 'abort':
         this.agentHost.abort();
         break;
@@ -127,7 +135,9 @@ export class WebSocketHandler {
 
       case 'agent_end':
         // Agent finished processing
-        console.log('Agent finished. Stop reason:', this.agentHost.state.stopReason);
+        console.log('Agent finished. Stop reason:', (this.agentHost.state as any).stopReason);
+        // Signal that the agent is ready for the next message
+        this.send({ type: 'ready_for_input' });
         break;
 
       default:

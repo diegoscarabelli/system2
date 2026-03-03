@@ -37,6 +37,14 @@ export interface Message {
   turnEvents?: TurnEvent[];
 }
 
+// Queued message for sending when agent is ready
+export interface QueuedMessage {
+  id: string;
+  content: string;
+  isSteering: boolean; // Steering messages are inserted ASAP into the agent loop
+  timestamp: number;
+}
+
 interface ChatState {
   messages: Message[];
   // Current turn state (while streaming)
@@ -45,8 +53,14 @@ interface ChatState {
   activeThinkingId: string | null; // ID of currently streaming thinking block
   isConnected: boolean;
   isStreaming: boolean;
+  isWaitingForResponse: boolean; // True after user sends, before first chunk arrives
+  // Message queue
+  messageQueue: QueuedMessage[];
 
   addUserMessage: (content: string) => void;
+  queueMessage: (content: string, isSteering?: boolean) => void;
+  dequeueMessage: () => QueuedMessage | undefined;
+  clearQueue: () => void;
   startAssistantMessage: () => void;
   appendAssistantChunk: (chunk: string) => void;
   finishAssistantMessage: () => void;
@@ -57,6 +71,7 @@ interface ChatState {
   finishToolCall: (name: string, result: string) => void;
   setConnected: (connected: boolean) => void;
   setStreaming: (streaming: boolean) => void;
+  setWaitingForResponse: (waiting: boolean) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -66,6 +81,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeThinkingId: null,
   isConnected: false,
   isStreaming: false,
+  isWaitingForResponse: false,
+  messageQueue: [],
 
   addUserMessage: (content: string) => {
     const message: Message = {
@@ -79,11 +96,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Clear any lingering turn state when user sends new message
       currentTurnEvents: [],
       activeThinkingId: null,
+      isWaitingForResponse: true,
     }));
   },
 
+  queueMessage: (content: string, isSteering = false) => {
+    const queuedMsg: QueuedMessage = {
+      id: `queued-${Date.now()}`,
+      content,
+      isSteering,
+      timestamp: Date.now(),
+    };
+    set((state) => {
+      // Steering messages go to the front of the queue
+      if (isSteering) {
+        return { messageQueue: [queuedMsg, ...state.messageQueue] };
+      }
+      return { messageQueue: [...state.messageQueue, queuedMsg] };
+    });
+  },
+
+  dequeueMessage: () => {
+    const state = get();
+    if (state.messageQueue.length === 0) return undefined;
+    const [next, ...rest] = state.messageQueue;
+    set({ messageQueue: rest });
+    return next;
+  },
+
+  clearQueue: () => {
+    set({ messageQueue: [] });
+  },
+
   startAssistantMessage: () => {
-    set({ currentAssistantMessage: '', isStreaming: true });
+    set({ currentAssistantMessage: '', isStreaming: true, isWaitingForResponse: false });
   },
 
   appendAssistantChunk: (chunk: string) => {
@@ -125,6 +171,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       currentTurnEvents: [...state.currentTurnEvents, { type: 'thinking', data: thinkingBlock }],
       activeThinkingId: thinkingId,
+      isWaitingForResponse: false,
     }));
   },
 
@@ -171,6 +218,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
     set((state) => ({
       currentTurnEvents: [...state.currentTurnEvents, { type: 'tool_call', data: toolCall }],
+      isWaitingForResponse: false,
     }));
   },
 
@@ -190,5 +238,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setStreaming: (streaming: boolean) => {
     set({ isStreaming: streaming });
+  },
+
+  setWaitingForResponse: (waiting: boolean) => {
+    set({ isWaitingForResponse: waiting });
   },
 }));
