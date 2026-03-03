@@ -16,6 +16,69 @@ import {
   useChatStore,
 } from '../stores/chat';
 
+// Brain loader - rotating brain with sequential dots
+function BrainLoader() {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Text
+        sx={{
+          fontSize: 2,
+          display: 'inline-block',
+          animation: 'spin 2s linear infinite',
+          '@keyframes spin': {
+            '0%': { transform: 'rotate(0deg)' },
+            '100%': { transform: 'rotate(360deg)' },
+          },
+        }}
+      >
+        🧠
+      </Text>
+      <Box sx={{ display: 'flex', gap: '2px' }}>
+        <Text
+          sx={{
+            fontSize: 1,
+            color: '#ffb444',
+            animation: 'dot1 1.5s ease-in-out infinite',
+            '@keyframes dot1': {
+              '0%, 20%': { opacity: 0 },
+              '25%, 100%': { opacity: 1 },
+            },
+          }}
+        >
+          •
+        </Text>
+        <Text
+          sx={{
+            fontSize: 1,
+            color: '#ffb444',
+            animation: 'dot2 1.5s ease-in-out infinite',
+            '@keyframes dot2': {
+              '0%, 40%': { opacity: 0 },
+              '45%, 100%': { opacity: 1 },
+            },
+          }}
+        >
+          •
+        </Text>
+        <Text
+          sx={{
+            fontSize: 1,
+            color: '#ffb444',
+            animation: 'dot3 1.5s ease-in-out infinite',
+            '@keyframes dot3': {
+              '0%, 60%': { opacity: 0 },
+              '65%, 95%': { opacity: 1 },
+              '100%': { opacity: 0 },
+            },
+          }}
+        >
+          •
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
 // Markdown wrapper with styling
 function MarkdownContent({ content, muted }: { content: string; muted?: boolean }) {
   return (
@@ -162,7 +225,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
           sx={{
             fontSize: 0,
             fontWeight: 'semibold',
-            color: isRunning ? 'attention.fg' : 'fg.muted',
+            color: '#fd2ef5',
           }}
         >
           {isRunning ? '⚙️ ' : '✓ '}
@@ -302,7 +365,7 @@ function TurnEventItem({ event, isLast }: { event: TurnEvent; isLast?: boolean }
   const tc = event.data;
   return (
     <TimelineItem
-      dotColor={tc.status === 'running' ? '#d29922' : '#8b949e'}
+      dotColor={tc.status === 'running' ? '#fd2ef5' : '#fd2ef5'}
       pulse={tc.status === 'running'}
       isLast={isLast}
     >
@@ -327,12 +390,12 @@ function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: 
         ))}
 
       {/* Response */}
-      <TimelineItem dotColor="#3fb950" isLast={isLast}>
+      <TimelineItem dotColor="#ffb444" isLast={isLast}>
         <Text
           sx={{
             fontWeight: 'semibold',
             fontSize: 0,
-            color: 'success.fg',
+            color: '#ffb444',
             marginBottom: 1,
           }}
         >
@@ -345,10 +408,12 @@ function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: 
 }
 
 export function MessageList() {
-  const { messages, currentAssistantMessage, currentTurnEvents } = useChatStore();
+  const { messages, currentAssistantMessage, currentTurnEvents, isWaitingForResponse } =
+    useChatStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const hasCurrentActivity = currentAssistantMessage || currentTurnEvents.length > 0;
+  const hasCurrentActivity =
+    currentAssistantMessage || currentTurnEvents.length > 0 || isWaitingForResponse;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -381,12 +446,12 @@ export function MessageList() {
 
         if (message.role === 'user') {
           return (
-            <TimelineItem key={message.id} dotColor="#58a6ff" isLast={isLastMessage}>
+            <TimelineItem key={message.id} dotColor="#00aaba" isLast={isLastMessage}>
               <Text
                 sx={{
                   fontWeight: 'semibold',
                   fontSize: 0,
-                  color: 'accent.fg',
+                  color: '#00aaba',
                   marginBottom: 1,
                 }}
               >
@@ -412,6 +477,13 @@ export function MessageList() {
         return <AssistantMessageBlock key={message.id} message={message} isLast={isLastMessage} />;
       })}
 
+      {/* Waiting for response indicator */}
+      {isWaitingForResponse && currentTurnEvents.length === 0 && !currentAssistantMessage && (
+        <TimelineItem dotColor="#ffb444" pulse isLast>
+          <BrainLoader />
+        </TimelineItem>
+      )}
+
       {/* Current streaming: turn events in chronological order */}
       {currentTurnEvents.map((event, idx) => (
         <TurnEventItem
@@ -423,12 +495,12 @@ export function MessageList() {
 
       {/* Current streaming: response */}
       {currentAssistantMessage && (
-        <TimelineItem dotColor="#3fb950" pulse isLast>
+        <TimelineItem dotColor="#ffb444" pulse isLast>
           <Text
             sx={{
               fontWeight: 'semibold',
               fontSize: 0,
-              color: 'success.fg',
+              color: '#ffb444',
               marginBottom: 1,
             }}
           >
