@@ -157,7 +157,7 @@ export async function onboard(): Promise<void> {
   p.log.info(
     'Before we can get to work, we need at least one LLM provider and an API key. ' +
       'You can configure multiple providers and keys for redundancy and flexibility. ' +
-      'Don\'t worry, you can always change or add providers and keys later by editing ~/.system2/auth.json directly.'
+      "Don't worry, you can always change or add providers and keys later by editing ~/.system2/auth.json directly."
   );
 
   try {

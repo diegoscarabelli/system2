@@ -1,0 +1,186 @@
+/**
+ * Retry Utility
+ *
+ * Implements exponential backoff with jitter for API calls.
+ * Handles different error types with appropriate retry strategies.
+ */
+
+export interface RetryConfig {
+  /** Base delay in milliseconds (default: 1000) */
+  baseDelay: number;
+  /** Maximum delay cap in milliseconds (default: 30000) */
+  maxDelay: number;
+  /** Maximum retries for rate limit errors (default: 3) */
+  maxRateLimitRetries: number;
+  /** Maximum retries for transient errors like 503 (default: 2) */
+  maxTransientRetries: number;
+}
+
+export const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  baseDelay: 1000,
+  maxDelay: 30000,
+  maxRateLimitRetries: 3,
+  maxTransientRetries: 2,
+};
+
+/**
+ * Error categories that determine retry behavior.
+ */
+export type ErrorCategory =
+  | 'auth' // 401, 403 - immediate failover
+  | 'rate_limit' // 429 - exponential retry, then failover
+  | 'transient' // 500, 503, timeout - brief retry, then failover
+  | 'client' // 400 - no retry, surface error
+  | 'unknown'; // unexpected - treat as transient
+
+/**
+ * Categorize an error based on HTTP status code or error type.
+ */
+export function categorizeError(error: unknown): ErrorCategory {
+  // Extract status code from various error formats
+  const statusCode = extractStatusCode(error);
+
+  if (statusCode) {
+    switch (statusCode) {
+      case 400:
+        return 'client';
+      case 401:
+      case 403:
+        return 'auth';
+      case 429:
+        return 'rate_limit';
+      case 500:
+      case 502:
+      case 503:
+      case 504:
+        return 'transient';
+      default:
+        if (statusCode >= 400 && statusCode < 500) {
+          return 'client';
+        }
+        if (statusCode >= 500) {
+          return 'transient';
+        }
+    }
+  }
+
+  // Check for timeout/network errors
+  const errorMessage = extractErrorMessage(error).toLowerCase();
+  if (
+    errorMessage.includes('timeout') ||
+    errorMessage.includes('econnrefused') ||
+    errorMessage.includes('enotfound') ||
+    errorMessage.includes('network')
+  ) {
+    return 'transient';
+  }
+
+  return 'unknown';
+}
+
+/**
+ * Extract HTTP status code from various error formats.
+ */
+function extractStatusCode(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+
+  const err = error as Record<string, unknown>;
+
+  // Direct status property
+  if (typeof err.status === 'number') return err.status;
+  if (typeof err.statusCode === 'number') return err.statusCode;
+  if (typeof err.code === 'number' && err.code >= 100 && err.code < 600) return err.code;
+
+  // Nested in response
+  if (err.response && typeof err.response === 'object') {
+    const response = err.response as Record<string, unknown>;
+    if (typeof response.status === 'number') return response.status;
+  }
+
+  // Parse from error message (common in API errors)
+  const message = extractErrorMessage(error);
+  const match = message.match(/\b(4\d{2}|5\d{2})\b/);
+  if (match) return parseInt(match[1], 10);
+
+  return undefined;
+}
+
+/**
+ * Extract error message from various error formats.
+ */
+export function extractErrorMessage(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object') {
+    const err = error as Record<string, unknown>;
+    if (typeof err.message === 'string') return err.message;
+    if (typeof err.errorMessage === 'string') return err.errorMessage;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error);
+}
+
+/**
+ * Calculate delay with exponential backoff and jitter.
+ * Formula: min(baseDelay * 2^attempt + jitter, maxDelay)
+ */
+export function calculateDelay(
+  attempt: number,
+  config: RetryConfig = DEFAULT_RETRY_CONFIG
+): number {
+  const exponentialDelay = config.baseDelay * 2 ** attempt;
+  // Add random jitter (0-25% of delay) to avoid thundering herd
+  const jitter = Math.random() * exponentialDelay * 0.25;
+  return Math.min(exponentialDelay + jitter, config.maxDelay);
+}
+
+/**
+ * Sleep for the specified duration.
+ */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Determine if we should retry based on error category and attempt count.
+ */
+export function shouldRetry(
+  category: ErrorCategory,
+  attempt: number,
+  config: RetryConfig = DEFAULT_RETRY_CONFIG
+): boolean {
+  switch (category) {
+    case 'auth':
+    case 'client':
+      // Never retry auth errors or client errors
+      return false;
+    case 'rate_limit':
+      return attempt < config.maxRateLimitRetries;
+    case 'transient':
+    case 'unknown':
+      return attempt < config.maxTransientRetries;
+  }
+}
+
+/**
+ * Determine if we should failover to the next provider/key.
+ */
+export function shouldFailover(category: ErrorCategory, retriesExhausted: boolean): boolean {
+  switch (category) {
+    case 'auth':
+      // Immediate failover for auth errors
+      return true;
+    case 'rate_limit':
+    case 'transient':
+    case 'unknown':
+      // Failover only after retries exhausted
+      return retriesExhausted;
+    case 'client':
+      // Never failover for client errors (our bug)
+      return false;
+  }
+}
