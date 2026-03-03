@@ -1,15 +1,44 @@
 /**
  * Stop Command
  *
- * Stops the System2 server.
+ * Stops the System2 server. Cross-platform: uses signals on Unix, taskkill on Windows.
  */
 
+import { exec } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
+
+const execAsync = promisify(exec);
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
 const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
+const IS_WINDOWS = process.platform === 'win32';
+
+/**
+ * Check if a process is running by PID.
+ */
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kill a process. Uses taskkill on Windows, signals on Unix.
+ */
+async function killProcess(pid: number, force: boolean): Promise<void> {
+  if (IS_WINDOWS) {
+    const flag = force ? '/F' : '';
+    await execAsync(`taskkill /PID ${pid} ${flag}`.trim());
+  } else {
+    process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
+  }
+}
 
 export async function stop(): Promise<void> {
   // Check if PID file exists
@@ -24,32 +53,34 @@ export async function stop(): Promise<void> {
 
   try {
     // Check if process exists
-    process.kill(pid, 0);
+    if (!isProcessRunning(pid)) {
+      console.log('System2 was not running (removing stale PID file)');
+      unlinkSync(PID_FILE);
+      return;
+    }
 
-    // Process exists, send SIGTERM for graceful shutdown
+    // Process exists, request graceful shutdown
     console.log(`Stopping System2 (PID: ${pid})...`);
-    process.kill(pid, 'SIGTERM');
+    await killProcess(pid, false);
 
     // Wait a bit for graceful shutdown
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Check if still running
-    try {
-      process.kill(pid, 0);
-      // Still running, force kill
+    if (isProcessRunning(pid)) {
       console.log('Process still running, forcing shutdown...');
-      process.kill(pid, 'SIGKILL');
+      await killProcess(pid, true);
       await new Promise((resolve) => setTimeout(resolve, 500));
-    } catch {
-      // Process stopped gracefully
     }
 
     // Clean up PID file
     unlinkSync(PID_FILE);
     console.log('✓ System2 stopped');
   } catch (_error) {
-    // Process not running, clean up stale PID file
-    console.log('System2 was not running (removing stale PID file)');
-    unlinkSync(PID_FILE);
+    // Process not running or already terminated, clean up stale PID file
+    if (existsSync(PID_FILE)) {
+      unlinkSync(PID_FILE);
+    }
+    console.log('✓ System2 stopped');
   }
 }

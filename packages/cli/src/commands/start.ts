@@ -2,6 +2,7 @@
  * Start Command
  *
  * Starts the System2 server in the background (detached) with logs to file.
+ * Cross-platform: works on macOS, Linux, and Windows.
  */
 
 import { spawn } from 'node:child_process';
@@ -17,6 +18,7 @@ const AUTH_FILE = join(SYSTEM2_DIR, 'auth.json');
 const LOGS_DIR = join(SYSTEM2_DIR, 'logs');
 const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
 const LOG_FILE = join(LOGS_DIR, 'system2.log');
+const IS_WINDOWS = process.platform === 'win32';
 
 export async function start(options: {
   port?: number;
@@ -116,6 +118,7 @@ export async function start(options: {
         detached: true,
         stdio: ['ignore', logFd, logFd],
         env: process.env,
+        windowsHide: true,
       }
     );
 
@@ -129,7 +132,11 @@ export async function start(options: {
     console.log(`  PID: ${child.pid}`);
     console.log(`  Logs: ${LOG_FILE}`);
     console.log('');
-    console.log(`To view logs: tail -f ${LOG_FILE}`);
+    console.log(
+      IS_WINDOWS
+        ? `To view logs: Get-Content "${LOG_FILE}" -Wait`
+        : `To view logs: tail -f ${LOG_FILE}`
+    );
     console.log('To stop: system2 stop');
     console.log('');
 
