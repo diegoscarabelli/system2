@@ -71,7 +71,7 @@ export class WebSocketHandler {
         break;
 
       default:
-        this.sendError(`Unknown message type: ${(message as any).type}`);
+        this.sendError(`Unknown message type: ${(message as Record<string, unknown>).type}`);
     }
   }
 
@@ -103,7 +103,7 @@ export class WebSocketHandler {
         // Format tool input for display - check multiple possible properties
         // Pi Agent uses 'args' for tool input, not 'toolInput'
         let inputText = '';
-        const rawInput = event.toolInput ?? (event as any).args;
+        const rawInput = event.toolInput ?? (event as Record<string, unknown>).args;
         if (rawInput) {
           try {
             inputText = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput, null, 2);
@@ -124,7 +124,7 @@ export class WebSocketHandler {
         let resultText = '';
         if (event.result?.content) {
           resultText = event.result.content
-            .map((c: any) => (c.type === 'text' ? c.text : ''))
+            .map((c: { type: string; text?: string }) => (c.type === 'text' ? c.text : ''))
             .join('');
         }
 
@@ -152,7 +152,10 @@ export class WebSocketHandler {
 
       case 'agent_end': {
         // Agent finished processing
-        console.log('Agent finished. Stop reason:', (this.agentHost.state as any).stopReason);
+        console.log(
+          'Agent finished. Stop reason:',
+          (this.agentHost.state as Record<string, unknown>).stopReason
+        );
 
         // Send context usage update
         const usage = this.agentHost.getContextUsage();

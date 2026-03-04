@@ -25,9 +25,10 @@ export function ArtifactViewer() {
 
     function resizeToContent() {
       try {
-        const doc = iframe!.contentDocument;
+        if (!iframe) return;
+        const doc = iframe.contentDocument;
         if (!doc?.body) return;
-        iframe!.style.height = `${doc.documentElement.scrollHeight}px`;
+        iframe.style.height = `${doc.documentElement.scrollHeight}px`;
       } catch {
         // Cross-origin — ignore
       }

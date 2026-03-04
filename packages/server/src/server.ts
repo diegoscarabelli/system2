@@ -89,7 +89,7 @@ export class Server {
     if (config.uiDistPath) {
       this.app.use(express.static(config.uiDistPath));
       this.app.get('*', (_req, res) => {
-        res.sendFile(join(config.uiDistPath!, 'index.html'));
+        res.sendFile(join(config.uiDistPath as string, 'index.html'));
       });
     }
 
