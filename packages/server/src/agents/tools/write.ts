@@ -10,7 +10,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 
-export function createWriteTool(): AgentTool<any> {
+export function createWriteTool() {
   const params = Type.Object({
     path: Type.String({
       description: 'Path to the file to write (absolute or relative to home directory)',
@@ -20,7 +20,7 @@ export function createWriteTool(): AgentTool<any> {
     }),
   });
 
-  return {
+  const tool: AgentTool<typeof params> = {
     name: 'write',
     label: 'Write File',
     description:
@@ -28,14 +28,11 @@ export function createWriteTool(): AgentTool<any> {
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
-        // Resolve path relative to home if not absolute
         const filePath = isAbsolute(params.path) ? params.path : resolve(homedir(), params.path);
 
-        // Ensure parent directory exists
         const dir = dirname(filePath);
         await mkdir(dir, { recursive: true });
 
-        // Write file
         await writeFile(filePath, params.content, 'utf-8');
 
         return {
@@ -47,8 +44,8 @@ export function createWriteTool(): AgentTool<any> {
           ],
           details: { path: filePath, size: params.content.length },
         };
-      } catch (error: any) {
-        const errorMsg = error.message || String(error);
+      } catch (error: unknown) {
+        const errorMsg = (error as Error).message || String(error);
 
         return {
           content: [{ type: 'text', text: `Error writing file: ${errorMsg}` }],
@@ -57,4 +54,5 @@ export function createWriteTool(): AgentTool<any> {
       }
     },
   };
+  return tool;
 }

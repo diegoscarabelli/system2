@@ -12,7 +12,7 @@ import { Type } from '@sinclair/typebox';
 
 const execAsync = promisify(exec);
 
-export function createBashTool(): AgentTool<any> {
+export function createBashTool() {
   const params = Type.Object({
     command: Type.String({
       description: 'The shell command to execute (bash syntax)',
@@ -24,7 +24,7 @@ export function createBashTool(): AgentTool<any> {
     ),
   });
 
-  return {
+  const tool: AgentTool<typeof params> = {
     name: 'bash',
     label: 'Execute Bash Command',
     description:
@@ -45,10 +45,11 @@ export function createBashTool(): AgentTool<any> {
           content: [{ type: 'text', text: output || '(command completed with no output)' }],
           details: { stdout, stderr, exitCode: 0 },
         };
-      } catch (error: any) {
-        const errorMsg = error.message || String(error);
-        const stdout = error.stdout || '';
-        const stderr = error.stderr || '';
+      } catch (error: unknown) {
+        const err = error as { message?: string; stdout?: string; stderr?: string; code?: number };
+        const errorMsg = err.message || String(error);
+        const stdout = err.stdout || '';
+        const stderr = err.stderr || '';
 
         return {
           content: [
@@ -61,10 +62,11 @@ export function createBashTool(): AgentTool<any> {
             error: errorMsg,
             stdout,
             stderr,
-            exitCode: error.code || 1,
+            exitCode: err.code || 1,
           },
         };
       }
     },
   };
+  return tool;
 }

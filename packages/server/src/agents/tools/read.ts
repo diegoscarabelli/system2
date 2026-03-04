@@ -10,21 +10,20 @@ import { isAbsolute, resolve } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 
-export function createReadTool(): AgentTool<any> {
+export function createReadTool() {
   const params = Type.Object({
     path: Type.String({
       description: 'Path to the file to read (absolute or relative to home directory)',
     }),
   });
 
-  return {
+  const tool: AgentTool<typeof params> = {
     name: 'read',
     label: 'Read File',
     description: 'Read the contents of a file from the filesystem. Supports text files.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
-        // Resolve path relative to home if not absolute
         const filePath = isAbsolute(params.path) ? params.path : resolve(homedir(), params.path);
 
         const content = await readFile(filePath, 'utf-8');
@@ -33,11 +32,10 @@ export function createReadTool(): AgentTool<any> {
           content: [{ type: 'text', text: content }],
           details: { path: filePath, size: content.length },
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const err = error as { code?: string; message?: string };
         const errorMsg =
-          error.code === 'ENOENT'
-            ? `File not found: ${params.path}`
-            : error.message || String(error);
+          err.code === 'ENOENT' ? `File not found: ${params.path}` : err.message || String(error);
 
         return {
           content: [{ type: 'text', text: `Error reading file: ${errorMsg}` }],
@@ -46,4 +44,5 @@ export function createReadTool(): AgentTool<any> {
       }
     },
   };
+  return tool;
 }

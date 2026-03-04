@@ -5,10 +5,10 @@
  */
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@mariozechner/pi-ai';
+import { Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
 
-export function createQueryDatabaseTool(db: DatabaseClient): AgentTool<any> {
+export function createQueryDatabaseTool(db: DatabaseClient) {
   const params = Type.Object({
     sql: Type.String({
       description:
@@ -16,7 +16,7 @@ export function createQueryDatabaseTool(db: DatabaseClient): AgentTool<any> {
     }),
   });
 
-  return {
+  const tool: AgentTool<typeof params> = {
     name: 'query_database',
     label: 'Query Database',
     description:
@@ -24,10 +24,8 @@ export function createQueryDatabaseTool(db: DatabaseClient): AgentTool<any> {
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
-        // Execute query
         const results = db.query(params.sql);
 
-        // Format results as text
         const resultText =
           results.length === 0
             ? 'No results found.'
@@ -50,4 +48,5 @@ export function createQueryDatabaseTool(db: DatabaseClient): AgentTool<any> {
       }
     },
   };
+  return tool;
 }

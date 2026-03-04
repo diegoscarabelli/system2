@@ -12,7 +12,7 @@ import { parseHTML } from 'linkedom';
 const DEFAULT_MAX_LENGTH = 20_000;
 const FETCH_TIMEOUT = 15_000; // 15 seconds
 
-export function createWebFetchTool(): AgentTool<any> {
+export function createWebFetchTool() {
   const params = Type.Object({
     url: Type.String({
       description: 'The URL to fetch and extract content from',
@@ -24,7 +24,7 @@ export function createWebFetchTool(): AgentTool<any> {
     ),
   });
 
-  return {
+  const tool: AgentTool<typeof params> = {
     name: 'web_fetch',
     label: 'Fetch Web Page',
     description:
@@ -34,7 +34,6 @@ export function createWebFetchTool(): AgentTool<any> {
       const maxLength = params.max_length ?? DEFAULT_MAX_LENGTH;
 
       try {
-        // Create a timeout signal combined with the abort signal
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
         if (signal) {
@@ -67,7 +66,6 @@ export function createWebFetchTool(): AgentTool<any> {
           };
         }
 
-        // Reject non-HTML content
         const contentType = response.headers.get('content-type') || '';
         if (!contentType.includes('html') && !contentType.includes('xml')) {
           return {
@@ -83,15 +81,12 @@ export function createWebFetchTool(): AgentTool<any> {
 
         const html = await response.text();
 
-        // Use linkedom to create a DOM document for Readability
         const { document } = parseHTML(html);
 
-        // Extract readable content
         const reader = new Readability(document);
         const article = reader.parse();
 
         if (!article || !article.textContent?.trim()) {
-          // Fallback: strip scripts and extract body text
           const { document: fallbackDoc } = parseHTML(html);
           for (const tag of ['script', 'style', 'nav', 'header', 'footer']) {
             for (const el of fallbackDoc.querySelectorAll(tag)) {
@@ -108,7 +103,6 @@ export function createWebFetchTool(): AgentTool<any> {
           };
         }
 
-        // Use textContent from Readability
         let content = article.textContent.replace(/\s+/g, ' ').trim();
         const title = article.title;
 
@@ -122,9 +116,10 @@ export function createWebFetchTool(): AgentTool<any> {
           content: [{ type: 'text', text: output }],
           details: { url: params.url, title, length: content.length, method: 'readability' },
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const err = error as { name?: string; message?: string };
         const errorMsg =
-          error.name === 'AbortError' ? 'Request timed out' : error.message || String(error);
+          err.name === 'AbortError' ? 'Request timed out' : err.message || String(error);
         return {
           content: [{ type: 'text', text: `Fetch failed: ${errorMsg}` }],
           details: { error: errorMsg, url: params.url },
@@ -132,4 +127,5 @@ export function createWebFetchTool(): AgentTool<any> {
       }
     },
   };
+  return tool;
 }

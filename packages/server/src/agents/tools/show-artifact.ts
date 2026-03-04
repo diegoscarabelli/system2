@@ -13,7 +13,7 @@ import { Type } from '@sinclair/typebox';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
 
-export function createShowArtifactTool(): AgentTool<any> {
+export function createShowArtifactTool() {
   const params = Type.Object({
     path: Type.String({
       description:
@@ -21,14 +21,13 @@ export function createShowArtifactTool(): AgentTool<any> {
     }),
   });
 
-  return {
+  const tool: AgentTool<typeof params> = {
     name: 'show_artifact',
     label: 'Show Artifact',
     description:
       'Display an HTML artifact file in the UI side panel. The file must exist under ~/.system2/. Only specify the relative path — the file content is served directly by the server.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
-      // Resolve and validate path (prevent traversal)
       const resolved = normalize(join(SYSTEM2_DIR, params.path));
       const rel = relative(SYSTEM2_DIR, resolved);
       if (rel.startsWith('..') || rel.startsWith('/')) {
@@ -40,7 +39,6 @@ export function createShowArtifactTool(): AgentTool<any> {
         };
       }
 
-      // Check file exists
       if (!existsSync(resolved)) {
         return {
           content: [{ type: 'text', text: `Error: artifact not found: ${params.path}` }],
@@ -56,4 +54,5 @@ export function createShowArtifactTool(): AgentTool<any> {
       };
     },
   };
+  return tool;
 }

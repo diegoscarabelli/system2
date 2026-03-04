@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { AgentTool } from '@mariozechner/pi-agent-core';
 import {
   type AgentSession,
   type AgentSessionEvent,
@@ -308,7 +309,8 @@ export class AgentHost {
    * Build the custom tools array, conditionally including web_search if configured.
    */
   private buildTools() {
-    const tools = [
+    // biome-ignore lint/suspicious/noExplicitAny: heterogeneous tool collection matches SDK's AgentTool<any>[]
+    const tools: AgentTool<any>[] = [
       createQueryDatabaseTool(this.db),
       createBashTool(),
       createReadTool(),

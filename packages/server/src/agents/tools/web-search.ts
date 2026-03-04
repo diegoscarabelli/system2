@@ -19,7 +19,7 @@ interface BraveSearchApiResponse {
   };
 }
 
-export function createWebSearchTool(apiKey: string, maxResults?: number): AgentTool<any> {
+export function createWebSearchTool(apiKey: string, maxResults?: number) {
   const defaultCount = maxResults ?? DEFAULT_MAX_RESULTS;
 
   const params = Type.Object({
@@ -33,7 +33,7 @@ export function createWebSearchTool(apiKey: string, maxResults?: number): AgentT
     ),
   });
 
-  return {
+  const tool: AgentTool<typeof params> = {
     name: 'web_search',
     label: 'Web Search',
     description:
@@ -85,9 +85,10 @@ export function createWebSearchTool(apiKey: string, maxResults?: number): AgentT
           content: [{ type: 'text', text: formatted }],
           details: { query: params.query, count: results.length, results },
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const err = error as { name?: string; message?: string };
         const errorMsg =
-          error.name === 'AbortError' ? 'Search aborted' : error.message || String(error);
+          err.name === 'AbortError' ? 'Search aborted' : err.message || String(error);
         return {
           content: [{ type: 'text', text: `Search failed: ${errorMsg}` }],
           details: { error: errorMsg },
@@ -95,4 +96,5 @@ export function createWebSearchTool(apiKey: string, maxResults?: number): AgentT
       }
     },
   };
+  return tool;
 }
