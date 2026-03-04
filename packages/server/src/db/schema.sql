@@ -2,30 +2,30 @@
 -- SQLite with WAL mode for concurrent access
 
 CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY,          -- UUID v4
+  id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT,
-  status TEXT DEFAULT 'active' CHECK(status IN ('active', 'completed', 'archived')),
+  status TEXT DEFAULT 'in progress' CHECK(status IN ('in progress', 'completed', 'archived')),
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
-  id TEXT PRIMARY KEY,          -- UUID v4
-  project_id TEXT REFERENCES projects(id),
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER REFERENCES projects(id),
   title TEXT NOT NULL,
   status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'in_progress', 'completed', 'failed')),
-  assigned_agent_id TEXT,
+  assigned_agent_id INTEGER,
   artifact_path TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS agents (
-  id TEXT PRIMARY KEY,          -- UUID v4
+  id INTEGER PRIMARY KEY,
   type TEXT NOT NULL CHECK(type IN ('guide', 'conductor', 'narrator', 'reviewer')),
-  project_id TEXT,              -- NULL for Guide, set for project-specific agents
-  session_path TEXT NOT NULL,   -- Path to Pi SDK JSONL session
+  project_id INTEGER,              -- NULL for Guide, set for project-specific agents
+  session_path TEXT NOT NULL,       -- Path to Pi SDK JSONL session
   status TEXT DEFAULT 'idle' CHECK(status IN ('idle', 'working', 'waiting')),
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))

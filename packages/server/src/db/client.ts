@@ -4,7 +4,6 @@
  * Manages System2's app.db with WAL mode for concurrent access.
  */
 
-import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,17 +33,17 @@ export class DatabaseClient {
   }
 
   // Project operations
-  createProject(project: Omit<Project, 'created_at' | 'updated_at'>): Project {
+  createProject(project: Omit<Project, 'id' | 'created_at' | 'updated_at'>): Project {
     const stmt = this.db.prepare(`
-      INSERT INTO projects (id, name, description, status)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO projects (name, description, status)
+      VALUES (?, ?, ?)
       RETURNING *
     `);
 
-    return stmt.get(project.id, project.name, project.description, project.status) as Project;
+    return stmt.get(project.name, project.description, project.status) as Project;
   }
 
-  getProject(id: string): Project | null {
+  getProject(id: number): Project | null {
     const stmt = this.db.prepare('SELECT * FROM projects WHERE id = ?');
     return (stmt.get(id) as Project) || null;
   }
@@ -61,11 +60,11 @@ export class DatabaseClient {
   }
 
   updateProject(
-    id: string,
+    id: number,
     updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>
   ): Project | null {
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: (string | number | null)[] = [];
 
     if (updates.name !== undefined) {
       fields.push('name = ?');
@@ -96,15 +95,14 @@ export class DatabaseClient {
   }
 
   // Task operations
-  createTask(task: Omit<Task, 'created_at' | 'updated_at'>): Task {
+  createTask(task: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Task {
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (id, project_id, title, status, assigned_agent_id, artifact_path)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (project_id, title, status, assigned_agent_id, artifact_path)
+      VALUES (?, ?, ?, ?, ?)
       RETURNING *
     `);
 
     return stmt.get(
-      task.id,
       task.project_id,
       task.title,
       task.status,
@@ -113,12 +111,12 @@ export class DatabaseClient {
     ) as Task;
   }
 
-  getTask(id: string): Task | null {
+  getTask(id: number): Task | null {
     const stmt = this.db.prepare('SELECT * FROM tasks WHERE id = ?');
     return (stmt.get(id) as Task) || null;
   }
 
-  listTasks(projectId: string): Task[] {
+  listTasks(projectId: number): Task[] {
     const stmt = this.db.prepare(
       'SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at ASC'
     );
@@ -126,11 +124,11 @@ export class DatabaseClient {
   }
 
   updateTask(
-    id: string,
+    id: number,
     updates: Partial<Pick<Task, 'status' | 'assigned_agent_id' | 'artifact_path'>>
   ): Task | null {
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: (string | number | null)[] = [];
 
     if (updates.status !== undefined) {
       fields.push('status = ?');
@@ -161,28 +159,22 @@ export class DatabaseClient {
   }
 
   // Agent operations
-  createAgent(agent: Omit<Agent, 'created_at' | 'updated_at'>): Agent {
+  createAgent(agent: Omit<Agent, 'id' | 'created_at' | 'updated_at'>): Agent {
     const stmt = this.db.prepare(`
-      INSERT INTO agents (id, type, project_id, session_path, status)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO agents (type, project_id, session_path, status)
+      VALUES (?, ?, ?, ?)
       RETURNING *
     `);
 
-    return stmt.get(
-      agent.id,
-      agent.type,
-      agent.project_id,
-      agent.session_path,
-      agent.status
-    ) as Agent;
+    return stmt.get(agent.type, agent.project_id, agent.session_path, agent.status) as Agent;
   }
 
-  getAgent(id: string): Agent | null {
+  getAgent(id: number): Agent | null {
     const stmt = this.db.prepare('SELECT * FROM agents WHERE id = ?');
     return (stmt.get(id) as Agent) || null;
   }
 
-  listAgents(projectId?: string): Agent[] {
+  listAgents(projectId?: number): Agent[] {
     if (projectId) {
       const stmt = this.db.prepare('SELECT * FROM agents WHERE project_id = ?');
       return stmt.all(projectId) as Agent[];
@@ -191,7 +183,7 @@ export class DatabaseClient {
     return stmt.all() as Agent[];
   }
 
-  updateAgentStatus(id: string, status: Agent['status']): Agent | null {
+  updateAgentStatus(id: number, status: Agent['status']): Agent | null {
     const stmt = this.db.prepare(`
       UPDATE agents
       SET status = ?, updated_at = datetime('now')
@@ -207,7 +199,6 @@ export class DatabaseClient {
    * Guide is a singleton - there's only one, with project_id = NULL.
    */
   getOrCreateGuideAgent(): Agent {
-    // Check if Guide agent already exists
     const findStmt = this.db.prepare('SELECT * FROM agents WHERE type = ? AND project_id IS NULL');
     const existing = findStmt.get('guide') as Agent | undefined;
 
@@ -215,21 +206,16 @@ export class DatabaseClient {
       return existing;
     }
 
-    // Create new Guide agent with UUID
-    const id = randomUUID();
-    const sessionPath = `sessions/guide-${id}`;
-
     return this.createAgent({
-      id,
       type: 'guide',
       project_id: null,
-      session_path: sessionPath,
+      session_path: 'sessions/guide',
       status: 'idle',
     });
   }
 
   // Query method for custom queries (used by query_database tool)
-  query(sql: string): any[] {
+  query(sql: string): unknown[] {
     try {
       const stmt = this.db.prepare(sql);
       return stmt.all();
