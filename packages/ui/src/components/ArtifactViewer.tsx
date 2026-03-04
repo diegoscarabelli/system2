@@ -16,6 +16,29 @@ export function ArtifactViewer() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const isLight = colorMode === 'light';
 
+  // Resize iframe to its content height so the parent container handles scrolling.
+  // This keeps the scrollbar outside the iframe (and outside the CSS filter).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: currentUrl triggers resize when artifact changes
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    function resizeToContent() {
+      try {
+        const doc = iframe!.contentDocument;
+        if (!doc?.body) return;
+        iframe!.style.height = `${doc.documentElement.scrollHeight}px`;
+      } catch {
+        // Cross-origin — ignore
+      }
+    }
+
+    iframe.addEventListener('load', resizeToContent);
+    resizeToContent();
+
+    return () => iframe.removeEventListener('load', resizeToContent);
+  }, [currentUrl]);
+
   // postMessage bridge: listen for query requests from iframe
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
@@ -48,7 +71,7 @@ export function ArtifactViewer() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  if (!currentUrl) {
+  if (!currentUrl || !currentUrl.includes('.')) {
     return (
       <Box
         sx={{
@@ -68,16 +91,17 @@ export function ArtifactViewer() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Box sx={{ flex: 1, overflow: 'hidden' }}>
+      <Box sx={{ flex: 1, overflow: 'auto' }}>
         <iframe
           ref={iframeRef}
           src={currentUrl}
           sandbox="allow-scripts allow-same-origin"
           title="Artifact"
+          scrolling="no"
           style={{
             width: '100%',
-            height: '100%',
             border: 'none',
+            overflow: 'hidden',
             backgroundColor: isLight ? 'white' : 'transparent',
             filter: isLight ? 'invert(1) hue-rotate(180deg)' : 'none',
           }}
