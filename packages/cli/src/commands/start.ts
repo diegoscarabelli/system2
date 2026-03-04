@@ -88,6 +88,8 @@ export async function start(options: {
       dbPath: join(SYSTEM2_DIR, 'app.db'),
       uiDistPath: join(import.meta.dirname, '..', '..', 'ui', 'dist'),
       llmConfig: config.llm,
+      servicesConfig: config.services,
+      toolsConfig: config.tools,
     });
 
     await server.start();

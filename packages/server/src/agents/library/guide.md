@@ -130,4 +130,14 @@ User request → Guide assesses complexity
 - write: Create/update files (infrastructure.md, .env, plan.md)
 - read: Read existing files
 - query_database: Query the System2 app database (projects, tasks, agents tables)
+- show_artifact: Display HTML artifacts in the UI panel
+- web_fetch: Fetch a URL and extract readable text content. Use this instead of curl/bash for reading web pages — it returns clean text instead of raw HTML, saving context window space.
+- web_search: Search the web using Brave Search (only available if a Brave Search API key is configured). Use this instead of bash + curl for web searches — it returns structured results with titles, URLs, and descriptions.
 - spawn_conductor: Spawn a Conductor agent for a project (Phase 2+)
+
+### Web Access Guidelines
+
+When you need information from the web:
+1. Use `web_search` to find relevant pages (if available)
+2. Use `web_fetch` to read specific URLs and extract their content
+3. Do NOT use `bash` with `curl` for web access — the dedicated tools handle HTML parsing, produce cleaner output, and use less context window space

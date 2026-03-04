@@ -17,7 +17,7 @@ import {
   ModelRegistry,
   SessionManager,
 } from '@mariozechner/pi-coding-agent';
-import type { LlmConfig, LlmProvider } from '@system2/shared';
+import type { LlmConfig, LlmProvider, ServicesConfig, ToolsConfig } from '@system2/shared';
 import matter from 'gray-matter';
 import type { DatabaseClient } from '../db/client.js';
 import { AuthResolver } from './auth-resolver.js';
@@ -27,6 +27,8 @@ import { createBashTool } from './tools/bash.js';
 import { createQueryDatabaseTool } from './tools/query-database.js';
 import { createReadTool } from './tools/read.js';
 import { createShowArtifactTool } from './tools/show-artifact.js';
+import { createWebFetchTool } from './tools/web-fetch.js';
+import { createWebSearchTool } from './tools/web-search.js';
 import { createWriteTool } from './tools/write.js';
 import './types.js'; // Import custom message type declarations
 
@@ -51,11 +53,15 @@ interface AgentDefinition {
 export interface AgentHostConfig {
   db: DatabaseClient;
   llmConfig: LlmConfig;
+  servicesConfig?: ServicesConfig;
+  toolsConfig?: ToolsConfig;
 }
 
 export class AgentHost {
   private session: AgentSession | null = null;
   private db: DatabaseClient;
+  private servicesConfig?: ServicesConfig;
+  private toolsConfig?: ToolsConfig;
   private authResolver: AuthResolver;
   private modelRegistry: ModelRegistry;
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
@@ -66,6 +72,8 @@ export class AgentHost {
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
+    this.servicesConfig = config.servicesConfig;
+    this.toolsConfig = config.toolsConfig;
 
     // Initialize AuthResolver with failover support
     this.authResolver = new AuthResolver(config.llmConfig);
@@ -154,14 +162,7 @@ export class AgentHost {
       modelRegistry: this.modelRegistry,
       resourceLoader,
       model,
-      customTools: [
-        createQueryDatabaseTool(this.db),
-        createBashTool(),
-        createReadTool(),
-        createWriteTool(),
-        createShowArtifactTool(),
-        // TODO: Add spawn_conductor tool (Phase 2)
-      ],
+      customTools: this.buildTools(),
       thinkingLevel: 'high', // Enable extended thinking for transparency
     });
 
@@ -301,6 +302,30 @@ export class AgentHost {
     } finally {
       this.isReinitializing = false;
     }
+  }
+
+  /**
+   * Build the custom tools array, conditionally including web_search if configured.
+   */
+  private buildTools() {
+    const tools = [
+      createQueryDatabaseTool(this.db),
+      createBashTool(),
+      createReadTool(),
+      createWriteTool(),
+      createShowArtifactTool(),
+      createWebFetchTool(),
+      // TODO: Add spawn_conductor tool (Phase 2)
+    ];
+
+    // web_search requires a Brave Search API key
+    const braveKey = this.servicesConfig?.brave_search?.key;
+    if (braveKey && this.toolsConfig?.web_search?.enabled !== false) {
+      tools.push(createWebSearchTool(braveKey, this.toolsConfig?.web_search?.max_results));
+      console.log('[AgentHost] web_search tool enabled');
+    }
+
+    return tools;
   }
 
   /**

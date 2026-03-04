@@ -224,6 +224,8 @@ Agents have access to these tools for interacting with the system:
 | `write` | Write files, create parent directories | Overwrites existing files |
 | `query_database` | Query System2 SQLite database | Read access to projects, tasks, agents |
 | `show_artifact` | Display HTML file in the UI left panel | Path must be within `~/.system2/` |
+| `web_search` | Search the web via Brave Search API | Requires API key; max 20 results |
+| `web_fetch` | Fetch URL and extract readable text | 15s timeout, 20K char default |
 
 ### Database Schema
 
