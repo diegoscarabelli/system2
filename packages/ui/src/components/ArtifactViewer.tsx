@@ -8,10 +8,13 @@
 import { Box, Text } from '@primer/react';
 import { useEffect, useRef } from 'react';
 import { useArtifactStore } from '../stores/artifact';
+import { useThemeStore } from '../stores/theme';
 
 export function ArtifactViewer() {
   const currentUrl = useArtifactStore((s) => s.currentUrl);
+  const colorMode = useThemeStore((s) => s.colorMode);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const isLight = colorMode === 'light';
 
   // postMessage bridge: listen for query requests from iframe
   useEffect(() => {
@@ -69,13 +72,14 @@ export function ArtifactViewer() {
         <iframe
           ref={iframeRef}
           src={currentUrl}
-          sandbox="allow-scripts"
+          sandbox="allow-scripts allow-same-origin"
           title="Artifact"
           style={{
             width: '100%',
             height: '100%',
             border: 'none',
-            backgroundColor: 'white',
+            backgroundColor: isLight ? 'white' : 'transparent',
+            filter: isLight ? 'invert(1) hue-rotate(180deg)' : 'none',
           }}
         />
       </Box>
