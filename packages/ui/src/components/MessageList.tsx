@@ -204,6 +204,35 @@ function TimelineItem({
   );
 }
 
+// Parse JSON tool data into readable key: value lines
+function formatToolData(raw: string): string {
+  try {
+    const obj = JSON.parse(raw);
+    if (typeof obj !== 'object' || obj === null) return raw;
+    return Object.entries(obj)
+      .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+      .join('\n');
+  } catch {
+    return raw;
+  }
+}
+
+// Extract a brief summary from tool input JSON for inline display
+function toolSummary(_name: string, input?: string): string {
+  if (!input) return '';
+  try {
+    const obj = JSON.parse(input);
+    // Pick the most descriptive field per tool
+    const value = obj.command || obj.path || obj.sql || obj.query || '';
+    if (!value) return '';
+    const text = String(value).trim();
+    // Truncate long values
+    return text.length > 60 ? `${text.slice(0, 57)}...` : text;
+  } catch {
+    return '';
+  }
+}
+
 // Tool call display component (collapsible)
 function ToolCallItem({ tc }: { tc: ToolCall }) {
   const isRunning = tc.status === 'running';
@@ -232,6 +261,9 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
           {isRunning ? '⚙️ ' : '✓ '}
           {tc.name}
         </Text>
+        {toolSummary(tc.name, tc.input) && (
+          <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{toolSummary(tc.name, tc.input)}</Text>
+        )}
         {hasContent && (
           <Text
             sx={{
@@ -246,64 +278,81 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
           </Text>
         )}
       </Box>
-      {!collapsed && tc.input && (
-        <Box sx={{ marginTop: 1 }}>
-          <Text
-            sx={{
-              fontSize: 0,
-              fontWeight: 'semibold',
-              color: 'fg.muted',
-              marginBottom: 1,
-              display: 'block',
-            }}
-          >
-            IN
-          </Text>
-          <Text
-            as="pre"
-            sx={{
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontFamily: 'mono',
-              fontSize: 0,
-              color: 'fg.muted',
-              margin: 0,
-              maxHeight: '100px',
-              overflow: 'auto',
-            }}
-          >
-            {tc.input}
-          </Text>
-        </Box>
-      )}
-      {!collapsed && tc.result && (
-        <Box sx={{ marginTop: 1 }}>
-          <Text
-            sx={{
-              fontSize: 0,
-              fontWeight: 'semibold',
-              color: 'fg.muted',
-              marginBottom: 1,
-              display: 'block',
-            }}
-          >
-            OUT
-          </Text>
-          <Text
-            as="pre"
-            sx={{
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontFamily: 'mono',
-              fontSize: 0,
-              color: 'fg.muted',
-              margin: 0,
-              maxHeight: '150px',
-              overflow: 'auto',
-            }}
-          >
-            {tc.result}
-          </Text>
+      {!collapsed && hasContent && (
+        <Box
+          sx={{
+            marginTop: 1,
+            border: '1px solid',
+            borderColor: 'border.muted',
+            borderRadius: 2,
+            overflow: 'hidden',
+          }}
+        >
+          {tc.input && (
+            <Box sx={{ display: 'flex', gap: 2, padding: 2 }}>
+              <Text
+                sx={{
+                  fontSize: 0,
+                  fontWeight: 'semibold',
+                  color: 'fg.muted',
+                  flexShrink: 0,
+                  width: '28px',
+                }}
+              >
+                IN
+              </Text>
+              <Text
+                as="pre"
+                sx={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontFamily: 'mono',
+                  fontSize: 0,
+                  color: 'fg.muted',
+                  margin: 0,
+                  maxHeight: '100px',
+                  overflow: 'auto',
+                  flex: 1,
+                }}
+              >
+                {formatToolData(tc.input)}
+              </Text>
+            </Box>
+          )}
+          {tc.input && tc.result && (
+            <Box sx={{ borderTop: '1px solid', borderColor: 'border.muted' }} />
+          )}
+          {tc.result && (
+            <Box sx={{ display: 'flex', gap: 2, padding: 2 }}>
+              <Text
+                sx={{
+                  fontSize: 0,
+                  fontWeight: 'semibold',
+                  color: 'fg.muted',
+                  flexShrink: 0,
+                  width: '28px',
+                }}
+              >
+                OUT
+              </Text>
+              <Text
+                as="pre"
+                sx={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontFamily: 'mono',
+                  fontSize: 0,
+                  color: 'fg.muted',
+                  margin: 0,
+                  maxHeight: '150px',
+                  overflow: 'auto',
+                  flex: 1,
+                }}
+              >
+                {tc.result}
+              </Text>
+            </Box>
+          )}
         </Box>
       )}
     </Box>
