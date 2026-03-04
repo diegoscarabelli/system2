@@ -35,7 +35,7 @@ export class DatabaseClient {
   // Project operations
   createProject(project: Omit<Project, 'id' | 'created_at' | 'updated_at'>): Project {
     const stmt = this.db.prepare(`
-      INSERT INTO projects (name, description, status)
+      INSERT INTO project (name, description, status)
       VALUES (?, ?, ?)
       RETURNING *
     `);
@@ -44,18 +44,18 @@ export class DatabaseClient {
   }
 
   getProject(id: number): Project | null {
-    const stmt = this.db.prepare('SELECT * FROM projects WHERE id = ?');
+    const stmt = this.db.prepare('SELECT * FROM project WHERE id = ?');
     return (stmt.get(id) as Project) || null;
   }
 
   listProjects(status?: Project['status']): Project[] {
     if (status) {
       const stmt = this.db.prepare(
-        'SELECT * FROM projects WHERE status = ? ORDER BY created_at DESC'
+        'SELECT * FROM project WHERE status = ? ORDER BY created_at DESC'
       );
       return stmt.all(status) as Project[];
     }
-    const stmt = this.db.prepare('SELECT * FROM projects ORDER BY created_at DESC');
+    const stmt = this.db.prepare('SELECT * FROM project ORDER BY created_at DESC');
     return stmt.all() as Project[];
   }
 
@@ -85,7 +85,7 @@ export class DatabaseClient {
     values.push(id);
 
     const stmt = this.db.prepare(`
-      UPDATE projects
+      UPDATE project
       SET ${fields.join(', ')}
       WHERE id = ?
       RETURNING *
@@ -97,7 +97,7 @@ export class DatabaseClient {
   // Task operations
   createTask(task: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Task {
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (project_id, title, status, assigned_agent_id, artifact_path)
+      INSERT INTO task (project_id, title, status, assigned_agent_id, artifact_path)
       VALUES (?, ?, ?, ?, ?)
       RETURNING *
     `);
@@ -112,14 +112,12 @@ export class DatabaseClient {
   }
 
   getTask(id: number): Task | null {
-    const stmt = this.db.prepare('SELECT * FROM tasks WHERE id = ?');
+    const stmt = this.db.prepare('SELECT * FROM task WHERE id = ?');
     return (stmt.get(id) as Task) || null;
   }
 
   listTasks(projectId: number): Task[] {
-    const stmt = this.db.prepare(
-      'SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at ASC'
-    );
+    const stmt = this.db.prepare('SELECT * FROM task WHERE project_id = ? ORDER BY created_at ASC');
     return stmt.all(projectId) as Task[];
   }
 
@@ -149,7 +147,7 @@ export class DatabaseClient {
     values.push(id);
 
     const stmt = this.db.prepare(`
-      UPDATE tasks
+      UPDATE task
       SET ${fields.join(', ')}
       WHERE id = ?
       RETURNING *
@@ -161,7 +159,7 @@ export class DatabaseClient {
   // Agent operations
   createAgent(agent: Omit<Agent, 'id' | 'created_at' | 'updated_at'>): Agent {
     const stmt = this.db.prepare(`
-      INSERT INTO agents (type, project_id, session_path, status)
+      INSERT INTO agent (type, project_id, session_path, status)
       VALUES (?, ?, ?, ?)
       RETURNING *
     `);
@@ -170,22 +168,22 @@ export class DatabaseClient {
   }
 
   getAgent(id: number): Agent | null {
-    const stmt = this.db.prepare('SELECT * FROM agents WHERE id = ?');
+    const stmt = this.db.prepare('SELECT * FROM agent WHERE id = ?');
     return (stmt.get(id) as Agent) || null;
   }
 
   listAgents(projectId?: number): Agent[] {
     if (projectId) {
-      const stmt = this.db.prepare('SELECT * FROM agents WHERE project_id = ?');
+      const stmt = this.db.prepare('SELECT * FROM agent WHERE project_id = ?');
       return stmt.all(projectId) as Agent[];
     }
-    const stmt = this.db.prepare('SELECT * FROM agents ORDER BY created_at DESC');
+    const stmt = this.db.prepare('SELECT * FROM agent ORDER BY created_at DESC');
     return stmt.all() as Agent[];
   }
 
   updateAgentStatus(id: number, status: Agent['status']): Agent | null {
     const stmt = this.db.prepare(`
-      UPDATE agents
+      UPDATE agent
       SET status = ?, updated_at = datetime('now')
       WHERE id = ?
       RETURNING *
@@ -199,7 +197,7 @@ export class DatabaseClient {
    * Guide is a singleton - there's only one, with project_id = NULL.
    */
   getOrCreateGuideAgent(): Agent {
-    const findStmt = this.db.prepare('SELECT * FROM agents WHERE type = ? AND project_id IS NULL');
+    const findStmt = this.db.prepare('SELECT * FROM agent WHERE type = ? AND project_id IS NULL');
     const existing = findStmt.get('guide') as Agent | undefined;
 
     if (existing) {

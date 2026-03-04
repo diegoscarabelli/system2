@@ -1,7 +1,7 @@
 -- System2 App Database Schema
 -- SQLite with WAL mode for concurrent access
 
-CREATE TABLE IF NOT EXISTS projects (
+CREATE TABLE IF NOT EXISTS project (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT,
@@ -10,9 +10,9 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE IF NOT EXISTS task (
   id INTEGER PRIMARY KEY,
-  project_id INTEGER REFERENCES projects(id),
+  project_id INTEGER REFERENCES project(id),
   title TEXT NOT NULL,
   status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'in_progress', 'completed', 'failed')),
   assigned_agent_id INTEGER,
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS agents (
+CREATE TABLE IF NOT EXISTS agent (
   id INTEGER PRIMARY KEY,
   type TEXT NOT NULL CHECK(type IN ('guide', 'conductor', 'narrator', 'reviewer')),
   project_id INTEGER,              -- NULL for Guide, set for project-specific agents
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 
 -- Indexes for common queries
-CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
-CREATE INDEX IF NOT EXISTS idx_agents_type ON agents(type);
+CREATE INDEX IF NOT EXISTS idx_task_project ON task(project_id);
+CREATE INDEX IF NOT EXISTS idx_task_status ON task(status);
+CREATE INDEX IF NOT EXISTS idx_agent_project ON agent(project_id);
+CREATE INDEX IF NOT EXISTS idx_agent_type ON agent(type);
