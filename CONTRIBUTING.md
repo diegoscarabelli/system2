@@ -11,8 +11,9 @@ Thank you for your interest in contributing to System2! This document provides g
   - [Submitting Pull Requests](#submitting-pull-requests)
 - [Development Setup](#development-setup)
   - [Prerequisites](#prerequisites)
-  - [Setup](#setup)
-  - [Development Commands](#development-commands)
+  - [Initial Setup](#initial-setup)
+  - [Development Workflow](#development-workflow)
+  - [Commands Reference](#commands-reference)
 - [Building](#building)
   - [Package Outputs](#package-outputs)
   - [Building Individual Packages](#building-individual-packages)
@@ -104,20 +105,64 @@ Before submitting a PR, ensure:
 
 - Node.js >= 18
 - pnpm >= 8
+- System2 installed globally (`npm install -g @system2/cli`) and onboarded (`system2 onboard`)
 
-### Setup
+### Initial Setup
+
+Run once after cloning:
 
 ```bash
 pnpm install
 pnpm build
 ```
 
-### Development Commands
+### Development Workflow
+
+During development you run two things: the **system2 server** (backend + agent) and the **Vite dev server** (UI hot reload). They run on different ports:
+
+| Process | Port | What it does |
+|---------|------|-------------|
+| `system2 start` | 3000 | Backend server, WebSocket, agent runtime |
+| Vite dev server | 3001 | Serves UI with hot reload, proxies API/artifacts to port 3000 |
+
+**You develop on `localhost:3001`** (not 3000). The Vite dev server proxies WebSocket, artifact, and API requests to the backend automatically.
+
+#### Step-by-step
+
+Open **two terminals** from the repo root:
+
+**Terminal 1 — Start the backend server:**
+```bash
+system2 start
+```
+
+This starts the system2 server on port 3000. Keep it running.
+
+**Terminal 2 — Start the UI dev server with hot reload:**
+```bash
+cd packages/ui
+pnpm dev
+```
+
+This starts Vite on `http://localhost:3001`. Open this URL in your browser.
+
+#### What hot reloads and what doesn't
+
+| Change | Hot reload? | What to do |
+|--------|------------|------------|
+| UI components (`packages/ui/src/`) | Yes | Saves automatically reflect in the browser |
+| Server code (`packages/server/src/`) | No | Rebuild and restart: `pnpm build && system2 stop && system2 start` |
+| CLI code (`packages/cli/src/`) | No | Rebuild: `pnpm --filter @system2/cli build` |
+| Shared types (`packages/shared/src/`) | No | Rebuild: `pnpm build` (all packages depend on it) |
+
+### Commands Reference
 
 ```bash
-pnpm dev          # Run all packages in dev mode
 pnpm build        # Build all packages
+pnpm dev          # Run all packages in watch/dev mode (alternative to the two-terminal setup)
 pnpm typecheck    # Run TypeScript type checking
+pnpm check        # Run format check and lint
+pnpm format       # Auto-fix formatting
 ```
 
 ## Building
