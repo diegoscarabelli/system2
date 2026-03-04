@@ -215,17 +215,52 @@ Agent conversations are persisted in JSONL files with a tree structure:
 
 ### Tools
 
-Agents have access to these tools for interacting with the system:
+Agents interact with the system through custom tools defined in `packages/server/src/agents/tools/`. Each tool is a factory function returning a pi-coding-agent `AgentTool` with typed parameters, description, and an async `execute` method. Tools are registered in `AgentHost.buildTools()` — some are always available, others are conditional on configuration.
 
-| Tool | Description | Limits |
-|------|-------------|--------|
-| `bash` | Execute shell commands | 30s timeout, 10MB output buffer |
-| `read` | Read file contents | Absolute or home-relative paths |
-| `write` | Write files, create parent directories | Overwrites existing files |
-| `query_database` | Query System2 SQLite database | Read access to projects, tasks, agents |
-| `show_artifact` | Display HTML file in the UI left panel | Path must be within `~/.system2/` |
-| `web_search` | Search the web via Brave Search API | Requires API key; max 20 results |
-| `web_fetch` | Fetch URL and extract readable text | 15s timeout, 20K char default |
+| Tool | Description | Conditional |
+|------|-------------|-------------|
+| `bash` | Execute shell commands (30s timeout, 10MB output buffer) | No |
+| `read` | Read file contents (absolute or `~/` paths) | No |
+| `write` | Write/create files, auto-creates parent directories | No |
+| `query_database` | Query System2 SQLite database (read-only: projects, tasks, agents) | No |
+| `show_artifact` | Display HTML file in the UI left panel (path must be within `~/.system2/`) | No |
+| `web_fetch` | Fetch a URL and extract readable text content | No |
+| `web_search` | Search the web via Brave Search API | Yes — requires `[services.brave_search]` key |
+
+#### `web_fetch`
+
+Fetches a URL and extracts the main content as clean, readable text — replacing the need for `bash` + `curl` which dumps raw HTML into the agent's context window.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `url` | string | required | URL to fetch |
+| `max_length` | number | 20,000 | Maximum characters returned |
+
+**Implementation:** Uses Node.js built-in `fetch` with a 15-second timeout and `redirect: 'follow'`. HTML is parsed into a DOM using [linkedom](https://github.com/WebReflection/linkedom) (lightweight DOM implementation), then passed through [Mozilla Readability](https://github.com/mozilla/readability) — the same algorithm behind Firefox Reader View — to extract the article content. If Readability fails (e.g., non-article pages), a fallback strips `<script>`, `<style>`, `<nav>`, `<header>`, and `<footer>` elements and extracts body text. Non-HTML content types (PDF, images) are rejected with a clear error message.
+
+**Returns:** `# {title}\n\n{textContent}` as plain text, with a `[Content truncated]` marker if the output exceeds `max_length`.
+
+#### `web_search`
+
+Searches the web using the [Brave Search API](https://brave.com/search/api/) and returns structured results. Only registered when a Brave Search API key is present in `config.toml` and `[tools.web_search]` is not explicitly disabled.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | required | Search query |
+| `count` | number | from config (default 5) | Number of results (max 20) |
+
+**Implementation:** Calls `GET https://api.search.brave.com/res/v1/web/search` with the API key in the `X-Subscription-Token` header. Passes the abort signal through for graceful cancellation.
+
+**Returns:** Numbered list of results (title, URL, description) as text, plus a structured `results` array in `details` for programmatic use.
+
+#### Conditional registration
+
+Tools are assembled in `AgentHost.buildTools()`. Core tools (bash, read, write, query_database, show_artifact, web_fetch) are always included. `web_search` is added only when both conditions are met:
+
+1. A Brave Search API key exists in `config.servicesConfig.brave_search.key`
+2. `config.toolsConfig.web_search.enabled` is not explicitly `false`
+
+The config flows from `config.toml` → CLI (`loadConfig()`) → `Server` → `AgentHost` → `buildTools()` via dependency injection. No tool reads config files directly.
 
 ### Database Schema
 
@@ -506,7 +541,7 @@ system2/
 │   │   └── src/
 │   │       ├── agents/
 │   │       │   ├── library/    # Agent definitions (guide.md, conductor.md, ...)
-│   │       │   ├── tools/      # bash, read, write, query-database, show-artifact
+│   │       │   ├── tools/      # bash, read, write, query-database, show-artifact, web-fetch, web-search
 │   │       │   ├── host.ts     # AgentHost with failover
 │   │       │   ├── auth-resolver.ts
 │   │       │   ├── retry.ts    # Exponential backoff logic
