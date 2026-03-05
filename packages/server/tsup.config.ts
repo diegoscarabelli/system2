@@ -21,9 +21,16 @@ export default defineConfig({
     '@mariozechner/pi-tui',
   ],
   onSuccess: async () => {
-    // Copy agent library .md files to dist
-    const srcLibrary = join(__dirname, 'src', 'agents', 'library');
-    const destLibrary = join(__dirname, 'dist', 'agents', 'library');
+    // Copy shared agent reference to dist/agents/
+    const srcAgents = join(__dirname, 'src', 'agents');
+    const destAgents = join(__dirname, 'dist', 'agents');
+    mkdirSync(destAgents, { recursive: true });
+    copyFileSync(join(srcAgents, 'agents.md'), join(destAgents, 'agents.md'));
+    console.log('✓ Copied agents.md to dist/');
+
+    // Copy agent library .md files to dist/agents/library/
+    const srcLibrary = join(srcAgents, 'library');
+    const destLibrary = join(destAgents, 'library');
 
     mkdirSync(destLibrary, { recursive: true });
 
