@@ -203,12 +203,8 @@ export class Server {
     }
 
     if (!lastNarrated) {
-      // No timestamps found — first run, queue narration
-      console.log('[Server] No narration timestamps found, queuing initial daily log');
-      this.narratorHost.deliverMessage(
-        "[Scheduled task: daily-log]\n\nAppend to today's daily log. This is the first run — create the daily log file and capture any existing activity.",
-        { sender: 0, receiver: this.narratorId, timestamp: Date.now() }
-      );
+      // First run — nothing to narrate yet. Let the regular schedule handle it.
+      console.log('[Server] First run, skipping narrator catch-up');
       return;
     }
 
