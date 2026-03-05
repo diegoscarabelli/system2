@@ -22,9 +22,11 @@ import type { LlmConfig, LlmProvider, ServicesConfig, ToolsConfig } from '@syste
 import matter from 'gray-matter';
 import type { DatabaseClient } from '../db/client.js';
 import { AuthResolver } from './auth-resolver.js';
+import type { AgentRegistry } from './registry.js';
 import { calculateDelay, categorizeError, shouldFailover, shouldRetry, sleep } from './retry.js';
 import { rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
+import { createMessageAgentTool } from './tools/message-agent.js';
 import { createQueryDatabaseTool } from './tools/query-database.js';
 import { createReadTool } from './tools/read.js';
 import { createShowArtifactTool } from './tools/show-artifact.js';
@@ -37,8 +39,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
-// Agent library is bundled in the package dist at dist/agents/library/
-const AGENT_LIBRARY_DIR = join(__dirname, 'agents', 'library');
+// Agent files are bundled in the package dist at dist/agents/
+const AGENT_DIR = join(__dirname, 'agents');
+const AGENT_LIBRARY_DIR = join(AGENT_DIR, 'library');
 
 interface AgentDefinition {
   name: string;
@@ -53,6 +56,8 @@ interface AgentDefinition {
 
 export interface AgentHostConfig {
   db: DatabaseClient;
+  agentId: number;
+  registry: AgentRegistry;
   llmConfig: LlmConfig;
   servicesConfig?: ServicesConfig;
   toolsConfig?: ToolsConfig;
@@ -61,6 +66,8 @@ export interface AgentHostConfig {
 export class AgentHost {
   private session: AgentSession | null = null;
   private db: DatabaseClient;
+  readonly agentId: number;
+  private registry: AgentRegistry;
   private servicesConfig?: ServicesConfig;
   private toolsConfig?: ToolsConfig;
   private authResolver: AuthResolver;
@@ -73,6 +80,8 @@ export class AgentHost {
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
+    this.agentId = config.agentId;
+    this.registry = config.registry;
     this.servicesConfig = config.servicesConfig;
     this.toolsConfig = config.toolsConfig;
 
@@ -89,40 +98,49 @@ export class AgentHost {
    * Initialize the agent session (must be called before use)
    */
   async initialize(): Promise<void> {
-    // Get or create the Guide agent in database (singleton)
-    const guideAgent = this.db.getOrCreateGuideAgent();
-    console.log('[AgentHost] Guide agent:', { id: guideAgent.id });
+    // Look up the agent record from the database
+    const agentRecord = this.db.getAgent(this.agentId);
+    if (!agentRecord) {
+      throw new Error(`Agent with ID ${this.agentId} not found in database`);
+    }
+    console.log('[AgentHost] Agent:', { id: agentRecord.id, role: agentRecord.role });
 
-    // Session directory for the Guide agent
-    const guideSessionDir = join(SYSTEM2_DIR, 'sessions', 'guide');
+    // Session directory — use role_id format (e.g., sessions/guide_1/)
+    const sessionDirName = `${agentRecord.role}_${agentRecord.id}`;
+    const agentSessionDir = join(SYSTEM2_DIR, 'sessions', sessionDirName);
 
     // Ensure session directory exists
-    if (!existsSync(guideSessionDir)) {
-      mkdirSync(guideSessionDir, { recursive: true });
+    if (!existsSync(agentSessionDir)) {
+      mkdirSync(agentSessionDir, { recursive: true });
     }
 
     // Rotate session file if it exceeds size threshold (10MB)
-    const rotated = rotateSessionIfNeeded(guideSessionDir, SYSTEM2_DIR);
+    const rotated = rotateSessionIfNeeded(agentSessionDir, SYSTEM2_DIR);
     if (rotated) {
       console.log('[AgentHost] Session file rotated to new file');
     }
 
-    // Load Guide agent definition from package library (Markdown with YAML frontmatter)
-    const guideDefinitionPath = join(AGENT_LIBRARY_DIR, 'guide.md');
-    const guideFile = readFileSync(guideDefinitionPath, 'utf-8');
-    const { data: guideMeta, content: systemPrompt } = matter(guideFile);
-    const guideConfig = guideMeta as AgentDefinition;
+    // Load shared agent reference (prepended to all agent system prompts)
+    const agentsRefPath = join(AGENT_DIR, 'agents.md');
+    const agentsRefContent = readFileSync(agentsRefPath, 'utf-8');
+
+    // Load agent-specific definition (Markdown with YAML frontmatter)
+    const definitionPath = join(AGENT_LIBRARY_DIR, `${agentRecord.role}.md`);
+    const definitionFile = readFileSync(definitionPath, 'utf-8');
+    const { data: agentMeta, content: agentPrompt } = matter(definitionFile);
+    const agentConfig = agentMeta as AgentDefinition;
+    const systemPrompt = `${agentsRefContent}\n\n${agentPrompt}`;
 
     const llmProvider = this.currentProvider;
 
-    console.log('[AgentHost] Guide config loaded:', {
-      name: guideConfig.name,
-      models: guideConfig.models,
+    console.log('[AgentHost] Agent config loaded:', {
+      name: agentConfig.name,
+      models: agentConfig.models,
       provider: llmProvider,
     });
 
     // Get model ID from agent library config
-    const modelId = guideConfig.models[llmProvider as keyof typeof guideConfig.models];
+    const modelId = agentConfig.models[llmProvider as keyof typeof agentConfig.models];
     if (!modelId) {
       throw new Error(`No model configured for provider: ${llmProvider}`);
     }
@@ -155,7 +173,7 @@ export class AgentHost {
     const { session } = await createAgentSession({
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
-      sessionManager: SessionManager.continueRecent(SYSTEM2_DIR, guideSessionDir),
+      sessionManager: SessionManager.continueRecent(SYSTEM2_DIR, agentSessionDir),
       authStorage: this.authResolver.createAuthStorage(),
       modelRegistry: this.modelRegistry,
       resourceLoader,
@@ -177,7 +195,7 @@ export class AgentHost {
       });
     });
 
-    console.log('[AgentHost] Guide agent session initialized with JSONL persistence');
+    console.log(`[AgentHost] ${agentRecord.role} agent session initialized with JSONL persistence`);
     console.log('[AgentHost] Using provider:', this.currentProvider);
   }
 
@@ -309,12 +327,12 @@ export class AgentHost {
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous tool collection matches SDK's AgentTool<any>[]
     const tools: AgentTool<any>[] = [
       createQueryDatabaseTool(this.db),
+      createMessageAgentTool(this.agentId, this.registry, this.db),
       createBashTool(),
       createReadTool(),
       createWriteTool(),
       createShowArtifactTool(),
       createWebFetchTool(),
-      // TODO: Add spawn_conductor tool (Phase 2)
     ];
 
     // web_search requires a Brave Search API key
@@ -353,6 +371,36 @@ export class AgentHost {
     await this.session.prompt(content, promptOptions);
     // Clear on successful completion (no error triggered failover)
     this.pendingPrompt = null;
+  }
+
+  /**
+   * Deliver an inter-agent message into this agent's session.
+   * Uses sendCustomMessage with customType 'agent_message'.
+   *
+   * @param content LLM-visible message content (includes sender prefix)
+   * @param details Metadata for programmatic use (not sent to LLM)
+   * @param urgent If true, uses 'steer' delivery (interrupts mid-turn). Default: 'followUp' (waits for current turn to finish).
+   */
+  async deliverMessage(
+    content: string,
+    details: { sender: number; receiver: number; timestamp: number },
+    urgent?: boolean
+  ): Promise<void> {
+    if (!this.session) {
+      throw new Error('AgentHost not initialized. Call initialize() first.');
+    }
+    await this.session.sendCustomMessage(
+      {
+        customType: 'agent_message',
+        content,
+        display: false,
+        details,
+      },
+      {
+        deliverAs: urgent ? 'steer' : 'followUp',
+        triggerTurn: true,
+      }
+    );
   }
 
   /**

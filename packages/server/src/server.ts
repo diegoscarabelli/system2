@@ -12,6 +12,7 @@ import type { LlmConfig, ServicesConfig, ToolsConfig } from '@system2/shared';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { AgentHost } from './agents/host.js';
+import { AgentRegistry } from './agents/registry.js';
 import { DatabaseClient } from './db/client.js';
 import { WebSocketHandler } from './websocket/handler.js';
 
@@ -33,6 +34,7 @@ export class Server {
   private wss: WebSocketServer;
   private db: DatabaseClient;
   private agentHost: AgentHost;
+  private agentRegistry: AgentRegistry;
   private config: ServerConfig;
 
   constructor(config: ServerConfig) {
@@ -41,13 +43,19 @@ export class Server {
     // Initialize database
     this.db = new DatabaseClient(config.dbPath);
 
-    // Initialize agent host with config from config.toml
+    // Initialize agent registry and guide agent
+    this.agentRegistry = new AgentRegistry();
+    const guideAgent = this.db.getOrCreateGuideAgent();
+
     this.agentHost = new AgentHost({
       db: this.db,
+      agentId: guideAgent.id,
+      registry: this.agentRegistry,
       llmConfig: config.llmConfig,
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
     });
+    this.agentRegistry.register(guideAgent.id, this.agentHost);
 
     // Set up Express app
     this.app = express();

@@ -2,7 +2,12 @@
  * Custom AgentMessage Types for Multi-Agent Communication
  *
  * Extends pi-agent-core via declaration merging to support
- * inter-agent communication with source/target tracking.
+ * inter-agent communication with sender/receiver tracking.
+ *
+ * Note: These declarations define in-memory message types for future event routing.
+ * Actual inter-agent message persistence and LLM context injection uses
+ * sendCustomMessage() with customType: 'agent_message' (stored as custom_message
+ * entries in JSONL). See AgentHost.deliverMessage() and the message_agent tool.
  */
 
 declare module '@mariozechner/pi-agent-core' {
