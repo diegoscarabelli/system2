@@ -20,7 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_project_status ON project(status);
 CREATE TABLE IF NOT EXISTS agent (
   id INTEGER PRIMARY KEY,                -- Auto-incrementing unique identifier
   role TEXT NOT NULL CHECK(role IN ('guide', 'conductor', 'narrator', 'reviewer')), -- Agent specialization (guide is system-wide)
-  project INTEGER REFERENCES project(id), -- Assigned project, NULL for guide (system-wide)
+  project INTEGER REFERENCES project(id), -- Assigned project, NULL for guide and narrator (system-wide)
   status TEXT DEFAULT 'idle' CHECK(status IN ('idle', 'active', 'archived')), -- Current lifecycle state
   created_at TEXT DEFAULT (datetime('now')), -- Row creation timestamp
   updated_at TEXT DEFAULT (datetime('now'))  -- Last modification timestamp
@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS agent (
 CREATE INDEX IF NOT EXISTS idx_agent_project ON agent(project);
 CREATE INDEX IF NOT EXISTS idx_agent_role ON agent(role);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_guide_singleton ON agent(role) WHERE role = 'guide'; -- Only one guide agent allowed
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_narrator_singleton ON agent(role) WHERE role = 'narrator'; -- Only one narrator agent allowed
 
 -- A unit of work within a project or standalone
 CREATE TABLE IF NOT EXISTS task (
@@ -54,12 +55,12 @@ CREATE INDEX IF NOT EXISTS idx_task_assignee ON task(assignee);
 
 -- Directed link between two tasks (blocked_by, relates_to, duplicates)
 CREATE TABLE IF NOT EXISTS task_link (
-  id INTEGER PRIMARY KEY,
-  source INTEGER NOT NULL REFERENCES task(id), -- The task that has the relationship
-  target INTEGER NOT NULL REFERENCES task(id), -- The task being referenced
-  relationship TEXT NOT NULL CHECK(relationship IN ('blocked_by', 'relates_to', 'duplicates')),
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
+  id INTEGER PRIMARY KEY,                       -- Auto-incrementing unique identifier
+  source INTEGER NOT NULL REFERENCES task(id),  -- The task that has the relationship
+  target INTEGER NOT NULL REFERENCES task(id),  -- The task being referenced
+  relationship TEXT NOT NULL CHECK(relationship IN ('blocked_by', 'relates_to', 'duplicates')), -- Link type
+  created_at TEXT DEFAULT (datetime('now')),     -- Row creation timestamp
+  updated_at TEXT DEFAULT (datetime('now'))      -- Last modification timestamp
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_task_link_unique ON task_link(source, target, relationship);

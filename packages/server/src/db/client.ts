@@ -274,6 +274,25 @@ export class DatabaseClient {
     });
   }
 
+  /**
+   * Get the Narrator agent, creating it if it doesn't exist.
+   * Narrator is a singleton - there's only one, with project = NULL.
+   */
+  getOrCreateNarratorAgent(): Agent {
+    const findStmt = this.db.prepare('SELECT * FROM agent WHERE role = ? AND project IS NULL');
+    const existing = findStmt.get('narrator') as Agent | undefined;
+
+    if (existing) {
+      return existing;
+    }
+
+    return this.createAgent({
+      role: 'narrator',
+      project: null,
+      status: 'idle',
+    });
+  }
+
   // Task link operations
   createTaskLink(link: Omit<TaskLink, 'id' | 'created_at' | 'updated_at'>): TaskLink {
     const stmt = this.db.prepare(`

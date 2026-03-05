@@ -53,7 +53,7 @@ export interface TaskComment {
 export interface Agent {
   id: number;
   role: 'guide' | 'conductor' | 'narrator' | 'reviewer';
-  project: number | null; // NULL for Guide, set for project-specific agents
+  project: number | null; // NULL for Guide and Narrator (system-wide), set for project-specific agents
   status: 'idle' | 'active' | 'archived';
   created_at: string;
   updated_at: string;
