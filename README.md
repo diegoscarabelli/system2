@@ -136,7 +136,8 @@ All System2 data lives in `~/.system2/`:
 ├── sessions/       # Agent conversation history (JSONL)
 ├── projects/       # Project workspaces
 └── logs/
-    └── system2.log # Server logs (rotated automatically)
+    ├── system2.log   # Server logs (rotated automatically)
+    └── system2.log.N # Rotated logs (system2.log.1 to system2.log.5)
 ```
 
 Automatic backups are stored in `~/.system2-auto-backup-<timestamp>/`.
@@ -500,6 +501,20 @@ Messages are displayed in a vertical timeline with colored indicators:
 | **Guide** (assistant) | `#ffb444` (orange) | Assistant responses |
 | **Tool calls** | `#fd2ef5` (magenta) | Tool execution status |
 | **Thinking** | `#8b949e` (gray) | Extended thinking blocks (collapsible) |
+
+### Mid-Loop Message Delivery
+
+The server can inject messages into an agent's context while it is actively processing, without waiting for the current turn to finish. This is powered by pi-coding-agent's `streamingBehavior: 'steer'` option.
+
+**How it works:**
+1. Message arrives at `AgentHost.prompt()` with `{ isSteering: true }`
+2. AgentHost passes `{ streamingBehavior: 'steer' }` to the SDK's `session.prompt()`
+3. The SDK injects the message into the agent's next LLM call (between tool executions)
+4. If the agent is idle, the message triggers a new loop round
+
+**Current use:** User steering messages — users can send priority messages while the agent is mid-turn (the UI Send button changes to "Queue", and steering messages are prepended to the front of the queue).
+
+**Future use:** The same mechanism enables agent-to-agent communication — the server routes messages between agents identically to how it routes user→Guide messages.
 
 ### Inter-Agent Communication (Planned)
 

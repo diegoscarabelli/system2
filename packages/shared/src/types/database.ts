@@ -7,29 +7,54 @@
 export interface Project {
   id: number;
   name: string;
-  description: string | null;
-  status: 'in progress' | 'completed' | 'archived';
+  description: string;
+  status: 'todo' | 'in progress' | 'review' | 'done' | 'abandoned';
+  labels: string[];
+  start_at: string | null;
+  end_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export interface Task {
   id: number;
-  project_id: number;
+  parent: number | null;
+  project: number | null;
   title: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
-  assigned_agent_id: number | null;
-  artifact_path: string | null;
+  description: string;
+  status: 'todo' | 'in progress' | 'review' | 'done' | 'abandoned';
+  priority: 'low' | 'medium' | 'high';
+  assignee: number | null;
+  labels: string[];
+  start_at: string | null;
+  end_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskLink {
+  id: number;
+  source: number;
+  target: number;
+  relationship: 'blocked_by' | 'relates_to' | 'duplicates';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskComment {
+  id: number;
+  task: number;
+  author: number;
+  content: string;
   created_at: string;
   updated_at: string;
 }
 
 export interface Agent {
   id: number;
-  type: 'guide' | 'conductor' | 'narrator' | 'reviewer';
-  project_id: number | null; // NULL for Guide, set for project-specific agents
-  session_path: string; // Path to Pi SDK JSONL session
-  status: 'idle' | 'working' | 'waiting';
+  role: 'guide' | 'conductor' | 'narrator' | 'reviewer';
+  project: number | null; // NULL for Guide, set for project-specific agents
+  status: 'idle' | 'active' | 'archived';
   created_at: string;
   updated_at: string;
 }

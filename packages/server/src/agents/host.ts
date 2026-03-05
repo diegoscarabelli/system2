@@ -91,13 +91,10 @@ export class AgentHost {
   async initialize(): Promise<void> {
     // Get or create the Guide agent in database (singleton)
     const guideAgent = this.db.getOrCreateGuideAgent();
-    console.log('[AgentHost] Guide agent:', {
-      id: guideAgent.id,
-      session_path: guideAgent.session_path,
-    });
+    console.log('[AgentHost] Guide agent:', { id: guideAgent.id });
 
-    // Session directory from database record
-    const guideSessionDir = join(SYSTEM2_DIR, guideAgent.session_path);
+    // Session directory for the Guide agent
+    const guideSessionDir = join(SYSTEM2_DIR, 'sessions', 'guide');
 
     // Ensure session directory exists
     if (!existsSync(guideSessionDir)) {

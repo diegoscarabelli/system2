@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Agent, Project, Task } from '@system2/shared';
+import type { Agent, Project, Task, TaskComment, TaskLink } from '@system2/shared';
 import Database from 'better-sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,12 +35,19 @@ export class DatabaseClient {
   // Project operations
   createProject(project: Omit<Project, 'id' | 'created_at' | 'updated_at'>): Project {
     const stmt = this.db.prepare(`
-      INSERT INTO project (name, description, status)
-      VALUES (?, ?, ?)
+      INSERT INTO project (name, description, status, labels, start_at, end_at)
+      VALUES (?, ?, ?, ?, ?, ?)
       RETURNING *
     `);
 
-    return stmt.get(project.name, project.description, project.status) as Project;
+    return stmt.get(
+      project.name,
+      project.description,
+      project.status,
+      JSON.stringify(project.labels),
+      project.start_at,
+      project.end_at
+    ) as Project;
   }
 
   getProject(id: number): Project | null {
@@ -61,7 +68,9 @@ export class DatabaseClient {
 
   updateProject(
     id: number,
-    updates: Partial<Pick<Project, 'name' | 'description' | 'status'>>
+    updates: Partial<
+      Pick<Project, 'name' | 'description' | 'status' | 'labels' | 'start_at' | 'end_at'>
+    >
   ): Project | null {
     const fields: string[] = [];
     const values: (string | number | null)[] = [];
@@ -77,6 +86,18 @@ export class DatabaseClient {
     if (updates.status !== undefined) {
       fields.push('status = ?');
       values.push(updates.status);
+    }
+    if (updates.labels !== undefined) {
+      fields.push('labels = ?');
+      values.push(JSON.stringify(updates.labels));
+    }
+    if (updates.start_at !== undefined) {
+      fields.push('start_at = ?');
+      values.push(updates.start_at);
+    }
+    if (updates.end_at !== undefined) {
+      fields.push('end_at = ?');
+      values.push(updates.end_at);
     }
 
     if (fields.length === 0) return this.getProject(id);
@@ -97,17 +118,22 @@ export class DatabaseClient {
   // Task operations
   createTask(task: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Task {
     const stmt = this.db.prepare(`
-      INSERT INTO task (project_id, title, status, assigned_agent_id, artifact_path)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO task (parent, project, title, description, status, priority, assignee, labels, start_at, end_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING *
     `);
 
     return stmt.get(
-      task.project_id,
+      task.parent,
+      task.project,
       task.title,
+      task.description,
       task.status,
-      task.assigned_agent_id,
-      task.artifact_path
+      task.priority,
+      task.assignee,
+      JSON.stringify(task.labels),
+      task.start_at,
+      task.end_at
     ) as Task;
   }
 
@@ -116,29 +142,66 @@ export class DatabaseClient {
     return (stmt.get(id) as Task) || null;
   }
 
-  listTasks(projectId: number): Task[] {
-    const stmt = this.db.prepare('SELECT * FROM task WHERE project_id = ? ORDER BY created_at ASC');
-    return stmt.all(projectId) as Task[];
+  listTasks(project: number): Task[] {
+    const stmt = this.db.prepare('SELECT * FROM task WHERE project = ? ORDER BY created_at ASC');
+    return stmt.all(project) as Task[];
   }
 
   updateTask(
     id: number,
-    updates: Partial<Pick<Task, 'status' | 'assigned_agent_id' | 'artifact_path'>>
+    updates: Partial<
+      Pick<
+        Task,
+        | 'parent'
+        | 'title'
+        | 'description'
+        | 'status'
+        | 'priority'
+        | 'assignee'
+        | 'labels'
+        | 'start_at'
+        | 'end_at'
+      >
+    >
   ): Task | null {
     const fields: string[] = [];
     const values: (string | number | null)[] = [];
 
+    if (updates.parent !== undefined) {
+      fields.push('parent = ?');
+      values.push(updates.parent);
+    }
+    if (updates.title !== undefined) {
+      fields.push('title = ?');
+      values.push(updates.title);
+    }
+    if (updates.description !== undefined) {
+      fields.push('description = ?');
+      values.push(updates.description);
+    }
     if (updates.status !== undefined) {
       fields.push('status = ?');
       values.push(updates.status);
     }
-    if (updates.assigned_agent_id !== undefined) {
-      fields.push('assigned_agent_id = ?');
-      values.push(updates.assigned_agent_id);
+    if (updates.priority !== undefined) {
+      fields.push('priority = ?');
+      values.push(updates.priority);
     }
-    if (updates.artifact_path !== undefined) {
-      fields.push('artifact_path = ?');
-      values.push(updates.artifact_path);
+    if (updates.assignee !== undefined) {
+      fields.push('assignee = ?');
+      values.push(updates.assignee);
+    }
+    if (updates.labels !== undefined) {
+      fields.push('labels = ?');
+      values.push(JSON.stringify(updates.labels));
+    }
+    if (updates.start_at !== undefined) {
+      fields.push('start_at = ?');
+      values.push(updates.start_at);
+    }
+    if (updates.end_at !== undefined) {
+      fields.push('end_at = ?');
+      values.push(updates.end_at);
     }
 
     if (fields.length === 0) return this.getTask(id);
@@ -159,12 +222,12 @@ export class DatabaseClient {
   // Agent operations
   createAgent(agent: Omit<Agent, 'id' | 'created_at' | 'updated_at'>): Agent {
     const stmt = this.db.prepare(`
-      INSERT INTO agent (type, project_id, session_path, status)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO agent (role, project, status)
+      VALUES (?, ?, ?)
       RETURNING *
     `);
 
-    return stmt.get(agent.type, agent.project_id, agent.session_path, agent.status) as Agent;
+    return stmt.get(agent.role, agent.project, agent.status) as Agent;
   }
 
   getAgent(id: number): Agent | null {
@@ -172,10 +235,10 @@ export class DatabaseClient {
     return (stmt.get(id) as Agent) || null;
   }
 
-  listAgents(projectId?: number): Agent[] {
-    if (projectId) {
-      const stmt = this.db.prepare('SELECT * FROM agent WHERE project_id = ?');
-      return stmt.all(projectId) as Agent[];
+  listAgents(project?: number): Agent[] {
+    if (project) {
+      const stmt = this.db.prepare('SELECT * FROM agent WHERE project = ?');
+      return stmt.all(project) as Agent[];
     }
     const stmt = this.db.prepare('SELECT * FROM agent ORDER BY created_at DESC');
     return stmt.all() as Agent[];
@@ -194,10 +257,10 @@ export class DatabaseClient {
 
   /**
    * Get the Guide agent, creating it if it doesn't exist.
-   * Guide is a singleton - there's only one, with project_id = NULL.
+   * Guide is a singleton - there's only one, with project = NULL.
    */
   getOrCreateGuideAgent(): Agent {
-    const findStmt = this.db.prepare('SELECT * FROM agent WHERE type = ? AND project_id IS NULL');
+    const findStmt = this.db.prepare('SELECT * FROM agent WHERE role = ? AND project IS NULL');
     const existing = findStmt.get('guide') as Agent | undefined;
 
     if (existing) {
@@ -205,11 +268,56 @@ export class DatabaseClient {
     }
 
     return this.createAgent({
-      type: 'guide',
-      project_id: null,
-      session_path: 'sessions/guide',
+      role: 'guide',
+      project: null,
       status: 'idle',
     });
+  }
+
+  // Task link operations
+  createTaskLink(link: Omit<TaskLink, 'id' | 'created_at' | 'updated_at'>): TaskLink {
+    const stmt = this.db.prepare(`
+      INSERT INTO task_link (source, target, relationship)
+      VALUES (?, ?, ?)
+      RETURNING *
+    `);
+
+    return stmt.get(link.source, link.target, link.relationship) as TaskLink;
+  }
+
+  listTaskLinks(taskId: number): TaskLink[] {
+    const stmt = this.db.prepare(
+      'SELECT * FROM task_link WHERE source = ? OR target = ? ORDER BY created_at ASC'
+    );
+    return stmt.all(taskId, taskId) as TaskLink[];
+  }
+
+  deleteTaskLink(id: number): boolean {
+    const stmt = this.db.prepare('DELETE FROM task_link WHERE id = ?');
+    return stmt.run(id).changes > 0;
+  }
+
+  // Task comment operations
+  createTaskComment(comment: Omit<TaskComment, 'id' | 'created_at' | 'updated_at'>): TaskComment {
+    const stmt = this.db.prepare(`
+      INSERT INTO task_comment (task, author, content)
+      VALUES (?, ?, ?)
+      RETURNING *
+    `);
+
+    return stmt.get(comment.task, comment.author, comment.content) as TaskComment;
+  }
+
+  listTaskComments(task: number): TaskComment[] {
+    const stmt = this.db.prepare(
+      'SELECT * FROM task_comment WHERE task = ? ORDER BY created_at ASC'
+    );
+    return stmt.all(task) as TaskComment[];
+  }
+
+  deleteTaskComment(id: number): boolean {
+    const stmt = this.db.prepare('DELETE FROM task_comment WHERE id = ?');
+    return stmt.run(id).changes > 0;
   }
 
   // Query method for custom queries (used by query_database tool)
