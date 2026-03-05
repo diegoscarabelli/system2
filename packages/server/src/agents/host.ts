@@ -129,7 +129,8 @@ export class AgentHost {
     const definitionFile = readFileSync(definitionPath, 'utf-8');
     const { data: agentMeta, content: agentPrompt } = matter(definitionFile);
     const agentConfig = agentMeta as AgentDefinition;
-    const systemPrompt = `${agentsRefContent}\n\n${agentPrompt}`;
+    const knowledgeContext = this.loadKnowledgeContext();
+    const systemPrompt = `${agentsRefContent}\n\n${agentPrompt}${knowledgeContext}`;
 
     const llmProvider = this.currentProvider;
 
@@ -318,6 +319,26 @@ export class AgentHost {
     } finally {
       this.isReinitializing = false;
     }
+  }
+
+  /**
+   * Load knowledge files and return as context string for the system prompt.
+   * Files with only template scaffolding (<=10 lines) are skipped.
+   */
+  private loadKnowledgeContext(): string {
+    const knowledgeDir = join(SYSTEM2_DIR, 'knowledge');
+    const sections: string[] = [];
+    for (const file of ['infrastructure.md', 'user.md', 'memory.md']) {
+      const filePath = join(knowledgeDir, file);
+      if (existsSync(filePath)) {
+        const content = readFileSync(filePath, 'utf-8');
+        if (content.trim().split('\n').length > 10) {
+          sections.push(content);
+        }
+      }
+    }
+    if (sections.length === 0) return '';
+    return `\n\n## Knowledge Base\n\n${sections.join('\n\n---\n\n')}`;
   }
 
   /**
