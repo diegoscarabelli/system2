@@ -20,6 +20,7 @@ A single-user, self-hosted AI multi-agent system for working with data.
   - [Message Delivery](#message-delivery)
   - [Session Persistence](#session-persistence)
   - [Database Schema](#database-schema)
+  - [Knowledge & Memory](#knowledge--memory)
 - [Artifact Display](#artifact-display)
 - [Server & Protocol](#server--protocol)
 - [Web UI](#web-ui)
@@ -151,14 +152,20 @@ All System2 data lives in `~/.system2/`:
 
 ```
 ~/.system2/
-├── config.toml     # All settings and credentials (0600 permissions)
-├── app.db          # SQLite database (projects, tasks, agents)
-├── server.pid      # PID file when server is running
-├── sessions/       # Agent conversation history (JSONL)
-├── projects/       # Project workspaces
+├── .git/               # Version control for text files
+├── config.toml         # All settings and credentials (0600 permissions)
+├── app.db              # SQLite database (projects, tasks, agents)
+├── server.pid          # PID file when server is running
+├── knowledge/          # Persistent memory
+│   ├── infrastructure.md  # Data stack details (Guide)
+│   ├── user.md            # User profile (Guide)
+│   ├── memory.md          # Long-term memory (Narrator)
+│   └── memory/            # Daily activity logs (Narrator)
+├── sessions/           # Agent conversation history (JSONL)
+├── projects/           # Project workspaces
 └── logs/
-    ├── system2.log   # Server logs (rotated automatically)
-    └── system2.log.N # Rotated logs (system2.log.1 to system2.log.5)
+    ├── system2.log     # Server logs (rotated automatically)
+    └── system2.log.N   # Rotated logs (system2.log.1 to system2.log.5)
 ```
 
 Automatic backups are stored in `~/.system2-auto-backup-<timestamp>/`.
@@ -213,6 +220,8 @@ system2/
 │   │       ├── db/
 │   │       │   ├── schema.sql  # SQLite schema
 │   │       │   └── client.ts   # Database client
+│   │       ├── knowledge/      # Knowledge directory init + git
+│   │       ├── scheduler/      # Croner-based job scheduler
 │   │       └── server.ts       # Express + WebSocket server
 │   │
 │   ├── shared/                 # Shared TypeScript types
@@ -238,12 +247,12 @@ Agent definitions are stored as Markdown files with YAML frontmatter in `package
 
 | Agent | Role | Models |
 |-------|------|--------|
-| **Guide** | User-facing agent. Detects system environment, handles questions and simple tasks directly, delegates complex work to Conductor. | claude-opus-4.5, gpt-4o, gemini-3.1-pro |
+| **Guide** | User-facing agent. Detects system environment, handles questions and simple tasks directly, delegates complex work to Conductor. Populates knowledge files during onboarding. | claude-opus-4.5, gpt-4o, gemini-3.1-pro |
 | **Conductor** | Project orchestrator. Reads `plan.md`, breaks work into tasks, creates database schemas and pipeline code, tracks progress in database. | claude-opus-4.5, gpt-4o, gemini-3.1-pro |
-| **Narrator** | Documentation agent. Reviews completed work and creates `narration.md` files capturing context for future modifications. Read-only. | claude-haiku-4.5, gpt-4o-mini, gemini-2.0-flash |
+| **Narrator** | Memory keeper. Maintains long-term memory and creates daily activity logs. Singleton (one per system, cross-project). Runs on a schedule. | claude-haiku-4.5, gpt-4o-mini, gemini-2.0-flash |
 | **Reviewer** | Validation agent. Checks SQL logic, data transformations, analytical assumptions. Generates validation reports with issues and recommendations. | claude-opus-4.5, gpt-4o, gemini-3.1-pro |
 
-**Agent spawning:** Guide is a singleton (one per system). When complex work is needed, Guide spawns a Conductor for that project. Conductor spawns Narrator when work is complete.
+**Agent lifecycle:** Guide and Narrator are singletons — created at server startup, sessions persist indefinitely. Conductor and Reviewer are project-scoped — spawned per project, archived when done.
 
 ### Agent Tools
 
@@ -268,11 +277,19 @@ The server can inject messages into an agent's context while it is actively proc
 
 #### Delivery Modes
 
-| Sender | Receiver | Mode | Behavior |
-|--------|----------|------|----------|
-| User | Guide | `steer` (always) | Interrupts immediately — user gets priority. Message injected between tool executions. |
-| Agent | Agent | `followUp` (default) | Waits for receiver to finish current work, then delivers. `triggerTurn: true` ensures idle agents wake up. |
-| Agent | Agent | `steer` (urgent) | Interrupts receiver mid-turn. Receiver can respond immediately and continue original work. |
+| Sender | Receiver | Method | Mode | Behavior |
+|--------|----------|--------|------|----------|
+| User | Guide | `prompt()` | `steer` (always) | Interrupts immediately — user gets priority. Awaits full response. |
+| Agent | Agent | `deliverMessage()` | `followUp` (default) | Waits for receiver to finish current work, then delivers. `triggerTurn: true` ensures idle agents wake up. |
+| Agent | Agent | `deliverMessage()` | `steer` (urgent) | Interrupts receiver mid-turn. Receiver can respond immediately and continue original work. |
+| Scheduler | Agent | `deliverMessage()` | `followUp` | System-generated task queued for next available turn. |
+
+#### `prompt()` vs `deliverMessage()`
+
+`AgentHost` exposes two methods that map to different Pi SDK primitives:
+
+- **`prompt(content)`** → `session.prompt()` — Creates a `user` role message. **Blocking**: the Promise resolves when the agent completes its full turn. Used by the WebSocket handler for **User → Guide** because the UI needs to stream the response synchronously.
+- **`deliverMessage(content, details)`** → `session.sendCustomMessage()` — Creates a `custom_message` entry. **Non-blocking**: returns immediately after queuing. Used for **Agent → Agent** (via `message_agent` tool) and **Scheduler → Agent** (system-generated tasks) because the sender should not block waiting for the receiver.
 
 #### User → Guide (Steering)
 
@@ -285,7 +302,7 @@ In the UI, the Send button changes to "Queue" while the agent is processing. Ste
 
 #### Agent → Agent (`message_agent`)
 
-Agents communicate via the `message_agent` tool using `sendCustomMessage()`. Messages are persisted as `custom_message` entries in the receiver's JSONL session file and automatically included in the receiver's LLM context.
+Agents communicate via the `message_agent` tool using `deliverMessage()` → `sendCustomMessage()`. Messages are persisted as `custom_message` entries in the receiver's JSONL session file and automatically included in the receiver's LLM context.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -301,14 +318,18 @@ The `AgentRegistry` (`packages/server/src/agents/registry.ts`) maps agent databa
 
 ### Session Persistence
 
-Agent conversations are persisted in JSONL files using the [pi-coding-agent session format](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md). Each line is a JSON object with a tree structure (`id`, `parentId`) that supports in-place branching — all history preserved in a single file.
+Every agent gets its own session directory with JSONL persistence, automatic compaction, and session rotation — all handled by `AgentHost.initialize()`, the same code path for all agents. Singleton agents (Guide, Narrator) are created at server startup and run indefinitely. Project-scoped agents (Conductor, Reviewer) are spawned per-project and archived when done, but use identical session mechanics while alive.
+
+Conversations are persisted in JSONL files using the [pi-coding-agent session format](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md). Each line is a JSON object with a tree structure (`id`, `parentId`) that supports in-place branching — all history preserved in a single file.
 
 ```
 ~/.system2/sessions/
-├── guide-1/                # Guide agent sessions (role-id)
+├── guide_1/                # Guide agent (singleton, persistent)
 │   └── 2026-03-02T14-30-00_abc123.jsonl
-└── conductor-2/            # Conductor sessions (role-id, per project)
-    └── 2026-03-02T15-00-00_def456.jsonl
+├── narrator_2/             # Narrator agent (singleton, persistent)
+│   └── 2026-03-03T09-00-00_def456.jsonl
+└── conductor_3/            # Conductor agent (project-scoped, archived when done)
+    └── 2026-03-02T15-00-00_ghi789.jsonl
 ```
 
 #### JSONL Entry Types
@@ -359,8 +380,8 @@ System2 uses SQLite with WAL mode for concurrent access. Schema in `packages/ser
 | Column | Type | Description |
 |--------|------|-------------|
 | id | INTEGER | Auto-incrementing unique identifier |
-| role | TEXT | Agent specialization (`guide`, `conductor`, `narrator`, `reviewer`); guide is system-wide |
-| project | INTEGER | Assigned project, NULL for guide (system-wide) |
+| role | TEXT | Agent specialization (`guide`, `conductor`, `narrator`, `reviewer`) |
+| project | INTEGER | Assigned project, NULL for Guide and Narrator (system-wide) |
 | status | TEXT | Current lifecycle state (`idle`, `active`, `archived`) |
 | created_at | TEXT | Row creation timestamp |
 | updated_at | TEXT | Last modification timestamp |
@@ -401,6 +422,17 @@ System2 uses SQLite with WAL mode for concurrent access. Schema in `packages/ser
 | content | TEXT | Comment body |
 | created_at | TEXT | Row creation timestamp |
 | updated_at | TEXT | Last modification timestamp |
+
+### Knowledge & Memory
+
+System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked for change history:
+
+- **`infrastructure.md`** — Data stack details (databases, orchestrator, repos). Populated by the Guide during onboarding, updated as infrastructure evolves.
+- **`user.md`** — Facts about the user for personalized assistance. Updated by the Guide.
+- **`memory.md`** — Long-term memory. Restructured by the Narrator every 24 hours into a coherent document. Has a `## Notes` section where any agent can write important facts; the Narrator consolidates these during restructuring.
+- **`memory/YYYY-MM-DD.md`** — Daily activity logs. The Narrator appends narrative summaries every 30 minutes based on JSONL session activity, database changes, and git diffs.
+
+The Narrator tracks progress via YAML frontmatter timestamps (`last_narrated` on daily logs, `last_restructured` on memory.md). On startup, the server checks if narration is stale and queues a catch-up — this handles laptop sleep/shutdown since the in-process scheduler (croner) does not catch up missed jobs.
 
 ## Artifact Display
 
@@ -448,7 +480,7 @@ The server (`packages/server/`) runs Express.js with a WebSocket server on the s
 - **`/artifacts`:** Serves HTML artifact files from `~/.system2/` (no-cache headers, dotfiles denied)
 - **`/api/query`:** POST endpoint for interactive artifact dashboards (SELECT-only SQL)
 - **Database:** SQLite at `~/.system2/app.db`
-- **Agent host:** Manages Guide agent session with failover support
+- **Agent hosts:** Manages Guide and Narrator agent sessions (singletons) with failover support. Runs an in-process scheduler for Narrator curation tasks.
 
 ### WebSocket Protocol
 
