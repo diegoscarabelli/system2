@@ -4,12 +4,11 @@
  * HTTP + WebSocket server that hosts the Guide and Narrator agents and serves the UI.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { LlmConfig, ServicesConfig, ToolsConfig } from '@system2/shared';
+import type { LlmConfig, SchedulerConfig, ServicesConfig, ToolsConfig } from '@system2/shared';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { AgentHost } from './agents/host.js';
@@ -17,7 +16,11 @@ import { AgentRegistry } from './agents/registry.js';
 import { DatabaseClient } from './db/client.js';
 import { initializeGitRepo } from './knowledge/git.js';
 import { initializeKnowledge } from './knowledge/init.js';
-import { registerNarratorJobs } from './scheduler/jobs.js';
+import {
+  buildAndDeliverDailySummary,
+  registerNarratorJobs,
+  resolveDailySummaryTimestamp,
+} from './scheduler/jobs.js';
 import { Scheduler } from './scheduler/scheduler.js';
 import { WebSocketHandler } from './websocket/handler.js';
 
@@ -33,6 +36,7 @@ export interface ServerConfig {
   llmConfig: LlmConfig;
   servicesConfig?: ServicesConfig;
   toolsConfig?: ToolsConfig;
+  schedulerConfig?: SchedulerConfig;
 }
 
 export class Server {
@@ -150,7 +154,15 @@ export class Server {
     await this.narratorHost.initialize();
 
     // Start scheduled jobs
-    registerNarratorJobs(this.scheduler, this.narratorHost, this.narratorId);
+    const intervalMinutes = this.config.schedulerConfig?.daily_summary_interval_minutes ?? 30;
+    registerNarratorJobs(
+      this.scheduler,
+      this.narratorHost,
+      this.narratorId,
+      this.db,
+      SYSTEM2_DIR,
+      intervalMinutes
+    );
 
     // Check if narrator needs catch-up after sleep/shutdown
     this.checkNarratorCatchUp();
@@ -178,46 +190,25 @@ export class Server {
    * Croner does NOT catch up missed jobs, so we check timestamps on startup.
    */
   private checkNarratorCatchUp(): void {
-    const today = new Date().toISOString().slice(0, 10);
-    const dailyLogPath = join(SYSTEM2_DIR, 'knowledge', 'memory', `${today}.md`);
+    const intervalMinutes = this.config.schedulerConfig?.daily_summary_interval_minutes ?? 30;
+    const { lastRunTs } = resolveDailySummaryTimestamp(SYSTEM2_DIR, intervalMinutes);
 
-    let lastNarrated: Date | null = null;
-
-    if (existsSync(dailyLogPath)) {
-      // Read frontmatter from today's daily log
-      const content = readFileSync(dailyLogPath, 'utf-8');
-      const match = content.match(/^---\s*\nlast_narrated:\s*(.+)\s*\n---/);
-      if (match) {
-        lastNarrated = new Date(match[1]);
-      }
-    } else {
-      // No daily log for today — check memory.md for last_restructured
-      const memoryPath = join(SYSTEM2_DIR, 'knowledge', 'memory.md');
-      if (existsSync(memoryPath)) {
-        const content = readFileSync(memoryPath, 'utf-8');
-        const match = content.match(/^---\s*\nlast_restructured:\s*(.+)\s*\n---/);
-        if (match) {
-          lastNarrated = new Date(match[1]);
-        }
-      }
-    }
-
-    if (!lastNarrated) {
-      // First run — nothing to narrate yet. Let the regular schedule handle it.
+    if (!lastRunTs) {
       console.log('[Server] First run, skipping narrator catch-up');
       return;
     }
 
-    const staleness = Date.now() - lastNarrated.getTime();
-    const thirtyMinutes = 30 * 60 * 1000;
-
-    if (staleness > thirtyMinutes) {
+    const staleness = Date.now() - new Date(lastRunTs).getTime();
+    if (staleness > intervalMinutes * 60 * 1000) {
       console.log(
-        `[Server] Narrator is stale by ${Math.round(staleness / 60000)} minutes, queuing catch-up`
+        `[Server] Narrator stale by ${Math.round(staleness / 60000)} min, queuing catch-up`
       );
-      this.narratorHost.deliverMessage(
-        "[Scheduled task: daily-log]\n\nAppend to today's daily log. Read activity since last_narrated timestamp. This is a catch-up after server restart.",
-        { sender: 0, receiver: this.narratorId, timestamp: Date.now() }
+      buildAndDeliverDailySummary(
+        this.db,
+        this.narratorHost,
+        this.narratorId,
+        SYSTEM2_DIR,
+        intervalMinutes
       );
     }
   }
