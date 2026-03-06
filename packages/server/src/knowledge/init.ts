@@ -15,7 +15,7 @@ import { createMemoryTemplate, INFRASTRUCTURE_TEMPLATE, USER_TEMPLATE } from './
  */
 export function initializeKnowledge(system2Dir: string): void {
   const knowledgeDir = join(system2Dir, 'knowledge');
-  const memoryDir = join(knowledgeDir, 'memory');
+  const memoryDir = join(knowledgeDir, 'daily_summaries');
 
   // Create directories
   if (!existsSync(knowledgeDir)) {

@@ -40,7 +40,7 @@ export const USER_TEMPLATE = `# User Profile
 export function createMemoryTemplate(): string {
   const now = new Date().toISOString();
   return `---
-last_restructured: ${now}
+last_narrator_update_ts: ${now}
 ---
 # Memory
 
