@@ -14,7 +14,7 @@ Agent definitions are stored as Markdown files with YAML frontmatter in `package
 |-------|------|
 | **Guide** | User-facing agent. Detects system environment, handles questions and simple tasks directly, delegates complex work to Conductor. Singleton (one per system, cross-project). Populates `knowledge/infrastructure.md` and `knowledge/user.md` during onboarding and ongoing conversations. Writes important facts to the `## Notes` section of `knowledge/memory.md` for long-term retention. |
 | **Conductor** | Project orchestrator. Reads `plan.md`, breaks work into tasks, creates database schemas and pipeline code, tracks progress in database. Spawned by Guide per project. Can write important facts to the `## Notes` section of `knowledge/memory.md`. |
-| **Narrator** | Memory keeper. Maintains long-term memory (`knowledge/memory.md`) and creates daily activity logs (`knowledge/memory/YYYY-MM-DD.md`). Singleton (one per system, cross-project). Runs on a schedule: appends to the daily log every 30 minutes, restructures `memory.md` every 24 hours. |
+| **Narrator** | Memory keeper. Maintains long-term memory (`knowledge/memory.md`) and creates daily activity summaries (`knowledge/daily_summaries/YYYY-MM-DD.md`). Singleton (one per system, cross-project). Runs on a schedule: appends to the daily summary every 30 minutes (configurable), updates `memory.md` every 24 hours. |
 | **Reviewer** | Validation agent. Checks SQL logic, data transformations, analytical assumptions. Generates validation reports with issues and recommendations. |
 
 **Agent lifecycle:** Guide and Narrator are singletons — created at server startup, sessions persist indefinitely. Conductor and Reviewer are project-scoped — spawned per project, archived when done. All agents use the same session mechanics (JSONL, compaction, rotation) via `AgentHost.initialize()`.
@@ -155,42 +155,45 @@ System2 maintains a knowledge directory at `~/.system2/knowledge/` for persisten
 |------|---------|------------|--------|
 | `infrastructure.md` | Data stack details (databases, orchestrator, git repos, tools) | Guide (onboarding + ongoing) | Edit-based |
 | `user.md` | Facts about the user for personalized assistance | Guide | Edit-based |
-| `memory.md` | Long-term memory synthesized from daily logs and agent notes | Narrator (restructure every 24h), any agent (Notes section) | Edit-based, YAML frontmatter |
-| `memory/YYYY-MM-DD.md` | Daily activity log | Narrator (append every 30 min) | Append-only, YAML frontmatter |
+| `memory.md` | Long-term memory synthesized from daily summaries and agent notes | Narrator (update every 24h), any agent (Notes section) | Edit-based, YAML frontmatter |
+| `daily_summaries/YYYY-MM-DD.md` | Daily activity summary | Narrator (append every 30 min, configurable) | Append-only, YAML frontmatter |
 
 ### memory.md
 
-Structured document with table of contents, maintained by the Narrator for coherence. Contains a `## Notes` section where any agent can write important facts during work. The Narrator consolidates notes into the document body during restructuring and clears them.
+Structured document with table of contents, maintained by the Narrator for coherence. Contains a `## Notes` section where any agent can write important facts during work. The Narrator consolidates notes into the document body during memory updates and clears them.
 
-YAML frontmatter tracks `last_restructured` (ISO 8601 timestamp). Set to creation time during onboarding.
+YAML frontmatter tracks `last_narrator_update_ts` (ISO 8601 timestamp). Set to creation time during onboarding.
 
-### Daily Logs
+### Daily Summaries
 
-Append-only files. The Narrator reads frontmatter cheaply via bash `head`/`sed` (no need to read the whole file), then appends new timestamped sections via bash `cat >>`.
+Append-only files in `knowledge/daily_summaries/`. The scheduler creates new files when needed and pre-computes all activity data. The Narrator appends narrative sections and updates the frontmatter timestamp.
 
-YAML frontmatter tracks `last_narrated` (ISO 8601 timestamp). The Narrator captures the current time at the **start** of each cycle and uses it as the new `last_narrated` value — this ensures changes during processing aren't missed in the next cycle.
+YAML frontmatter tracks `last_narrator_update_ts` (ISO 8601 timestamp).
 
-**Narrator workflow:**
-1. Capture current timestamp (`now`) before reading anything
-2. Read `last_narrated` from today's daily log frontmatter (or `last_restructured` from memory.md if no daily log exists yet)
-3. Query non-archived agents, read their JSONL entries since `last_narrated` (skip compaction entries)
-4. Optionally check `git diff`/`git log` for knowledge file changes
-5. Query database for changes: `WHERE updated_at > '<last_narrated>'`
-6. If meaningful activity exists, synthesize and append a narrative section
-7. Update `last_narrated` to `now`, commit to git
+**Scheduler pre-computation:** The scheduler job (not the Narrator) handles all deterministic work:
+1. Reads previous context (last 20 lines of most recent summary) for continuity
+2. Creates today's file if it doesn't exist (with empty `last_narrator_update_ts` frontmatter)
+3. Resolves `last_run_ts` via fallback chain: today's frontmatter → most recent summary frontmatter → memory.md frontmatter → interval ago
+4. Collects full JSONL session records from all non-archived agents in the time window
+5. Queries database for changes (tasks, projects, comments, links) in the time window
+6. Sends a single message to the Narrator with all data included
+
+The Narrator then reviews the provided data, optionally investigates further (git diffs, artifacts, additional queries), synthesizes a narrative, appends it, and updates the frontmatter.
 
 ### Git Tracking
 
-`~/.system2/` is a git repository (initialized on first `system2 start`). The Narrator uses `git log` and `git diff` to track what changed and when. Binary files (app.db, WAL) and runtime files (PID, logs) are gitignored. The Narrator commits after each daily log append and memory.md restructure.
+`~/.system2/` is a git repository (initialized on first `system2 start`). The Narrator uses `git log` and `git diff` to track what changed and when. Binary files (app.db, WAL) and runtime files (PID, logs) are gitignored. The Narrator commits after each daily summary append and memory.md update.
 
 ### Scheduler
 
-An in-process scheduler (croner) sends messages to the Narrator via `deliverMessage()` on a cron schedule. If the Narrator is mid-turn, messages queue via `followUp` delivery. On startup, a catch-up check queues immediate narration if `last_narrated` is stale (croner does not catch up missed jobs after sleep/shutdown).
+An in-process scheduler (croner) triggers jobs that pre-compute activity data and send messages to the Narrator via `deliverMessage()`. If the Narrator is mid-turn, messages queue via `followUp` delivery. On startup, a catch-up check queues immediate narration if `last_narrator_update_ts` is stale (croner does not catch up missed jobs after sleep/shutdown).
+
+The daily summary interval is configurable via `[scheduler] daily_summary_interval_minutes` in `config.toml` (default: 30).
 
 | Job | Schedule | Action |
 |-----|----------|--------|
-| daily-log | `*/30 * * * *` | Append to today's daily log |
-| memory-restructure | `0 4 * * *` | Restructure memory.md |
+| daily-summary | `*/<interval> * * * *` | Collect activity and send to Narrator for daily summary |
+| memory-update | `0 4 * * *` | List daily summaries and send to Narrator for memory update |
 
 ## Inter-Agent Communication
 
@@ -370,8 +373,8 @@ All System2 data lives in `~/.system2/`:
 │   ├── infrastructure.md  # Data stack details
 │   ├── user.md            # User profile
 │   ├── memory.md          # Long-term memory (YAML frontmatter)
-│   └── memory/            # Daily logs
-│       └── YYYY-MM-DD.md  # Daily activity log (append-only, YAML frontmatter)
+│   └── daily_summaries/   # Daily activity summaries
+│       └── YYYY-MM-DD.md  # Daily summary (append-only, YAML frontmatter)
 ├── sessions/           # Agent conversation history (JSONL)
 │   ├── guide_1/        # Guide agent (singleton, persistent)
 │   ├── narrator_2/     # Narrator agent (singleton, persistent)

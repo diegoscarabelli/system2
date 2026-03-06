@@ -160,7 +160,7 @@ All System2 data lives in `~/.system2/`:
 │   ├── infrastructure.md  # Data stack details (Guide)
 │   ├── user.md            # User profile (Guide)
 │   ├── memory.md          # Long-term memory (Narrator)
-│   └── memory/            # Daily activity logs (Narrator)
+│   └── daily_summaries/   # Daily activity summaries (Narrator)
 ├── sessions/           # Agent conversation history (JSONL)
 ├── projects/           # Project workspaces
 └── logs/
@@ -249,7 +249,7 @@ Agent definitions are stored as Markdown files with YAML frontmatter in `package
 |-------|------|--------|
 | **Guide** | User-facing agent. Detects system environment, handles questions and simple tasks directly, delegates complex work to Conductor. Populates knowledge files during onboarding. | claude-opus-4.5, gpt-4o, gemini-3.1-pro |
 | **Conductor** | Project orchestrator. Reads `plan.md`, breaks work into tasks, creates database schemas and pipeline code, tracks progress in database. | claude-opus-4.5, gpt-4o, gemini-3.1-pro |
-| **Narrator** | Memory keeper. Maintains long-term memory and creates daily activity logs. Singleton (one per system, cross-project). Runs on a schedule. | claude-haiku-4.5, gpt-4o-mini, gemini-2.0-flash |
+| **Narrator** | Memory keeper. Maintains long-term memory and creates daily activity summaries. Singleton (one per system, cross-project). Runs on a schedule. | claude-haiku-4.5, gpt-4o-mini, gemini-2.0-flash |
 | **Reviewer** | Validation agent. Checks SQL logic, data transformations, analytical assumptions. Generates validation reports with issues and recommendations. | claude-opus-4.5, gpt-4o, gemini-3.1-pro |
 
 **Agent lifecycle:** Guide and Narrator are singletons — created at server startup, sessions persist indefinitely. Conductor and Reviewer are project-scoped — spawned per project, archived when done.
@@ -429,10 +429,10 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked f
 
 - **`infrastructure.md`** — Data stack details (databases, orchestrator, repos). Populated by the Guide during onboarding, updated as infrastructure evolves.
 - **`user.md`** — Facts about the user for personalized assistance. Updated by the Guide.
-- **`memory.md`** — Long-term memory. Restructured by the Narrator every 24 hours into a coherent document. Has a `## Notes` section where any agent can write important facts; the Narrator consolidates these during restructuring.
-- **`memory/YYYY-MM-DD.md`** — Daily activity logs. The Narrator appends narrative summaries every 30 minutes based on JSONL session activity, database changes, and git diffs.
+- **`memory.md`** — Long-term memory. Updated by the Narrator every 24 hours into a coherent document. Has a `## Notes` section where any agent can write important facts; the Narrator consolidates these during updates.
+- **`daily_summaries/YYYY-MM-DD.md`** — Daily activity summaries. The scheduler pre-computes all activity data (JSONL session records, database changes) and sends it to the Narrator, which appends narrative summaries every 30 minutes (configurable via `[scheduler] daily_summary_interval_minutes` in config.toml).
 
-The Narrator tracks progress via YAML frontmatter timestamps (`last_narrated` on daily logs, `last_restructured` on memory.md). On startup, the server checks if narration is stale and queues a catch-up — this handles laptop sleep/shutdown since the in-process scheduler (croner) does not catch up missed jobs.
+The Narrator tracks progress via `last_narrator_update_ts` in YAML frontmatter (on both daily summaries and memory.md). On startup, the server checks if narration is stale and queues a catch-up — this handles laptop sleep/shutdown since the in-process scheduler (croner) does not catch up missed jobs.
 
 ## Artifact Display
 
