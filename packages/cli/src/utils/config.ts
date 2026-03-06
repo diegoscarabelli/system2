@@ -44,6 +44,10 @@ export interface System2Config {
     /** Minutes between daily summary runs (default: 30) */
     dailySummaryIntervalMinutes: number;
   };
+  chat: {
+    /** Maximum number of chat messages to keep in history (default: 100) */
+    maxHistoryMessages: number;
+  };
 }
 
 /**
@@ -77,12 +81,18 @@ interface TomlConfig {
   scheduler?: {
     daily_summary_interval_minutes?: number;
   };
+  chat?: {
+    max_history_messages?: number;
+  };
 }
 
 /**
  * Default operational configuration values.
  */
-const DEFAULT_OPERATIONAL: Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler'> = {
+const DEFAULT_OPERATIONAL: Pick<
+  System2Config,
+  'backup' | 'session' | 'logs' | 'scheduler' | 'chat'
+> = {
   backup: {
     cooldownHours: 24,
     maxBackups: 5,
@@ -96,6 +106,9 @@ const DEFAULT_OPERATIONAL: Pick<System2Config, 'backup' | 'session' | 'logs' | '
   },
   scheduler: {
     dailySummaryIntervalMinutes: 30,
+  },
+  chat: {
+    maxHistoryMessages: 100,
   },
 };
 
@@ -153,8 +166,9 @@ function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
  */
 function convertTomlOperational(
   toml: TomlConfig
-): Partial<Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler'>> {
-  const config: Partial<Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler'>> = {};
+): Partial<Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler' | 'chat'>> {
+  const config: Partial<Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler' | 'chat'>> =
+    {};
 
   if (toml.backup) {
     config.backup = {
@@ -183,6 +197,13 @@ function convertTomlOperational(
       dailySummaryIntervalMinutes:
         toml.scheduler.daily_summary_interval_minutes ??
         DEFAULT_OPERATIONAL.scheduler.dailySummaryIntervalMinutes,
+    };
+  }
+
+  if (toml.chat) {
+    config.chat = {
+      maxHistoryMessages:
+        toml.chat.max_history_messages ?? DEFAULT_OPERATIONAL.chat.maxHistoryMessages,
     };
   }
 
@@ -256,6 +277,7 @@ export function buildConfigToml(options: {
   session?: System2Config['session'];
   logs?: System2Config['logs'];
   scheduler?: System2Config['scheduler'];
+  chat?: System2Config['chat'];
 }): string {
   const lines: string[] = [
     '# System2 Configuration',
@@ -331,6 +353,12 @@ export function buildConfigToml(options: {
   lines.push('[scheduler]');
   lines.push(`# Minutes between daily summary runs`);
   lines.push(`daily_summary_interval_minutes = ${scheduler.dailySummaryIntervalMinutes}`);
+  lines.push('');
+
+  const chat = options.chat ?? DEFAULT_OPERATIONAL.chat;
+  lines.push('[chat]');
+  lines.push(`# Maximum number of chat messages to keep in UI history`);
+  lines.push(`max_history_messages = ${chat.maxHistoryMessages}`);
   lines.push('');
 
   return lines.join('\n');

@@ -91,6 +91,9 @@ export async function start(options: {
       servicesConfig: config.services,
       toolsConfig: config.tools,
       schedulerConfig: config.scheduler,
+      chatConfig: config.chat
+        ? { max_history_messages: config.chat.maxHistoryMessages }
+        : undefined,
     });
 
     await server.start();
