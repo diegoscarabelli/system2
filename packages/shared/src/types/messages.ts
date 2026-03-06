@@ -4,6 +4,8 @@
  * Defines the message format for client-server communication over WebSocket.
  */
 
+import type { ChatMessage } from './chat.js';
+
 // Client -> Server messages
 export type ClientMessage =
   | { type: 'user_message'; content: string }
@@ -21,4 +23,5 @@ export type ServerMessage =
   | { type: 'artifact'; url: string }
   | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number }
   | { type: 'error'; message: string }
-  | { type: 'ready_for_input' }; // Signals that the agent is ready for the next message
+  | { type: 'ready_for_input' } // Signals that the agent is ready for the next message
+  | { type: 'chat_history'; messages: ChatMessage[] }; // Sent on connect — recent message history from server

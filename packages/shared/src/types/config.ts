@@ -42,3 +42,7 @@ export interface ToolsConfig {
 export interface SchedulerConfig {
   daily_summary_interval_minutes: number;
 }
+
+export interface ChatConfig {
+  max_history_messages: number;
+}
