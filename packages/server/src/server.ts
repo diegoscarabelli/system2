@@ -8,8 +8,11 @@ import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type {
   ChatConfig,
+  ChatMessage,
+  ChatTurnEvent,
   LlmConfig,
   SchedulerConfig,
   ServicesConfig,
@@ -102,6 +105,11 @@ export class Server {
     const maxMessages = config.chatConfig?.max_history_messages ?? 100;
     this.messageHistory = new MessageHistory(join(SYSTEM2_DIR, 'chat-history.json'), maxMessages);
 
+    // Single subscriber for capturing assistant messages into history.
+    // This runs once regardless of how many WebSocket clients are connected,
+    // preventing duplicate entries when multiple tabs are open.
+    this.subscribeForHistoryCapture(this.agentHost);
+
     // Initialize scheduler
     this.scheduler = new Scheduler();
 
@@ -157,7 +165,131 @@ export class Server {
     // Handle WebSocket connections
     this.wss.on('connection', (ws) => {
       console.log('Client connected');
-      new WebSocketHandler(ws, this.agentHost, this.messageHistory);
+      new WebSocketHandler(ws, this.agentHost, this.messageHistory, this.wss);
+    });
+  }
+
+  /**
+   * Subscribe once to agent events for history capture.
+   * Accumulates thinking blocks and tool calls as turn events,
+   * then persists the complete assistant message on message_end.
+   */
+  private subscribeForHistoryCapture(agentHost: AgentHost): void {
+    let currentAssistantText = '';
+    let activeThinkingContent = '';
+    let currentTurnEvents: ChatTurnEvent[] = [];
+
+    agentHost.subscribe((event: AgentSessionEvent) => {
+      switch (event.type) {
+        case 'message_update':
+          if (event.assistantMessageEvent.type === 'text_delta') {
+            currentAssistantText += event.assistantMessageEvent.delta;
+          } else if (event.assistantMessageEvent.type === 'thinking_delta') {
+            activeThinkingContent += event.assistantMessageEvent.delta;
+          }
+          break;
+
+        case 'message_end': {
+          // Finalize thinking if active
+          if (activeThinkingContent) {
+            currentTurnEvents.push({
+              type: 'thinking',
+              data: {
+                id: `thinking-${Date.now()}`,
+                content: activeThinkingContent,
+                isStreaming: false,
+                timestamp: Date.now(),
+              },
+            });
+            activeThinkingContent = '';
+          }
+
+          // Capture completed assistant message in history
+          if (currentAssistantText) {
+            const assistantMsg: ChatMessage = {
+              id: `msg-${Date.now()}`,
+              role: 'assistant',
+              content: currentAssistantText,
+              timestamp: Date.now(),
+              turnEvents: currentTurnEvents.length > 0 ? [...currentTurnEvents] : undefined,
+            };
+            this.messageHistory.push(assistantMsg);
+            currentAssistantText = '';
+            currentTurnEvents = [];
+          }
+          break;
+        }
+
+        case 'tool_execution_start': {
+          // Finalize thinking before tool call
+          if (activeThinkingContent) {
+            currentTurnEvents.push({
+              type: 'thinking',
+              data: {
+                id: `thinking-${Date.now()}`,
+                content: activeThinkingContent,
+                isStreaming: false,
+                timestamp: Date.now(),
+              },
+            });
+            activeThinkingContent = '';
+          }
+
+          // Format tool input for display
+          let inputText = '';
+          const rawInput = event.args;
+          if (rawInput) {
+            try {
+              inputText =
+                typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput, null, 2);
+            } catch {
+              inputText = String(rawInput);
+            }
+          }
+
+          currentTurnEvents.push({
+            type: 'tool_call',
+            data: {
+              id: `tool-${Date.now()}`,
+              name: event.toolName,
+              status: 'running',
+              input: inputText,
+              timestamp: Date.now(),
+            },
+          });
+          break;
+        }
+
+        case 'tool_execution_end': {
+          // Format result as string for display
+          let resultText = '';
+          if (event.result?.content) {
+            resultText = event.result.content
+              .map((c: { type: string; text?: string }) => (c.type === 'text' ? c.text : ''))
+              .join('');
+          }
+          const finalResult = event.isError ? `Error: ${resultText}` : resultText;
+
+          // Update the tool call in turn events (immutable)
+          let matched = false;
+          currentTurnEvents = currentTurnEvents.map((e) => {
+            if (
+              !matched &&
+              e.type === 'tool_call' &&
+              e.data.name === event.toolName &&
+              e.data.status === 'running'
+            ) {
+              matched = true;
+              return {
+                ...e,
+                data: { ...e.data, status: 'completed' as const, result: finalResult },
+              };
+            }
+            return e;
+          });
+          break;
+        }
+      }
     });
   }
 

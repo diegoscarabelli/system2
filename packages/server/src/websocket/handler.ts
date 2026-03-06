@@ -2,13 +2,14 @@
  * WebSocket Handler
  *
  * Bridges Pi Agent events to WebSocket clients for real-time chat UI updates.
- * Captures completed messages into MessageHistory for persistence.
+ * User messages are captured here and broadcast to other connected tabs.
+ * Assistant message history capture is handled centrally by Server.
  */
 
 import { type FSWatcher, watch } from 'node:fs';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
-import type { ChatMessage, ChatTurnEvent, ClientMessage, ServerMessage } from '@system2/shared';
-import type { WebSocket } from 'ws';
+import type { ClientMessage, ServerMessage } from '@system2/shared';
+import type { WebSocket, WebSocketServer } from 'ws';
 import type { AgentHost } from '../agents/host.js';
 import type { MessageHistory } from '../chat/history.js';
 
@@ -16,24 +17,21 @@ export class WebSocketHandler {
   private ws: WebSocket;
   private agentHost: AgentHost;
   private history: MessageHistory;
+  private wss: WebSocketServer;
   private unsubscribe?: () => void;
   private artifactWatcher?: FSWatcher;
   private artifactUrl?: string;
 
-  // Accumulate turn events for the current assistant message
-  private currentTurnEvents: ChatTurnEvent[] = [];
-  private currentAssistantText = '';
-  private activeThinkingContent = '';
-
-  constructor(ws: WebSocket, agentHost: AgentHost, history: MessageHistory) {
+  constructor(ws: WebSocket, agentHost: AgentHost, history: MessageHistory, wss: WebSocketServer) {
     this.ws = ws;
     this.agentHost = agentHost;
     this.history = history;
+    this.wss = wss;
 
     // Send chat history on connect — server is the source of truth
     this.send({ type: 'chat_history', messages: history.getMessages() });
 
-    // Subscribe to agent events
+    // Subscribe to agent events for streaming to this client
     this.unsubscribe = agentHost.subscribe((event) => {
       this.handleAgentEvent(event);
     });
@@ -62,13 +60,20 @@ export class WebSocketHandler {
 
   private handleClientMessage(message: ClientMessage): void {
     switch (message.type) {
-      case 'user_message':
-        // Capture user message in history
-        this.history.push({
+      case 'user_message': {
+        // Capture user message in history and broadcast to other tabs
+        const userMsg = {
           id: `msg-${Date.now()}`,
-          role: 'user',
+          role: 'user' as const,
           content: message.content,
           timestamp: Date.now(),
+        };
+        this.history.push(userMsg);
+        this.broadcast({
+          type: 'user_message_broadcast',
+          id: userMsg.id,
+          content: userMsg.content,
+          timestamp: userMsg.timestamp,
         });
 
         // Send user message to agent
@@ -77,14 +82,22 @@ export class WebSocketHandler {
           this.sendError('Failed to process message');
         });
         break;
+      }
 
-      case 'steering_message':
-        // Capture steering message in history (still a user message)
-        this.history.push({
+      case 'steering_message': {
+        // Capture steering message in history (still a user message) and broadcast
+        const steerMsg = {
           id: `msg-${Date.now()}`,
-          role: 'user',
+          role: 'user' as const,
           content: message.content,
           timestamp: Date.now(),
+        };
+        this.history.push(steerMsg);
+        this.broadcast({
+          type: 'user_message_broadcast',
+          id: steerMsg.id,
+          content: steerMsg.content,
+          timestamp: steerMsg.timestamp,
         });
 
         // Send steering message (inserted ASAP into the agent loop)
@@ -93,6 +106,7 @@ export class WebSocketHandler {
           this.sendError('Failed to process steering message');
         });
         break;
+      }
 
       case 'abort':
         this.agentHost.abort();
@@ -108,7 +122,6 @@ export class WebSocketHandler {
       case 'message_update':
         // Stream text as it's generated
         if (event.assistantMessageEvent.type === 'text_delta') {
-          this.currentAssistantText += event.assistantMessageEvent.delta;
           this.send({
             type: 'assistant_chunk',
             content: event.assistantMessageEvent.delta,
@@ -116,7 +129,6 @@ export class WebSocketHandler {
         }
         // Stream thinking blocks
         else if (event.assistantMessageEvent.type === 'thinking_delta') {
-          this.activeThinkingContent += event.assistantMessageEvent.delta;
           this.send({
             type: 'thinking_chunk',
             content: event.assistantMessageEvent.delta,
@@ -125,55 +137,13 @@ export class WebSocketHandler {
         break;
 
       case 'message_end':
-        // Finalize thinking if active
-        if (this.activeThinkingContent) {
-          this.currentTurnEvents.push({
-            type: 'thinking',
-            data: {
-              id: `thinking-${Date.now()}`,
-              content: this.activeThinkingContent,
-              isStreaming: false,
-              timestamp: Date.now(),
-            },
-          });
-          this.activeThinkingContent = '';
-        }
-
-        // Capture completed assistant message in history
-        if (this.currentAssistantText) {
-          const assistantMsg: ChatMessage = {
-            id: `msg-${Date.now()}`,
-            role: 'assistant',
-            content: this.currentAssistantText,
-            timestamp: Date.now(),
-            turnEvents: this.currentTurnEvents.length > 0 ? [...this.currentTurnEvents] : undefined,
-          };
-          this.history.push(assistantMsg);
-          this.currentAssistantText = '';
-          this.currentTurnEvents = [];
-        }
-
         this.send({ type: 'assistant_end' });
         break;
 
       case 'tool_execution_start': {
-        // Finalize thinking before tool call
-        if (this.activeThinkingContent) {
-          this.currentTurnEvents.push({
-            type: 'thinking',
-            data: {
-              id: `thinking-${Date.now()}`,
-              content: this.activeThinkingContent,
-              isStreaming: false,
-              timestamp: Date.now(),
-            },
-          });
-          this.activeThinkingContent = '';
-        }
-
         // Format tool input for display
         let inputText = '';
-        const rawInput = event.toolInput ?? (event as Record<string, unknown>).args;
+        const rawInput = event.args;
         if (rawInput) {
           try {
             inputText = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput, null, 2);
@@ -181,18 +151,6 @@ export class WebSocketHandler {
             inputText = String(rawInput);
           }
         }
-
-        // Track tool call in turn events
-        this.currentTurnEvents.push({
-          type: 'tool_call',
-          data: {
-            id: `tool-${Date.now()}`,
-            name: event.toolName,
-            status: 'running',
-            input: inputText,
-            timestamp: Date.now(),
-          },
-        });
 
         this.send({
           type: 'tool_call_start',
@@ -211,21 +169,6 @@ export class WebSocketHandler {
             .join('');
         }
         const finalResult = event.isError ? `Error: ${resultText}` : resultText;
-
-        // Update the tool call in turn events (immutable)
-        let matched = false;
-        this.currentTurnEvents = this.currentTurnEvents.map((e) => {
-          if (
-            !matched &&
-            e.type === 'tool_call' &&
-            e.data.name === event.toolName &&
-            e.data.status === 'running'
-          ) {
-            matched = true;
-            return { ...e, data: { ...e.data, status: 'completed' as const, result: finalResult } };
-          }
-          return e;
-        });
 
         this.send({
           type: 'tool_call_end',
@@ -278,9 +221,20 @@ export class WebSocketHandler {
     }
   }
 
+  /** Send a message to this client only. */
   private send(message: ServerMessage): void {
     if (this.ws.readyState === this.ws.OPEN) {
       this.ws.send(JSON.stringify(message));
+    }
+  }
+
+  /** Send a message to all other connected clients (excluding this one). */
+  private broadcast(message: ServerMessage): void {
+    const data = JSON.stringify(message);
+    for (const client of this.wss.clients) {
+      if (client !== this.ws && client.readyState === this.ws.OPEN) {
+        client.send(data);
+      }
     }
   }
 

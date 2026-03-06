@@ -101,6 +101,11 @@ export function useWebSocket() {
           useChatStore.getState().loadHistory(message.messages);
           break;
 
+        case 'user_message_broadcast':
+          // User message sent from another tab — use server's ID and timestamp
+          addUserMessage(message.content, message.id, message.timestamp);
+          break;
+
         case 'context_usage':
           useChatStore.getState().setContextPercent(message.percent);
           break;
@@ -135,6 +140,7 @@ export function useWebSocket() {
       ws.close();
     };
   }, [
+    addUserMessage,
     appendAssistantChunk,
     appendThinkingChunk,
     finishAssistantMessage,

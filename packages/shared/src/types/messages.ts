@@ -24,4 +24,5 @@ export type ServerMessage =
   | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number }
   | { type: 'error'; message: string }
   | { type: 'ready_for_input' } // Signals that the agent is ready for the next message
-  | { type: 'chat_history'; messages: ChatMessage[] }; // Sent on connect — recent message history from server
+  | { type: 'chat_history'; messages: ChatMessage[] } // Sent on connect — recent message history from server
+  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number }; // Broadcast to other tabs

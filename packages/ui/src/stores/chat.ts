@@ -40,7 +40,7 @@ interface ChatState {
   // Context window usage
   contextPercent: number | null;
 
-  addUserMessage: (content: string) => void;
+  addUserMessage: (content: string, id?: string, timestamp?: number) => void;
   loadHistory: (messages: Message[]) => void;
   queueMessage: (content: string, isSteering?: boolean) => void;
   dequeueMessage: () => QueuedMessage | undefined;
@@ -70,12 +70,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   messageQueue: [],
   contextPercent: null,
 
-  addUserMessage: (content: string) => {
+  addUserMessage: (content: string, id?: string, timestamp?: number) => {
     const message: Message = {
-      id: `msg-${Date.now()}`,
+      id: id ?? `msg-${Date.now()}`,
       role: 'user',
       content,
-      timestamp: Date.now(),
+      timestamp: timestamp ?? Date.now(),
     };
     set((state) => ({
       messages: [...state.messages, message],
