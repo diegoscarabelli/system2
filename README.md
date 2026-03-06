@@ -402,6 +402,7 @@ The server (`packages/server/`) runs Express.js with a WebSocket server on the s
 | `{ type: 'context_usage', percent, tokens, contextWindow }` | Context window usage after each turn |
 | `{ type: 'ready_for_input' }` | Agent finished, ready for next message |
 | `{ type: 'chat_history', messages: ChatMessage[] }` | Sent on connect — recent message history from server |
+| `{ type: 'user_message_broadcast', id, content, timestamp }` | User message from another tab |
 | `{ type: 'error', message: string }` | Error occurred |
 
 ## Web UI

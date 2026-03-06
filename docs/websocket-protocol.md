@@ -42,7 +42,8 @@ type ServerMessage =
   | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number }
   | { type: 'error'; message: string }
   | { type: 'ready_for_input' }
-  | { type: 'chat_history'; messages: ChatMessage[] };
+  | { type: 'chat_history'; messages: ChatMessage[] }
+  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number };
 ```
 
 | Message | Description |
@@ -55,6 +56,7 @@ type ServerMessage =
 | `error` | Error message |
 | `ready_for_input` | Agent finished, ready for next message |
 | `chat_history` | Sent on connect -- recent messages from server |
+| `user_message_broadcast` | User message from another tab -- broadcast to all other connected clients |
 
 ## Message Flow
 
@@ -90,19 +92,29 @@ The UI maintains a FIFO message queue (`useChatStore.messageQueue`). When the ag
 2. Steering messages are prepended (higher priority)
 3. On `ready_for_input`, the next queued message is sent automatically
 
+## Multi-Tab Support
+
+Multiple browser tabs each open their own WebSocket connection. All tabs receive the same agent events (thinking, text, tool calls) because each handler subscribes independently to the agent.
+
+User messages are broadcast to other tabs: when tab A sends a message, the handler sends `user_message_broadcast` to all other connected clients so they display the message immediately. The sending tab adds the message locally (optimistic UI). On reconnect, all tabs receive the full history via `chat_history`.
+
+## History Capture
+
+Assistant message history is captured by a **single subscriber** registered in `Server` (not per-handler), preventing duplicate entries when multiple tabs are open. User messages are captured by the handler that receives them (one per user action). Both write to the shared `MessageHistory` ring buffer.
+
 ## WebSocketHandler (`handler.ts`)
 
 Each WebSocket connection gets its own `WebSocketHandler` instance. It:
 
 1. Sends chat history on connect
-2. Subscribes to agent session events
+2. Subscribes to agent session events for streaming to its client
 3. Converts Pi SDK events to `ServerMessage` types:
    - `message_update` (with thinking) -> `thinking_chunk`
    - `message_update` (with text) -> `assistant_chunk`
    - `tool_execution_started` -> `tool_call_start`
    - `tool_execution_ended` -> `tool_call_end`
    - `agent_end` -> `context_usage` + `ready_for_input`
-4. Captures completed messages in `MessageHistory`
+4. Captures user messages in `MessageHistory` and broadcasts to other tabs
 5. Watches artifact files for live reload (`fs.watch`)
 
 ## See Also

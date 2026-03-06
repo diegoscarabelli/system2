@@ -50,9 +50,10 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 4. Create Guide agent (singleton via `db.getOrCreateGuideAgent()`)
 5. Create Narrator agent (singleton via `db.getOrCreateNarratorAgent()`)
 6. Create `MessageHistory` (ring buffer, default 100 messages)
-7. Create `Scheduler`
-8. Set up Express routes
-9. Create HTTP server and WebSocket server
+7. Subscribe once to Guide agent events for assistant message history capture (prevents duplicates with multiple tabs)
+8. Create `Scheduler`
+9. Set up Express routes
+10. Create HTTP server and WebSocket server
 
 ### `start()` Method
 
