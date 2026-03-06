@@ -101,7 +101,7 @@ Before submitting a PR, ensure:
 1. Your code follows the formatting standards (see [Code Quality](#code-quality))
 2. All quality checks pass: `pnpm check`
 3. Build succeeds: `pnpm build`
-4. Documentation is updated if needed
+4. Documentation is updated if needed — changes to architecture, packages, tools, configuration, or the WebSocket protocol should be reflected in the relevant [docs/](docs/README.md) pages and, where applicable, in [README.md](README.md)
 
 ## Development Setup
 
