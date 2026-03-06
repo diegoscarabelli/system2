@@ -97,6 +97,10 @@ export function useWebSocket() {
           processNextQueuedMessage();
           break;
 
+        case 'chat_history':
+          useChatStore.getState().loadHistory(message.messages);
+          break;
+
         case 'context_usage':
           useChatStore.getState().setContextPercent(message.percent);
           break;
