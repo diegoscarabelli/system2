@@ -29,6 +29,8 @@ A single-user, self-hosted AI multi-agent system for working with data.
 - [Contributing](#contributing)
 - [License](#license)
 
+> **Developer docs:** For in-depth architecture, package internals, and contributor guides, see [docs/](docs/README.md).
+
 ## Overview
 
 System2 is an AI data team that automates the full data lifecycle - from data engineering (procurement, transformation, loading) to analysis, reporting, and dashboards. Built on a multi-agent architecture with structured memory and narrative lineage.

@@ -24,6 +24,10 @@ Thank you for your interest in contributing to System2! This document provides g
 - [Commit Messages](#commit-messages)
 - [Code Review Process](#code-review-process)
 
+## Developer Documentation
+
+Before diving into the code, read through the [developer docs](docs/README.md). They cover the architecture, each package's internals, the agent system, database schema, WebSocket protocol, and more.
+
 ## How to Contribute
 
 ### External Contributors Workflow
