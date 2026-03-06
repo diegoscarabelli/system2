@@ -90,6 +90,7 @@ export async function start(options: {
       llmConfig: config.llm,
       servicesConfig: config.services,
       toolsConfig: config.tools,
+      schedulerConfig: config.scheduler,
     });
 
     await server.start();

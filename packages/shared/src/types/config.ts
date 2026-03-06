@@ -38,3 +38,7 @@ export interface WebSearchToolConfig {
 export interface ToolsConfig {
   web_search?: WebSearchToolConfig;
 }
+
+export interface SchedulerConfig {
+  daily_summary_interval_minutes: number;
+}

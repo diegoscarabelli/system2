@@ -40,6 +40,10 @@ export interface System2Config {
     /** Maximum number of archived log files to keep (default: 5) */
     maxArchives: number;
   };
+  scheduler: {
+    /** Minutes between daily summary runs (default: 30) */
+    dailySummaryIntervalMinutes: number;
+  };
 }
 
 /**
@@ -70,12 +74,15 @@ interface TomlConfig {
     rotation_threshold_mb?: number;
     max_archives?: number;
   };
+  scheduler?: {
+    daily_summary_interval_minutes?: number;
+  };
 }
 
 /**
  * Default operational configuration values.
  */
-const DEFAULT_OPERATIONAL: Pick<System2Config, 'backup' | 'session' | 'logs'> = {
+const DEFAULT_OPERATIONAL: Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler'> = {
   backup: {
     cooldownHours: 24,
     maxBackups: 5,
@@ -86,6 +93,9 @@ const DEFAULT_OPERATIONAL: Pick<System2Config, 'backup' | 'session' | 'logs'> = 
   logs: {
     rotationThresholdMB: 10,
     maxArchives: 5,
+  },
+  scheduler: {
+    dailySummaryIntervalMinutes: 30,
   },
 };
 
@@ -143,8 +153,8 @@ function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
  */
 function convertTomlOperational(
   toml: TomlConfig
-): Partial<Pick<System2Config, 'backup' | 'session' | 'logs'>> {
-  const config: Partial<Pick<System2Config, 'backup' | 'session' | 'logs'>> = {};
+): Partial<Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler'>> {
+  const config: Partial<Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler'>> = {};
 
   if (toml.backup) {
     config.backup = {
@@ -165,6 +175,14 @@ function convertTomlOperational(
       rotationThresholdMB:
         toml.logs.rotation_threshold_mb ?? DEFAULT_OPERATIONAL.logs.rotationThresholdMB,
       maxArchives: toml.logs.max_archives ?? DEFAULT_OPERATIONAL.logs.maxArchives,
+    };
+  }
+
+  if (toml.scheduler) {
+    config.scheduler = {
+      dailySummaryIntervalMinutes:
+        toml.scheduler.daily_summary_interval_minutes ??
+        DEFAULT_OPERATIONAL.scheduler.dailySummaryIntervalMinutes,
     };
   }
 
@@ -237,6 +255,7 @@ export function buildConfigToml(options: {
   backup?: System2Config['backup'];
   session?: System2Config['session'];
   logs?: System2Config['logs'];
+  scheduler?: System2Config['scheduler'];
 }): string {
   const lines: string[] = [
     '# System2 Configuration',
@@ -306,6 +325,12 @@ export function buildConfigToml(options: {
   lines.push('');
   lines.push(`# Maximum number of archived log files to keep`);
   lines.push(`max_archives = ${logs.maxArchives}`);
+  lines.push('');
+
+  const scheduler = options.scheduler ?? DEFAULT_OPERATIONAL.scheduler;
+  lines.push('[scheduler]');
+  lines.push(`# Minutes between daily summary runs`);
+  lines.push(`daily_summary_interval_minutes = ${scheduler.dailySummaryIntervalMinutes}`);
   lines.push('');
 
   return lines.join('\n');
