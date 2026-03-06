@@ -129,8 +129,8 @@ export class AgentHost {
     const definitionFile = readFileSync(definitionPath, 'utf-8');
     const { data: agentMeta, content: agentPrompt } = matter(definitionFile);
     const agentConfig = agentMeta as AgentDefinition;
-    const knowledgeContext = this.loadKnowledgeContext();
-    const systemPrompt = `${agentsRefContent}\n\n${agentPrompt}${knowledgeContext}`;
+    // Static parts of the system prompt (loaded once)
+    const staticPrompt = `${agentsRefContent}\n\n${agentPrompt}`;
 
     const llmProvider = this.currentProvider;
 
@@ -160,8 +160,8 @@ export class AgentHost {
     const resourceLoader = new DefaultResourceLoader({
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
-      // Override system prompt with our Guide agent's prompt
-      systemPromptOverride: () => systemPrompt,
+      // Override system prompt: static agent instructions + fresh knowledge files on every call
+      systemPromptOverride: () => `${staticPrompt}${this.loadKnowledgeContext()}`,
       // Disable default resource discovery (we manage our own)
       noExtensions: true,
       noSkills: true,

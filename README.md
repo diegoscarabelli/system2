@@ -254,6 +254,22 @@ Agent definitions are stored as Markdown files with YAML frontmatter in `package
 
 **Agent lifecycle:** Guide and Narrator are singletons — created at server startup, sessions persist indefinitely. Conductor and Reviewer are project-scoped — spawned per project, archived when done.
 
+### System Prompt
+
+LLM APIs are stateless — every API call sends the full system prompt and conversation history. The Pi SDK manages this transparently, persisting history in JSONL files and handling auto-compaction when context limits approach.
+
+Each agent's system prompt is assembled from three layers:
+
+| Layer | Source | Refresh |
+|-------|--------|---------|
+| Shared reference | `packages/server/src/agents/agents.md` | Once at initialization |
+| Agent instructions | `packages/server/src/agents/library/{role}.md` | Once at initialization |
+| Knowledge files | `~/.system2/knowledge/` (`infrastructure.md`, `user.md`, `memory.md`) | **Every LLM call** |
+
+The static layers (agents.md + role instructions) are loaded once when the agent session is created. Knowledge files are read fresh on every API call, so changes made by any agent or the user are reflected immediately without restarting the server. Anthropic's prompt caching makes the static prefix cheap to resend — only the refreshed knowledge portion is reprocessed.
+
+Knowledge files are only included if they have more than 10 lines (to skip empty templates from initial onboarding).
+
 ### Agent Tools
 
 Agents interact with the system through custom tools defined in `packages/server/src/agents/tools/`. Each tool is a factory function returning a pi-coding-agent `AgentTool` with typed parameters, description, and an async `execute` method.

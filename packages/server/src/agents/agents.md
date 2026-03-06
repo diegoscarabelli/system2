@@ -195,6 +195,27 @@ The daily summary interval is configurable via `[scheduler] daily_summary_interv
 | daily-summary | `*/<interval> * * * *` | Collect activity and send to Narrator for daily summary |
 | memory-update | `0 4 * * *` | List daily summaries and send to Narrator for memory update |
 
+## System Prompt & Context
+
+LLM APIs are stateless — every API call sends the full system prompt and conversation history. There is no server-side session state. The Pi SDK manages this transparently: it persists conversation history in JSONL files, reconstructs the message array on each call, and handles auto-compaction when context limits approach.
+
+### System Prompt Construction
+
+Each agent's system prompt is assembled from three layers:
+
+1. **agents.md** (this file) — shared architecture reference, database schema, tools, communication protocols. Loaded once at agent initialization.
+2. **`library/{role}.md`** — agent-specific instructions (e.g., `guide.md`, `narrator.md`). Loaded once at agent initialization.
+3. **Knowledge files** — `infrastructure.md`, `user.md`, `memory.md` from `~/.system2/knowledge/`. **Refreshed on every LLM call** — the system prompt override reads these files dynamically, so changes made by any agent (or the user) are reflected in the next API call without restarting the server.
+
+Knowledge files are only included if they exist and have more than 10 lines (to skip empty templates from initial onboarding).
+
+### What This Means for Agents
+
+- Your instructions (`{role}.md`) and this reference (`agents.md`) are always in your context.
+- Knowledge files (`infrastructure.md`, `user.md`, `memory.md`) reflect the latest on-disk state — if another agent updates `memory.md`, you see the change on your next turn.
+- Conversation history is sent with every call. When context approaches model limits, the SDK auto-compacts older messages into a summary. You may see a compaction summary at the start of your context — this is normal.
+- Prompt caching (Anthropic) makes resending the same system prompt prefix cheap — the static portion (agents.md + role instructions) hits the cache, and only the refreshed knowledge section is reprocessed.
+
 ## Inter-Agent Communication
 
 Agents communicate via the `message_agent` tool. Messages are fire-and-forget — reply by calling `message_agent` back.
