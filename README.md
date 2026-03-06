@@ -16,6 +16,7 @@ A single-user, self-hosted AI multi-agent system for working with data.
 - [Project Structure](#project-structure)
 - [Architecture](#architecture)
   - [Multi-Agent System](#multi-agent-system)
+  - [System Prompt](#system-prompt)
   - [Agent Tools](#agent-tools)
   - [Message Delivery](#message-delivery)
   - [Session Persistence](#session-persistence)
@@ -107,6 +108,9 @@ rotation_threshold_mb = 10
 [logs]
 rotation_threshold_mb = 10
 max_archives = 5
+
+[scheduler]
+daily_summary_interval_minutes = 30
 ```
 
 ### Sections
@@ -119,6 +123,7 @@ max_archives = 5
 | `[backup]` | Automatic backup frequency and retention. |
 | `[session]` | Session file rotation threshold. |
 | `[logs]` | Log file rotation threshold and archive retention. |
+| `[scheduler]` | Narrator job scheduling (daily summary interval). |
 
 ### LLM Providers
 
@@ -258,7 +263,7 @@ Agent definitions are stored as Markdown files with YAML frontmatter in `package
 
 LLM APIs are stateless — every API call sends the full system prompt and conversation history. The Pi SDK manages this transparently, persisting history in JSONL files and handling auto-compaction when context limits approach.
 
-Each agent's system prompt is assembled from three layers:
+Each agent's system prompt is assembled from four layers:
 
 | Layer | Source | Refresh |
 |-------|--------|---------|
@@ -286,159 +291,40 @@ Agents interact with the system through custom tools defined in `packages/server
 | `web_fetch` | Fetch a URL and extract readable text content | No |
 | `web_search` | Search the web via Brave Search API | Yes — requires `[services.brave_search]` key |
 
-`web_search` is added only when a Brave Search API key exists in config and `[tools.web_search]` is not explicitly disabled. Config flows from `config.toml` → CLI → `Server` → `AgentHost` → `buildTools()` via dependency injection.
+`web_search` is added only when a Brave Search API key exists in config and `[tools.web_search]` is not explicitly disabled.
 
 ### Message Delivery
 
-The server can inject messages into an agent's context while it is actively processing, using pi-coding-agent's delivery modes. This mechanism powers both user steering and inter-agent communication.
+The server can inject messages into an agent's context while it is actively processing, using pi-coding-agent's delivery modes:
 
-#### Delivery Modes
+| Sender | Receiver | Mode | Behavior |
+|--------|----------|------|----------|
+| User | Guide | `steer` | Interrupts immediately — user gets priority. Awaits full response. |
+| Agent | Agent | `followUp` (default) | Waits for receiver to finish current work, then delivers. |
+| Agent | Agent | `steer` (urgent) | Interrupts receiver mid-turn. |
+| Scheduler | Agent | `followUp` | System-generated task queued for next available turn. |
 
-| Sender | Receiver | Method | Mode | Behavior |
-|--------|----------|--------|------|----------|
-| User | Guide | `prompt()` | `steer` (always) | Interrupts immediately — user gets priority. Awaits full response. |
-| Agent | Agent | `deliverMessage()` | `followUp` (default) | Waits for receiver to finish current work, then delivers. `triggerTurn: true` ensures idle agents wake up. |
-| Agent | Agent | `deliverMessage()` | `steer` (urgent) | Interrupts receiver mid-turn. Receiver can respond immediately and continue original work. |
-| Scheduler | Agent | `deliverMessage()` | `followUp` | System-generated task queued for next available turn. |
+`AgentHost` exposes two methods: **`prompt()`** (blocking, creates `user` message, used for User → Guide) and **`deliverMessage()`** (non-blocking, creates `custom_message`, used for Agent → Agent and Scheduler → Agent). The distinction exists because user messages need synchronous streaming back to the UI, while inter-agent messages should not block the sender.
 
-#### `prompt()` vs `deliverMessage()`
-
-`AgentHost` exposes two methods that map to different Pi SDK primitives:
-
-- **`prompt(content)`** → `session.prompt()` — Creates a `user` role message. **Blocking**: the Promise resolves when the agent completes its full turn. Used by the WebSocket handler for **User → Guide** because the UI needs to stream the response synchronously.
-- **`deliverMessage(content, details)`** → `session.sendCustomMessage()` — Creates a `custom_message` entry. **Non-blocking**: returns immediately after queuing. Used for **Agent → Agent** (via `message_agent` tool) and **Scheduler → Agent** (system-generated tasks) because the sender should not block waiting for the receiver.
-
-#### User → Guide (Steering)
-
-1. Message arrives at `AgentHost.prompt()` with `{ isSteering: true }`
-2. AgentHost passes `{ streamingBehavior: 'steer' }` to the SDK's `session.prompt()`
-3. The SDK injects the message into the agent's next LLM call (between tool executions)
-4. If the agent is idle, the message triggers a new loop round
-
-In the UI, the Send button changes to "Queue" while the agent is processing. Steering messages are prepended to the front of the queue.
-
-#### Agent → Agent (`message_agent`)
-
-Agents communicate via the `message_agent` tool using `deliverMessage()` → `sendCustomMessage()`. Messages are persisted as `custom_message` entries in the receiver's JSONL session file and automatically included in the receiver's LLM context.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `agent_id` | number | required | Database ID of the receiver agent |
-| `message` | string | required | Message content |
-| `urgent` | boolean | `false` | If true, uses `steer` (interrupts mid-turn). If false, uses `followUp` (waits for current turn to finish). |
-
-Messages are fire-and-forget. The `message_agent` tool builds a sender prefix server-side (`[Message from {role} agent (id={id})]`) so the receiver knows who sent it. Agents reply by calling `message_agent` back.
-
-#### Agent Registry
-
-The `AgentRegistry` (`packages/server/src/agents/registry.ts`) maps agent database IDs to their active `AgentHost` instances, enabling message routing. The `message_agent` tool uses the registry to look up the receiver's host.
+The `AgentRegistry` (`packages/server/src/agents/registry.ts`) maps agent database IDs to active `AgentHost` instances for message routing.
 
 ### Session Persistence
 
-Every agent gets its own session directory with JSONL persistence, automatic compaction, and session rotation — all handled by `AgentHost.initialize()`, the same code path for all agents. Singleton agents (Guide, Narrator) are created at server startup and run indefinitely. Project-scoped agents (Conductor, Reviewer) are spawned per-project and archived when done, but use identical session mechanics while alive.
+Every agent gets its own session directory with JSONL persistence, automatic compaction, and session rotation — all handled by `AgentHost.initialize()`. Conversations are persisted using the [pi-coding-agent session format](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md) with a tree structure (`id`, `parentId`) supporting in-place branching.
 
-Conversations are persisted in JSONL files using the [pi-coding-agent session format](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md). Each line is a JSON object with a tree structure (`id`, `parentId`) that supports in-place branching — all history preserved in a single file.
-
-```
-~/.system2/sessions/
-├── guide_1/                # Guide agent (singleton, persistent)
-│   └── 2026-03-02T14-30-00_abc123.jsonl
-├── narrator_2/             # Narrator agent (singleton, persistent)
-│   └── 2026-03-03T09-00-00_def456.jsonl
-└── conductor_3/            # Conductor agent (project-scoped, archived when done)
-    └── 2026-03-02T15-00-00_ghi789.jsonl
-```
-
-#### JSONL Entry Types
-
-Every entry has base fields: `type`, `id`, `parentId`, and `timestamp`.
-
-| Type | Description |
-|------|-------------|
-| `session` | File header — version, session id, working directory |
-| `message` | Conversation messages (user, assistant, toolResult, etc.) |
-| `compaction` | Context summarization — `summary`, `firstKeptEntryId`, `tokensBefore` |
-| `branch_summary` | Summary of an abandoned branch — `fromId`, `summary` |
-| `model_change` | Provider/model switch — `provider`, `modelId` |
-| `thinking_level_change` | Thinking level change — `thinkingLevel` |
-| `custom` | Extension data storage (not sent to LLM) — `customType`, `data` |
-| `custom_message` | Extension-injected messages (sent to LLM) — `customType`, `content`, `display` |
-| `label` | Bookmark on an entry — `targetId`, `label` |
-| `session_info` | Session metadata — `name` |
-
-Full type definitions: [`session-manager.d.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/sdk.md) in the pi-coding-agent SDK.
-
-#### Auto-Compaction
-
-When context approaches model limits, the SDK automatically summarizes older messages. The `compaction` entry records the summary, a pointer to the first preserved entry, and the token count before compaction.
-
-#### Session Rotation
-
-When JSONL files exceed 10MB, a new file is created with the compacted history carried over. The old file remains archived. New files are picked up automatically by modification time.
+When context approaches model limits, the SDK auto-compacts older messages into a summary. When JSONL files exceed 10MB, session rotation creates a new file carrying over the compacted history.
 
 ### Database Schema
 
-System2 uses SQLite with WAL mode for concurrent access. Schema in `packages/server/src/db/schema.sql`:
+System2 uses SQLite with WAL mode. Full schema in `packages/server/src/db/schema.sql`.
 
-**project** — A data project managed by System2 agents
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Auto-incrementing unique identifier |
-| name | TEXT | Project name |
-| description | TEXT | Project description |
-| status | TEXT | Current progress state (`todo`, `in progress`, `review`, `done`, `abandoned`) |
-| labels | TEXT | JSON array of string labels for categorization |
-| start_at | TEXT | ISO 8601 timestamp when work began |
-| end_at | TEXT | ISO 8601 timestamp when work completed |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
-
-**agent** — An AI agent that performs work within System2, assigned to projects or system-wide
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Auto-incrementing unique identifier |
-| role | TEXT | Agent specialization (`guide`, `conductor`, `narrator`, `reviewer`) |
-| project | INTEGER | Assigned project, NULL for Guide and Narrator (system-wide) |
-| status | TEXT | Current lifecycle state (`idle`, `active`, `archived`) |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
-
-**task** — A unit of work within a project or standalone
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Auto-incrementing unique identifier |
-| parent | INTEGER | Parent task for subtask hierarchy, NULL for top-level tasks |
-| project | INTEGER | Parent project, NULL for standalone tasks |
-| title | TEXT | Short task title |
-| description | TEXT | Detailed task description |
-| status | TEXT | Current progress state (`todo`, `in progress`, `review`, `done`, `abandoned`) |
-| priority | TEXT | Task urgency level (`low`, `medium`, `high`) |
-| assignee | INTEGER | Agent responsible for this task, NULL if unassigned |
-| labels | TEXT | JSON array of string labels for categorization |
-| start_at | TEXT | ISO 8601 timestamp when work began |
-| end_at | TEXT | ISO 8601 timestamp when work completed |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
-
-**task_link** — Directed link between two tasks (blocked_by, relates_to, duplicates)
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Auto-incrementing unique identifier |
-| source | INTEGER | The task that has the relationship |
-| target | INTEGER | The task being referenced |
-| relationship | TEXT | `blocked_by`, `relates_to`, `duplicates` |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
-
-**task_comment** — A comment on a task, authored by an agent
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Auto-incrementing unique identifier |
-| task | INTEGER | The task being commented on |
-| author | INTEGER | The agent who wrote the comment |
-| content | TEXT | Comment body |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
+| Table | Description |
+|-------|-------------|
+| `project` | Data projects with status, labels, timestamps |
+| `agent` | Agent instances with role, project assignment, lifecycle status |
+| `task` | Work units with hierarchy (parent), priority, assignee, status |
+| `task_link` | Directed relationships between tasks (`blocked_by`, `relates_to`, `duplicates`) |
+| `task_comment` | Agent-authored comments on tasks |
 
 ### Knowledge & Memory
 
@@ -454,20 +340,6 @@ The Narrator tracks progress via `last_narrator_update_ts` in YAML frontmatter (
 ## Artifact Display
 
 Agents produce HTML artifacts (dashboards, reports, plots) as files on disk under `~/.system2/`. The Guide agent curates which artifact to display using the `show_artifact` tool. The HTML content never passes through the LLM — only the file path does.
-
-### Data Flow
-
-```
-Show:   Guide calls show_artifact({ path: "projects/foo/dashboard.html" })
-          → Server validates path is within ~/.system2/, checks file exists
-          → Server emits { type: 'artifact', url: '/artifacts/projects/foo/dashboard.html' }
-          → UI sets iframe src → browser fetches HTML over HTTP
-
-Reload: Data agent modifies the HTML file on disk
-          → fs.watch fires on the file
-          → Server emits { type: 'artifact', url: '/artifacts/...?t=<timestamp>' }
-          → UI updates iframe src → browser re-fetches (cache-busted)
-```
 
 ### Live Reload
 
@@ -571,48 +443,6 @@ The React web interface (`packages/ui/`) provides a responsive chat experience w
                     │    WebSocket      │  ws://localhost:3000
                     └───────────────────┘
 ```
-
-### State Management
-
-The Zustand store (`useChatStore`) manages all UI state. Fields marked with **P** are persisted to `localStorage`:
-
-| State | Type | Description |
-|-------|------|-------------|
-| `messages` **P** | `Message[]` | Conversation history (user, assistant, tool) |
-| `contextPercent` **P** | `number \| null` | Context window usage percentage |
-| `messageQueue` | `QueuedMessage[]` | Messages waiting to be sent |
-| `currentAssistantMessage` | `string \| null` | Streaming response content |
-| `currentTurnEvents` | `TurnEvent[]` | Thinking blocks and tool calls for current turn |
-| `activeThinkingId` | `string \| null` | Currently streaming thinking block |
-| `isStreaming` | `boolean` | True while receiving any response chunks |
-| `isWaitingForResponse` | `boolean` | True after send, before first chunk |
-| `isConnected` | `boolean` | WebSocket connection status |
-
-### Message Flow
-
-1. **User sends message** → `addUserMessage()` adds to history, sets `isWaitingForResponse: true`
-2. **WebSocket sends** → `user_message` or `steering_message` to server
-3. **Server streams response** → Chunks update `currentAssistantMessage` or `currentTurnEvents`
-4. **Response complete** → `assistant_end` triggers `finishAssistantMessage()`
-5. **Agent ready** → `ready_for_input` triggers `processNextQueuedMessage()`
-
-### Message Queueing
-
-Users can continue typing and queueing messages while the agent is processing:
-
-- **Queue button:** When streaming, the Send button changes to "Queue"
-- **Queue indicator:** Shows count of queued messages below the input
-- **Automatic processing:** Queued messages are sent when `ready_for_input` is received
-- **Steering messages:** Priority messages inserted ASAP into the agent loop
-
-### Persistence
-
-The UI persists state to `localStorage` so it survives page refreshes:
-
-- **Chat history**: Messages and context usage via Zustand's `persist` middleware (key: `system2:chat`)
-- **Artifact URL**: Current artifact URL stored under `system2:artifact-url`
-
-On the server side, the agent's full conversation context is maintained in JSONL session files, so reconnecting picks up where you left off.
 
 ### Timeline UI
 

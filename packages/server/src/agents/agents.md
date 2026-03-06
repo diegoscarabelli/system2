@@ -17,13 +17,13 @@ Agent definitions are stored as Markdown files with YAML frontmatter in `package
 | **Narrator** | Memory keeper. Maintains long-term memory (`knowledge/memory.md`) and creates daily activity summaries (`knowledge/daily_summaries/YYYY-MM-DD.md`). Singleton (one per system, cross-project). Runs on a schedule: appends to the daily summary every 30 minutes (configurable), updates `memory.md` every 24 hours. |
 | **Reviewer** | Validation agent. Checks SQL logic, data transformations, analytical assumptions. Generates validation reports with issues and recommendations. |
 
-**Agent lifecycle:** Guide and Narrator are singletons — created at server startup, sessions persist indefinitely. Conductor and Reviewer are project-scoped — spawned per project, archived when done. All agents use the same session mechanics (JSONL, compaction, rotation) via `AgentHost.initialize()`.
+**Agent lifecycle:** Guide and Narrator are singletons — created at server startup, sessions persist indefinitely. Conductor and Reviewer are project-scoped — spawned per project, archived when done.
 
 **Agent spawning:** When complex work is needed, Guide spawns a Conductor for that project. Conductor may spawn Reviewers for validation. The Narrator is not spawned — it runs independently on a schedule.
 
 ### Tools
 
-Agents interact with the system through custom tools. Each tool is a factory function returning a pi-coding-agent `AgentTool` with typed parameters, description, and an async `execute` method. Tools are registered in `AgentHost.buildTools()` — some are always available, others are conditional on configuration.
+Agents interact with the system through custom tools registered in `AgentHost.buildTools()`.
 
 | Tool | Description | Conditional |
 |------|-------------|-------------|
@@ -38,20 +38,16 @@ Agents interact with the system through custom tools. Each tool is a factory fun
 
 #### `web_fetch`
 
-Fetches a URL and extracts the main content as clean, readable text — replacing the need for `bash` + `curl` which dumps raw HTML into your context window.
+Fetches a URL and returns the main content as clean, readable text. Non-HTML content (PDF, images) is rejected.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `url` | string | required | URL to fetch |
 | `max_length` | number | 20,000 | Maximum characters returned |
 
-Uses Node.js built-in `fetch` with a 15-second timeout and `redirect: 'follow'`. HTML is parsed into a DOM using linkedom, then passed through Mozilla Readability (the same algorithm behind Firefox Reader View) to extract the article content. If Readability fails (e.g., non-article pages), a fallback strips `<script>`, `<style>`, `<nav>`, `<header>`, and `<footer>` elements and extracts body text. Non-HTML content types (PDF, images) are rejected with a clear error message.
-
-Returns `# {title}\n\n{textContent}` as plain text, with a `[Content truncated]` marker if the output exceeds `max_length`.
-
 #### `web_search`
 
-Searches the web using the Brave Search API and returns structured results. Only available when a Brave Search API key is configured.
+Searches the web using the Brave Search API. Only available when a Brave Search API key is configured.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -62,24 +58,11 @@ Returns a numbered list of results (title, URL, description) as text, plus a str
 
 #### `show_artifact`
 
-Displays an HTML file in the UI left panel. The path must be relative to `~/.system2/` (e.g., `projects/foo/dashboard.html`).
-
-The server validates the path is within `~/.system2/`, checks the file exists, and emits a WebSocket message that sets the UI iframe source. The HTML content never passes through the LLM — only the file path does.
+Displays an HTML file in the UI left panel. The path must be relative to `~/.system2/` (e.g., `projects/foo/dashboard.html`). The HTML content never passes through the LLM — only the file path does.
 
 **Live reload:** When an artifact is shown, the server watches the file with `fs.watch`. Any modification triggers an immediate reload in the UI — no agent action required. Only one file is watched at a time.
 
-#### Interactive Dashboards
-
-Artifacts run in a sandboxed iframe (`sandbox="allow-scripts allow-same-origin"`). For dashboards that need database access, a `postMessage` bridge connects the iframe to the server:
-
-```
-Iframe → postMessage({ type: 'system2:query', requestId, sql })
-  → ArtifactViewer intercepts → fetch('/api/query', { sql })
-    → Server executes SELECT against SQLite → returns { rows, count }
-  → ArtifactViewer posts back → postMessage({ type: 'system2:query_result', requestId, data })
-```
-
-The `/api/query` endpoint only allows `SELECT` queries. The iframe cannot access cookies, storage, or navigate the parent frame due to sandbox restrictions.
+**Interactive dashboards:** Artifacts run in a sandboxed iframe. Dashboards can query the database via a `postMessage` bridge — post `{ type: 'system2:query', requestId, sql }` and receive `{ type: 'system2:query_result', requestId, data }`. Only SELECT queries are allowed.
 
 ## Database Schema
 
@@ -186,7 +169,7 @@ The Narrator then reviews the provided data, optionally investigates further (gi
 
 ### Scheduler
 
-An in-process scheduler (croner) triggers jobs that pre-compute activity data and send messages to the Narrator via `deliverMessage()`. If the Narrator is mid-turn, messages queue via `followUp` delivery. On startup, a catch-up check queues immediate narration if `last_narrator_update_ts` is stale (croner does not catch up missed jobs after sleep/shutdown).
+An in-process scheduler (croner) triggers jobs that pre-compute activity data and send messages to the Narrator. If the Narrator is mid-turn, messages queue until the current turn finishes. On startup, a catch-up check queues immediate narration if `last_narrator_update_ts` is stale (croner does not catch up missed jobs after sleep/shutdown).
 
 The daily summary interval is configurable via `[scheduler] daily_summary_interval_minutes` in `config.toml` (default: 30).
 
@@ -197,11 +180,11 @@ The daily summary interval is configurable via `[scheduler] daily_summary_interv
 
 ## System Prompt & Context
 
-LLM APIs are stateless — every API call sends the full system prompt and conversation history. There is no server-side session state. The Pi SDK manages this transparently: it persists conversation history in JSONL files, reconstructs the message array on each call, and handles auto-compaction when context limits approach.
+LLM APIs are stateless — every API call sends the full system prompt and conversation history. The Pi SDK manages this transparently: it persists conversation history in JSONL files, reconstructs the message array on each call, and handles auto-compaction when context limits approach.
 
 ### System Prompt Construction
 
-Each agent's system prompt is assembled from three layers:
+Each agent's system prompt is assembled from four layers:
 
 1. **agents.md** (this file) — shared architecture reference, database schema, tools, communication protocols. Loaded once at agent initialization.
 2. **`library/{role}.md`** — agent-specific instructions (e.g., `guide.md`, `narrator.md`). Loaded once at agent initialization.
@@ -214,106 +197,29 @@ Knowledge files and daily summaries are only included if they exist and have mor
 
 - Your instructions (`{role}.md`) and this reference (`agents.md`) are always in your context.
 - Knowledge files (`infrastructure.md`, `user.md`, `memory.md`) and the two most recent daily summaries reflect the latest on-disk state — if another agent updates `memory.md` or appends to a daily summary, you see the change on your next turn.
-- Conversation history is sent with every call. When context approaches model limits, the SDK auto-compacts older messages into a summary. You may see a compaction summary at the start of your context — this is normal.
 - Prompt caching (Anthropic) makes resending the same system prompt prefix cheap — the static portion (agents.md + role instructions) hits the cache, and only the refreshed knowledge section is reprocessed.
 
 ## Inter-Agent Communication
 
 Agents communicate via the `message_agent` tool. Messages are fire-and-forget — reply by calling `message_agent` back.
 
-### `message_agent` Tool
-
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `agent_id` | number | required | Database ID of the target agent |
 | `message` | string | required | Message content |
-| `urgent` | boolean | `false` | If true, interrupts the receiver mid-turn (`steer` delivery). If false, waits for the receiver to finish current work (`followUp` delivery). |
+| `urgent` | boolean | `false` | If true, interrupts the receiver mid-turn. If false, waits for the receiver to finish current work. |
 
 Messages from other agents appear in your context prefixed with:
 `[Message from {role} agent (id={id})]`
-
-### Message Delivery: `prompt()` vs `deliverMessage()`
-
-The `AgentHost` class exposes two ways to send messages to an agent. They map to different Pi SDK methods and serve different purposes:
-
-**`prompt(content, options?)`** — wraps `session.prompt()`
-- Creates a standard `user` role message in the JSONL session log
-- **Synchronous**: the returned Promise resolves when the agent completes its full turn (all tool calls, thinking, response)
-- Supports `isSteering: true` to interrupt a running turn
-- Used by: **User → Guide** (via WebSocket handler). The UI needs to await the full response to stream it back.
-
-**`deliverMessage(content, details, urgent?)`** — wraps `session.sendCustomMessage()`
-- Creates a `custom_message` entry in the JSONL (not a `user` message)
-- **Asynchronous**: returns immediately after queuing the message
-- `deliverAs: 'followUp'` (default) queues the message after the current turn; `'steer'` (urgent) interrupts mid-turn
-- `triggerTurn: true` starts a new agent turn after delivery
-- `display: false` — the message does not appear in the UI as a user message
-- Carries structured `details` metadata (sender, receiver, timestamp) alongside the LLM-visible content
-- Used by: **Agent → Agent** (via `message_agent` tool), **Scheduler → Agent** (system-generated tasks)
-
-**Why the distinction matters:**
-- User messages use `prompt()` because the WebSocket handler needs to stream the response back synchronously — it awaits the full turn.
-- Agent and system messages use `deliverMessage()` because the sender should not block waiting for the receiver. Messages queue naturally — if the receiver is busy, the message waits until the current turn finishes, then triggers a new turn.
-
-### Delivery Modes
-
-| Sender | Receiver | Method | Mode | Behavior |
-|--------|----------|--------|------|----------|
-| User | Guide | `prompt()` | `steer` (always) | Interrupts immediately — user gets priority. Awaits full response. |
-| Agent | Agent | `deliverMessage()` | `followUp` (default) | Waits for receiver to finish current work, then delivers. If receiver is idle, a new turn starts immediately. |
-| Agent | Agent | `deliverMessage()` | `steer` (urgent) | Interrupts receiver mid-turn — message injected between tool executions. |
-| Scheduler | Agent | `deliverMessage()` | `followUp` | System-generated task queued for next available turn. |
-
-### How It Works
-
-1. You call `message_agent({ agent_id: 2, message: "Review the pipeline" })`
-2. System validates the receiver exists in the database and has an active AgentHost
-3. The `message_agent` tool builds the sender prefix server-side: `[Message from {role} agent (id={id})]`
-4. Message is delivered to the receiver's session via `deliverMessage()` → `sendCustomMessage()` with `customType: 'agent_message'`
-5. You get confirmation: `"Message delivered to conductor agent (id=2)."`
-6. The receiver sees your message in their LLM context and can reply via `message_agent` back to you
-
-### JSONL Persistence
-
-Both sides record the exchange, in different forms:
-
-**Receiver's JSONL** — `custom_message` entry:
-```json
-{
-  "type": "custom_message",
-  "id": "entry-uuid",
-  "parentId": "previous-entry-id",
-  "timestamp": "2026-03-04T12:00:00.000Z",
-  "customType": "agent_message",
-  "content": "[Message from guide agent (id=1)]\n\nPlease review the data pipeline for project 3.",
-  "details": { "sender": 1, "receiver": 2, "timestamp": 1709553600000 },
-  "display": false
-}
-```
-
-- `content` → included in LLM context (the sender prefix `[Message from ...]` is how the receiving LLM knows who sent it)
-- `details` → metadata only (not sent to LLM) — sender, receiver, timestamp for programmatic use
-
-**Sender's JSONL** — automatic tool call recording:
-- `message` entry with assistant role containing `toolCall` block (`message_agent` with args)
-- `message` entry with `toolResult` role ("Message delivered to conductor agent (id=2)")
-
-### Finding Other Agents
 
 Use `query_database` to find agents:
 ```sql
 SELECT id, role, status, project FROM agent WHERE status = 'active';
 ```
 
-### Agent Registry
-
-The `AgentRegistry` maps agent database IDs to their active `AgentHost` instances, enabling message routing. When the server creates an AgentHost, it registers it; when an agent is shut down, it unregisters. The `message_agent` tool uses the registry to look up the receiver's host.
-
 ## Session Persistence
 
-Every agent gets its own session directory with JSONL persistence, automatic compaction, and session rotation — regardless of role. This is handled by `AgentHost.initialize()`, which is the same code path for all agents. The difference is lifecycle: singleton agents (Guide, Narrator) are created at server startup and never killed, so their sessions accumulate indefinitely. Project-scoped agents (Conductor, Reviewer) are spawned per-project and eventually archived, but while alive, the session mechanics are identical.
-
-Conversations are persisted in JSONL files using the [pi-coding-agent session format](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md). Each line is a JSON object with a tree structure (`id`, `parentId`) that supports in-place branching when users edit or regenerate responses — all history preserved in a single file.
+Every agent gets its own session directory with JSONL persistence. Sessions persist across server restarts — conversations are restored from disk automatically.
 
 ```
 ~/.system2/sessions/
@@ -325,60 +231,9 @@ Conversations are persisted in JSONL files using the [pi-coding-agent session fo
     └── 2026-03-02T15-00-00_ghi789.jsonl
 ```
 
-### JSONL Entry Types
+**Auto-compaction:** When context approaches model limits, the SDK automatically summarizes older messages. You may see a compaction summary at the start of your context — this is normal and means your earlier conversation was summarized to make room.
 
-Every entry has base fields: `type`, `id`, `parentId`, and `timestamp`. The `session` header is the exception — it has `type`, `version`, `id`, `timestamp`, `cwd`, and optional `parentSession`.
-
-| Type | Description |
-|------|-------------|
-| `session` | File header — version, session id, working directory |
-| `message` | Conversation messages (see message roles below) |
-| `compaction` | Context summarization — `summary`, `firstKeptEntryId`, `tokensBefore` |
-| `branch_summary` | Summary of an abandoned branch — `fromId`, `summary` |
-| `model_change` | Provider/model switch — `provider`, `modelId` |
-| `thinking_level_change` | Thinking level change — `thinkingLevel` |
-| `custom` | Extension data storage (not sent to LLM) — `customType`, `data` |
-| `custom_message` | Extension-injected messages (sent to LLM) — `customType`, `content`, `display` |
-| `label` | Bookmark on an entry — `targetId`, `label` |
-| `session_info` | Session metadata — `name` |
-
-### Message Roles
-
-The `message` entry contains an `AgentMessage` object. The `role` field determines the shape:
-
-| Role | Key fields |
-|------|------------|
-| `user` | `content` (string or text/image array) |
-| `assistant` | `content` (array of `text`, `thinking`, or `toolCall` blocks), `provider`, `model`, `usage`, `stopReason` |
-| `toolResult` | `toolCallId`, `toolName`, `content`, `isError` |
-| `bashExecution` | `command`, `output`, `exitCode`, `cancelled`, `truncated` |
-| `compactionSummary` | `summary`, `tokensBefore` |
-| `branchSummary` | `summary`, `fromId` |
-| `custom` | `customType`, `content`, `display` |
-
-The `assistant` role's content blocks contain the actual LLM output: `text` (response text), `thinking` (extended thinking with signature), and `toolCall` (tool name, id, arguments). The `usage` field tracks token counts and costs per message.
-
-Full type definitions: [`session-manager.d.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/sdk.md) in the pi-coding-agent SDK.
-
-### Auto-Compaction
-
-When context approaches model limits, the SDK automatically summarizes older messages. The `compaction` entry contains:
-- `summary`: Condensed conversation history
-- `firstKeptEntryId`: Pointer to first preserved entry
-- `tokensBefore`: Token count before compaction
-
-You may see a compaction summary at the start of your context — this is normal and means your earlier conversation was summarized to make room.
-
-### Session Rotation
-
-When JSONL files exceed 10MB:
-1. New file created with fresh session header
-2. Entries from `firstKeptEntryId` through compaction are copied
-3. All post-compaction entries are copied
-4. Old file remains archived
-5. New file picked up automatically (newer mtime)
-
-Your context is preserved across rotation.
+**Session rotation:** When JSONL files exceed 10MB, a new file is created with the compacted history carried over. Your context is preserved across rotation.
 
 ## File System
 
