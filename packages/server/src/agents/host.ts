@@ -5,7 +5,7 @@
  * Includes automatic failover when API errors occur.
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -337,6 +337,24 @@ export class AgentHost {
         }
       }
     }
+
+    // Include the two most recent daily summaries for recent activity context
+    const summariesDir = join(knowledgeDir, 'daily_summaries');
+    if (existsSync(summariesDir)) {
+      const summaryFiles = readdirSync(summariesDir)
+        .filter((f) => f.endsWith('.md'))
+        .sort()
+        .reverse()
+        .slice(0, 2)
+        .reverse(); // chronological order
+      for (const file of summaryFiles) {
+        const content = readFileSync(join(summariesDir, file), 'utf-8');
+        if (content.trim().split('\n').length > 10) {
+          sections.push(content);
+        }
+      }
+    }
+
     if (sections.length === 0) return '';
     return `\n\n## Knowledge Base\n\n${sections.join('\n\n---\n\n')}`;
   }

@@ -265,10 +265,11 @@ Each agent's system prompt is assembled from three layers:
 | Shared reference | `packages/server/src/agents/agents.md` | Once at initialization |
 | Agent instructions | `packages/server/src/agents/library/{role}.md` | Once at initialization |
 | Knowledge files | `~/.system2/knowledge/` (`infrastructure.md`, `user.md`, `memory.md`) | **Every LLM call** |
+| Recent daily summaries | `~/.system2/knowledge/daily_summaries/` (last 2 by filename) | **Every LLM call** |
 
-The static layers (agents.md + role instructions) are loaded once when the agent session is created. Knowledge files are read fresh on every API call, so changes made by any agent or the user are reflected immediately without restarting the server. Anthropic's prompt caching makes the static prefix cheap to resend — only the refreshed knowledge portion is reprocessed.
+The static layers (agents.md + role instructions) are loaded once when the agent session is created. Knowledge files and the two most recent daily summaries are read fresh on every API call, so changes made by any agent or the user are reflected immediately without restarting the server. Anthropic's prompt caching makes the static prefix cheap to resend — only the refreshed knowledge portion is reprocessed.
 
-Knowledge files are only included if they have more than 10 lines (to skip empty templates from initial onboarding).
+Knowledge files and daily summaries are only included if they have more than 10 lines (to skip empty templates or stub files).
 
 ### Agent Tools
 
