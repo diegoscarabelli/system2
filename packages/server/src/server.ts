@@ -8,11 +8,18 @@ import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { LlmConfig, SchedulerConfig, ServicesConfig, ToolsConfig } from '@system2/shared';
+import type {
+  ChatConfig,
+  LlmConfig,
+  SchedulerConfig,
+  ServicesConfig,
+  ToolsConfig,
+} from '@system2/shared';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { AgentHost } from './agents/host.js';
 import { AgentRegistry } from './agents/registry.js';
+import { MessageHistory } from './chat/history.js';
 import { DatabaseClient } from './db/client.js';
 import { initializeGitRepo } from './knowledge/git.js';
 import { initializeKnowledge } from './knowledge/init.js';
@@ -37,6 +44,7 @@ export interface ServerConfig {
   servicesConfig?: ServicesConfig;
   toolsConfig?: ToolsConfig;
   schedulerConfig?: SchedulerConfig;
+  chatConfig?: ChatConfig;
 }
 
 export class Server {
@@ -50,6 +58,7 @@ export class Server {
   private scheduler: Scheduler;
   private config: ServerConfig;
   private narratorId: number;
+  private messageHistory: MessageHistory;
 
   constructor(config: ServerConfig) {
     this.config = config;
@@ -88,6 +97,10 @@ export class Server {
       toolsConfig: config.toolsConfig,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
+
+    // Initialize chat history (server-side, persisted to disk)
+    const maxMessages = config.chatConfig?.max_history_messages ?? 100;
+    this.messageHistory = new MessageHistory(join(SYSTEM2_DIR, 'chat-history.json'), maxMessages);
 
     // Initialize scheduler
     this.scheduler = new Scheduler();
@@ -144,7 +157,7 @@ export class Server {
     // Handle WebSocket connections
     this.wss.on('connection', (ws) => {
       console.log('Client connected');
-      new WebSocketHandler(ws, this.agentHost);
+      new WebSocketHandler(ws, this.agentHost, this.messageHistory);
     });
   }
 
