@@ -111,6 +111,9 @@ max_archives = 5
 
 [scheduler]
 daily_summary_interval_minutes = 30
+
+[chat]
+max_history_messages = 100
 ```
 
 ### Sections
@@ -124,6 +127,7 @@ daily_summary_interval_minutes = 30
 | `[session]` | Session file rotation threshold. |
 | `[logs]` | Log file rotation threshold and archive retention. |
 | `[scheduler]` | Narrator job scheduling (daily summary interval). |
+| `[chat]` | Chat history settings (max messages to keep). |
 
 ### LLM Providers
 
@@ -160,6 +164,7 @@ All System2 data lives in `~/.system2/`:
 ├── .git/               # Version control for text files
 ├── config.toml         # All settings and credentials (0600 permissions)
 ├── app.db              # SQLite database (projects, tasks, agents)
+├── chat-history.json   # Recent chat messages (server-side, max 100)
 ├── server.pid          # PID file when server is running
 ├── knowledge/          # Persistent memory
 │   ├── infrastructure.md  # Data stack details (Guide)
@@ -394,11 +399,12 @@ The server (`packages/server/`) runs Express.js with a WebSocket server on the s
 | `{ type: 'artifact', url: string }` | Display HTML artifact in left panel (also sent on live reload) |
 | `{ type: 'context_usage', percent, tokens, contextWindow }` | Context window usage after each turn |
 | `{ type: 'ready_for_input' }` | Agent finished, ready for next message |
+| `{ type: 'chat_history', messages: ChatMessage[] }` | Sent on connect — recent message history from server |
 | `{ type: 'error', message: string }` | Error occurred |
 
 ## Web UI
 
-The React web interface (`packages/ui/`) provides a responsive chat experience while the agent is working.
+The React web interface (`packages/ui/`) provides a responsive chat experience while the agent is working. Chat history is managed server-side — the server persists messages to `~/.system2/chat-history.json` and sends the full history to the UI on each WebSocket connect. The UI does not use browser storage for messages.
 
 ### Tech Stack
 
