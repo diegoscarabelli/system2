@@ -1,25 +1,27 @@
 /**
- * Query Database Tool
+ * Read System2 DB Tool
  *
- * Allows the Guide agent to query System2's app.db.
+ * Allows agents to query System2's app.db (projects, tasks, agents).
+ * This is NOT for querying data pipeline databases — use bash for those.
  */
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
 
-export function createQueryDatabaseTool(db: DatabaseClient) {
+export function createReadSystem2DbTool(db: DatabaseClient) {
   const params = Type.Object({
     sql: Type.String({
-      description: 'SQL query to execute against the app database. Tables: project, task, agent.',
+      description:
+        'SQL SELECT query to execute against the System2 app database (~/.system2/app.db). Tables: project, task, agent, task_link, task_comment.',
     }),
   });
 
   const tool: AgentTool<typeof params> = {
-    name: 'query_database',
-    label: 'Query Database',
+    name: 'read_system2_db',
+    label: 'Read System2 DB',
     description:
-      'Execute a SQL query against the System2 app database to retrieve information about project, task, and agent records.',
+      'Execute a SQL SELECT query against the System2 app database (~/.system2/app.db) to retrieve projects, tasks, agents, task links, and comments. This tool is only for the System2 management database — not for data pipeline databases (use bash for those).',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {

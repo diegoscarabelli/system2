@@ -339,7 +339,7 @@ export class DatabaseClient {
     return stmt.run(id).changes > 0;
   }
 
-  // Query method for custom queries (used by query_database tool)
+  // Query method for custom queries (used by read_system2_db tool)
   query(sql: string): unknown[] {
     try {
       const stmt = this.db.prepare(sql);

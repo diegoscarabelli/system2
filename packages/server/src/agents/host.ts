@@ -27,12 +27,13 @@ import { calculateDelay, categorizeError, shouldFailover, shouldRetry, sleep } f
 import { rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
 import { createMessageAgentTool } from './tools/message-agent.js';
-import { createQueryDatabaseTool } from './tools/query-database.js';
 import { createReadTool } from './tools/read.js';
+import { createReadSystem2DbTool } from './tools/read-system2-db.js';
 import { createShowArtifactTool } from './tools/show-artifact.js';
 import { createWebFetchTool } from './tools/web-fetch.js';
 import { createWebSearchTool } from './tools/web-search.js';
 import { createWriteTool } from './tools/write.js';
+import { createWriteSystem2DbTool } from './tools/write-system2-db.js';
 import './types.js'; // Import custom message type declarations
 
 const __filename = fileURLToPath(import.meta.url);
@@ -365,7 +366,8 @@ export class AgentHost {
   private buildTools() {
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous tool collection matches SDK's AgentTool<any>[]
     const tools: AgentTool<any>[] = [
-      createQueryDatabaseTool(this.db),
+      createReadSystem2DbTool(this.db),
+      createWriteSystem2DbTool(this.db, this.agentId),
       createMessageAgentTool(this.agentId, this.registry, this.db),
       createBashTool(),
       createReadTool(),
