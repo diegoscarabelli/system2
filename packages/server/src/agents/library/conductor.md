@@ -3,7 +3,7 @@ name: conductor
 description: Conductor agent for executing data pipeline projects
 version: 1.0.0
 models:
-  anthropic: claude-opus-4-5
+  anthropic: claude-opus-4-6
   openai: gpt-4o
   google: gemini-3.1-pro-preview
 ---

@@ -3,7 +3,7 @@ name: reviewer
 description: Reviewer agent for validating analytical work and ensuring correctness
 version: 1.0.0
 models:
-  anthropic: claude-opus-4-5
+  anthropic: claude-opus-4-6
   openai: gpt-4o
   google: gemini-3.1-pro-preview
 ---

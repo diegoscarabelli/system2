@@ -3,7 +3,7 @@ name: narrator
 description: Memory keeper — maintains long-term memory and creates daily activity summaries
 version: 3.0.0
 models:
-  anthropic: claude-haiku-4-5
+  anthropic: claude-haiku-4-5-20251001
   openai: gpt-4o-mini
   google: gemini-2.0-flash
 ---

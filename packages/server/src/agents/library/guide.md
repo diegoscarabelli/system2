@@ -3,7 +3,7 @@ name: guide
 description: Your personal guide to thw world of reasoning with data
 version: 1.0.0
 models:
-  anthropic: claude-opus-4.5
+  anthropic: claude-opus-4-6
   openai: gpt-4o
   google: gemini-3.1-pro-preview
 ---
