@@ -29,6 +29,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
         Type.Literal('updateProject'),
         Type.Literal('createTask'),
         Type.Literal('updateTask'),
+        Type.Literal('claimTask'),
         Type.Literal('createTaskLink'),
         Type.Literal('deleteTaskLink'),
         Type.Literal('createTaskComment'),
@@ -36,7 +37,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
       ],
       {
         description:
-          'Operation to perform. createProject/updateProject manage projects. createTask/updateTask manage tasks. createTaskLink/deleteTaskLink manage task relationships. createTaskComment/deleteTaskComment manage task comments.',
+          'Operation to perform. createProject/updateProject manage projects. createTask/updateTask manage tasks. claimTask atomically claims an unassigned todo task (pull model, secondary to assignment). createTaskLink/deleteTaskLink manage task relationships. createTaskComment/deleteTaskComment manage task comments.',
       }
     ),
     // Shared: ID for updates/deletes
@@ -100,7 +101,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
     name: 'write_system2_db',
     label: 'Write System2 DB',
     description:
-      'Create or update records in the System2 app database (~/.system2/app.db). Use named operations to manage projects, tasks, task links, and task comments. updated_at is maintained automatically. The author field on task comments is filled automatically from your agent ID. This tool is only for the System2 management database — not for data pipeline databases (use bash for those). For ad-hoc or complex SQL not covered by these operations, you can also use bash with sqlite3 ~/.system2/app.db.',
+      "Create or update records in the System2 app database (~/.system2/app.db). Use named operations to manage projects, tasks, task links, and task comments. updated_at is maintained automatically. The author field on task comments is filled automatically from your agent ID. claimTask atomically claims a todo task — only use this when operating in pull mode at the Conductor's direction, not as a substitute for working your assigned tasks. This tool is only for the System2 management database — not for data pipeline databases (use bash for those). For ad-hoc or complex SQL not covered by these operations, you can also use bash with sqlite3 ~/.system2/app.db.",
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       const err = (msg: string) => ({
@@ -121,6 +122,12 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
       try {
         switch (params.operation) {
           case 'createProject': {
+            const self = db.getAgent(agentId);
+            if (!self || self.role !== 'guide') {
+              return err(
+                'createProject is restricted to the Guide agent. Only Guide creates and owns projects; Conductors execute them.'
+              );
+            }
             if (!params.name) return err('createProject requires: name');
             if (!params.description) return err('createProject requires: description');
             if (params.status && !PROJECT_STATUSES.includes(params.status as ProjectStatus)) {
@@ -212,6 +219,24 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             });
             if (!result) return err(`No task found with id ${params.id}`);
             return ok(result);
+          }
+
+          case 'claimTask': {
+            if (params.id === undefined) return err('claimTask requires: id');
+            const result = db.claimTask(agentId, params.id);
+            if (!result.claimed) {
+              const reason =
+                result.error === 'task_not_found'
+                  ? `No task found with id ${params.id}.`
+                  : result.error === 'wrong_project'
+                    ? `Task ${params.id} belongs to a different project than your agent. claimTask only works within your own project.`
+                    : `Task ${params.id} is no longer available (status is not 'todo').`;
+              return {
+                content: [{ type: 'text' as const, text: `Claim failed: ${reason}` }],
+                details: { claimed: false, error: result.error },
+              };
+            }
+            return ok({ claimed: true, task: result.task });
           }
 
           case 'createTaskLink': {

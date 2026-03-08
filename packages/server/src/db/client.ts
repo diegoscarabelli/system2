@@ -219,6 +219,44 @@ export class DatabaseClient {
     return (stmt.get(...values) as Task) || null;
   }
 
+  /**
+   * Atomically claim a task for the given agent.
+   *
+   * Only succeeds if the task is 'todo' AND has the same project as the agent
+   * (including NULL IS NULL — project-less agents can claim project-less tasks).
+   * Uses IS instead of = for the project comparison so NULL matches NULL.
+   * Returns the claimed task on success, or a reason string on failure.
+   */
+  claimTask(
+    agentId: number,
+    taskId: number
+  ):
+    | { claimed: true; task: Task }
+    | { claimed: false; error: 'task_not_found' | 'wrong_project' | 'already_claimed' } {
+    const stmt = this.db.prepare(`
+      UPDATE task
+      SET status = 'in progress', assignee = ?, start_at = datetime('now'), updated_at = datetime('now')
+      WHERE id = ?
+        AND status = 'todo'
+        AND project IS (SELECT project FROM agent WHERE id = ?)
+      RETURNING *
+    `);
+
+    const row = stmt.get(agentId, taskId, agentId) as Task | undefined;
+    if (row) return { claimed: true, task: row };
+
+    // Claim failed — diagnose why for a clear error message
+    const task = this.getTask(taskId);
+    if (!task) return { claimed: false, error: 'task_not_found' };
+
+    const agent = this.getAgent(agentId);
+    if (!agent || task.project !== agent.project) {
+      return { claimed: false, error: 'wrong_project' };
+    }
+
+    return { claimed: false, error: 'already_claimed' };
+  }
+
   // Agent operations
   createAgent(agent: Omit<Agent, 'id' | 'created_at' | 'updated_at'>): Agent {
     const stmt = this.db.prepare(`
