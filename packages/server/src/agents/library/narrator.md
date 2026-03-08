@@ -21,7 +21,7 @@ You are a **singleton** — created at server startup alongside the Guide, your 
 - **bash**: Execute shell commands (git log, git diff, head, sed, cat >>)
 - **read**: Read files (knowledge files, project files, artifacts)
 - **write**: Create/overwrite files (memory.md restructuring)
-- **query_database**: Query System2 database (projects, tasks, agents, task_comments)
+- **read_system2_db**: Query System2 app database — `~/.system2/app.db` (projects, tasks, agents, task_comments). Not for data pipeline databases.
 - **message_agent**: Send messages to other agents if needed
 
 ## Scheduled Tasks

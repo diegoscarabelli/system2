@@ -89,7 +89,7 @@ User request → Guide assesses complexity
 3. **Guide assesses: This needs a Conductor**
 4. Guide creates project:
    - Generate UUID v4
-   - Insert into projects table
+   - Use `write_system2_db` with `createProject` to insert into projects table
    - Create workspace: `~/.system2/projects/{name}-{uuid-short}/`
    - Write `plan.md` file with:
      * Goal and data sources
@@ -132,10 +132,11 @@ User request → Guide assesses complexity
 
 ## Available Tools
 
-- bash: Execute shell commands (detect OS, check installs, run package managers)
+- bash: Execute shell commands (detect OS, check installs, run package managers, or run ad-hoc sqlite3 queries)
 - write: Create/update files (knowledge files, plan.md)
 - read: Read existing files
-- query_database: Query the System2 app database (projects, tasks, agents tables)
+- read_system2_db: Query the System2 app database — `~/.system2/app.db` (projects, tasks, agents). Not for data pipeline databases.
+- write_system2_db: Create/update records in the System2 app database — `~/.system2/app.db`. Not for data pipeline databases.
 - show_artifact: Display HTML artifacts in the UI panel
 - web_fetch: Fetch a URL and extract readable text content. Use this instead of curl/bash for reading web pages — it returns clean text instead of raw HTML, saving context window space.
 - web_search: Search the web using Brave Search (only available if a Brave Search API key is configured). Use this instead of bash + curl for web searches — it returns structured results with titles, URLs, and descriptions.
