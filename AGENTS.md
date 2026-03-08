@@ -31,6 +31,22 @@ The [`CONTRIBUTING.md`](CONTRIBUTING.md) file contains development guidelines. K
 
 Every System2 agent — Guide, Conductor, Narrator, Reviewer, and any data agent spawned by Conductor — **must** use `app.db` (`~/.system2/app.db`) as the single source of truth for all project and task management. The tools `read_system2_db` and `write_system2_db` are the primary interface. See [docs/database.md](docs/database.md) for the full schema and [docs/tools.md](docs/tools.md) for tool reference.
 
+### Work Assignment Model
+
+**The primary work modality is push, not pull.** The Conductor assigns tasks to agents by setting `assignee` and then messaging them with their task IDs. Agents should always prefer working on tasks they have been explicitly assigned.
+
+**Conductor** is the primary planner. In projects where the Conductor is the sole executor, it self-assigns tasks via `createTask`/`updateTask` and coordinates the Reviewer directly. When other specialist agents are active, the Conductor creates tasks, assigns them, and messages each agent its task IDs.
+
+**Guide** and **Narrator** are system-wide singleton roles — they do not belong to a project and are not subject to project-scoped work assignment.
+
+**Pull-based work claiming** via `claimTask` is a secondary mechanism. It is only appropriate when:
+
+- The Conductor has explicitly set up a pool of unassigned `todo` tasks for an agent to self-schedule, **and**
+- The task scope matches the agent's scope (`claimTask` enforces this): project-scoped agents can only claim tasks in their own project; project-less agents (Guide, Narrator) can only claim project-less tasks, **and**
+- The task is clearly within the agent's stated purpose.
+
+If you have no assigned work and are not in an explicit pull-mode arrangement, **ask the Conductor** what to do next — do not self-assign arbitrarily.
+
 ### Mandatory Behaviors
 
 **Every agent must:**
@@ -45,6 +61,8 @@ Every System2 agent — Guide, Conductor, Narrator, Reviewer, and any data agent
      AND t.status IN ('todo', 'in progress')
    ORDER BY t.priority DESC, t.start_at ASC
    ```
+
+   If this returns no rows and you are a project-scoped agent (Conductor, Reviewer, or a spawned specialist), message the Conductor to ask for next steps — do not remain idle or self-assign arbitrarily.
 
 2. **Keep task status current**: transition `todo` → `in progress` → `review` → `done`. Always set `start_at` when beginning a task and `end_at` when completing it.
 

@@ -65,10 +65,11 @@ Executes against `~/.system2/app.db` using structured named operations that dele
 
 | Operation | Required | Optional | Notes |
 |-----------|----------|----------|-------|
-| `createProject` | `name`, `description` | `status`, `labels`, `start_at` | `status` defaults to `"todo"` |
+| `createProject` | `name`, `description` | `status`, `labels`, `start_at` | **Guide only.** `status` defaults to `"todo"` |
 | `updateProject` | `id` | `name`, `description`, `status`, `labels`, `start_at`, `end_at` | `updated_at` auto-set |
 | `createTask` | `project`, `title`, `description` | `status`, `priority`, `assignee`, `labels`, `parent`, `start_at` | `status` defaults to `"todo"`, `priority` to `"medium"` |
 | `updateTask` | `id` | `title`, `description`, `status`, `priority`, `assignee`, `labels`, `parent`, `start_at`, `end_at` | `updated_at` auto-set |
+| `claimTask` | `id` | — | Atomically claims a `todo` task; enforces scope match (project-scoped agents: same project; project-less agents: project-less tasks only); `assignee` set to calling agent's ID. Returns `{ claimed: true, task }` or `{ claimed: false, error }`. Secondary mechanism — prefer assigned tasks. |
 | `createTaskLink` | `source`, `target`, `relationship` | — | `relationship`: `blocked_by` \| `relates_to` \| `duplicates` |
 | `deleteTaskLink` | `id` | — | |
 | `createTaskComment` | `task`, `content` | — | `author` auto-filled from agent ID |

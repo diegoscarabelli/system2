@@ -13,10 +13,10 @@ System2's agents are built on the [pi-coding-agent](https://github.com/mariozech
 
 | Agent | Role | Lifecycle | Scope | Models |
 |-------|------|-----------|-------|--------|
-| **Guide** | User-facing agent. Answers questions, delegates complex work to Conductor. Populates knowledge files. | Singleton, persistent | System-wide | claude-opus-4.5, gpt-4o, gemini-3.1-pro |
-| **Conductor** | Project orchestrator. Breaks work into tasks, creates schemas and pipelines, tracks progress. | Per-project, ephemeral | Project-specific | claude-opus-4.5, gpt-4o, gemini-3.1-pro |
-| **Narrator** | Memory keeper. Creates daily summaries and maintains long-term memory. Schedule-driven. | Singleton, persistent | System-wide | claude-haiku-4.5, gpt-4o-mini, gemini-2.0-flash |
-| **Reviewer** | Validation agent. Checks SQL logic, data transformations, analytical assumptions. | Per-project, ephemeral | Project-specific | claude-opus-4.5, gpt-4o, gemini-3.1-pro |
+| **Guide** | User-facing agent. Answers questions, delegates complex work to Conductor. Populates knowledge files. | Singleton, persistent | System-wide | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
+| **Conductor** | Project orchestrator. Breaks work into tasks, creates schemas and pipelines, tracks progress. | Per-project, ephemeral | Project-specific | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
+| **Narrator** | Memory keeper. Creates daily summaries and maintains long-term memory. Schedule-driven. | Singleton, persistent | System-wide | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
+| **Reviewer** | Validation agent. Checks SQL logic, data transformations, analytical assumptions. | Per-project, ephemeral | Project-specific | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
 
 **Guide and Narrator** are singletons created at server startup. Their sessions persist indefinitely across restarts (via `SessionManager.continueRecent()`).
 
@@ -32,7 +32,7 @@ name: Guide
 description: User-facing agent
 version: "1.0"
 models:
-  anthropic: claude-opus-4.5
+  anthropic: claude-opus-4-6
   openai: gpt-4o
   google: gemini-3.1-pro
 ---
