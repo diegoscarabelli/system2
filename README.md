@@ -223,7 +223,7 @@ system2/
 │   │       ├── agents/
 │   │       │   ├── agents.md   # Shared agent reference (prepended to all system prompts)
 │   │       │   ├── library/    # Agent definitions (guide.md, conductor.md, ...)
-│   │       │   ├── tools/      # bash, read, write, query-database, message-agent, show-artifact, web-fetch, web-search
+│   │       │   ├── tools/      # bash, read, write, read-system2-db, write-system2-db, message-agent, show-artifact, web-fetch, web-search
 │   │       │   ├── host.ts     # AgentHost with failover
 │   │       │   ├── registry.ts # AgentRegistry (maps agent IDs to AgentHost instances)
 │   │       │   ├── auth-resolver.ts
@@ -292,7 +292,8 @@ Agents interact with the system through custom tools defined in `packages/server
 | `bash` | Execute shell commands (30s timeout, 10MB output buffer) | No |
 | `read` | Read file contents (absolute or `~/` paths) | No |
 | `write` | Write/create files, auto-creates parent directories | No |
-| `query_database` | Query System2 SQLite database (read-only: projects, tasks, agents) | No |
+| `read_system2_db` | Query System2 app database `~/.system2/app.db` (SELECT only). Not for data pipeline databases. | No |
+| `write_system2_db` | Create/update records in System2 app database via named operations. Not for data pipeline databases. | No |
 | `message_agent` | Send a message to another agent by database ID | No |
 | `show_artifact` | Display HTML file in the UI left panel (path must be within `~/.system2/`) | No |
 | `web_fetch` | Fetch a URL and extract readable text content | No |

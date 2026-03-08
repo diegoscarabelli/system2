@@ -107,12 +107,22 @@ The `DatabaseClient` class initializes SQLite with WAL mode and a 5-second busy 
 
 Project, task, comment, and link CRUD methods are also available.
 
-## Query Access
+## Database Access for Agents
 
-Agents query the database via the `query_database` tool (SELECT only). Interactive artifact dashboards use the `/api/query` POST endpoint, which also restricts to SELECT queries. See [Tools](tools.md#query_database).
+Both tools operate exclusively on `~/.system2/app.db` — the System2 management database. They are **not** for querying data pipeline databases (TimescaleDB, DuckDB, etc.); use `bash` for those.
+
+### Read access
+
+Agents query the database via the `read_system2_db` tool (SELECT only). Interactive artifact dashboards use the `/api/query` POST endpoint, which also restricts to SELECT queries. See [Tools](tools.md#read_system2_db).
+
+### Write access
+
+Agents write to the database via the `write_system2_db` tool, which exposes structured named operations (`createProject`, `updateProject`, `createTask`, `updateTask`, `createTaskLink`, `deleteTaskLink`, `createTaskComment`, `deleteTaskComment`). These delegate to `DatabaseClient` methods, ensuring `updated_at` is always maintained and `task_comment.author` is auto-filled from the calling agent's ID. See [Tools](tools.md#write_system2_db).
+
+For ad-hoc SQL not covered by the tool (bulk updates, complex transactions), agents can use `bash` with `sqlite3 ~/.system2/app.db`.
 
 ## See Also
 
 - [Shared Types](packages/shared.md) -- TypeScript interfaces matching this schema
-- [Tools](tools.md) -- `query_database` tool
+- [Tools](tools.md) -- `read_system2_db` and `write_system2_db` tools
 - [Server](packages/server.md) -- `/api/query` endpoint

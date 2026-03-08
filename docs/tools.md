@@ -42,15 +42,40 @@ Write or create files on the filesystem.
 
 Auto-creates parent directories if they don't exist.
 
-### `query_database`
+### `read_system2_db`
 
-Query the System2 SQLite database (read-only).
+Query the System2 app database (read-only).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `sql` | string | SQL SELECT query |
 
-Executes against the app database (`~/.system2/app.db`). Returns rows as JSON. Only SELECT queries are allowed. See [Database](database.md) for the schema.
+Executes against `~/.system2/app.db`. Returns rows as JSON. Only SELECT queries are allowed. **Only for System2's management database** — for data pipeline databases use `bash`. See [Database](database.md) for the schema.
+
+### `write_system2_db`
+
+Create or update records in the System2 app database.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `operation` | string | Named operation (see table below) |
+| _(varies)_ | _(varies)_ | Additional params depend on operation |
+
+Executes against `~/.system2/app.db` using structured named operations that delegate to `DatabaseClient` methods. `updated_at` is always maintained automatically. The `author` field on task comments is auto-filled from the calling agent's ID. **Only for System2's management database** — for data pipeline databases use `bash`. For ad-hoc SQL not covered by these operations, use `bash` with `sqlite3 ~/.system2/app.db`.
+
+| Operation | Required | Optional | Notes |
+|-----------|----------|----------|-------|
+| `createProject` | `name`, `description` | `status`, `labels`, `start_at` | `status` defaults to `"todo"` |
+| `updateProject` | `id` | `name`, `description`, `status`, `labels`, `start_at`, `end_at` | `updated_at` auto-set |
+| `createTask` | `project`, `title`, `description` | `status`, `priority`, `assignee`, `labels`, `parent`, `start_at` | `status` defaults to `"todo"`, `priority` to `"medium"` |
+| `updateTask` | `id` | `title`, `description`, `status`, `priority`, `assignee`, `labels`, `parent`, `start_at`, `end_at` | `updated_at` auto-set |
+| `createTaskLink` | `source`, `target`, `relationship` | — | `relationship`: `blocked_by` \| `relates_to` \| `duplicates` |
+| `deleteTaskLink` | `id` | — | |
+| `createTaskComment` | `task`, `content` | — | `author` auto-filled from agent ID |
+| `deleteTaskComment` | `id` | — | |
+
+Valid `status` values: `"todo"`, `"in progress"`, `"review"`, `"done"`, `"abandoned"`
+Valid `priority` values: `"low"`, `"medium"`, `"high"`
 
 ### `message_agent`
 
@@ -101,6 +126,6 @@ Returns structured results (title, URL, description). Requires a [Brave Search A
 ## See Also
 
 - [Agents](agents.md) -- how tools are registered and used
-- [Database](database.md) -- schema for `query_database`
+- [Database](database.md) -- schema for `read_system2_db` and `write_system2_db`
 - [Configuration](configuration.md) -- web search configuration
 - [UI](packages/ui.md) -- artifact display and postMessage bridge
