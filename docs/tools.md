@@ -1,10 +1,16 @@
 # Agent Tools
 
-Agents interact with the system through 8 custom tools defined in `packages/server/src/agents/tools/`. Each tool is a factory function returning a [pi-coding-agent](https://github.com/mariozechner/pi-coding-agent) `AgentTool` with typed parameters (via [@sinclair/typebox](https://github.com/sinclairzx81/typebox)) and an async `execute` method.
+Agents interact with the system through custom tools defined in `packages/server/src/agents/tools/`. Each tool is a factory function returning a [pi-coding-agent](https://github.com/mariozechner/pi-coding-agent) `AgentTool` with typed parameters (via [@sinclair/typebox](https://github.com/sinclairzx81/typebox)) and an async `execute` method.
 
 ## Tool Registration
 
-Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts`). Seven tools are always included; `web_search` is conditional on configuration.
+Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts`):
+
+- Nine tools are always included: `bash`, `read`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `show_artifact`, `web_fetch`, `terminate_agent`
+- `spawn_agent` is conditional — only agents that receive a spawner callback (Guide and Conductors) get this tool
+- `web_search` is conditional on a Brave Search API key being configured
+- `spawn_agent` is conditional on the agent receiving a `spawner` callback (Guide and all spawned Conductors/Reviewers)
+- `terminate_agent` is always included
 
 ## Tool Reference
 
@@ -124,9 +130,44 @@ Returns structured results (title, URL, description). Requires a [Brave Search A
 
 **Conditional:** only registered when `[services.brave_search]` key exists AND `[tools.web_search].enabled` is not `false`. Max results configurable via `[tools.web_search].max_results`.
 
+### `spawn_agent`
+
+Spawn a new agent (Conductor or Reviewer) for a project.
+
+| Parameter         | Type   | Description                                                          |
+|-------------------|--------|----------------------------------------------------------------------|
+| `role`            | string | `"conductor"` or `"reviewer"`                                        |
+| `project_id`      | number | ID of an existing project in app.db                                  |
+| `initial_message` | string | Context and instructions delivered to the new agent on creation      |
+
+Creates an agent record in app.db, starts a new `AgentHost` session, registers it in `AgentRegistry`, delivers the initial message, and returns the new agent's database ID.
+
+**Permission model:**
+
+- Guide may spawn Conductors or Reviewers for any project
+- Conductors may spawn Conductors or Reviewers within their own project only
+- Narrator has no spawner and cannot spawn agents
+
+**Conditional:** only registered when the `AgentHost` is created with a `spawner` callback (all agents except Narrator).
+
+### `terminate_agent`
+
+Archive an active agent — abort its session, unregister from `AgentRegistry`, and mark `status: "archived"` in app.db.
+
+| Parameter  | Type   | Description                         |
+|------------|--------|-------------------------------------|
+| `agent_id` | number | Database ID of the agent to archive |
+
+**Permission model:**
+
+- Singleton agents (Guide, Narrator) cannot be terminated
+- An agent cannot terminate itself
+- Only Guide and Conductor roles may terminate agents
+- Conductors can only terminate agents in their own project
+
 ## See Also
 
-- [Agents](agents.md) -- how tools are registered and used
+- [Agents](agents.md) -- agent roles, lifecycle, spawn/terminate, work management
 - [Database](database.md) -- schema for `read_system2_db` and `write_system2_db`
 - [Configuration](configuration.md) -- web search configuration
 - [UI](packages/ui.md) -- artifact display and postMessage bridge
