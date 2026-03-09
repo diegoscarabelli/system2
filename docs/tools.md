@@ -6,11 +6,9 @@ Agents interact with the system through custom tools defined in `packages/server
 
 Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts`):
 
-- Nine tools are always included: `bash`, `read`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `show_artifact`, `web_fetch`, `terminate_agent`
-- `spawn_agent` is conditional — only agents that receive a spawner callback (Guide and Conductors) get this tool
+- Eight tools are always included: `bash`, `read`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `show_artifact`, `web_fetch`
+- `spawn_agent` and `terminate_agent` are conditional — only agents that receive a spawner callback (Guide and Conductors) get these tools
 - `web_search` is conditional on a Brave Search API key being configured
-- `spawn_agent` is conditional on the agent receiving a `spawner` callback (Guide and all spawned Conductors/Reviewers)
-- `terminate_agent` is always included
 
 ## Tool Reference
 
@@ -105,7 +103,6 @@ Display an HTML file in the UI's left panel.
 |-----------|------|-------------|
 | `file_path` | string | Path relative to `~/.system2/` |
 
-- **Security:** validates the resolved path is within `~/.system2/` (no path traversal)
 - **Live reload:** the server starts an `fs.watch` on the file; modifications trigger automatic UI refresh
 - **Only one artifact watched at a time** -- showing a new artifact closes the previous watcher
 

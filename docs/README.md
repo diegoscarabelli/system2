@@ -18,7 +18,7 @@ For installation and usage, see the [project README](../README.md).
 ## Core Systems
 
 - [Agents](agents.md) -- multi-agent roles, lifecycle, system prompt construction, failover
-- [Tools](tools.md) -- the 8 agent tools (bash, read, write, query, messaging, artifacts, web)
+- [Tools](tools.md) -- the 11 agent tools (shell, filesystem, system2 management, messaging, artifacts, web, agent lifecycle)
 - [Database](database.md) -- SQLite schema, tables, indices, query patterns
 - [WebSocket Protocol](websocket-protocol.md) -- client/server message types and flow
 - [Knowledge System](knowledge-system.md) -- persistent memory, daily summaries, git tracking

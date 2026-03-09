@@ -7,7 +7,7 @@
 
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, normalize, relative } from 'node:path';
+import { join, normalize } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 
@@ -29,15 +29,6 @@ export function createShowArtifactTool() {
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       const resolved = normalize(join(SYSTEM2_DIR, params.path));
-      const rel = relative(SYSTEM2_DIR, resolved);
-      if (rel.startsWith('..') || rel.startsWith('/')) {
-        return {
-          content: [
-            { type: 'text', text: `Error: path must be within ~/.system2/: ${params.path}` },
-          ],
-          details: { error: 'path_traversal', path: params.path },
-        };
-      }
 
       if (!existsSync(resolved)) {
         return {
@@ -46,7 +37,7 @@ export function createShowArtifactTool() {
         };
       }
 
-      const url = `/artifacts/${rel}`;
+      const url = `/artifacts/${params.path}`;
 
       return {
         content: [{ type: 'text', text: 'Artifact displayed' }],

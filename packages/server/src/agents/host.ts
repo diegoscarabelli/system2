@@ -30,7 +30,7 @@ import { createMessageAgentTool } from './tools/message-agent.js';
 import { createReadTool } from './tools/read.js';
 import { createReadSystem2DbTool } from './tools/read-system2-db.js';
 import { createShowArtifactTool } from './tools/show-artifact.js';
-import { createSpawnAgentTool, type AgentSpawner } from './tools/spawn-agent.js';
+import { type AgentSpawner, createSpawnAgentTool } from './tools/spawn-agent.js';
 import { createTerminateAgentTool } from './tools/terminate-agent.js';
 import { createWebFetchTool } from './tools/web-fetch.js';
 import { createWebSearchTool } from './tools/web-search.js';
@@ -388,13 +388,11 @@ export class AgentHost {
       console.log('[AgentHost] web_search tool enabled');
     }
 
-    // spawn_agent requires a spawner callback (provided to Guide and Conductors, not Narrator)
+    // spawn_agent and terminate_agent require a spawner callback (provided to Guide and Conductors, not Narrator)
     if (this.spawner) {
       tools.push(createSpawnAgentTool(this.db, this.agentId, this.spawner));
+      tools.push(createTerminateAgentTool(this.db, this.agentId, this.registry));
     }
-
-    // terminate_agent is available to all agents with spawn rights (Guide, Conductors)
-    tools.push(createTerminateAgentTool(this.db, this.agentId, this.registry));
 
     return tools;
   }
