@@ -86,6 +86,28 @@ pnpm format      # Auto-fix formatting
 pnpm typecheck   # TypeScript type checking
 ```
 
+## Testing
+
+System2 uses [Vitest](https://vitest.dev/) with a workspace configuration. Tests live alongside source files with a `.test.ts` suffix.
+
+```bash
+pnpm test         # Run all tests once
+pnpm test:watch   # Run tests in watch mode
+```
+
+Test coverage spans the `server` and `cli` packages — retry logic, auth failover, agent registry, scheduler jobs, message history, config generation, and log rotation.
+
+### CI Pipeline
+
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push to `main`/`phase-*` branches and on PRs:
+
+1. `pnpm check` -- lint and formatting
+2. `pnpm typecheck` -- TypeScript
+3. `pnpm build` -- full build
+4. `pnpm test` -- test suite
+
+A local **pre-push git hook** runs the same checks before code leaves your machine.
+
 ## Before Committing
 
 **Mandatory** before every commit:
@@ -93,6 +115,7 @@ pnpm typecheck   # TypeScript type checking
 ```bash
 pnpm check    # Verify formatting and lint
 pnpm build    # Ensure build passes
+pnpm test     # Run all tests
 ```
 
 If `pnpm check` reports issues, run `pnpm format` to auto-fix.
@@ -116,6 +139,7 @@ System2 uses a **fork-based workflow**:
 ### PR Requirements
 
 - `pnpm check` passes
+- `pnpm test` passes
 - `pnpm build` passes
 - Documentation updated if needed
 - Review by project maintainer
@@ -131,6 +155,8 @@ pnpm dev          # Run all packages in watch/dev mode
 pnpm check        # Format check + lint
 pnpm format       # Auto-fix formatting
 pnpm typecheck    # TypeScript type checking
+pnpm test         # Run all tests (vitest)
+pnpm test:watch   # Run tests in watch mode
 ```
 
 ## See Also

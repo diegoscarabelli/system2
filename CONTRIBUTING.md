@@ -20,6 +20,7 @@ Thank you for your interest in contributing to System2! This document provides g
 - [Code Quality](#code-quality)
   - [Commands](#commands)
   - [Formatting Rules](#formatting-rules)
+- [Testing](#testing)
 - [Before Committing](#before-committing)
 - [Commit Messages](#commit-messages)
 - [Code Review Process](#code-review-process)
@@ -100,8 +101,9 @@ Before submitting a PR, ensure:
 
 1. Your code follows the formatting standards (see [Code Quality](#code-quality))
 2. All quality checks pass: `pnpm check`
-3. Build succeeds: `pnpm build`
-4. Documentation is updated if needed — changes to architecture, packages, tools, configuration, or the WebSocket protocol should be reflected in the relevant [docs/](docs/README.md) pages and, where applicable, in [README.md](README.md)
+3. Tests pass: `pnpm test`
+4. Build succeeds: `pnpm build`
+5. Documentation is updated if needed — changes to architecture, packages, tools, configuration, or the WebSocket protocol should be reflected in the relevant [docs/](docs/README.md) pages and, where applicable, in [README.md](README.md)
 
 ## Development Setup
 
@@ -167,6 +169,8 @@ pnpm dev          # Run all packages in watch/dev mode (alternative to the two-t
 pnpm typecheck    # Run TypeScript type checking
 pnpm check        # Run format check and lint
 pnpm format       # Auto-fix formatting
+pnpm test         # Run all tests
+pnpm test:watch   # Run tests in watch mode
 ```
 
 ## Building
@@ -216,6 +220,32 @@ pnpm check        # Run both format check and lint
 - **Trailing commas:** ES5 style
 - **Imports:** Use `node:` protocol for Node.js builtins
 
+## Testing
+
+System2 uses [Vitest](https://vitest.dev/) for testing, configured as a workspace across the `server` and `cli` packages.
+
+### Running Tests
+
+```bash
+pnpm test         # Run all tests once
+pnpm test:watch   # Run tests in watch mode (re-runs on file changes)
+```
+
+### Writing Tests
+
+Test files live alongside the source files they test, using the `.test.ts` suffix:
+
+```
+packages/server/src/agents/retry.ts        # Source
+packages/server/src/agents/retry.test.ts   # Tests
+```
+
+When adding new functionality, add tests for any exported logic — especially pure functions, state machines, and data transformations. Tests that touch the filesystem should use `tmpdir()` with cleanup in `afterEach`.
+
+### CI
+
+A GitHub Actions workflow runs on every push and PR. It executes `pnpm check`, `pnpm typecheck`, `pnpm build`, and `pnpm test`. A local pre-push git hook runs the same checks before code leaves your machine.
+
 ## Before Committing
 
 Run the following before every commit:
@@ -223,6 +253,7 @@ Run the following before every commit:
 ```bash
 pnpm check        # Verify formatting and lint
 pnpm build        # Ensure build passes
+pnpm test         # Run all tests
 ```
 
 If `pnpm check` reports issues, fix them with:
@@ -251,9 +282,11 @@ Keys are tried in order until one succeeds.
 
 ## Code Review Process
 
-1. **Automated checks** run on all PRs
-   - Code formatting verification
-   - Build verification
+1. **Automated checks** run on all PRs (via GitHub Actions)
+   - Code formatting and lint (`pnpm check`)
+   - Type checking (`pnpm typecheck`)
+   - Build verification (`pnpm build`)
+   - Test suite (`pnpm test`)
    - Must pass before merge
 
 2. **Manual review** by project maintainers

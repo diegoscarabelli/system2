@@ -37,6 +37,8 @@ pnpm dev                  # Run all packages in dev mode
 pnpm check                # Run format check and lint
 pnpm format               # Auto-fix formatting
 pnpm typecheck            # Run TypeScript type checking
+pnpm test                 # Run all tests (vitest)
+pnpm test:watch           # Run tests in watch mode
 ```
 
 Build individual packages:
@@ -53,6 +55,7 @@ pnpm --filter @system2/cli build
 ```bash
 pnpm check                # Verify formatting and lint
 pnpm build                # Ensure build passes
+pnpm test                 # Run all tests
 ```
 
 If `pnpm check` reports issues:
