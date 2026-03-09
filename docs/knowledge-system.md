@@ -21,6 +21,15 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked f
     └── ...
 ```
 
+Project-scoped files live outside `knowledge/`:
+
+```
+~/.system2/projects/
+└── {project_id}/
+    ├── log.md             # Continuous project log (Narrator, append-only)
+    └── project_story.md   # Final narrative (Narrator, on completion)
+```
+
 ## File Ownership
 
 | File | Written By | Updated When |
@@ -30,6 +39,8 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked f
 | `memory.md` | Narrator | Daily at 4 AM (memory-update job) |
 | `memory.md ## Notes` | Any agent | Anytime -- agents write important facts here |
 | `daily_summaries/*.md` | Narrator | Every 30 minutes (configurable) |
+| `projects/{id}/log.md` | Narrator | Every 30 minutes (same cron as daily summary) |
+| `projects/{id}/project_story.md` | Narrator | Once, when Conductor assigns story task at project completion |
 
 ## How Knowledge Enters System Prompts
 
@@ -37,7 +48,9 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked f
 
 1. Reads `infrastructure.md`, `user.md`, `memory.md`
 2. Skips files with 10 or fewer lines (empty templates)
-3. Reads the 2 most recent daily summary files (sorted by filename, chronological order)
+3. Loads role-aware context based on the agent's project assignment:
+   - **Project-scoped agents** (Conductor, Reviewer, specialists): loads `projects/{project_id}/log.md`
+   - **System-wide agents** (Guide, Narrator): loads the 2 most recent daily summary files (sorted by filename, chronological order)
 4. Returns all content under a `## Knowledge Base` header, separated by `---`
 
 This is appended to the static system prompt (agents.md + role instructions).

@@ -21,28 +21,44 @@ class Scheduler {
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
-| `daily-summary` | Every N minutes (default: 30) | Collect activity and deliver to Narrator for summarization |
+| `daily-summary` | Every N minutes (default: 30) | Collect activity, deliver project logs and daily summary to Narrator |
 | `memory-update` | Daily at 4 AM | Send daily summaries list to Narrator for memory consolidation |
 
 The `daily-summary` interval is configurable via `[scheduler].daily_summary_interval_minutes` in config.toml.
 
 ## Daily Summary Pipeline
 
-`buildAndDeliverDailySummary()` runs on each trigger:
+`buildAndDeliverDailySummary()` runs on each trigger in two phases: project logs first, then the daily summary.
 
-1. **Read previous context** -- last 20 lines of the most recent daily summary
-2. **Create today's file** if it doesn't exist (with empty YAML frontmatter)
-3. **Resolve `last_run_ts`** via fallback chain:
+### Phase 1: Project Logs
+
+For each active project (those with a non-archived Conductor):
+
+1. Ensure `~/.system2/projects/{project_id}/` directory exists
+2. Create `log.md` with YAML frontmatter if it doesn't exist
+3. Read previous context (last 20 lines of `log.md`)
+4. Collect activity from ALL agents involved in the project (project-scoped agents + Guide + Narrator)
+5. Collect project-scoped DB changes (task, project, task_comment, task_link records belonging to the project)
+6. If there is activity, deliver a `[Scheduled task: project-log]` message to the Narrator
+
+Each project log is a single continuous file per project lifetime (unlike daily summaries which create a new file per day).
+
+### Phase 2: Daily Summary
+
+1. **Resolve timestamps** via fallback chain:
    - Today's daily summary frontmatter (`last_narrator_update_ts`)
    - Most recent daily summary frontmatter (by filename sort)
    - `memory.md` frontmatter
    - Fall back to `intervalMinutes` ago
-4. **Collect agent activity** -- read JSONL session entries from all non-archived agents in the time window (`lastRunTs` to `newRunTs`). Only `message` and `custom_message` entry types are included.
-5. **Collect database changes** -- query `task`, `project`, `task_comment`, `task_link` tables for rows updated/created in the time window. Format as markdown tables.
-6. **Check for activity** -- skip delivery if there's no agent activity, no DB changes, and no previous context
-7. **Build and deliver** -- assemble a markdown message with all data and send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
+2. **Create today's file** if it doesn't exist (with empty YAML frontmatter)
+3. **Read previous context** -- last 20 lines of the most recent daily summary
+4. **Build message** with two sections:
+   - **Project Activity** -- per-project sections with project-scoped agent JSONL and project DB changes (reused from Phase 1)
+   - **Non-Project Activity** -- Guide + Narrator JSONL (full streams spanning all projects) and DB changes not tied to any active project
+5. **Check for activity** -- skip delivery if there's no meaningful activity
+6. **Deliver** -- send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
 
-The Narrator then synthesizes the data into a narrative summary and appends it to the daily summary file.
+The Narrator synthesizes each section into narrative summaries, avoiding repetition of project-specific content already covered in project-log entries (which are processed first).
 
 ## Memory Update Pipeline
 

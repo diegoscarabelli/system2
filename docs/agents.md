@@ -15,7 +15,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/mariozech
 |-------|------|-----------|-------|--------|
 | **Guide** | User-facing agent. Answers questions, delegates complex work to Conductor. Populates knowledge files. | Singleton, persistent | System-wide | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
 | **Conductor** | Project orchestrator. Breaks work into tasks, creates schemas and pipelines, tracks progress. | Per-project, ephemeral | Project-specific | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
-| **Narrator** | Memory keeper. Creates daily summaries and maintains long-term memory. Schedule-driven. | Singleton, persistent | System-wide | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
+| **Narrator** | Memory keeper. Curates project logs and daily summaries, maintains long-term memory, writes project stories. Schedule-driven. | Singleton, persistent | System-wide | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
 | **Reviewer** | Validation agent. Checks SQL logic, data transformations, analytical assumptions. | Per-project, ephemeral | Project-specific | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
 
 **Guide and Narrator** are singletons created at server startup. Their sessions persist indefinitely across restarts (via `SessionManager.continueRecent()`).
@@ -52,7 +52,7 @@ Each agent's system prompt is assembled from four layers:
 | Shared reference | `agents/agents.md` | Once at init |
 | Agent instructions | `agents/library/{role}.md` (body after frontmatter) | Once at init |
 | Knowledge files | `~/.system2/knowledge/` (infrastructure.md, user.md, memory.md) | **Every LLM call** |
-| Recent daily summaries | `~/.system2/knowledge/daily_summaries/` (last 2 by filename) | **Every LLM call** |
+| Role-aware context | Project log (`projects/{id}/log.md`) for project-scoped agents, or last 2 daily summaries for system-wide agents | **Every LLM call** |
 
 The static layers are concatenated into `staticPrompt`. The dynamic layers are loaded via `loadKnowledgeContext()`, which is passed as a `systemPromptOverride` callback to the Pi SDK's `DefaultResourceLoader`. This means knowledge updates take effect immediately without server restarts.
 
@@ -200,10 +200,10 @@ User request → Guide creates project in app.db
              → Conductor plans tasks in app.db
              → Conductor executes, spawning data agents as needed
              → Conductor coordinates Reviewer for analytical sign-off
+             → Conductor creates "Write project story" task for Narrator
              → Conductor messages Guide: project complete
-             → Guide asks Narrator for project story
-             → Guide terminates Conductor (terminate_agent)
-             → Guide terminates Reviewer (terminate_agent)
+             → Guide asks user for confirmation
+             → User confirms → Guide terminates Conductor + Reviewer
              → Guide updates project status to "done"
 ```
 
@@ -346,11 +346,12 @@ DataAgent-Extract, DataAgent-Analyze, and Reviewer work through their tasks in d
 #### Phase 4 — Completion and Story
 
 1. DataAgent-Analyze generates `~/.system2/artifacts/linkedin_report.html`.
-2. Conductor messages Guide: "Project #1 complete. Report at artifacts/linkedin_report.html."
-3. **Guide → Narrator**: requests project story.
-4. Narrator queries app.db, reads all session JSONL files, writes `~/.system2/projects/story-1.md`.
-5. Guide terminates Conductor (#2) and Reviewer (#4), sets project #1 to `done`.
-6. Guide informs user with summary and artifact.
+2. Conductor creates task "Write project story" assigned to Narrator, messages Narrator with task ID and project details.
+3. Conductor messages Guide: "Project #1 complete. Report at artifacts/linkedin_report.html. Story task #17 assigned to Narrator."
+4. **Guide → User**: "Project #1 is complete. [Summary]. Shall I finalize this project?"
+5. User confirms → Guide terminates Conductor (#2) and Reviewer (#4), sets project #1 to `done`.
+6. Guide informs user with final summary, artifact location, and story path (`~/.system2/projects/1/project_story.md`).
+7. Narrator (independently) writes the project story by querying app.db, reading project log and session JSONL files.
 
 ---
 
