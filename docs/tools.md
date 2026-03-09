@@ -16,7 +16,7 @@ Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts
 
 ### `bash`
 
-Execute shell commands.
+Execute shell commands. Uses PowerShell on Windows, the default shell (bash) on macOS/Linux.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -25,6 +25,7 @@ Execute shell commands.
 - **Timeout:** 30 seconds
 - **Output buffer:** 10MB
 - **Working directory:** user's home directory
+- **Shell:** PowerShell (`powershell.exe`) on Windows, default shell on macOS/Linux
 - **Implementation:** Node.js `child_process.exec`
 
 ### `read`
