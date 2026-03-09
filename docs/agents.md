@@ -1,6 +1,6 @@
 # Multi-Agent System
 
-System2's agents are built on the [pi-coding-agent](https://github.com/mariozechner/pi-coding-agent) SDK, which provides the core agent loop, tool execution, and JSONL session persistence. System2 adds multi-agent orchestration, LLM failover, dynamic knowledge injection, and inter-agent messaging.
+System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/pi-mono) SDK, which provides the core agent loop, tool execution, and JSONL session persistence. System2 adds multi-agent orchestration, LLM failover, dynamic knowledge injection, and inter-agent messaging.
 
 **Key source files:**
 - `packages/server/src/agents/host.ts` -- AgentHost class

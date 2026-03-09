@@ -1,6 +1,6 @@
 # Architecture Overview
 
-System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/mariozechner/pi-coding-agent), a SDK for building LLM-powered coding agents. The SDK provides the core agent loop, tool execution, session management (JSONL persistence), and auto-compaction. System2 adds multi-agent orchestration, LLM failover, a knowledge/memory system, a scheduler, and a web UI.
+System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/badlogic/pi-mono), a SDK for building LLM-powered coding agents. The SDK provides the core agent loop, tool execution, session management (JSONL persistence), and auto-compaction. System2 adds multi-agent orchestration, LLM failover, a knowledge/memory system, a scheduler, and a web UI.
 
 ## Monorepo Structure
 

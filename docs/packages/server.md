@@ -4,7 +4,7 @@ HTTP + WebSocket server that hosts the Guide and Narrator agents, serves the UI,
 
 **Source:** `packages/server/src/`
 **Build:** [tsup](https://tsup.egoist.dev/) -> `dist/index.js`
-**Dependencies:** [Express](https://expressjs.com/), [ws](https://github.com/websockets/ws), [pi-coding-agent](https://github.com/mariozechner/pi-coding-agent), [better-sqlite3](https://github.com/WiseLibs/better-sqlite3), [Croner](https://github.com/Hexagon/croner)
+**Dependencies:** [Express](https://expressjs.com/), [ws](https://github.com/websockets/ws), [pi-coding-agent](https://github.com/badlogic/pi-mono), [better-sqlite3](https://github.com/WiseLibs/better-sqlite3), [Croner](https://github.com/Hexagon/croner)
 
 ## Source Structure
 

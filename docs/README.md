@@ -1,6 +1,6 @@
 # System2 Developer Documentation
 
-System2 is a single-user, self-hosted AI multi-agent system for working with data. Built on [pi-coding-agent](https://github.com/mariozechner/pi-coding-agent), it automates data engineering, analysis, and reporting through coordinated AI agents with structured memory.
+System2 is a single-user, self-hosted AI multi-agent system for working with data. Built on [pi-coding-agent](https://github.com/badlogic/pi-mono), it automates data engineering, analysis, and reporting through coordinated AI agents with structured memory.
 
 For installation and usage, see the [project README](../README.md).
 
