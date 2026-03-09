@@ -12,7 +12,13 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import TOML from '@iarna/toml';
-import type { LlmConfig, LlmProvider, ServicesConfig, ToolsConfig } from '@system2/shared';
+import type {
+  LlmConfig,
+  LlmProvider,
+  LlmProviderConfig,
+  ServicesConfig,
+  ToolsConfig,
+} from '@system2/shared';
 
 export const SYSTEM2_DIR = join(homedir(), '.system2');
 export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
@@ -219,7 +225,10 @@ function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial
   for (const key in source) {
     if (source[key] !== undefined) {
       if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
-        result[key] = deepMerge(target[key] || {}, source[key]);
+        result[key] = deepMerge(
+          (target[key] || {}) as Record<string, unknown>,
+          source[key] as Record<string, unknown>
+        ) as T[Extract<keyof T, string>];
       } else {
         result[key] = source[key] as T[Extract<keyof T, string>];
       }

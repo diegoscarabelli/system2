@@ -196,7 +196,7 @@ export class WebSocketHandler {
         // Agent finished processing
         console.log(
           'Agent finished. Stop reason:',
-          (this.agentHost.state as Record<string, unknown>).stopReason
+          (this.agentHost.state as unknown as Record<string, unknown>).stopReason
         );
 
         // Send context usage update

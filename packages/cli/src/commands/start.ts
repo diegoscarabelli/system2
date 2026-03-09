@@ -90,7 +90,9 @@ export async function start(options: {
       llmConfig: config.llm,
       servicesConfig: config.services,
       toolsConfig: config.tools,
-      schedulerConfig: config.scheduler,
+      schedulerConfig: config.scheduler
+        ? { daily_summary_interval_minutes: config.scheduler.dailySummaryIntervalMinutes }
+        : undefined,
       chatConfig: config.chat
         ? { max_history_messages: config.chat.maxHistoryMessages }
         : undefined,
@@ -127,7 +129,7 @@ export async function start(options: {
     );
 
     // Save PID
-    writeFileSync(PID_FILE, child.pid?.toString());
+    writeFileSync(PID_FILE, String(child.pid ?? ''));
 
     // Detach from parent
     child.unref();
