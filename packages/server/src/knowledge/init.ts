@@ -24,6 +24,10 @@ export function initializeKnowledge(system2Dir: string): void {
   if (!existsSync(memoryDir)) {
     mkdirSync(memoryDir, { recursive: true });
   }
+  const projectsDir = join(system2Dir, 'projects');
+  if (!existsSync(projectsDir)) {
+    mkdirSync(projectsDir, { recursive: true });
+  }
 
   // Write template files (only if they don't exist)
   const templates: [string, string][] = [

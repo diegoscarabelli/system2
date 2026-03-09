@@ -82,6 +82,7 @@ export class AgentHost {
   private retryAttempts: Map<string, number> = new Map(); // Track retries per error type
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
+  private agentProject: number | null = null;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -109,6 +110,7 @@ export class AgentHost {
     if (!agentRecord) {
       throw new Error(`Agent with ID ${this.agentId} not found in database`);
     }
+    this.agentProject = agentRecord.project ?? null;
     console.log('[AgentHost] Agent:', { id: agentRecord.id, role: agentRecord.role });
 
     // Session directory — use role_id format (e.g., sessions/guide_1/)
@@ -344,19 +346,30 @@ export class AgentHost {
       }
     }
 
-    // Include the two most recent daily summaries for recent activity context
-    const summariesDir = join(knowledgeDir, 'daily_summaries');
-    if (existsSync(summariesDir)) {
-      const summaryFiles = readdirSync(summariesDir)
-        .filter((f) => f.endsWith('.md'))
-        .sort()
-        .reverse()
-        .slice(0, 2)
-        .reverse(); // chronological order
-      for (const file of summaryFiles) {
-        const content = readFileSync(join(summariesDir, file), 'utf-8');
+    // Role-aware activity context:
+    // Project-scoped agents get their project log; system-wide agents get daily summaries
+    if (this.agentProject !== null) {
+      const projectLogPath = join(SYSTEM2_DIR, 'projects', String(this.agentProject), 'log.md');
+      if (existsSync(projectLogPath)) {
+        const content = readFileSync(projectLogPath, 'utf-8');
         if (content.trim().split('\n').length > 10) {
           sections.push(content);
+        }
+      }
+    } else {
+      const summariesDir = join(knowledgeDir, 'daily_summaries');
+      if (existsSync(summariesDir)) {
+        const summaryFiles = readdirSync(summariesDir)
+          .filter((f) => f.endsWith('.md'))
+          .sort()
+          .reverse()
+          .slice(0, 2)
+          .reverse(); // chronological order
+        for (const file of summaryFiles) {
+          const content = readFileSync(join(summariesDir, file), 'utf-8');
+          if (content.trim().split('\n').length > 10) {
+            sections.push(content);
+          }
         }
       }
     }

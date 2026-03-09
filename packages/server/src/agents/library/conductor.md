@@ -85,11 +85,15 @@ The Reviewer was spawned alongside you by Guide. Their agent ID is in your initi
 
 ### 5. Completion
 
-When all tasks are done:
+When all project tasks are done:
 
 - Verify data landed, pipelines run end-to-end, all task statuses are updated in app.db
-- **Message Guide**: "Project #N complete. [Brief summary of outcomes, task IDs, artifact paths]"
-- Do NOT terminate yourself or the Reviewer — Guide will do that after the Narrator writes the project story
+- **Create a project story task** assigned to the Narrator:
+  - Query the Narrator's agent ID: `SELECT id FROM agent WHERE role = 'narrator'`
+  - Create task via `write_system2_db`: `createTask` with `project: <your project id>`, `title: "Write project story"`, `description: "Reconstruct the project journalistically. Read the project log, session files, and app.db records."`, `assignee: <narrator_id>`, `priority: "medium"`, `labels: ["narrative"]`
+  - **Message the Narrator** via `message_agent`: "Project #N (<project name>) is complete. Task #X is assigned to you — please write the project story. Read the project log at `~/.system2/projects/<project_id>/log.md` and all session files for agents involved. Save the story to `~/.system2/projects/<project_id>/project_story.md`."
+- **Message Guide**: "Project #N complete. [Brief summary of outcomes, task IDs, artifact paths]. Story task #X assigned to Narrator."
+- Do NOT terminate yourself or the Reviewer — Guide will do that after confirming with the user
 
 ## Standards
 

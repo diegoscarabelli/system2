@@ -112,16 +112,17 @@ The Conductor will message you with regular progress updates. When you receive o
 
 When the Conductor reports the project is complete:
 
-1. **Request a project story from the Narrator** via `message_agent`:
-   > "Write a project story for project #N. Reconstruct it journalistically: what was the goal, what was found, what wasn't found, how the work was done and why decisions were made that way. Query all tasks, task_links, and task_comments for project #N in app.db. Read the JSONL session files for all agents involved: `~/.system2/sessions/{role}_{id}/`. You may interrogate the Conductor (#X) via message_agent for additional context. Save the story to `~/.system2/projects/story-{N}.md` and commit to git."
+1. **Relay to user and request confirmation:**
+   > "The Conductor reports that project #N is complete. [Brief summary from Conductor's message]. Shall I finalize this project?"
 
-2. **Wait for Narrator** to confirm the story is written.
+2. **Wait for explicit user confirmation.** Do NOT proceed without user approval. If the user has questions or wants changes, relay them to the Conductor.
 
-3. **Terminate Conductor and Reviewer** via `terminate_agent` (using their agent IDs).
+3. **After user confirms:**
+   - Terminate Conductor and Reviewer via `terminate_agent` (using their agent IDs)
+   - Update project status to `"done"` in app.db (set `end_at` to now)
+   - Inform the user with a final summary and where to find the project story (`~/.system2/projects/{project_id}/project_story.md`)
 
-4. **Update project status** to `"done"` in app.db (set `end_at` to now).
-
-5. **Inform the user** with a brief summary of outcomes and where to find the project story.
+**Important:** Never terminate agents or finalize a project without explicit user confirmation. The Conductor has already assigned a project story task to the Narrator before reporting completion, so the story is written independently of this flow.
 
 ## Knowledge Management
 
