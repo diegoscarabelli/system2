@@ -208,8 +208,134 @@ export function formatMarkdownTable(rows: Record<string, unknown>[]): string {
   return `${header}\n${separator}\n${body}`;
 }
 
+/** Data collected for a single active project, reused across project log and daily summary */
+interface ProjectActivityData {
+  projectId: number;
+  projectName: string;
+  agentActivity: string;
+  dbChanges: string;
+}
+
+type AgentRow = { id: number; role: string; project_name: string | null };
+
 /**
- * Build and deliver a daily-summary message to the Narrator.
+ * Collect database changes scoped to a specific project.
+ */
+export function collectProjectDbChanges(
+  db: DatabaseClient,
+  projectId: number,
+  lastRunTs: string,
+  newRunTs: string
+): string {
+  const queries = [
+    {
+      name: 'project',
+      sql: `SELECT * FROM project WHERE id = ${projectId} AND updated_at >= '${lastRunTs}' AND updated_at < '${newRunTs}'`,
+    },
+    {
+      name: 'task',
+      sql: `SELECT * FROM task WHERE project = ${projectId} AND updated_at >= '${lastRunTs}' AND updated_at < '${newRunTs}' ORDER BY updated_at ASC`,
+    },
+    {
+      name: 'task_comment',
+      sql: `SELECT tc.* FROM task_comment tc JOIN task t ON tc.task = t.id WHERE t.project = ${projectId} AND tc.created_at >= '${lastRunTs}' AND tc.created_at < '${newRunTs}' ORDER BY tc.created_at ASC`,
+    },
+    {
+      name: 'task_link',
+      sql: `SELECT tl.* FROM task_link tl JOIN task t ON tl.source = t.id WHERE t.project = ${projectId} AND tl.created_at >= '${lastRunTs}' AND tl.created_at < '${newRunTs}' ORDER BY tl.created_at ASC`,
+    },
+  ];
+
+  const sections: string[] = [];
+  for (const { name, sql } of queries) {
+    const rows = db.query(sql) as Record<string, unknown>[];
+    sections.push(`### ${name}`);
+    sections.push(sql);
+    sections.push('');
+    if (rows.length === 0) {
+      sections.push('(no changes)\n');
+    } else {
+      sections.push(formatMarkdownTable(rows));
+      sections.push('');
+    }
+  }
+  return sections.join('\n');
+}
+
+/**
+ * Collect database changes NOT belonging to any of the given project IDs.
+ * Captures standalone tasks and changes to inactive/completed projects.
+ */
+export function collectNonProjectDbChanges(
+  db: DatabaseClient,
+  activeProjectIds: number[],
+  lastRunTs: string,
+  newRunTs: string
+): string {
+  const projectExcl =
+    activeProjectIds.length > 0 ? `AND id NOT IN (${activeProjectIds.join(',')})` : '';
+  const taskExcl =
+    activeProjectIds.length > 0
+      ? `AND (project IS NULL OR project NOT IN (${activeProjectIds.join(',')}))`
+      : '';
+  const joinTaskExcl =
+    activeProjectIds.length > 0
+      ? `AND (t.project IS NULL OR t.project NOT IN (${activeProjectIds.join(',')}))`
+      : '';
+
+  const queries = [
+    {
+      name: 'project',
+      sql: `SELECT * FROM project WHERE updated_at >= '${lastRunTs}' AND updated_at < '${newRunTs}' ${projectExcl} ORDER BY updated_at ASC`,
+    },
+    {
+      name: 'task',
+      sql: `SELECT * FROM task WHERE updated_at >= '${lastRunTs}' AND updated_at < '${newRunTs}' ${taskExcl} ORDER BY updated_at ASC`,
+    },
+    {
+      name: 'task_comment',
+      sql: `SELECT tc.* FROM task_comment tc JOIN task t ON tc.task = t.id WHERE tc.created_at >= '${lastRunTs}' AND tc.created_at < '${newRunTs}' ${joinTaskExcl} ORDER BY tc.created_at ASC`,
+    },
+    {
+      name: 'task_link',
+      sql: `SELECT tl.* FROM task_link tl JOIN task t ON tl.source = t.id WHERE tl.created_at >= '${lastRunTs}' AND tl.created_at < '${newRunTs}' ${joinTaskExcl} ORDER BY tl.created_at ASC`,
+    },
+  ];
+
+  const sections: string[] = [];
+  for (const { name, sql } of queries) {
+    const rows = db.query(sql) as Record<string, unknown>[];
+    sections.push(`### ${name}`);
+    sections.push(sql);
+    sections.push('');
+    if (rows.length === 0) {
+      sections.push('(no changes)\n');
+    } else {
+      sections.push(formatMarkdownTable(rows));
+      sections.push('');
+    }
+  }
+  return sections.join('\n');
+}
+
+/**
+ * Check if collected activity data contains any meaningful content.
+ */
+function hasActivity(agentActivity: string, dbChanges: string): boolean {
+  const hasAgentLines = !agentActivity
+    .split('\n')
+    .every((line) => !line.trim() || line.startsWith('###') || line === '(no activity)');
+  return hasAgentLines || dbChanges.includes('|');
+}
+
+/**
+ * Build and deliver project logs and daily summary to the Narrator.
+ *
+ * For each active project (conductor not archived), a project-log message is
+ * delivered first with all involved agents' activity (project-scoped + Guide +
+ * Narrator) and project-scoped DB changes. The collected data is then reused
+ * in the daily summary, which groups activity by project vs non-project.
+ *
  * Shared by both the cron handler and server catch-up.
  */
 export function buildAndDeliverDailySummary(
@@ -262,30 +388,119 @@ export function buildAndDeliverDailySummary(
     lastRunTs = new Date(Date.now() - intervalMinutes * 60_000).toISOString();
   }
 
-  // 4. Gather agent activity
-  const agents = db.query(
+  // 4. Get all non-archived agents and partition by scope
+  const allAgents = db.query(
     "SELECT a.id, a.role, p.name as project_name FROM agent a LEFT JOIN project p ON a.project = p.id WHERE a.status != 'archived'"
-  ) as Array<{ id: number; role: string; project_name: string | null }>;
+  ) as AgentRow[];
 
-  const agentActivity = collectAgentActivity(system2Dir, agents, lastRunTs, newRunTs);
+  const systemWideAgents = allAgents.filter((a) => a.project_name === null);
 
-  // 5. Gather database changes
-  const dbChanges = collectDbChanges(db, lastRunTs, newRunTs);
+  // 5. Find active projects (conductor not archived) and deliver project logs
+  const activeProjects = db.query(
+    `SELECT DISTINCT p.id, p.name FROM project p
+     JOIN agent a ON a.project = p.id
+     WHERE a.role = 'conductor' AND a.status != 'archived'`
+  ) as Array<{ id: number; name: string }>;
 
-  // 6. Check if there's any activity
-  const hasAgentActivity = !agentActivity
-    .split('\n')
-    .every((line) => !line.trim() || line.startsWith('###') || line === '(no activity)');
-  const hasDbChanges = dbChanges.includes('|');
-  const hasPreviousContext = previousContext !== '(none)';
+  const projectDataList: ProjectActivityData[] = [];
 
-  if (!hasAgentActivity && !hasDbChanges && !hasPreviousContext) {
-    console.log('[Scheduler] No activity since last run, skipping daily-summary');
-    return;
+  for (const project of activeProjects) {
+    const projectDir = join(system2Dir, 'projects', String(project.id));
+    const logFile = join(projectDir, 'log.md');
+
+    // Ensure project directory exists
+    if (!existsSync(projectDir)) {
+      mkdirSync(projectDir, { recursive: true });
+    }
+
+    // Create log file if needed
+    if (!existsSync(logFile)) {
+      writeFileSync(
+        logFile,
+        `---\nlast_narrator_update_ts:\nproject_id: ${project.id}\nproject_name: ${project.name}\n---\n# Project Log — ${project.name}\n`,
+        'utf-8'
+      );
+    }
+
+    // Read previous context from project log
+    let projectPreviousContext = '(none)';
+    const logTail = readTailLines(logFile, 20);
+    if (logTail.trim()) projectPreviousContext = logTail;
+
+    // Project-scoped agents (Conductor, Reviewer, specialists)
+    const projectScopedAgents = allAgents.filter(
+      (a) => a.project_name === project.name
+    ) as AgentRow[];
+
+    // All agents involved: project-scoped + Guide + Narrator (for project log)
+    const allProjectAgents = [...projectScopedAgents, ...systemWideAgents];
+
+    const allProjectAgentActivity = collectAgentActivity(
+      system2Dir,
+      allProjectAgents,
+      lastRunTs,
+      newRunTs
+    );
+    const projectDbChanges = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
+
+    // Cache project-scoped agent activity for daily summary reuse
+    const projectScopedActivity = collectAgentActivity(
+      system2Dir,
+      projectScopedAgents,
+      lastRunTs,
+      newRunTs
+    );
+    projectDataList.push({
+      projectId: project.id,
+      projectName: project.name,
+      agentActivity: projectScopedActivity,
+      dbChanges: projectDbChanges,
+    });
+
+    // Deliver project-log message (with all agents including Guide + Narrator)
+    if (!hasActivity(allProjectAgentActivity, projectDbChanges)) continue;
+
+    const projectLogMessage = `[Scheduled task: project-log]
+
+project_id: ${project.id}
+project_name: ${project.name}
+file: ${logFile}
+last_run_ts: ${lastRunTs}
+new_run_ts: ${newRunTs}
+
+## Previous Context
+
+${projectPreviousContext}
+
+## Agent Activity
+
+${allProjectAgentActivity}
+## Database Changes
+
+${projectDbChanges}`;
+
+    narratorHost.deliverMessage(projectLogMessage, {
+      sender: 0,
+      receiver: narratorId,
+      timestamp: Date.now(),
+    });
   }
 
-  // 7. Build and send message
-  const message = `[Scheduled task: daily-summary]
+  // 6. Build daily summary — grouped by project vs non-project
+  const activeProjectIds = projectDataList.map((p) => p.projectId);
+
+  // Non-project: Guide + Narrator JSONL (full streams, span all projects)
+  const nonProjectAgentActivity = collectAgentActivity(
+    system2Dir,
+    systemWideAgents,
+    lastRunTs,
+    newRunTs
+  );
+  const nonProjectDbChanges = collectNonProjectDbChanges(db, activeProjectIds, lastRunTs, newRunTs);
+
+  // 7. Assemble daily summary message
+  const messageParts: string[] = [
+    `[Scheduled task: daily-summary]
 
 file: ${filePath}
 last_run_ts: ${lastRunTs}
@@ -293,16 +508,37 @@ new_run_ts: ${newRunTs}
 
 ## Previous Context
 
-${previousContext}
+${previousContext}`,
+  ];
 
-## Agent Activity
+  if (projectDataList.length > 0) {
+    const projectParts: string[] = [];
+    for (const pd of projectDataList) {
+      projectParts.push(
+        `### Project: ${pd.projectName} (#${pd.projectId})\n\n#### Agent Activity\n\n${pd.agentActivity}\n#### Database Changes\n\n${pd.dbChanges}`
+      );
+    }
+    messageParts.push(`## Project Activity\n\n${projectParts.join('\n')}`);
+  }
 
-${agentActivity}
-## Database Changes
+  messageParts.push(
+    `## Non-Project Activity\n\n#### Agent Activity\n\n${nonProjectAgentActivity}\n#### Database Changes\n\n${nonProjectDbChanges}`
+  );
 
-${dbChanges}`;
+  // 8. Check for any activity at all
+  const hasProjectChanges = projectDataList.some((pd) =>
+    hasActivity(pd.agentActivity, pd.dbChanges)
+  );
+  const hasNonProjectChanges = hasActivity(nonProjectAgentActivity, nonProjectDbChanges);
+  const hasPreviousContext = previousContext !== '(none)';
 
-  narratorHost.deliverMessage(message, {
+  if (!hasProjectChanges && !hasNonProjectChanges && !hasPreviousContext) {
+    console.log('[Scheduler] No activity since last run, skipping daily-summary');
+    return;
+  }
+
+  // 9. Deliver daily summary
+  narratorHost.deliverMessage(messageParts.join('\n\n'), {
     sender: 0,
     receiver: narratorId,
     timestamp: Date.now(),
@@ -324,7 +560,7 @@ export function registerNarratorJobs(
   const cronPattern = 60 % intervalMinutes === 0 ? `*/${intervalMinutes} * * * *` : '*/30 * * * *';
 
   scheduler.schedule('daily-summary', cronPattern, () => {
-    console.log('[Scheduler] Triggering daily-summary job');
+    console.log('[Scheduler] Triggering daily-summary job (project logs + daily summary)');
     buildAndDeliverDailySummary(db, narratorHost, narratorId, system2Dir, intervalMinutes);
   });
 
