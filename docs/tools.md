@@ -71,17 +71,22 @@ Executes against `~/.system2/app.db` using structured named operations that dele
 | Operation | Required | Optional | Notes |
 |-----------|----------|----------|-------|
 | `createProject` | `name`, `description` | `status`, `labels`, `start_at` | **Guide only.** `status` defaults to `"todo"` |
-| `updateProject` | `id` | `name`, `description`, `status`, `labels`, `start_at`, `end_at` | `updated_at` auto-set |
-| `createTask` | `project`, `title`, `description` | `status`, `priority`, `assignee`, `labels`, `parent`, `start_at` | `status` defaults to `"todo"`, `priority` to `"medium"` |
-| `updateTask` | `id` | `title`, `description`, `status`, `priority`, `assignee`, `labels`, `parent`, `start_at`, `end_at` | `updated_at` auto-set |
+| `updateProject` | `id` | `name`, `description`, `status`, `labels`, `start_at`, `end_at` | **Guide and Conductor only.** Conductors restricted to own project. |
+| `createTask` | `project`, `title`, `description` | `status`, `priority`, `assignee`, `labels`, `parent`, `start_at` | Project-scoped. `assignee` restricted to Guide and Conductor. `status` defaults to `"todo"`, `priority` to `"medium"`. |
+| `updateTask` | `id` | `title`, `description`, `status`, `priority`, `assignee`, `labels`, `parent`, `start_at`, `end_at` | Project-scoped. `assignee` restricted to Guide and Conductor. |
 | `claimTask` | `id` | — | Atomically claims a `todo` task; enforces scope match (project-scoped agents: same project; project-less agents: project-less tasks only); `assignee` set to calling agent's ID. Returns `{ claimed: true, task }` or `{ claimed: false, error }`. Secondary mechanism — prefer assigned tasks. |
-| `createTaskLink` | `source`, `target`, `relationship` | — | `relationship`: `blocked_by` \| `relates_to` \| `duplicates` |
-| `deleteTaskLink` | `id` | — | |
-| `createTaskComment` | `task`, `content` | — | `author` auto-filled from agent ID |
-| `deleteTaskComment` | `id` | — | |
+| `createTaskLink` | `source`, `target`, `relationship` | — | Project-scoped (checked via source task). `relationship`: `blocked_by` \| `relates_to` \| `duplicates` |
+| `deleteTaskLink` | `id` | — | Project-scoped (checked via source task) |
+| `createTaskComment` | `task`, `content` | — | Project-scoped. `author` auto-filled from agent ID. |
+| `deleteTaskComment` | `id` | — | Project-scoped |
 
 Valid `status` values: `"todo"`, `"in progress"`, `"review"`, `"done"`, `"abandoned"`
 Valid `priority` values: `"low"`, `"medium"`, `"high"`
+
+**Permission model:**
+
+- **Role checks:** `createProject` is Guide-only. `updateProject` is Guide and Conductor only (Conductors restricted to their own project). Setting `assignee` on tasks is Guide and Conductor only.
+- **Project scope:** if the calling agent is assigned to a project, it can only create/update/delete records belonging to that same project. Agents with no project assignment (Guide, Narrator) and records with no project association are unrestricted.
 
 ### `message_agent`
 

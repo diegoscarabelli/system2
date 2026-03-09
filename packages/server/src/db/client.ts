@@ -342,6 +342,11 @@ export class DatabaseClient {
     return stmt.get(link.source, link.target, link.relationship) as TaskLink;
   }
 
+  getTaskLink(id: number): TaskLink | null {
+    const stmt = this.db.prepare('SELECT * FROM task_link WHERE id = ?');
+    return (stmt.get(id) as TaskLink) || null;
+  }
+
   listTaskLinks(taskId: number): TaskLink[] {
     const stmt = this.db.prepare(
       'SELECT * FROM task_link WHERE source = ? OR target = ? ORDER BY created_at ASC'
@@ -363,6 +368,11 @@ export class DatabaseClient {
     `);
 
     return stmt.get(comment.task, comment.author, comment.content) as TaskComment;
+  }
+
+  getTaskComment(id: number): TaskComment | null {
+    const stmt = this.db.prepare('SELECT * FROM task_comment WHERE id = ?');
+    return (stmt.get(id) as TaskComment) || null;
   }
 
   listTaskComments(task: number): TaskComment[] {

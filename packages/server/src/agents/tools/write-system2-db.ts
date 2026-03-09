@@ -21,6 +21,18 @@ type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 type TaskPriority = (typeof TASK_PRIORITIES)[number];
 type TaskLinkRelationship = (typeof TASK_LINK_RELATIONSHIPS)[number];
 
+function checkProjectScope(
+  agentProject: number | null,
+  recordProject: number | null
+): string | null {
+  if (agentProject === null) return null;
+  if (recordProject === null) return null;
+  if (recordProject !== agentProject) {
+    return `Your agent is scoped to project ${agentProject}. The target record belongs to project ${recordProject}. You can only operate on records within your own project.`;
+  }
+  return null;
+}
+
 export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
   const params = Type.Object({
     operation: Type.Union(
@@ -120,10 +132,14 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
       });
 
       try {
+        const self = db.getAgent(agentId);
+        if (!self) return err('Calling agent not found in database.');
+
+        const isGuideOrConductor = self.role === 'guide' || self.role === 'conductor';
+
         switch (params.operation) {
           case 'createProject': {
-            const self = db.getAgent(agentId);
-            if (!self || self.role !== 'guide') {
+            if (self.role !== 'guide') {
               return err(
                 'createProject is restricted to the Guide agent. Only Guide creates and owns projects; Conductors execute them.'
               );
@@ -148,6 +164,16 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
 
           case 'updateProject': {
             if (params.id === undefined) return err('updateProject requires: id');
+            if (!isGuideOrConductor) {
+              return err(
+                `updateProject is restricted to Guide and Conductor agents. Your role is "${self.role}".`
+              );
+            }
+            if (self.role === 'conductor' && self.project !== params.id) {
+              return err(
+                `Conductors can only update their own project (project ${self.project}). Requested project: ${params.id}.`
+              );
+            }
             if (params.status && !PROJECT_STATUSES.includes(params.status as ProjectStatus)) {
               return err(
                 `Invalid status "${params.status}". Valid values: ${PROJECT_STATUSES.join(', ')}`
@@ -169,6 +195,11 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             if (params.project === undefined) return err('createTask requires: project');
             if (!params.title) return err('createTask requires: title');
             if (!params.description) return err('createTask requires: description');
+            const createTaskScopeErr = checkProjectScope(self.project, params.project);
+            if (createTaskScopeErr) return err(createTaskScopeErr);
+            if (params.assignee !== undefined && !isGuideOrConductor) {
+              return err('Only Guide and Conductor agents can set the assignee field.');
+            }
             if (params.status && !PROJECT_STATUSES.includes(params.status as ProjectStatus)) {
               return err(
                 `Invalid status "${params.status}". Valid values: ${PROJECT_STATUSES.join(', ')}`
@@ -196,6 +227,13 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
 
           case 'updateTask': {
             if (params.id === undefined) return err('updateTask requires: id');
+            const updateTaskTarget = db.getTask(params.id);
+            if (!updateTaskTarget) return err(`No task found with id ${params.id}`);
+            const updateTaskScopeErr = checkProjectScope(self.project, updateTaskTarget.project);
+            if (updateTaskScopeErr) return err(updateTaskScopeErr);
+            if (params.assignee !== undefined && !isGuideOrConductor) {
+              return err('Only Guide and Conductor agents can set the assignee field.');
+            }
             if (params.status && !PROJECT_STATUSES.includes(params.status as ProjectStatus)) {
               return err(
                 `Invalid status "${params.status}". Valid values: ${PROJECT_STATUSES.join(', ')}`
@@ -243,6 +281,10 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             if (params.source === undefined) return err('createTaskLink requires: source');
             if (params.target === undefined) return err('createTaskLink requires: target');
             if (!params.relationship) return err('createTaskLink requires: relationship');
+            const linkSourceTask = db.getTask(params.source);
+            if (!linkSourceTask) return err(`Source task ${params.source} not found.`);
+            const linkScopeErr = checkProjectScope(self.project, linkSourceTask.project);
+            if (linkScopeErr) return err(linkScopeErr);
             if (!TASK_LINK_RELATIONSHIPS.includes(params.relationship as TaskLinkRelationship)) {
               return err(
                 `Invalid relationship "${params.relationship}". Valid values: ${TASK_LINK_RELATIONSHIPS.join(', ')}`
@@ -258,6 +300,13 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
 
           case 'deleteTaskLink': {
             if (params.id === undefined) return err('deleteTaskLink requires: id');
+            const link = db.getTaskLink(params.id);
+            if (!link) return err(`No task link found with id ${params.id}`);
+            const delLinkSource = db.getTask(link.source);
+            if (delLinkSource) {
+              const delLinkScopeErr = checkProjectScope(self.project, delLinkSource.project);
+              if (delLinkScopeErr) return err(delLinkScopeErr);
+            }
             const deleted = db.deleteTaskLink(params.id);
             if (!deleted) return err(`No task link found with id ${params.id}`);
             return ok({ deleted: true, id: params.id });
@@ -266,6 +315,10 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
           case 'createTaskComment': {
             if (params.task === undefined) return err('createTaskComment requires: task');
             if (!params.content) return err('createTaskComment requires: content');
+            const commentTask = db.getTask(params.task);
+            if (!commentTask) return err(`Task ${params.task} not found.`);
+            const commentScopeErr = checkProjectScope(self.project, commentTask.project);
+            if (commentScopeErr) return err(commentScopeErr);
             const result = db.createTaskComment({
               task: params.task,
               author: agentId,
@@ -276,6 +329,13 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
 
           case 'deleteTaskComment': {
             if (params.id === undefined) return err('deleteTaskComment requires: id');
+            const comment = db.getTaskComment(params.id);
+            if (!comment) return err(`No task comment found with id ${params.id}`);
+            const delCommentTask = db.getTask(comment.task);
+            if (delCommentTask) {
+              const delCommentScopeErr = checkProjectScope(self.project, delCommentTask.project);
+              if (delCommentScopeErr) return err(delCommentScopeErr);
+            }
             const deleted = db.deleteTaskComment(params.id);
             if (!deleted) return err(`No task comment found with id ${params.id}`);
             return ok({ deleted: true, id: params.id });
