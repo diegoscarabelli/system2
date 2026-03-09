@@ -9,7 +9,7 @@ const __dirname = dirname(__filename);
 export default defineConfig({
   entry: ['src/index.ts'],
   format: ['esm'],
-  dts: true,
+  dts: { compilerOptions: { composite: false } },
   sourcemap: true,
   clean: true,
   // Externalize native modules and pi-coding-agent (has CJS dependencies)
