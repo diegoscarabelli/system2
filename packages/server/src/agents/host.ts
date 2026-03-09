@@ -30,6 +30,8 @@ import { createMessageAgentTool } from './tools/message-agent.js';
 import { createReadTool } from './tools/read.js';
 import { createReadSystem2DbTool } from './tools/read-system2-db.js';
 import { createShowArtifactTool } from './tools/show-artifact.js';
+import { createSpawnAgentTool, type AgentSpawner } from './tools/spawn-agent.js';
+import { createTerminateAgentTool } from './tools/terminate-agent.js';
 import { createWebFetchTool } from './tools/web-fetch.js';
 import { createWebSearchTool } from './tools/web-search.js';
 import { createWriteTool } from './tools/write.js';
@@ -62,6 +64,7 @@ export interface AgentHostConfig {
   llmConfig: LlmConfig;
   servicesConfig?: ServicesConfig;
   toolsConfig?: ToolsConfig;
+  spawner?: AgentSpawner;
 }
 
 export class AgentHost {
@@ -71,6 +74,7 @@ export class AgentHost {
   private registry: AgentRegistry;
   private servicesConfig?: ServicesConfig;
   private toolsConfig?: ToolsConfig;
+  private spawner?: AgentSpawner;
   private authResolver: AuthResolver;
   private modelRegistry: ModelRegistry;
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
@@ -85,6 +89,7 @@ export class AgentHost {
     this.registry = config.registry;
     this.servicesConfig = config.servicesConfig;
     this.toolsConfig = config.toolsConfig;
+    this.spawner = config.spawner;
 
     // Initialize AuthResolver with failover support
     this.authResolver = new AuthResolver(config.llmConfig);
@@ -382,6 +387,14 @@ export class AgentHost {
       tools.push(createWebSearchTool(braveKey, this.toolsConfig?.web_search?.max_results));
       console.log('[AgentHost] web_search tool enabled');
     }
+
+    // spawn_agent requires a spawner callback (provided to Guide and Conductors, not Narrator)
+    if (this.spawner) {
+      tools.push(createSpawnAgentTool(this.db, this.agentId, this.spawner));
+    }
+
+    // terminate_agent is available to all agents with spawn rights (Guide, Conductors)
+    tools.push(createTerminateAgentTool(this.db, this.agentId, this.registry));
 
     return tools;
   }

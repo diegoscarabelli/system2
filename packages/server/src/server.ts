@@ -22,6 +22,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { AgentHost } from './agents/host.js';
 import { AgentRegistry } from './agents/registry.js';
+import type { AgentSpawner } from './agents/tools/spawn-agent.js';
 import { MessageHistory } from './chat/history.js';
 import { DatabaseClient } from './db/client.js';
 import { initializeGitRepo } from './knowledge/git.js';
@@ -76,7 +77,7 @@ export class Server {
     // Initialize agent registry
     this.agentRegistry = new AgentRegistry();
 
-    // Initialize Guide agent (singleton)
+    // Initialize Guide agent (singleton) — receives the spawner so it can create Conductors/Reviewers
     const guideAgent = this.db.getOrCreateGuideAgent();
     this.agentHost = new AgentHost({
       db: this.db,
@@ -85,6 +86,7 @@ export class Server {
       llmConfig: config.llmConfig,
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
+      spawner: this.makeSpawner(),
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
 
@@ -167,6 +169,43 @@ export class Server {
       console.log('Client connected');
       new WebSocketHandler(ws, this.agentHost, this.messageHistory, this.wss);
     });
+  }
+
+  /**
+   * Create a spawner callback that creates, initializes, and registers new AgentHost instances.
+   * The spawner is self-referential: spawned agents (Conductors) receive the same spawner so
+   * they can in turn spawn specialist sub-agents and Reviewers.
+   */
+  private makeSpawner(): AgentSpawner {
+    const spawner: AgentSpawner = async (role, projectId, callerAgentId, initialMessage) => {
+      // Create agent record in DB
+      const newAgent = this.db.createAgent({ role, project: projectId, status: 'active' });
+
+      // Create new AgentHost with identical config + recursive spawner
+      const newHost = new AgentHost({
+        db: this.db,
+        agentId: newAgent.id,
+        registry: this.agentRegistry,
+        llmConfig: this.config.llmConfig,
+        servicesConfig: this.config.servicesConfig,
+        toolsConfig: this.config.toolsConfig,
+        spawner, // recursive — Conductors can spawn sub-agents
+      });
+
+      await newHost.initialize();
+      this.agentRegistry.register(newAgent.id, newHost);
+
+      // Deliver the initial message from the caller
+      await newHost.deliverMessage(initialMessage, {
+        sender: callerAgentId,
+        receiver: newAgent.id,
+        timestamp: Date.now(),
+      });
+
+      return newAgent.id;
+    };
+
+    return spawner;
   }
 
   /**
