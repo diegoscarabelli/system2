@@ -88,7 +88,7 @@ describe('edit tool', () => {
 
   it('errors when file does not exist', async () => {
     const result = await exec({
-      path: '/tmp/nonexistent-file-' + randomUUID(),
+      path: `/tmp/nonexistent-file-${randomUUID()}`,
       old_string: 'x',
       new_string: 'y',
     });
