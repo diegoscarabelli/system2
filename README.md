@@ -4,7 +4,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json)
 [![pnpm](https://img.shields.io/badge/pnpm-%3E%3D8-orange.svg)](package.json)
 
-**System2 is a self-hosted AI data team.** You chat with a Guide agent that delegates complex work to a crew of specialized agents working in parallel — extracting data, running analyses, reviewing results for statistical rigor, and narrating what happened. You stay in the loop without managing the details.
+**System2 is your self-hosted AI data team.** You chat with a Guide agent that delegates complex work to a crew of specialized agents working in parallel — extracting data, running analyses, reviewing results for statistical rigor, and narrating what happened. You stay in the loop without managing the details.
 
 ---
 

@@ -95,7 +95,25 @@ pnpm test         # Run all tests once
 pnpm test:watch   # Run tests in watch mode
 ```
 
-Test coverage spans the `server` and `cli` packages — retry logic, auth failover, agent registry, scheduler jobs, message history, config generation, and log rotation.
+Test coverage spans the `server` and `cli` packages:
+
+- **Agent tools** (`packages/server/src/agents/tools/*.test.ts`) — all 12 tools have tests covering success paths, error handling, permission checks, and edge cases
+- **Server infrastructure** — retry logic, auth failover, agent registry, scheduler jobs, message history
+- **CLI** — config generation, log rotation
+
+### Testing patterns
+
+| Category | Pattern | Example tools |
+|----------|---------|---------------|
+| Filesystem | Temp dirs with `afterEach` cleanup | `bash`, `read`, `edit`, `write` |
+| Database | Mock `DatabaseClient` with inline query/method stubs | `read_system2_db`, `write_system2_db` |
+| Agent interaction | Mock `DatabaseClient` + `AgentRegistry`/`AgentSpawner` | `message_agent`, `spawn_agent`, `terminate_agent` |
+| Network | Mock global `fetch` | `web_fetch`, `web_search` |
+| Artifacts | Real files in `~/.system2/` with cleanup | `show_artifact` |
+
+- **AbortSignal:** tools that accept an `AbortSignal` (e.g. `bash`, `edit`) include tests for pre-aborted signals
+- **Streaming:** `bash` tests verify `onUpdate` callback receives partial output
+- **Background execution:** `bash` tests verify `notifyBackground` callback delivery
 
 ### CI Pipeline
 

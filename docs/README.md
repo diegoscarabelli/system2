@@ -6,25 +6,25 @@ For installation and usage, see the [project README](../README.md).
 
 ## Architecture
 
-- [Architecture Overview](architecture.md) -- monorepo structure, runtime components, data flow
+- [Architecture Overview](architecture.md): How the monorepo is organized, how the runtime components connect, and how data flows through the system.
 
 ## Packages
 
-- [@system2/shared](packages/shared.md) -- TypeScript types shared across all packages
-- [@system2/server](packages/server.md) -- Express + WebSocket server, agent hosting, scheduler
-- [@system2/cli](packages/cli.md) -- CLI for server lifecycle (onboard, start, stop, status)
-- [@system2/ui](packages/ui.md) -- React chat interface with artifact display
+- [@system2/shared](packages/shared.md): The TypeScript types and interfaces that all other packages depend on.
+- [@system2/server](packages/server.md): The main runtime — hosts agents, serves the UI over HTTP and WebSocket, and runs scheduled jobs.
+- [@system2/cli](packages/cli.md): Command-line tool for managing the server (initial setup, starting, stopping, checking status).
+- [@system2/ui](packages/ui.md): The browser-based chat interface where you interact with the Guide agent and view artifacts.
 
 ## Core Systems
 
-- [Agents](agents.md) -- multi-agent roles, lifecycle, system prompt construction, failover
-- [Tools](tools.md) -- the 11 agent tools (shell, filesystem, system2 management, messaging, artifacts, web, agent lifecycle)
-- [Database](database.md) -- SQLite schema, tables, indices, query patterns
-- [WebSocket Protocol](websocket-protocol.md) -- client/server message types and flow
-- [Knowledge System](knowledge-system.md) -- persistent memory, daily summaries, git tracking
-- [Scheduler](scheduler.md) -- Croner jobs, daily summary pipeline, catch-up logic
+- [Agents](agents.md): How the four agent roles (Guide, Conductor, Narrator, Reviewer) work together — their lifecycles, how system prompts are assembled, and how LLM failover is handled.
+- [Tools](tools.md): The tools available to agents — what each one does, how they are registered, and how permissions are enforced.
+- [Database](database.md): The SQLite schema that stores projects, tasks, agents, and comments — table definitions, indices, and common query patterns.
+- [WebSocket Protocol](websocket-protocol.md): The message format between the UI and server — how chat messages, tool calls, and agent events are exchanged in real time.
+- [Knowledge System](knowledge-system.md): How agents persist and share memory — knowledge files, daily summaries, project logs, and the git-tracked knowledge directory.
+- [Scheduler](scheduler.md): The background job system — what runs on schedule (daily summaries, memory updates), how missed jobs are caught up, and how to add new ones.
 
 ## Reference
 
-- [Configuration](configuration.md) -- config.toml reference, LLM failover, data directory
-- [Development](development.md) -- dev setup, build system, code quality, contributing
+- [Configuration](configuration.md): All settings in `config.toml` — LLM provider credentials, failover chains, data directory paths, and feature flags.
+- [Development](development.md): How to set up a dev environment, build the project, run tests, and contribute code.

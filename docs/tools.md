@@ -6,7 +6,7 @@ Agents interact with the system through custom tools defined in `packages/server
 
 Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts`):
 
-- Eight tools are always included: `bash`, `read`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `show_artifact`, `web_fetch`
+- Nine tools are always included: `bash`, `read`, `edit`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `show_artifact`, `web_fetch`
 - `spawn_agent` and `terminate_agent` are conditional — only agents that receive a spawner callback (Guide and Conductors) get these tools
 - `web_search` is conditional on a Brave Search API key being configured
 
@@ -14,17 +14,22 @@ Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts
 
 ### `bash`
 
-Execute shell commands. Uses PowerShell on Windows, the default shell (bash) on macOS/Linux.
+Execute shell commands with streaming output and optional background execution. Uses PowerShell on Windows, the default shell (bash) on macOS/Linux.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `command` | string | Shell command to execute |
+| `cwd` | string? | Working directory (defaults to user home) |
+| `run_in_background` | boolean? | If true, return immediately and deliver output as a follow-up message on completion |
 
-- **Timeout:** 30 seconds
+- **Timeout:** 120 seconds (foreground only; background commands have no timeout)
 - **Output buffer:** 10MB
-- **Working directory:** user's home directory
-- **Shell:** PowerShell (`powershell.exe`) on Windows, default shell on macOS/Linux
-- **Implementation:** Node.js `child_process.exec`
+- **Working directory:** user's home directory (overridable via `cwd`)
+- **Shell:** PowerShell (`powershell.exe`) on Windows, `/bin/bash` on macOS/Linux
+- **Streaming:** output is streamed to the agent as the command runs via `onUpdate`
+- **AbortSignal:** child process is killed (`SIGTERM`) when the agent session is aborted
+- **Background:** when `run_in_background` is true, the tool returns immediately and delivers the result as a `followUp` custom message when the command finishes
+- **Implementation:** Node.js `child_process.spawn`
 
 ### `read`
 
@@ -36,16 +41,35 @@ Read file contents from the filesystem.
 
 Returns the file contents as a string.
 
+### `edit`
+
+Edit a file by replacing an exact string match. The `old_string` must appear exactly once in the file.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string | Absolute path or `~/` relative path |
+| `old_string` | string | Exact text to find (must be unique in the file) |
+| `new_string` | string | Replacement text |
+| `commit_message` | string? | If provided and path is inside `~/.system2/`, git-commits the file with this message |
+
+- **Uniqueness check:** if `old_string` appears 0 or >1 times, the edit fails with an error instructing the agent to add more context
+- **Insertions:** use surrounding context as `old_string` and embed new content in `new_string`
+- **Preferred over `write`** for modifying existing files — only changes what is specified
+- For bulk operations where `edit` is inconvenient, use `bash` with `sed`, `awk`, `>>`, etc.
+
 ### `write`
 
-Write or create files on the filesystem.
+Write or create files on the filesystem. Overwrites the entire file.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `file_path` | string | Absolute path or `~/` relative path |
 | `content` | string | File content to write |
+| `commit_message` | string? | If provided and path is inside `~/.system2/`, git-commits the file with this message |
 
-Auto-creates parent directories if they don't exist.
+Auto-creates parent directories if they don't exist. Use for creating new files or complete rewrites. For modifying specific parts of an existing file, prefer `edit`. For operations where neither is convenient, use `bash`.
+
+**Auto-commit (`edit` and `write`):** When `commit_message` is provided, the tool runs `git add <file> && git commit -m <message>` in `~/.system2/` after the file operation. Git failure is non-fatal — the file change still succeeds. This is the primary mechanism for version-tracking knowledge and project files.
 
 ### `read_system2_db`
 

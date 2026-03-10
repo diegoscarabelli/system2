@@ -128,7 +128,13 @@ See [Scheduler](scheduler.md) for the pipeline that produces project logs and da
 
 ## Git Tracking
 
-`~/.system2/` is initialized as a git repository (`knowledge/git.ts`). The Narrator commits after updating knowledge files, providing change history. Binary and runtime files (`.db`, `.jsonl`, `.pid`, `.log`, `node_modules/`) are gitignored.
+`~/.system2/` is a git repository initialized at first server start (`knowledge/git.ts`). Knowledge and project files are version-tracked; binary and runtime files are gitignored.
+
+**How commits happen:** The `write` and `edit` tools accept an optional `commit_message` parameter. When provided and the target path is inside `~/.system2/`, the tool auto-commits the file after the operation. Agents provide descriptive messages (e.g., `"daily summary: 2024-01-16 14:30"`). If an agent modifies a tracked file via `bash` instead, it must commit manually.
+
+**Gitignored:** `app.db` (and WAL/SHM), `sessions/`, `logs/`, `*.log`, `server.pid`, `config.toml` (contains API keys), `chat-history.json` (UI state).
+
+**Backup:** The CLI creates timestamped full copies (`~/.system2-auto-backup-*`) on every `system2 start` (24h cooldown, 5 max retention). This covers everything git ignores (database, sessions, config). See [CLI](packages/cli.md) and [Configuration](configuration.md).
 
 ## Initialization
 

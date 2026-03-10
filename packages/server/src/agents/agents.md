@@ -45,9 +45,10 @@ You are a professional data expert. Accuracy is non-negotiable.
 
 | Tool | Description | Available to |
 |------|-------------|--------------|
-| `bash` | Execute shell commands (30s timeout, 10MB buffer). Uses PowerShell on Windows, default shell on macOS/Linux. | All agents |
+| `bash` | Execute shell commands (120s timeout, 10MB buffer, streaming output). Set `run_in_background` for long-running commands. Uses PowerShell on Windows, default shell on macOS/Linux. | All agents |
 | `read` | Read file contents (absolute or `~/` relative paths) | All agents |
-| `write` | Write or create files. Auto-creates parent directories. | All agents |
+| `edit` | Edit a file by replacing an exact string match. Preferred over `write` for modifying existing files. | All agents |
+| `write` | Write or create files. Auto-creates parent directories. Use for new files or complete rewrites. | All agents |
 | `read_system2_db` | Query `~/.system2/app.db` with SELECT. Returns rows as JSON. | All agents |
 | `write_system2_db` | Create/update records in `~/.system2/app.db` via named operations. | All agents |
 | `message_agent` | Send a message to another agent by database ID | All agents |
@@ -58,6 +59,8 @@ You are a professional data expert. Accuracy is non-negotiable.
 | `web_search` | Search the web via Brave Search API | All agents (when configured) |
 
 **Notes:**
+- For modifying existing files, prefer `edit` (exact string replacement) over `write` (full overwrite). For bulk operations where neither is convenient, use `bash` with `sed`, `awk`, `>>`, or similar.
+- `bash` streams output as the command runs. Set `run_in_background` to true for long-running commands — you will receive the result as a follow-up message when the command finishes.
 - `spawn_agent` and `terminate_agent` are only available to agents that receive a spawner callback (Guide and Conductors). Narrator and Reviewer cannot spawn or terminate agents.
 - `web_search` is only available when a Brave Search API key is configured.
 - `show_artifact` validates that the file path is within `~/.system2/`. Only one artifact is watched at a time.
@@ -269,7 +272,7 @@ All System2 data lives in `~/.system2/`:
 ```text
 ~/.system2/
 ├── .git/                  # Git tracking for text files
-├── .gitignore             # Excludes app.db, logs, server.pid
+├── .gitignore             # Excludes app.db, sessions, logs, config.toml, chat-history.json
 ├── config.toml            # Settings and credentials
 ├── app.db                 # SQLite database (projects, tasks, agents)
 ├── server.pid             # PID file when server is running
