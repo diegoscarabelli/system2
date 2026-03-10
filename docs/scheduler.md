@@ -34,7 +34,7 @@ The `daily-summary` interval is configurable via `[scheduler].daily_summary_inte
 
 For each active project (those with a non-archived Conductor):
 
-1. Ensure `~/.system2/projects/{project_id}/` directory exists
+1. Ensure `~/.system2/projects/{id}_{name}/` directory exists
 2. Create `log.md` with YAML frontmatter if it doesn't exist
 3. Read previous context (last 20 lines of `log.md`)
 4. Collect activity from all agents involved in the project (project-scoped agents + Guide; Narrator is excluded to prevent recursive embedding)

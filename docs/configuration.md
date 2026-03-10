@@ -113,7 +113,7 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 │   ├── memory.md          # Long-term memory (Narrator)
 │   └── daily_summaries/   # Activity summaries (Narrator)
 ├── sessions/              # Agent JSONL session files
-├── projects/              # Project workspaces
+├── projects/              # Project workspaces ({id}_{name}/ per project)
 └── logs/
     ├── system2.log        # Server logs
     └── system2.log.N      # Rotated archives (1-5)

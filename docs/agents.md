@@ -52,7 +52,7 @@ Each agent's system prompt is assembled from four layers:
 | Shared reference | `agents/agents.md` | Once at init |
 | Agent instructions | `agents/library/{role}.md` (body after frontmatter) | Once at init |
 | Knowledge files | `~/.system2/knowledge/` (infrastructure.md, user.md, memory.md) | **Every LLM call** |
-| Role-aware context | Project log (`projects/{id}/log.md`) for project-scoped agents, or last 2 daily summaries for system-wide agents | **Every LLM call** |
+| Role-aware context | Project log (`projects/{id}_{name}/log.md`) for project-scoped agents, or last 2 daily summaries for system-wide agents | **Every LLM call** |
 
 The static layers are concatenated into `staticPrompt`. The dynamic layers are loaded via `loadKnowledgeContext()`, which is passed as a `systemPromptOverride` callback to the Pi SDK's `DefaultResourceLoader`. This means knowledge updates take effect immediately without server restarts.
 
@@ -350,7 +350,7 @@ DataAgent-Extract, DataAgent-Analyze, and Reviewer work through their tasks in d
 3. Conductor messages Guide: "Project #1 complete. Report at artifacts/linkedin_report.html. Story task #17 assigned to Narrator."
 4. **Guide → User**: "Project #1 is complete. [Summary]. Shall I finalize this project?"
 5. User confirms → Guide terminates Conductor (#2) and Reviewer (#4), sets project #1 to `done`.
-6. Guide informs user with final summary, artifact location, and story path (`~/.system2/projects/1/project_story.md`).
+6. Guide informs user with final summary, artifact location, and story path (`~/.system2/projects/1_linkedin-campaign/project_story.md`).
 7. Narrator (independently) writes the project story by querying app.db, reading project log and session JSONL files.
 
 ---
