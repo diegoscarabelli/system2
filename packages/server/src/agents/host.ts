@@ -84,6 +84,7 @@ export class AgentHost {
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
   private agentProject: number | null = null;
+  private sessionDir: string | null = null;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -122,6 +123,9 @@ export class AgentHost {
     if (!existsSync(agentSessionDir)) {
       mkdirSync(agentSessionDir, { recursive: true });
     }
+
+    // Store for periodic rotation checks (e.g., long-running singletons)
+    this.sessionDir = agentSessionDir;
 
     // Rotate session file if it exceeds size threshold (10MB)
     const rotated = rotateSessionIfNeeded(agentSessionDir, SYSTEM2_DIR);
@@ -461,6 +465,12 @@ export class AgentHost {
     if (!this.session) {
       throw new Error('AgentHost not initialized. Call initialize() first.');
     }
+
+    // Rotate session file if needed (catches growth between server restarts)
+    if (this.sessionDir) {
+      rotateSessionIfNeeded(this.sessionDir, SYSTEM2_DIR);
+    }
+
     await this.session.sendCustomMessage(
       {
         customType: 'agent_message',

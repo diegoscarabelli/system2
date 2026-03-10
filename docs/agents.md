@@ -157,7 +157,7 @@ Agent sessions are persisted as JSONL files in `~/.system2/sessions/{role}_{id}/
 - **Auto-compaction:** when context approaches model limits, older messages are summarized
 - **Session continuation:** `SessionManager.continueRecent()` picks up the latest session on restart
 
-**Session rotation** (`session-rotation.ts`): when a JSONL file exceeds 10MB, a new file is created carrying over the compacted history. The old file is archived.
+**Session rotation** (`session-rotation.ts`): when a JSONL file exceeds 10MB, a new file is created carrying over the compacted history. The old file is archived. Rotation is checked both at initialization and before each `deliverMessage()` call, so long-running singleton agents (Guide, Narrator) don't grow unbounded between server restarts.
 
 See the [pi-coding-agent session format docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md) for details.
 
