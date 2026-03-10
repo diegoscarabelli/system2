@@ -1,17 +1,8 @@
 # AGENTS.md
 
-This file provides guidance to AI coding agents working with code in this repository.
+This file provides guidance to AI coding agents working with code in this repository. The following sections provide references to other files that must be read before any work to acquire critical knowledge about system2.
 
-## Developer Documentation
-
-The [`docs/`](docs/README.md) directory contains in-depth developer documentation:
-
-- **Architecture**: Monorepo structure, runtime components, pi-coding-agent integration.
-- **Packages**: Detailed docs for each package (cli, server, shared, ui).
-- **Core Systems**: Agents, tools (`read_system2_db`, `write_system2_db`, `spawn_agent`, `terminate_agent`, and others), database schema, WebSocket protocol, knowledge system, scheduler.
-- **Reference**: Configuration (config.toml), development workflow, contributing guide.
-
-See [`docs/agents.md`](docs/agents.md) for the System2 agent architecture, work management conventions, and the inter-agent communication protocol.
+IMPORTANT: 
 
 ## README.md
 
@@ -27,6 +18,25 @@ The [`CONTRIBUTING.md`](CONTRIBUTING.md) file contains development guidelines. K
 - **Code Quality**: Biome formatting/linting rules and commands.
 - **Before Committing**: Required quality checks before every commit.
 - **Code Review Process**: How PRs are reviewed and merged.
+
+## Developer Documentation
+
+The [`docs/`](docs/) directory contains in-depth documentation. Start with [`docs/README.md`](docs/README.md) for an overview, then refer to individual files as needed:
+
+| File | Description |
+| ---- | ----------- |
+| [`architecture.md`](docs/architecture.md) | Monorepo structure, runtime components, pi-coding-agent integration |
+| [`agents.md`](docs/agents.md) | Multi-agent orchestration, LLM failover, inter-agent messaging |
+| [`tools.md`](docs/tools.md) | Custom agent tools: typed parameters, factory pattern, execution |
+| [`database.md`](docs/database.md) | SQLite schema, WAL mode, better-sqlite3 usage |
+| [`websocket-protocol.md`](docs/websocket-protocol.md) | Real-time UI–server communication protocol |
+| [`knowledge-system.md`](docs/knowledge-system.md) | Persistent knowledge files, git-tracked, dynamic prompt injection |
+| [`scheduler.md`](docs/scheduler.md) | Cron-based Narrator jobs via Croner |
+| [`configuration.md`](docs/configuration.md) | `config.toml` settings and API keys |
+| [`packages/cli.md`](docs/packages/cli.md) | CLI: onboarding, daemon management, status |
+| [`packages/server.md`](docs/packages/server.md) | Server: HTTP, WebSocket, agents, scheduler |
+| [`packages/shared.md`](docs/packages/shared.md) | Shared TypeScript type definitions |
+| [`packages/ui.md`](docs/packages/ui.md) | React UI: real-time chat, artifacts |
 
 ## Command Reference
 

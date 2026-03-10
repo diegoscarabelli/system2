@@ -6,7 +6,8 @@ Agents interact with the system through custom tools defined in `packages/server
 
 Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts`):
 
-- Nine tools are always included: `bash`, `read`, `edit`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `show_artifact`, `web_fetch`
+- Eight tools are always included: `bash`, `read`, `edit`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `web_fetch`
+- `show_artifact` is Guide-only — the Guide is the only agent that interacts with the user via the UI
 - `spawn_agent` and `terminate_agent` are conditional — only agents that receive a spawner callback (Guide and Conductors) get these tools
 - `web_search` is conditional on a Brave Search API key being configured
 
@@ -126,7 +127,7 @@ Routes through `AgentRegistry` to find the target `AgentHost`, then calls `deliv
 
 ### `show_artifact`
 
-Display an HTML file in the UI's left panel.
+Display an HTML file in the UI's left panel. **Guide-only** — the Guide is the only agent that interacts with the user via the UI.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|

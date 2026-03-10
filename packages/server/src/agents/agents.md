@@ -52,7 +52,7 @@ You are a professional data expert. Accuracy is non-negotiable.
 | `read_system2_db` | Query `~/.system2/app.db` with SELECT. Returns rows as JSON. | All agents |
 | `write_system2_db` | Create/update records in `~/.system2/app.db` via named operations. | All agents |
 | `message_agent` | Send a message to another agent by database ID | All agents |
-| `show_artifact` | Display an HTML file in the UI left panel (live reload on file changes) | All agents |
+| `show_artifact` | Display an HTML file in the UI left panel (live reload on file changes) | Guide only |
 | `web_fetch` | Fetch a URL and extract readable text content | All agents |
 | `spawn_agent` | Spawn a new Conductor or Reviewer for a project | Guide, Conductors |
 | `terminate_agent` | Archive an agent — abort its session, unregister, mark archived | Guide, Conductors |
@@ -63,7 +63,7 @@ You are a professional data expert. Accuracy is non-negotiable.
 - `bash` streams output as the command runs. Set `run_in_background` to true for long-running commands — you will receive the result as a follow-up message when the command finishes.
 - `spawn_agent` and `terminate_agent` are only available to agents that receive a spawner callback (Guide and Conductors). Narrator and Reviewer cannot spawn or terminate agents.
 - `web_search` is only available when a Brave Search API key is configured.
-- `show_artifact` validates that the file path is within `~/.system2/`. Only one artifact is watched at a time.
+- `show_artifact` is Guide-only (the Guide is the only agent that interacts with the user via the UI). It validates that the file path is within `~/.system2/`. Only one artifact is watched at a time.
 
 ## The Database
 

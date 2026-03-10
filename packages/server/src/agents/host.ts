@@ -83,6 +83,7 @@ export class AgentHost {
   private retryAttempts: Map<string, number> = new Map(); // Track retries per error type
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
+  private agentRole: string | null = null;
   private agentProject: number | null = null;
   private agentProjectDirName: string | null = null;
   private sessionDir: string | null = null;
@@ -123,6 +124,7 @@ export class AgentHost {
           .replace(/^-|-$/g, '')}`;
       }
     }
+    this.agentRole = agentRecord.role;
     console.log('[AgentHost] Agent:', { id: agentRecord.id, role: agentRecord.role });
 
     // Session directory — use role_id format (e.g., sessions/guide_1/)
@@ -411,7 +413,6 @@ export class AgentHost {
       createReadTool(),
       createEditTool(),
       createWriteTool(),
-      createShowArtifactTool(),
       createWebFetchTool(),
     ];
 
@@ -420,6 +421,11 @@ export class AgentHost {
     if (braveKey && this.toolsConfig?.web_search?.enabled !== false) {
       tools.push(createWebSearchTool(braveKey, this.toolsConfig?.web_search?.max_results));
       console.log('[AgentHost] web_search tool enabled');
+    }
+
+    // show_artifact is Guide-only — the Guide is the only agent that interacts with the user via the UI
+    if (this.agentRole === 'guide') {
+      tools.push(createShowArtifactTool());
     }
 
     // spawn_agent and terminate_agent require a spawner callback (provided to Guide and Conductors, not Narrator)
