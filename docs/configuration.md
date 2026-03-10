@@ -98,7 +98,7 @@ When API errors occur, System2 automatically retries and fails over:
 
 See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 
-## Data Directory
+## Application Directory
 
 ```
 ~/.system2/

@@ -57,9 +57,9 @@ See individual package docs: [shared](packages/shared.md) | [server](packages/se
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Data Directory
+## Application Directory
 
-All runtime data lives in `~/.system2/`. See [Configuration](configuration.md) for the full directory layout.
+All runtime state lives in `~/.system2/`. See [Configuration](configuration.md) for the full directory layout.
 
 ## Key Design Decisions
 
