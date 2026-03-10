@@ -14,10 +14,16 @@ app.db
 app.db-shm
 app.db-wal
 
+# Credentials
+config.toml
+
 # Runtime
 server.pid
 logs/
 *.log
+
+# UI state
+chat-history.json
 
 # Session files (large, binary-like JSONL)
 sessions/
