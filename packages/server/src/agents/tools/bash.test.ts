@@ -26,7 +26,7 @@ describe('bash tool', () => {
   describe('foreground execution', () => {
     const tool = createBashTool();
     const exec = (params: Record<string, unknown>, signal?: AbortSignal, onUpdate?: any) =>
-      tool.execute('test-call', params as any, signal, onUpdate);
+      tool.execute('test-call', params as any, signal, onUpdate) as any;
 
     it('runs a simple command', async () => {
       const result = await exec({ command: 'echo hello' });
@@ -81,7 +81,7 @@ describe('bash tool', () => {
       const notifyBackground = vi.fn();
       const tool = createBashTool(notifyBackground);
 
-      const result = await tool.execute('bg-call', {
+      const result: any = await tool.execute('bg-call', {
         command: 'echo background',
         run_in_background: true,
       } as any);
@@ -100,7 +100,7 @@ describe('bash tool', () => {
 
     it('falls through to foreground when no notifyBackground callback', async () => {
       const tool = createBashTool(); // no callback
-      const result = await tool.execute('fg-call', {
+      const result: any = await tool.execute('fg-call', {
         command: 'echo fallthrough',
         run_in_background: true,
       } as any);

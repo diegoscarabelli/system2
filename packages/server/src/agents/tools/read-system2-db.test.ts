@@ -18,7 +18,7 @@ describe('read_system2_db tool', () => {
     ];
     const tool = createReadSystem2DbTool(mockDb(rows));
 
-    const result = await tool.execute('test', { sql: 'SELECT * FROM project' } as any);
+    const result: any = await tool.execute('test', { sql: 'SELECT * FROM project' } as any);
 
     expect(result.content[0].text).toContain('2 row(s)');
     expect(result.content[0].text).toContain('Project A');
@@ -28,7 +28,9 @@ describe('read_system2_db tool', () => {
   it('returns message for empty result', async () => {
     const tool = createReadSystem2DbTool(mockDb([]));
 
-    const result = await tool.execute('test', { sql: 'SELECT * FROM project WHERE 1=0' } as any);
+    const result: any = await tool.execute('test', {
+      sql: 'SELECT * FROM project WHERE 1=0',
+    } as any);
 
     expect(result.content[0].text).toBe('No results found.');
     expect((result.details as any).count).toBe(0);
@@ -37,7 +39,7 @@ describe('read_system2_db tool', () => {
   it('returns error on SQL failure', async () => {
     const tool = createReadSystem2DbTool(mockDb(new Error('not authorized')));
 
-    const result = await tool.execute('test', { sql: 'DROP TABLE project' } as any);
+    const result: any = await tool.execute('test', { sql: 'DROP TABLE project' } as any);
 
     expect(result.content[0].text).toContain('Error');
     expect(result.content[0].text).toContain('not authorized');

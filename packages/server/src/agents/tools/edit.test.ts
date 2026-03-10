@@ -20,7 +20,7 @@ function trackDir(dir: string): string {
 describe('edit tool', () => {
   const tool = createEditTool();
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
-    tool.execute('test-call', params as any, signal);
+    tool.execute('test-call', params as any, signal) as any;
 
   afterEach(() => {
     for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });

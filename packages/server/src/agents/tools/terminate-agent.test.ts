@@ -23,7 +23,8 @@ function setup(callerId: number, agents: Agent[], registeredIds: number[]) {
 }
 
 describe('terminate_agent tool', () => {
-  const exec = (tool: any, params: Record<string, unknown>) => tool.execute('test', params as any);
+  const exec = (tool: any, params: Record<string, unknown>) =>
+    tool.execute('test', params as any) as any;
 
   it('Guide terminates conductor', async () => {
     const guide = makeAgent(1, 'guide', null);

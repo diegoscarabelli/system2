@@ -31,7 +31,8 @@ function setup(agentId: number, agents: Agent[], projects: Project[]) {
 }
 
 describe('spawn_agent tool', () => {
-  const exec = (tool: any, params: Record<string, unknown>) => tool.execute('test', params as any);
+  const exec = (tool: any, params: Record<string, unknown>) =>
+    tool.execute('test', params as any) as any;
 
   it('Guide spawns conductor successfully', async () => {
     const { tool, spawner } = setup(1, [makeAgent(1, 'guide', null)], [makeProject(10)]);

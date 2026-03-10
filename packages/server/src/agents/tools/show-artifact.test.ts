@@ -9,7 +9,7 @@ const SYSTEM2_DIR = join(homedir(), '.system2');
 
 describe('show_artifact tool', () => {
   const tool = createShowArtifactTool();
-  const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any);
+  const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
 
   const createdFiles: string[] = [];
 

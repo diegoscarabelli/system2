@@ -27,7 +27,8 @@ function setup(selfId: number, agents: Agent[], registeredIds: number[]) {
 }
 
 describe('message_agent tool', () => {
-  const exec = (tool: any, params: Record<string, unknown>) => tool.execute('test', params as any);
+  const exec = (tool: any, params: Record<string, unknown>) =>
+    tool.execute('test', params as any) as any;
 
   it('delivers a message successfully', async () => {
     const guide = makeAgent(1, 'guide');

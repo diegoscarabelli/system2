@@ -129,7 +129,7 @@ describe('write_system2_db tool', () => {
       addAgent(db, 1, 'guide', null);
       const tool = createWriteSystem2DbTool(db as any, 1);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'createProject',
         name: 'New Project',
         description: 'A test project',
@@ -143,7 +143,7 @@ describe('write_system2_db tool', () => {
       addAgent(db, 2, 'conductor', 1);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'createProject',
         name: 'X',
         description: 'Y',
@@ -160,7 +160,7 @@ describe('write_system2_db tool', () => {
       addProject(db, 10);
       const tool = createWriteSystem2DbTool(db as any, 1);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'updateProject',
         id: 10,
         name: 'Updated',
@@ -175,7 +175,7 @@ describe('write_system2_db tool', () => {
       addProject(db, 10);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'updateProject',
         id: 10,
         status: 'in progress',
@@ -190,7 +190,7 @@ describe('write_system2_db tool', () => {
       addProject(db, 20);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'updateProject',
         id: 20,
         name: 'X',
@@ -204,7 +204,7 @@ describe('write_system2_db tool', () => {
       addAgent(db, 3, 'reviewer', 10);
       const tool = createWriteSystem2DbTool(db as any, 3);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'updateProject',
         id: 10,
         name: 'X',
@@ -220,7 +220,7 @@ describe('write_system2_db tool', () => {
       addAgent(db, 2, 'conductor', 10);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'createTask',
         project: 20,
         title: 'Task',
@@ -235,7 +235,7 @@ describe('write_system2_db tool', () => {
       addAgent(db, 3, 'reviewer', 10);
       const tool = createWriteSystem2DbTool(db as any, 3);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'createTask',
         project: 10,
         title: 'Task',
@@ -251,7 +251,7 @@ describe('write_system2_db tool', () => {
       addAgent(db, 1, 'guide', null);
       const tool = createWriteSystem2DbTool(db as any, 1);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'createTask',
         project: 10,
         title: 'Task',
@@ -270,7 +270,7 @@ describe('write_system2_db tool', () => {
       addTask(db, 50, 20); // task in project 20
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'updateTask',
         id: 50,
         status: 'done',
@@ -285,7 +285,7 @@ describe('write_system2_db tool', () => {
       addTask(db, 50, 10);
       const tool = createWriteSystem2DbTool(db as any, 3);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'updateTask',
         id: 50,
         assignee: 5,
@@ -302,7 +302,7 @@ describe('write_system2_db tool', () => {
       addTask(db, 50, 10);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'claimTask',
         id: 50,
       } as any);
@@ -316,7 +316,7 @@ describe('write_system2_db tool', () => {
       addTask(db, 50, 20);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'claimTask',
         id: 50,
       } as any);
@@ -333,7 +333,7 @@ describe('write_system2_db tool', () => {
       addTask(db, 51, 20);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'createTaskLink',
         source: 50,
         target: 51,
@@ -359,7 +359,7 @@ describe('write_system2_db tool', () => {
       } as any);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'deleteTaskLink',
         id: 1,
       } as any);
@@ -375,7 +375,7 @@ describe('write_system2_db tool', () => {
       addTask(db, 50, 20);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'createTaskComment',
         task: 50,
         content: 'Hello',
@@ -390,7 +390,7 @@ describe('write_system2_db tool', () => {
       addTask(db, 50, 10);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'createTaskComment',
         task: 50,
         content: 'A comment',
@@ -418,7 +418,7 @@ describe('write_system2_db tool', () => {
       } as any);
       const tool = createWriteSystem2DbTool(db as any, 2);
 
-      const result = await tool.execute('test', {
+      const result: any = await tool.execute('test', {
         operation: 'deleteTaskComment',
         id: 1,
       } as any);
@@ -432,7 +432,7 @@ describe('write_system2_db tool', () => {
     addAgent(db, 1, 'guide', null);
     const tool = createWriteSystem2DbTool(db as any, 1);
 
-    const result = await tool.execute('test', {
+    const result: any = await tool.execute('test', {
       operation: 'unknownOp',
     } as any);
 
