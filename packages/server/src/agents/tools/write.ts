@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
+import { commitIfStateDir } from './git-commit.js';
 
 export function createWriteTool() {
   const params = Type.Object({
@@ -18,13 +19,19 @@ export function createWriteTool() {
     content: Type.String({
       description: 'Content to write to the file',
     }),
+    commit_message: Type.Optional(
+      Type.String({
+        description:
+          'If provided and path is inside ~/.system2/, git-commit the file with this message after writing',
+      })
+    ),
   });
 
   const tool: AgentTool<typeof params> = {
     name: 'write',
     label: 'Write File',
     description:
-      'Write content to a file. Creates parent directories if needed. Overwrites existing files.',
+      'Write content to a file. Creates parent directories if needed. Overwrites the entire file. Use this for creating new files or complete rewrites. For modifying specific parts of an existing file, prefer the `edit` tool. For operations where neither `edit` nor `write` is convenient (bulk replacements, appending, etc.), use `bash` with `sed`, `awk`, or `>>`.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
@@ -34,6 +41,10 @@ export function createWriteTool() {
         await mkdir(dir, { recursive: true });
 
         await writeFile(filePath, params.content, 'utf-8');
+
+        if (params.commit_message) {
+          commitIfStateDir(filePath, params.commit_message);
+        }
 
         return {
           content: [

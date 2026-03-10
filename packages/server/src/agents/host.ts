@@ -26,6 +26,7 @@ import type { AgentRegistry } from './registry.js';
 import { calculateDelay, categorizeError, shouldFailover, shouldRetry, sleep } from './retry.js';
 import { rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
+import { createEditTool } from './tools/edit.js';
 import { createMessageAgentTool } from './tools/message-agent.js';
 import { createReadTool } from './tools/read.js';
 import { createReadSystem2DbTool } from './tools/read-system2-db.js';
@@ -387,8 +388,14 @@ export class AgentHost {
       createReadSystem2DbTool(this.db),
       createWriteSystem2DbTool(this.db, this.agentId),
       createMessageAgentTool(this.agentId, this.registry, this.db),
-      createBashTool(),
+      createBashTool((content, details) => {
+        this.session?.sendCustomMessage(
+          { customType: 'bash_background', content, display: false, details },
+          { deliverAs: 'followUp', triggerTurn: true }
+        );
+      }),
       createReadTool(),
+      createEditTool(),
       createWriteTool(),
       createShowArtifactTool(),
       createWebFetchTool(),
