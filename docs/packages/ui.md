@@ -119,7 +119,7 @@ In development, Vite runs on port 3001 and proxies to the backend on port 3000:
 | `/artifacts` | `http://localhost:3000` |
 | `/api` | `http://localhost:3000` |
 
-UI changes hot-reload instantly. See [Development](../development.md) for the full workflow.
+UI changes hot-reload instantly. See [Contributing](../../CONTRIBUTING.md) for the full workflow.
 
 ## See Also
 

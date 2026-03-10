@@ -79,7 +79,7 @@ Guide:  Project created. Conductor and Reviewer are spinning up now.
 
 ## Quick Start
 
-> System2 is not yet published to npm. To try it, clone and build from source — see [docs/development.md](docs/development.md).
+> System2 is not yet published to npm. To try it, clone and build from source — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 # After building from source:
@@ -139,8 +139,7 @@ system2/
 | [docs/knowledge-system.md](docs/knowledge-system.md) | Knowledge files and dynamic prompt injection                 |
 | [docs/configuration.md](docs/configuration.md)    | config.toml reference, LLM providers, failover                  |
 | [docs/architecture.md](docs/architecture.md)      | Monorepo structure, server architecture, SDK integration        |
-| [docs/development.md](docs/development.md)        | Building from source, dev workflow                              |
-| [CONTRIBUTING.md](CONTRIBUTING.md)                | Contributing guidelines, code standards, PR process             |
+| [CONTRIBUTING.md](CONTRIBUTING.md)                | Development setup, code standards, testing, PR process              |
 
 ---
 

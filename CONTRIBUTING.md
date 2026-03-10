@@ -242,6 +242,20 @@ packages/server/src/agents/retry.test.ts   # Tests
 
 When adding new functionality, add tests for any exported logic — especially pure functions, state machines, and data transformations. Tests that touch the filesystem should use `tmpdir()` with cleanup in `afterEach`.
 
+### Testing Patterns
+
+| Category | Pattern | Example tools |
+| ---------- | --------- | --------------- |
+| Filesystem | Temp dirs with `afterEach` cleanup | `bash`, `read`, `edit`, `write` |
+| Database | Mock `DatabaseClient` with inline query/method stubs | `read_system2_db`, `write_system2_db` |
+| Agent interaction | Mock `DatabaseClient` + `AgentRegistry`/`AgentSpawner` | `message_agent`, `spawn_agent`, `terminate_agent` |
+| Network | Mock global `fetch` | `web_fetch`, `web_search` |
+| Artifacts | Real files in `~/.system2/` with cleanup | `show_artifact` |
+
+- **AbortSignal:** tools that accept an `AbortSignal` (e.g. `bash`, `edit`) include tests for pre-aborted signals
+- **Streaming:** `bash` tests verify `onUpdate` callback receives partial output
+- **Background execution:** `bash` tests verify `notifyBackground` callback delivery
+
 ### CI
 
 A GitHub Actions workflow runs on every push and PR. It executes `pnpm check`, `pnpm typecheck`, `pnpm build`, and `pnpm test`. A local pre-push git hook runs the same checks before code leaves your machine.

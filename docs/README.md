@@ -27,4 +27,4 @@ For installation and usage, see the [project README](../README.md).
 ## Reference
 
 - [Configuration](configuration.md): All settings in `config.toml` — LLM provider credentials, failover chains, application directory paths, and feature flags.
-- [Development](development.md): How to set up a dev environment, build the project, run tests, and contribute code.
+- [Contributing](../CONTRIBUTING.md): Development setup, code standards, testing, and PR process.
