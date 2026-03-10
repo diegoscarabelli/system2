@@ -2,7 +2,7 @@
 
 This file provides guidance to AI coding agents working with code in this repository. The following sections provide references to other files that must be read before any work to acquire critical knowledge about system2.
 
-IMPORTANT: 
+IMPORTANT: system2 is not released yet, no one installed it. No need to worry about migrations for breaking changes, yet.
 
 ## README.md
 
