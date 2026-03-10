@@ -393,7 +393,7 @@ export function buildAndDeliverDailySummary(
     "SELECT a.id, a.role, p.name as project_name FROM agent a LEFT JOIN project p ON a.project = p.id WHERE a.status != 'archived'"
   ) as AgentRow[];
 
-  const systemWideAgents = allAgents.filter((a) => a.project_name === null);
+  const systemWideAgents = allAgents.filter((a) => a.project_name === null && a.id !== narratorId);
 
   // 5. Find active projects (conductor not archived) and deliver project logs
   const activeProjects = db.query(

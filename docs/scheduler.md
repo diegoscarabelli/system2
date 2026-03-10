@@ -37,7 +37,7 @@ For each active project (those with a non-archived Conductor):
 1. Ensure `~/.system2/projects/{project_id}/` directory exists
 2. Create `log.md` with YAML frontmatter if it doesn't exist
 3. Read previous context (last 20 lines of `log.md`)
-4. Collect activity from ALL agents involved in the project (project-scoped agents + Guide + Narrator)
+4. Collect activity from all agents involved in the project (project-scoped agents + Guide; Narrator is excluded to prevent recursive embedding)
 5. Collect project-scoped DB changes (task, project, task_comment, task_link records belonging to the project)
 6. If there is activity, deliver a `[Scheduled task: project-log]` message to the Narrator
 
@@ -54,7 +54,7 @@ Each project log is a single continuous file per project lifetime (unlike daily 
 3. **Read previous context** -- last 20 lines of the most recent daily summary
 4. **Build message** with two sections:
    - **Project Activity** -- per-project sections with project-scoped agent JSONL and project DB changes (reused from Phase 1)
-   - **Non-Project Activity** -- Guide + Narrator JSONL (full streams spanning all projects) and DB changes not tied to any active project
+   - **Non-Project Activity** -- Guide JSONL (full stream spanning all projects) and DB changes not tied to any active project. The Narrator's own JSONL is excluded to prevent a recursive feedback loop (each message would embed prior messages).
 5. **Check for activity** -- skip delivery if there's no meaningful activity
 6. **Deliver** -- send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
 
