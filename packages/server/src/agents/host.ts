@@ -117,7 +117,10 @@ export class AgentHost {
     if (this.agentProject !== null) {
       const projectRecord = this.db.getProject(this.agentProject);
       if (projectRecord) {
-        this.agentProjectDirName = `${projectRecord.id}_${projectRecord.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+        this.agentProjectDirName = `${projectRecord.id}_${projectRecord.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '')}`;
       }
     }
     console.log('[AgentHost] Agent:', { id: agentRecord.id, role: agentRecord.role });

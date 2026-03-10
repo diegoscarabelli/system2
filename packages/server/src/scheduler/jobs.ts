@@ -405,7 +405,10 @@ export function buildAndDeliverDailySummary(
   const projectDataList: ProjectActivityData[] = [];
 
   for (const project of activeProjects) {
-    const projectSlug = `${project.id}_${project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+    const projectSlug = `${project.id}_${project.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')}`;
     const projectDir = join(system2Dir, 'projects', projectSlug);
     const logFile = join(projectDir, 'log.md');
 
