@@ -120,7 +120,7 @@ When the Conductor reports the project is complete:
 3. **After user confirms:**
    - Terminate Conductor and Reviewer via `terminate_agent` (using their agent IDs)
    - Update project status to `"done"` in app.db (set `end_at` to now)
-   - Inform the user with a final summary and where to find the project story (`~/.system2/projects/{project_id}/project_story.md`)
+   - Inform the user with a final summary and where to find the project story (`~/.system2/projects/{id}_{name}/project_story.md`)
 
 **Important:** Never terminate agents or finalize a project without explicit user confirmation. The Conductor has already assigned a project story task to the Narrator before reporting completion, so the story is written independently of this flow.
 

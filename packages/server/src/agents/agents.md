@@ -242,12 +242,12 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`. These files a
 | `user.md` | Facts about the user for personalized assistance | Guide |
 | `memory.md` | Long-term memory synthesized from daily summaries and agent notes | Narrator (body), any agent (`## Notes` section) |
 | `daily_summaries/YYYY-MM-DD.md` | Daily activity summary | Narrator (append-only) |
-| `projects/{id}/log.md` | Continuous project log — append-only narrative of project work | Narrator |
-| `projects/{id}/project_story.md` | Final narrative account of a completed project | Narrator |
+| `projects/{id}_{name}/log.md` | Continuous project log — append-only narrative of project work | Narrator |
+| `projects/{id}_{name}/project_story.md` | Final narrative account of a completed project | Narrator |
 
 All agents receive `infrastructure.md`, `user.md`, and `memory.md`. Additional context varies by scope:
 
-- **Project-scoped agents** (Conductor, Reviewer, specialists) receive their project log (`projects/{project_id}/log.md`) instead of daily summaries.
+- **Project-scoped agents** (Conductor, Reviewer, specialists) receive their project log (`projects/{id}_{name}/log.md`) instead of daily summaries.
 - **System-wide agents** (Guide, Narrator) receive the two most recent daily summaries.
 
 ### Write It Down
@@ -286,13 +286,14 @@ All System2 data lives in `~/.system2/`:
 │   ├── guide_1/
 │   ├── narrator_2/
 │   └── conductor_3/
-├── projects/              # Project workspaces
-│   └── {project_id}/
+├── projects/              # Project workspaces (Conductor creates)
+│   └── {id}_{name}/       # e.g. 1_linkedin-campaign
 │       ├── log.md         # Continuous project log (Narrator, append-only)
-│       └── project_story.md  # Final narrative (Narrator, on completion)
+│       ├── project_story.md  # Final narrative (Narrator, on completion)
+│       └── artifacts/     # Reports, dashboards, data exports
 └── logs/
     ├── system2.log
     └── system2.log.N      # Rotated logs
 ```
 
-When creating files for a project, use the project workspace or an appropriate subdirectory under `~/.system2/`.
+Project directories are named `{id}_{name}` where both values come from the project record in app.db (name is lowercased and slugified). The Conductor creates this directory and the `artifacts/` subdirectory as its first action when starting a project. All project files — data, scripts, artifacts — belong here.

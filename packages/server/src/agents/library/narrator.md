@@ -131,13 +131,13 @@ When a Conductor completes a project, it creates a task assigned to you and send
    - All task_comments (agent decisions, findings, blockers, approvals)
    - All agents assigned to the project
 
-3. **Read the project log** at `~/.system2/projects/{project_id}/log.md` — this is the continuous narrative you've already written during the project.
+3. **Read the project log** at `~/.system2/projects/{id}_{name}/log.md` — this is the continuous narrative you've already written during the project.
 
 4. **Read JSONL session files** for all agents involved (at `~/.system2/sessions/{role}_{id}/`). These contain the full conversation history including reasoning, tool calls, and results. Use them to understand *why* decisions were made, not just *what* was done.
 
 5. **Interrogate the Conductor if still active** — If the session files and project log leave gaps, use `message_agent` to ask the Conductor directly.
 
-6. **Write the story** to `~/.system2/projects/{project_id}/project_story.md` using `write` with `commit_message: "project story: <project_name>"`:
+6. **Write the story** to `~/.system2/projects/{id}_{name}/project_story.md` using `write` with `commit_message: "project story: <project_name>"`:
 
    - Write in flowing prose, not bullet lists
    - Structure: opening (what the project was and why it mattered), execution (how it unfolded, phase by phase), findings (what was discovered and what wasn't), and close (what was built and what it enables)
