@@ -84,6 +84,7 @@ export class AgentHost {
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
   private agentProject: number | null = null;
+  private agentProjectDirName: string | null = null;
   private sessionDir: string | null = null;
 
   constructor(config: AgentHostConfig) {
@@ -113,6 +114,12 @@ export class AgentHost {
       throw new Error(`Agent with ID ${this.agentId} not found in database`);
     }
     this.agentProject = agentRecord.project ?? null;
+    if (this.agentProject !== null) {
+      const projectRecord = this.db.getProject(this.agentProject);
+      if (projectRecord) {
+        this.agentProjectDirName = `${projectRecord.id}_${projectRecord.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+      }
+    }
     console.log('[AgentHost] Agent:', { id: agentRecord.id, role: agentRecord.role });
 
     // Session directory — use role_id format (e.g., sessions/guide_1/)
@@ -353,8 +360,8 @@ export class AgentHost {
 
     // Role-aware activity context:
     // Project-scoped agents get their project log; system-wide agents get daily summaries
-    if (this.agentProject !== null) {
-      const projectLogPath = join(SYSTEM2_DIR, 'projects', String(this.agentProject), 'log.md');
+    if (this.agentProject !== null && this.agentProjectDirName) {
+      const projectLogPath = join(SYSTEM2_DIR, 'projects', this.agentProjectDirName, 'log.md');
       if (existsSync(projectLogPath)) {
         const content = readFileSync(projectLogPath, 'utf-8');
         if (content.trim().split('\n').length > 10) {
