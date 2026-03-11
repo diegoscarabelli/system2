@@ -1,11 +1,11 @@
 import type { Container } from '@tsparticles/engine';
 import Particles, { initParticlesEngine } from '@tsparticles/react';
 import { loadSlim } from '@tsparticles/slim';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
-export function ParticlesBackground() {
+export const ParticlesBackground = memo(function ParticlesBackground() {
   const [engineReady, setEngineReady] = useState(false);
   const { accent } = useAccentColors();
 
@@ -70,4 +70,4 @@ export function ParticlesBackground() {
       particlesLoaded={particlesLoaded}
     />
   );
-}
+});
