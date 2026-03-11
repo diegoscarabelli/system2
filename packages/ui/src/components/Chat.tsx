@@ -41,7 +41,7 @@ export function Chat() {
         }}
       >
         <Box as="h2" sx={{ fontSize: 2, fontWeight: 'bold', margin: 0 }}>
-          Guide
+          System2
         </Box>
       </Box>
 
