@@ -263,7 +263,11 @@ export async function onboard(): Promise<void> {
     if (primaryProvider === 'openai-compatible') {
       const compatConfig = await collectOpenAICompatibleConfig();
       collectedKeys.set(primaryProvider, compatConfig.keys);
-      compatExtras = { base_url: compatConfig.base_url, model: compatConfig.model, compat_reasoning: compatConfig.compat_reasoning };
+      compatExtras = {
+        base_url: compatConfig.base_url,
+        model: compatConfig.model,
+        compat_reasoning: compatConfig.compat_reasoning,
+      };
     } else {
       const primaryKeys = await collectKeysForProvider(primaryProvider);
       collectedKeys.set(primaryProvider, primaryKeys);
@@ -302,7 +306,11 @@ export async function onboard(): Promise<void> {
         if (fallbackProvider === 'openai-compatible' && !compatExtras) {
           const compatConfig = await collectOpenAICompatibleConfig();
           collectedKeys.set(fallbackProvider, compatConfig.keys);
-          compatExtras = { base_url: compatConfig.base_url, model: compatConfig.model, compat_reasoning: compatConfig.compat_reasoning };
+          compatExtras = {
+        base_url: compatConfig.base_url,
+        model: compatConfig.model,
+        compat_reasoning: compatConfig.compat_reasoning,
+      };
         } else {
           const fallbackKeys = await collectKeysForProvider(fallbackProvider);
           collectedKeys.set(fallbackProvider, fallbackKeys);
