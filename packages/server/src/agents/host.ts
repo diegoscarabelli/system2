@@ -230,6 +230,7 @@ export class AgentHost {
       }
 
       llmProvider = resolvedProvider;
+      this.currentProvider = resolvedProvider;
     }
 
     console.log('[AgentHost] Selected model:', modelId, 'for provider:', llmProvider);
