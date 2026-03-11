@@ -54,13 +54,13 @@ interface AgentDefinition {
   thinking_level?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   models: {
     anthropic: string;
-    openai: string;
+    cerebras: string;
     google: string;
+    groq: string;
     mistral: string;
+    openai: string;
     openrouter: string;
     xai: string;
-    groq: string;
-    cerebras: string;
   };
 }
 

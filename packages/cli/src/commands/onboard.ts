@@ -16,14 +16,14 @@ import { buildConfigToml, CONFIG_FILE, SYSTEM2_DIR, writeConfigFile } from '../u
 
 const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
+  { value: 'cerebras', label: 'Cerebras (fast inference)' },
   { value: 'google', label: 'Google (Gemini)' },
-  { value: 'openai', label: 'OpenAI (GPT & o-series)' },
+  { value: 'groq', label: 'Groq (fast inference)' },
   { value: 'mistral', label: 'Mistral (Mistral & Magistral)' },
+  { value: 'openai', label: 'OpenAI (GPT & o-series)' },
+  { value: 'openai-compatible', label: 'OpenAI-compatible (LiteLLM, vLLM, Ollama, Thaura, etc.)' },
   { value: 'openrouter', label: 'OpenRouter (multi-provider gateway)' },
   { value: 'xai', label: 'xAI (Grok)' },
-  { value: 'groq', label: 'Groq (fast inference)' },
-  { value: 'cerebras', label: 'Cerebras (fast inference)' },
-  { value: 'openai-compatible', label: 'OpenAI-compatible (LiteLLM, vLLM, Ollama, Thaura, etc.)' },
 ];
 
 /**

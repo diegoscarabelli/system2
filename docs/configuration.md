@@ -21,26 +21,26 @@ keys = [
   { key = "sk-ant-...", label = "work" },
 ]
 
+[llm.cerebras]
+keys = [{ key = "csk-...", label = "default" }]
+
 [llm.google]
 keys = [{ key = "AIza...", label = "default" }]
 
-[llm.openai]
-keys = [{ key = "sk-...", label = "default" }]
+[llm.groq]
+keys = [{ key = "gsk_...", label = "default" }]
 
 [llm.mistral]
 keys = [{ key = "...", label = "default" }]
+
+[llm.openai]
+keys = [{ key = "sk-...", label = "default" }]
 
 [llm.openrouter]
 keys = [{ key = "sk-or-...", label = "default" }]
 
 [llm.xai]
 keys = [{ key = "xai-...", label = "default" }]
-
-[llm.groq]
-keys = [{ key = "gsk_...", label = "default" }]
-
-[llm.cerebras]
-keys = [{ key = "csk-...", label = "default" }]
 
 # OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura, etc.)
 [llm.openai-compatible]
@@ -95,14 +95,14 @@ max_history_messages = 100  # Max messages in chat history ring buffer
 | Provider | Models Used |
 |----------|------------|
 | `anthropic` | Claude (Sonnet, Opus, Haiku) |
+| `cerebras` | Fast inference (Llama, Qwen) |
 | `google` | Gemini |
-| `openai` | GPT, o-series |
+| `groq` | Fast inference (Llama, DeepSeek, Gemma) |
 | `mistral` | Mistral Large/Medium/Small, Magistral |
+| `openai` | GPT, o-series |
+| `openai-compatible` | Any OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura) |
 | `openrouter` | Any model via OpenRouter (uses `provider/model` IDs) |
 | `xai` | Grok |
-| `groq` | Fast inference (Llama, DeepSeek, Gemma) |
-| `cerebras` | Fast inference (Llama, Qwen) |
-| `openai-compatible` | Any OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura) |
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
 

@@ -7,14 +7,14 @@
 
 export type LlmProvider =
   | 'anthropic'
-  | 'openai'
-  | 'google'
-  | 'mistral'
-  | 'openrouter'
-  | 'xai'
-  | 'groq'
   | 'cerebras'
-  | 'openai-compatible';
+  | 'google'
+  | 'groq'
+  | 'mistral'
+  | 'openai'
+  | 'openai-compatible'
+  | 'openrouter'
+  | 'xai';
 
 export interface LlmKey {
   key: string;

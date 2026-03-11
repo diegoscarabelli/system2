@@ -64,13 +64,13 @@ interface TomlConfig {
     primary?: string;
     fallback?: string[];
     anthropic?: { keys?: Array<{ key: string; label: string }> };
+    cerebras?: { keys?: Array<{ key: string; label: string }> };
     google?: { keys?: Array<{ key: string; label: string }> };
-    openai?: { keys?: Array<{ key: string; label: string }> };
+    groq?: { keys?: Array<{ key: string; label: string }> };
     mistral?: { keys?: Array<{ key: string; label: string }> };
+    openai?: { keys?: Array<{ key: string; label: string }> };
     openrouter?: { keys?: Array<{ key: string; label: string }> };
     xai?: { keys?: Array<{ key: string; label: string }> };
-    groq?: { keys?: Array<{ key: string; label: string }> };
-    cerebras?: { keys?: Array<{ key: string; label: string }> };
     'openai-compatible'?: {
       keys?: Array<{ key: string; label: string }>;
       base_url?: string;
@@ -137,13 +137,13 @@ function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
 
   for (const name of [
     'anthropic',
+    'cerebras',
     'google',
-    'openai',
+    'groq',
     'mistral',
+    'openai',
     'openrouter',
     'xai',
-    'groq',
-    'cerebras',
   ] as const) {
     const providerToml = toml[name];
     if (providerToml?.keys && providerToml.keys.length > 0) {
@@ -338,14 +338,14 @@ export function buildConfigToml(options: {
 
     for (const name of [
       'anthropic',
+      'cerebras',
       'google',
-      'openai',
+      'groq',
       'mistral',
+      'openai',
+      'openai-compatible',
       'openrouter',
       'xai',
-      'groq',
-      'cerebras',
-      'openai-compatible',
     ] as const) {
       const provider = providers[name];
       if (provider && provider.keys.length > 0) {
