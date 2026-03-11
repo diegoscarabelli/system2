@@ -117,7 +117,9 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
       })
     ),
     tags: Type.Optional(
-      Type.Array(Type.String(), { description: 'Array of string tags for artifact categorization.' })
+      Type.Array(Type.String(), {
+        description: 'Array of string tags for artifact categorization.',
+      })
     ),
   });
 

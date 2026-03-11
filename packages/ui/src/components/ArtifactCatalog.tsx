@@ -95,9 +95,7 @@ export function ArtifactCatalog() {
 
       {/* Content */}
       <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
-        {loading && (
-          <Text sx={{ color: 'fg.muted', fontSize: 0 }}>Loading...</Text>
-        )}
+        {loading && <Text sx={{ color: 'fg.muted', fontSize: 0 }}>Loading...</Text>}
 
         {!loading && artifacts.length === 0 && (
           <Text sx={{ color: 'fg.muted', fontSize: 0 }}>No artifacts registered.</Text>
@@ -106,7 +104,9 @@ export function ArtifactCatalog() {
         {!loading &&
           [...grouped.entries()].map(([group, items]) => (
             <Box key={group} sx={{ mb: 3 }}>
-              <Text sx={{ fontSize: 0, fontWeight: 'bold', color: 'fg.muted', mb: 1, display: 'block' }}>
+              <Text
+                sx={{ fontSize: 0, fontWeight: 'bold', color: 'fg.muted', mb: 1, display: 'block' }}
+              >
                 {group}
               </Text>
               {items.map((artifact) => (

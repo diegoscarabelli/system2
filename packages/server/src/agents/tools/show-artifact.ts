@@ -37,7 +37,9 @@ export function createShowArtifactTool(db: DatabaseClient) {
 
       if (!isAbsolute(resolved)) {
         return {
-          content: [{ type: 'text', text: `Error: file_path must be absolute: ${params.file_path}` }],
+          content: [
+            { type: 'text', text: `Error: file_path must be absolute: ${params.file_path}` },
+          ],
           details: { error: 'invalid_path', path: params.file_path },
         };
       }

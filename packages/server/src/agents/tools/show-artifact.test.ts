@@ -29,7 +29,8 @@ describe('show_artifact tool', () => {
     createdFiles.push(absPath);
 
     const tool = createShowArtifactTool(mockDb());
-    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const exec = (params: Record<string, unknown>) =>
+      tool.execute('test-call', params as any) as any;
     const result = await exec({ file_path: absPath });
 
     expect(result.content[0].text).toBe('Artifact displayed');
@@ -40,7 +41,8 @@ describe('show_artifact tool', () => {
 
   it('returns error for nonexistent file', async () => {
     const tool = createShowArtifactTool(mockDb());
-    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const exec = (params: Record<string, unknown>) =>
+      tool.execute('test-call', params as any) as any;
     const result = await exec({ file_path: `/tmp/nonexistent-${randomUUID()}.html` });
 
     expect(result.content[0].text).toContain('not found');
@@ -55,7 +57,8 @@ describe('show_artifact tool', () => {
     createdFiles.push(absPath);
 
     const tool = createShowArtifactTool(mockDb({ title: 'My Dashboard', file_path: absPath }));
-    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const exec = (params: Record<string, unknown>) =>
+      tool.execute('test-call', params as any) as any;
     const result = await exec({ file_path: absPath });
 
     expect(result.content[0].text).toBe('Artifact displayed');
@@ -69,7 +72,8 @@ describe('show_artifact tool', () => {
     createdFiles.push(absPath);
 
     const tool = createShowArtifactTool(mockDb());
-    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const exec = (params: Record<string, unknown>) =>
+      tool.execute('test-call', params as any) as any;
     const result = await exec({ file_path: `~/${filename}` });
 
     expect(result.content[0].text).toBe('Artifact displayed');
@@ -78,7 +82,8 @@ describe('show_artifact tool', () => {
 
   it('returns error for relative path', async () => {
     const tool = createShowArtifactTool(mockDb());
-    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const exec = (params: Record<string, unknown>) =>
+      tool.execute('test-call', params as any) as any;
     const result = await exec({ file_path: 'relative/path.html' });
 
     expect(result.content[0].text).toContain('must be absolute');
@@ -89,7 +94,8 @@ describe('show_artifact tool', () => {
     const tool = createShowArtifactTool(
       mockDb({ title: 'Lost Report', file_path: '/tmp/gone.html' })
     );
-    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const exec = (params: Record<string, unknown>) =>
+      tool.execute('test-call', params as any) as any;
     const result = await exec({ file_path: '/tmp/gone.html' });
 
     expect(result.content[0].text).toContain('Lost Report');
