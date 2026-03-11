@@ -27,6 +27,28 @@ keys = [{ key = "AIza...", label = "default" }]
 [llm.openai]
 keys = [{ key = "sk-...", label = "default" }]
 
+[llm.mistral]
+keys = [{ key = "...", label = "default" }]
+
+[llm.openrouter]
+keys = [{ key = "sk-or-...", label = "default" }]
+
+[llm.xai]
+keys = [{ key = "xai-...", label = "default" }]
+
+[llm.groq]
+keys = [{ key = "gsk_...", label = "default" }]
+
+[llm.cerebras]
+keys = [{ key = "csk-...", label = "default" }]
+
+# OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura, etc.)
+[llm.openai-compatible]
+keys = [{ key = "sk-...", label = "default" }]
+base_url = "http://localhost:4000/v1"
+model = "my-model"
+compat_reasoning = true  # optional, default true
+
 # Service credentials
 [services.brave_search]
 key = "BSA..."
@@ -72,11 +94,19 @@ max_history_messages = 100  # Max messages in chat history ring buffer
 
 | Provider | Models Used |
 |----------|------------|
-| `anthropic` | Claude (Sonnet, Opus) |
+| `anthropic` | Claude (Sonnet, Opus, Haiku) |
 | `google` | Gemini |
 | `openai` | GPT, o-series |
+| `mistral` | Mistral Large/Medium/Small, Magistral |
+| `openrouter` | Any model via OpenRouter (uses `provider/model` IDs) |
+| `xai` | Grok |
+| `groq` | Fast inference (Llama, DeepSeek, Gemma) |
+| `cerebras` | Fast inference (Llama, Qwen) |
+| `openai-compatible` | Any OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura) |
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
+
+The `openai-compatible` provider requires `base_url` and `model` fields in addition to keys. Use it for self-hosted proxies or providers not listed above. The optional `compat_reasoning` field (default `true`) declares whether the model supports extended thinking.
 
 ## Automatic Failover
 
