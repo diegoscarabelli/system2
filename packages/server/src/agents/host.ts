@@ -425,7 +425,7 @@ export class AgentHost {
 
     // show_artifact is Guide-only — the Guide is the only agent that interacts with the user via the UI
     if (this.agentRole === 'guide') {
-      tools.push(createShowArtifactTool());
+      tools.push(createShowArtifactTool(this.db));
     }
 
     // spawn_agent and terminate_agent require a spawner callback (provided to Guide and Conductors, not Narrator)

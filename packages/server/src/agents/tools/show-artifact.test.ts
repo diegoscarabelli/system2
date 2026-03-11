@@ -7,10 +7,13 @@ import { createShowArtifactTool } from './show-artifact.js';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
 
-describe('show_artifact tool', () => {
-  const tool = createShowArtifactTool();
-  const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+function mockDb(artifact: Record<string, unknown> | null = null) {
+  return {
+    getArtifactByPath: () => artifact,
+  } as any;
+}
 
+describe('show_artifact tool', () => {
   const createdFiles: string[] = [];
 
   afterEach(() => {
@@ -19,22 +22,78 @@ describe('show_artifact tool', () => {
   });
 
   it('returns artifact URL for existing file', async () => {
-    const relPath = `test-artifact-${randomUUID().slice(0, 8)}.html`;
-    const absPath = join(SYSTEM2_DIR, relPath);
+    const filename = `test-artifact-${randomUUID().slice(0, 8)}.html`;
+    const absPath = join(SYSTEM2_DIR, filename);
     mkdirSync(SYSTEM2_DIR, { recursive: true });
     writeFileSync(absPath, '<html></html>');
     createdFiles.push(absPath);
 
-    const result = await exec({ path: relPath });
+    const tool = createShowArtifactTool(mockDb());
+    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const result = await exec({ file_path: absPath });
 
     expect(result.content[0].text).toBe('Artifact displayed');
-    expect((result.details as any).url).toBe(`/artifacts/${relPath}`);
+    expect((result.details as any).url).toContain('/api/artifact?path=');
+    expect((result.details as any).absolutePath).toBe(absPath);
+    expect((result.details as any).title).toBe(filename);
   });
 
   it('returns error for nonexistent file', async () => {
-    const result = await exec({ path: `nonexistent-${randomUUID()}.html` });
+    const tool = createShowArtifactTool(mockDb());
+    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const result = await exec({ file_path: `/tmp/nonexistent-${randomUUID()}.html` });
 
     expect(result.content[0].text).toContain('not found');
+    expect((result.details as any).error).toBe('not_found');
+  });
+
+  it('uses DB title when artifact is registered', async () => {
+    const filename = `test-artifact-${randomUUID().slice(0, 8)}.html`;
+    const absPath = join(SYSTEM2_DIR, filename);
+    mkdirSync(SYSTEM2_DIR, { recursive: true });
+    writeFileSync(absPath, '<html></html>');
+    createdFiles.push(absPath);
+
+    const tool = createShowArtifactTool(mockDb({ title: 'My Dashboard', file_path: absPath }));
+    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const result = await exec({ file_path: absPath });
+
+    expect(result.content[0].text).toBe('Artifact displayed');
+    expect((result.details as any).title).toBe('My Dashboard');
+  });
+
+  it('supports ~/ path expansion', async () => {
+    const filename = `test-artifact-${randomUUID().slice(0, 8)}.html`;
+    const absPath = join(homedir(), filename);
+    writeFileSync(absPath, '<html></html>');
+    createdFiles.push(absPath);
+
+    const tool = createShowArtifactTool(mockDb());
+    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const result = await exec({ file_path: `~/${filename}` });
+
+    expect(result.content[0].text).toBe('Artifact displayed');
+    expect((result.details as any).absolutePath).toBe(absPath);
+  });
+
+  it('returns error for relative path', async () => {
+    const tool = createShowArtifactTool(mockDb());
+    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const result = await exec({ file_path: 'relative/path.html' });
+
+    expect(result.content[0].text).toContain('must be absolute');
+    expect((result.details as any).error).toBe('invalid_path');
+  });
+
+  it('shows search hint for registered artifact with missing file', async () => {
+    const tool = createShowArtifactTool(
+      mockDb({ title: 'Lost Report', file_path: '/tmp/gone.html' })
+    );
+    const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+    const result = await exec({ file_path: '/tmp/gone.html' });
+
+    expect(result.content[0].text).toContain('Lost Report');
+    expect(result.content[0].text).toContain('moved');
     expect((result.details as any).error).toBe('not_found');
   });
 });
