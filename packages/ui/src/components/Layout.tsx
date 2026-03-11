@@ -4,10 +4,12 @@
  * Resizable two-panel layout with main content and chat sidebar.
  */
 
-import { MoonIcon, SunIcon } from '@primer/octicons-react';
+import { ListUnorderedIcon, MoonIcon, SunIcon } from '@primer/octicons-react';
 import { Box, IconButton } from '@primer/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useArtifactStore } from '../stores/artifact';
 import { useThemeStore } from '../stores/theme';
+import { ArtifactCatalog } from './ArtifactCatalog';
 import { ArtifactViewer } from './ArtifactViewer';
 import { Chat } from './Chat';
 
@@ -16,6 +18,8 @@ export function Layout() {
   const isDragging = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const { colorMode, toggleColorMode } = useThemeStore();
+  const catalogOpen = useArtifactStore((s) => s.catalogOpen);
+  const toggleCatalog = useArtifactStore((s) => s.toggleCatalog);
 
   const handleMouseDown = useCallback(() => {
     isDragging.current = true;
@@ -86,14 +90,25 @@ export function Layout() {
           System2
         </Box>
 
-        {/* Theme toggle */}
-        <IconButton
-          aria-label={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          icon={colorMode === 'dark' ? SunIcon : MoonIcon}
-          variant="invisible"
-          onClick={toggleColorMode}
-          sx={{ color: 'fg.muted' }}
-        />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {/* Catalog toggle */}
+          <IconButton
+            aria-label="Toggle artifact catalog"
+            icon={ListUnorderedIcon}
+            variant="invisible"
+            onClick={toggleCatalog}
+            sx={{ color: catalogOpen ? 'accent.fg' : 'fg.muted' }}
+          />
+
+          {/* Theme toggle */}
+          <IconButton
+            aria-label={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            icon={colorMode === 'dark' ? SunIcon : MoonIcon}
+            variant="invisible"
+            onClick={toggleColorMode}
+            sx={{ color: 'fg.muted' }}
+          />
+        </Box>
       </Box>
 
       {/* Main area with resizable panels */}
@@ -113,9 +128,11 @@ export function Layout() {
             flexDirection: 'column',
             backgroundColor: 'canvas.default',
             overflow: 'auto',
+            position: 'relative',
           }}
         >
           <ArtifactViewer />
+          {catalogOpen && <ArtifactCatalog />}
         </Box>
 
         {/* Resize handle */}

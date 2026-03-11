@@ -110,9 +110,20 @@ export function useWebSocket() {
           useChatStore.getState().setContextPercent(message.percent);
           break;
 
-        case 'artifact':
-          useArtifactStore.getState().showArtifact(message.url);
+        case 'artifact': {
+          const store = useArtifactStore.getState();
+          if (message.filePath) {
+            const existingTab = store.tabs.find((t) => t.filePath === message.filePath);
+            if (existingTab) {
+              store.reloadTab(message.filePath, message.url);
+            } else {
+              store.openArtifact(message.url, message.title, message.filePath);
+            }
+          } else {
+            store.openArtifact(message.url, message.title);
+          }
           break;
+        }
 
         case 'error':
           console.error('Server error:', message.message);
