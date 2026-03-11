@@ -101,7 +101,7 @@ const DEFAULT_OPERATIONAL: Pick<
 > = {
   backup: {
     cooldownHours: 24,
-    maxBackups: 5,
+    maxBackups: 3,
   },
   session: {
     rotationThresholdMB: 10,

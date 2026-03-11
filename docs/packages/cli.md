@@ -50,7 +50,7 @@ Starts the server process.
 **Start sequence:**
 1. Load and validate `config.toml`
 2. Rotate logs if size > 10MB
-3. Create automatic backup of `~/.system2/` (24h cooldown, max 5 backups)
+3. Create automatic backup of `~/.system2/` (24h cooldown, max 3 backups)
 4. Check for existing PID file (prevent double-start)
 5. Spawn server as detached process (or run in foreground)
 6. Write PID file
@@ -69,7 +69,7 @@ Shows whether the server is running, its PID, log file size, and commands for ta
 The config utility handles:
 - Reading and parsing TOML from `~/.system2/config.toml`
 - Converting snake_case TOML keys to camelCase TypeScript interfaces
-- Deep-merging with defaults (backup cooldown: 24h, max backups: 5, etc.)
+- Deep-merging with defaults (backup cooldown: 24h, max backups: 3, etc.)
 - Validating required fields (at least one LLM provider with keys)
 - Building a `ServerConfig` object for the server package
 

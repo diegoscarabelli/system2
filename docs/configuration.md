@@ -39,7 +39,7 @@ max_results = 5
 # Operational settings
 [backup]
 cooldown_hours = 24    # Min hours between auto-backups
-max_backups = 5        # Max backup copies to keep
+max_backups = 3        # Max backup copies to keep
 
 [session]
 rotation_threshold_mb = 10  # JSONL session file rotation threshold

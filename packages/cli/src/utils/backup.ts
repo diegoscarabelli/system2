@@ -7,7 +7,7 @@
  *
  * Configuration via ~/.system2/config.toml:
  * - backup.cooldown_hours: Hours between backups (default: 24)
- * - backup.max_backups: Number of backups to keep (default: 5)
+ * - backup.max_backups: Number of backups to keep (default: 3)
  */
 
 import { cpSync, existsSync, readdirSync, rmSync, statSync } from 'node:fs';
