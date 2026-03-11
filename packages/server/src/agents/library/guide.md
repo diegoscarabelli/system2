@@ -2,10 +2,16 @@
 name: guide
 description: Your personal guide to the world of reasoning with data
 version: 1.0.0
+thinking_level: high
 models:
   anthropic: claude-opus-4-6
   openai: gpt-4o
   google: gemini-3.1-pro-preview
+  mistral: mistral-large-latest
+  openrouter: anthropic/claude-sonnet-4
+  xai: grok-2-latest
+  groq: llama-3.3-70b-versatile
+  cerebras: qwen-3-235b-a22b-instruct-2507
 ---
 
 # Guide Agent System Prompt

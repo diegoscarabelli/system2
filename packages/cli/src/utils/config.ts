@@ -66,6 +66,17 @@ interface TomlConfig {
     anthropic?: { keys?: Array<{ key: string; label: string }> };
     google?: { keys?: Array<{ key: string; label: string }> };
     openai?: { keys?: Array<{ key: string; label: string }> };
+    mistral?: { keys?: Array<{ key: string; label: string }> };
+    openrouter?: { keys?: Array<{ key: string; label: string }> };
+    xai?: { keys?: Array<{ key: string; label: string }> };
+    groq?: { keys?: Array<{ key: string; label: string }> };
+    cerebras?: { keys?: Array<{ key: string; label: string }> };
+    'openai-compatible'?: {
+      keys?: Array<{ key: string; label: string }>;
+      base_url?: string;
+      model?: string;
+      compat_reasoning?: boolean;
+    };
   };
   services?: {
     brave_search?: { key?: string };
@@ -124,14 +135,36 @@ const DEFAULT_OPERATIONAL: Pick<
 function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
   const providers: Partial<Record<LlmProvider, LlmProviderConfig>> = {};
 
-  for (const name of ['anthropic', 'google', 'openai'] as const) {
+  for (const name of [
+    'anthropic',
+    'google',
+    'openai',
+    'mistral',
+    'openrouter',
+    'xai',
+    'groq',
+    'cerebras',
+  ] as const) {
     const providerToml = toml[name];
     if (providerToml?.keys && providerToml.keys.length > 0) {
-      // Filter out empty key slots
       const validKeys = providerToml.keys.filter((k) => k.key);
       if (validKeys.length > 0) {
         providers[name] = { keys: validKeys };
       }
+    }
+  }
+
+  // openai-compatible has extra fields (base_url, model)
+  const compatToml = toml['openai-compatible'];
+  if (compatToml?.keys && compatToml.keys.length > 0) {
+    const validKeys = compatToml.keys.filter((k) => k.key);
+    if (validKeys.length > 0) {
+      providers['openai-compatible'] = {
+        keys: validKeys,
+        base_url: compatToml.base_url,
+        model: compatToml.model,
+        compat_reasoning: compatToml.compat_reasoning,
+      };
     }
   }
 
@@ -303,7 +336,17 @@ export function buildConfigToml(options: {
     lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
     lines.push('');
 
-    for (const name of ['anthropic', 'google', 'openai'] as const) {
+    for (const name of [
+      'anthropic',
+      'google',
+      'openai',
+      'mistral',
+      'openrouter',
+      'xai',
+      'groq',
+      'cerebras',
+      'openai-compatible',
+    ] as const) {
       const provider = providers[name];
       if (provider && provider.keys.length > 0) {
         lines.push(`[llm.${name}]`);
@@ -314,6 +357,20 @@ export function buildConfigToml(options: {
           }
         }
         lines.push(']');
+
+        // openai-compatible has extra fields
+        if (name === 'openai-compatible') {
+          if (provider.base_url) {
+            lines.push(`base_url = "${provider.base_url}"`);
+          }
+          if (provider.model) {
+            lines.push(`model = "${provider.model}"`);
+          }
+          if (provider.compat_reasoning !== undefined) {
+            lines.push(`compat_reasoning = ${provider.compat_reasoning}`);
+          }
+        }
+
         lines.push('');
       }
     }

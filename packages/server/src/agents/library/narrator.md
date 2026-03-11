@@ -2,10 +2,16 @@
 name: narrator
 description: Memory keeper — maintains long-term memory and creates daily activity summaries
 version: 3.0.0
+thinking_level: medium
 models:
   anthropic: claude-haiku-4-5-20251001
   openai: gpt-4o-mini
   google: gemini-2.0-flash
+  mistral: mistral-small-latest
+  openrouter: anthropic/claude-haiku-4-5
+  xai: grok-2-latest
+  groq: llama-3.1-8b-instant
+  cerebras: llama3.1-8b
 ---
 
 # Narrator Agent System Prompt

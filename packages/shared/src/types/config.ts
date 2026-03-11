@@ -5,7 +5,16 @@
  * Used by both CLI (config loading) and server (AuthResolver, AgentHost).
  */
 
-export type LlmProvider = 'anthropic' | 'openai' | 'google';
+export type LlmProvider =
+  | 'anthropic'
+  | 'openai'
+  | 'google'
+  | 'mistral'
+  | 'openrouter'
+  | 'xai'
+  | 'groq'
+  | 'cerebras'
+  | 'openai-compatible';
 
 export interface LlmKey {
   key: string;
@@ -14,6 +23,9 @@ export interface LlmKey {
 
 export interface LlmProviderConfig {
   keys: LlmKey[];
+  base_url?: string;
+  model?: string;
+  compat_reasoning?: boolean;
 }
 
 export interface LlmConfig {

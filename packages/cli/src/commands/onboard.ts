@@ -18,6 +18,12 @@ const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
   { value: 'google', label: 'Google (Gemini)' },
   { value: 'openai', label: 'OpenAI (GPT & o-series)' },
+  { value: 'mistral', label: 'Mistral (Mistral & Magistral)' },
+  { value: 'openrouter', label: 'OpenRouter (multi-provider gateway)' },
+  { value: 'xai', label: 'xAI (Grok)' },
+  { value: 'groq', label: 'Groq (fast inference)' },
+  { value: 'cerebras', label: 'Cerebras (fast inference)' },
+  { value: 'openai-compatible', label: 'OpenAI-compatible (LiteLLM, vLLM, Ollama, Thaura, etc.)' },
 ];
 
 /**
@@ -104,6 +110,76 @@ async function collectKeysForProvider(provider: LlmProvider): Promise<LlmKey[]> 
 }
 
 /**
+ * Collect configuration for an OpenAI-compatible endpoint (base URL, model, optional API key).
+ */
+async function collectOpenAICompatibleConfig(): Promise<{
+  keys: LlmKey[];
+  base_url: string;
+  model: string;
+  compat_reasoning: boolean;
+}> {
+  const baseUrl = (await p.text({
+    message: 'Enter the base URL of your OpenAI-compatible endpoint:',
+    placeholder: 'http://localhost:4000/v1',
+    validate: (value) => {
+      if (!value) return 'Base URL is required';
+      try {
+        new URL(value);
+      } catch {
+        return 'Invalid URL format';
+      }
+    },
+  })) as string;
+
+  if (p.isCancel(baseUrl)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  const model = (await p.text({
+    message: 'Enter the model ID to use:',
+    placeholder: 'gpt-4o',
+    validate: (value) => {
+      if (!value) return 'Model ID is required';
+    },
+  })) as string;
+
+  if (p.isCancel(model)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  const needsKey = await p.confirm({
+    message: 'Does this endpoint require an API key?',
+    initialValue: true,
+  });
+
+  if (p.isCancel(needsKey)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  let keys: LlmKey[];
+  if (needsKey) {
+    keys = await collectKeysForProvider('openai-compatible');
+  } else {
+    keys = [{ key: 'not-needed', label: 'local' }];
+  }
+
+  const reasoning = await p.confirm({
+    message: 'Does this model support reasoning/extended thinking?',
+    initialValue: true,
+  });
+
+  if (p.isCancel(reasoning)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  return { keys, base_url: baseUrl, model, compat_reasoning: reasoning };
+}
+
+/**
  * Collect optional Brave Search API key for web search.
  */
 async function collectWebSearchConfig(): Promise<{
@@ -181,9 +257,17 @@ export async function onboard(): Promise<void> {
       process.exit(0);
     }
 
-    // Step 2: Collect keys for primary provider
-    const primaryKeys = await collectKeysForProvider(primaryProvider);
-    collectedKeys.set(primaryProvider, primaryKeys);
+    // Step 2: Collect keys for primary provider (openai-compatible needs extra config)
+    let compatExtras: { base_url: string; model: string; compat_reasoning: boolean } | undefined;
+
+    if (primaryProvider === 'openai-compatible') {
+      const compatConfig = await collectOpenAICompatibleConfig();
+      collectedKeys.set(primaryProvider, compatConfig.keys);
+      compatExtras = { base_url: compatConfig.base_url, model: compatConfig.model, compat_reasoning: compatConfig.compat_reasoning };
+    } else {
+      const primaryKeys = await collectKeysForProvider(primaryProvider);
+      collectedKeys.set(primaryProvider, primaryKeys);
+    }
 
     // Step 3: Ask about fallback providers
     const wantsFallback = await p.confirm({
@@ -215,8 +299,14 @@ export async function onboard(): Promise<void> {
           process.exit(0);
         }
 
-        const fallbackKeys = await collectKeysForProvider(fallbackProvider);
-        collectedKeys.set(fallbackProvider, fallbackKeys);
+        if (fallbackProvider === 'openai-compatible' && !compatExtras) {
+          const compatConfig = await collectOpenAICompatibleConfig();
+          collectedKeys.set(fallbackProvider, compatConfig.keys);
+          compatExtras = { base_url: compatConfig.base_url, model: compatConfig.model, compat_reasoning: compatConfig.compat_reasoning };
+        } else {
+          const fallbackKeys = await collectKeysForProvider(fallbackProvider);
+          collectedKeys.set(fallbackProvider, fallbackKeys);
+        }
         fallbackOrder.push(fallbackProvider);
 
         availableProviders = availableProviders.filter((p) => p.value !== fallbackProvider);
@@ -248,7 +338,16 @@ export async function onboard(): Promise<void> {
     };
 
     for (const [provider, keys] of collectedKeys) {
-      llmConfig.providers[provider] = { keys };
+      if (provider === 'openai-compatible' && compatExtras) {
+        llmConfig.providers[provider] = {
+          keys,
+          base_url: compatExtras.base_url,
+          model: compatExtras.model,
+          compat_reasoning: compatExtras.compat_reasoning,
+        };
+      } else {
+        llmConfig.providers[provider] = { keys };
+      }
     }
 
     // Phase 2: Bootstrap

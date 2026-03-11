@@ -83,4 +83,116 @@ describe('buildConfigToml', () => {
     expect(result).not.toContain('empty');
     expect(result).toContain('sk-real');
   });
+
+  it('generates TOML with new providers (mistral, openrouter, xai, groq, cerebras)', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'mistral',
+        fallback: ['openrouter', 'groq'],
+        providers: {
+          mistral: { keys: [{ key: 'mist-key', label: 'default' }] },
+          openrouter: { keys: [{ key: 'sk-or-key', label: 'default' }] },
+          groq: { keys: [{ key: 'gsk-key', label: 'default' }] },
+        },
+      },
+    });
+    expect(result).toContain('primary = "mistral"');
+    expect(result).toContain('fallback = ["openrouter", "groq"]');
+    expect(result).toContain('[llm.mistral]');
+    expect(result).toContain('mist-key');
+    expect(result).toContain('[llm.openrouter]');
+    expect(result).toContain('sk-or-key');
+    expect(result).toContain('[llm.groq]');
+    expect(result).toContain('gsk-key');
+  });
+
+  it('generates TOML with openai-compatible provider including base_url and model', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openai-compatible',
+        fallback: [],
+        providers: {
+          'openai-compatible': {
+            keys: [{ key: 'proxy-key', label: 'local' }],
+            base_url: 'http://localhost:4000/v1',
+            model: 'my-model',
+          },
+        },
+      },
+    });
+    expect(result).toContain('primary = "openai-compatible"');
+    expect(result).toContain('[llm.openai-compatible]');
+    expect(result).toContain('proxy-key');
+    expect(result).toContain('base_url = "http://localhost:4000/v1"');
+    expect(result).toContain('model = "my-model"');
+  });
+
+  it('includes compat_reasoning field for openai-compatible provider', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openai-compatible',
+        fallback: [],
+        providers: {
+          'openai-compatible': {
+            keys: [{ key: 'proxy-key', label: 'local' }],
+            base_url: 'http://localhost:4000/v1',
+            model: 'my-model',
+            compat_reasoning: true,
+          },
+        },
+      },
+    });
+    expect(result).toContain('compat_reasoning = true');
+  });
+
+  it('emits compat_reasoning = false when explicitly set', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openai-compatible',
+        fallback: [],
+        providers: {
+          'openai-compatible': {
+            keys: [{ key: 'proxy-key', label: 'local' }],
+            base_url: 'http://localhost:4000/v1',
+            model: 'my-model',
+            compat_reasoning: false,
+          },
+        },
+      },
+    });
+    expect(result).toContain('compat_reasoning = false');
+  });
+
+  it('omits compat_reasoning when undefined for openai-compatible', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openai-compatible',
+        fallback: [],
+        providers: {
+          'openai-compatible': {
+            keys: [{ key: 'proxy-key', label: 'local' }],
+            base_url: 'http://localhost:4000/v1',
+            model: 'my-model',
+          },
+        },
+      },
+    });
+    expect(result).not.toContain('compat_reasoning');
+  });
+
+  it('omits base_url and model for non openai-compatible providers', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'xai',
+        fallback: [],
+        providers: {
+          xai: { keys: [{ key: 'xai-key', label: 'default' }] },
+        },
+      },
+    });
+    expect(result).toContain('[llm.xai]');
+    expect(result).toContain('xai-key');
+    expect(result).not.toContain('base_url');
+    expect(result).not.toContain('model =');
+  });
 });

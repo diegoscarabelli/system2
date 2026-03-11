@@ -132,4 +132,63 @@ describe('AuthResolver', () => {
       expect(status.cooldowns).toHaveLength(0);
     });
   });
+
+  describe('new providers', () => {
+    it('works with mistral as primary', () => {
+      const resolver = new AuthResolver(
+        makeConfig({
+          primary: 'mistral',
+          fallback: ['anthropic'],
+          providers: {
+            mistral: { keys: [{ key: 'mist-key', label: 'default' }] },
+            anthropic: { keys: [{ key: 'ant-key', label: 'default' }] },
+          },
+        })
+      );
+      expect(resolver.primaryProvider).toBe('mistral');
+      expect(resolver.getActiveKey('mistral')).toEqual({
+        provider: 'mistral',
+        keyIndex: 0,
+        label: 'default',
+      });
+    });
+
+    it('fails over from groq to cerebras', () => {
+      const resolver = new AuthResolver(
+        makeConfig({
+          primary: 'groq',
+          fallback: ['cerebras'],
+          providers: {
+            groq: { keys: [{ key: 'gsk-key', label: 'default' }] },
+            cerebras: { keys: [{ key: 'csk-key', label: 'default' }] },
+          },
+        })
+      );
+      resolver.markKeyFailed('groq', 'auth');
+      const next = resolver.getNextProvider();
+      expect(next).toBe('cerebras');
+    });
+
+    it('works with openai-compatible provider keys', () => {
+      const resolver = new AuthResolver(
+        makeConfig({
+          primary: 'openai-compatible',
+          fallback: [],
+          providers: {
+            'openai-compatible': {
+              keys: [{ key: 'proxy-key', label: 'local' }],
+              base_url: 'http://localhost:4000/v1',
+              model: 'my-model',
+            },
+          },
+        })
+      );
+      expect(resolver.primaryProvider).toBe('openai-compatible');
+      expect(resolver.getActiveKey('openai-compatible')).toEqual({
+        provider: 'openai-compatible',
+        keyIndex: 0,
+        label: 'local',
+      });
+    });
+  });
 });
