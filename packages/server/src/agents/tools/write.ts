@@ -5,11 +5,11 @@
  */
 
 import { mkdir, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { commitIfStateDir } from './git-commit.js';
+import { resolvePath } from './resolve-path.js';
 
 export function createWriteTool() {
   const params = Type.Object({
@@ -35,7 +35,7 @@ export function createWriteTool() {
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
-        const filePath = isAbsolute(params.path) ? params.path : resolve(homedir(), params.path);
+        const filePath = resolvePath(params.path);
 
         const dir = dirname(filePath);
         await mkdir(dir, { recursive: true });

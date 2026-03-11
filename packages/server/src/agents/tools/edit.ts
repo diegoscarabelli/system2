@@ -8,11 +8,10 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { isAbsolute, resolve } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { commitIfStateDir } from './git-commit.js';
+import { resolvePath } from './resolve-path.js';
 
 export function createEditTool() {
   const params = Type.Object({
@@ -50,7 +49,7 @@ export function createEditTool() {
           };
         }
 
-        const filePath = isAbsolute(params.path) ? params.path : resolve(homedir(), params.path);
+        const filePath = resolvePath(params.path);
 
         const content = await readFile(filePath, 'utf-8');
 

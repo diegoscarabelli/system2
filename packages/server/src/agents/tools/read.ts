@@ -5,10 +5,9 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { isAbsolute, resolve } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
+import { resolvePath } from './resolve-path.js';
 
 export function createReadTool() {
   const params = Type.Object({
@@ -24,7 +23,7 @@ export function createReadTool() {
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
-        const filePath = isAbsolute(params.path) ? params.path : resolve(homedir(), params.path);
+        const filePath = resolvePath(params.path);
 
         const content = await readFile(filePath, 'utf-8');
 

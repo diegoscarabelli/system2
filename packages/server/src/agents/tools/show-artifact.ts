@@ -7,11 +7,11 @@
  */
 
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { basename, isAbsolute, join, normalize } from 'node:path';
+import { basename, isAbsolute, normalize } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
+import { isTildePath, resolvePath } from './resolve-path.js';
 
 export function createShowArtifactTool(db: DatabaseClient) {
   const params = Type.Object({
@@ -28,14 +28,8 @@ export function createShowArtifactTool(db: DatabaseClient) {
       'Display an artifact file in the UI panel. The file can be anywhere on the filesystem — specify an absolute path. If the artifact is registered in the database, its title is used for the tab label.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
-      // Resolve path (handle ~/ expansion)
-      let resolved = params.file_path;
-      if (resolved.startsWith('~/')) {
-        resolved = join(homedir(), resolved.slice(2));
-      }
-      resolved = normalize(resolved);
-
-      if (!isAbsolute(resolved)) {
+      // Reject bare relative paths — require absolute or ~/ prefix
+      if (!isAbsolute(params.file_path) && !isTildePath(params.file_path)) {
         return {
           content: [
             { type: 'text', text: `Error: file_path must be absolute: ${params.file_path}` },
@@ -43,6 +37,9 @@ export function createShowArtifactTool(db: DatabaseClient) {
           details: { error: 'invalid_path', path: params.file_path },
         };
       }
+
+      // Resolve path (handle ~/ expansion)
+      const resolved = normalize(resolvePath(params.file_path));
 
       // Look up metadata in DB
       const artifact = db.getArtifactByPath(resolved);
