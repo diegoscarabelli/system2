@@ -307,10 +307,10 @@ export async function onboard(): Promise<void> {
           const compatConfig = await collectOpenAICompatibleConfig();
           collectedKeys.set(fallbackProvider, compatConfig.keys);
           compatExtras = {
-        base_url: compatConfig.base_url,
-        model: compatConfig.model,
-        compat_reasoning: compatConfig.compat_reasoning,
-      };
+            base_url: compatConfig.base_url,
+            model: compatConfig.model,
+            compat_reasoning: compatConfig.compat_reasoning,
+          };
         } else {
           const fallbackKeys = await collectKeysForProvider(fallbackProvider);
           collectedKeys.set(fallbackProvider, fallbackKeys);
