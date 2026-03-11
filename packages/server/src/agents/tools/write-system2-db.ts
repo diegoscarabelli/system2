@@ -46,17 +46,20 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
         Type.Literal('deleteTaskLink'),
         Type.Literal('createTaskComment'),
         Type.Literal('deleteTaskComment'),
+        Type.Literal('createArtifact'),
+        Type.Literal('updateArtifact'),
+        Type.Literal('deleteArtifact'),
       ],
       {
         description:
-          'Operation to perform. createProject/updateProject manage projects. createTask/updateTask manage tasks. claimTask atomically claims an unassigned todo task (pull model, secondary to assignment). createTaskLink/deleteTaskLink manage task relationships. createTaskComment/deleteTaskComment manage task comments.',
+          'Operation to perform. createProject/updateProject manage projects. createTask/updateTask manage tasks. claimTask atomically claims an unassigned todo task (pull model, secondary to assignment). createTaskLink/deleteTaskLink manage task relationships. createTaskComment/deleteTaskComment manage task comments. createArtifact/updateArtifact/deleteArtifact manage artifact metadata (file_path is absolute).',
       }
     ),
     // Shared: ID for updates/deletes
     id: Type.Optional(
       Type.Number({
         description:
-          'Record ID — required for updateProject, updateTask, deleteTaskLink, deleteTaskComment.',
+          'Record ID — required for updateProject, updateTask, deleteTaskLink, deleteTaskComment, updateArtifact, deleteArtifact.',
       })
     ),
     // Project / Task shared fields
@@ -107,13 +110,22 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
     content: Type.Optional(
       Type.String({ description: 'Comment content — required for createTaskComment.' })
     ),
+    // Artifact fields
+    file_path: Type.Optional(
+      Type.String({
+        description: 'Absolute path to artifact file on disk — required for createArtifact.',
+      })
+    ),
+    tags: Type.Optional(
+      Type.Array(Type.String(), { description: 'Array of string tags for artifact categorization.' })
+    ),
   });
 
   const tool: AgentTool<typeof params> = {
     name: 'write_system2_db',
     label: 'Write System2 DB',
     description:
-      "Create or update records in the System2 app database (~/.system2/app.db). Use named operations to manage projects, tasks, task links, and task comments. updated_at is maintained automatically. The author field on task comments is filled automatically from your agent ID. claimTask atomically claims a todo task — only use this when operating in pull mode at the Conductor's direction, not as a substitute for working your assigned tasks. This tool is only for the System2 management database — not for data pipeline databases (use bash for those). For ad-hoc or complex SQL not covered by these operations, you can also use bash with sqlite3 ~/.system2/app.db.",
+      "Create or update records in the System2 app database (~/.system2/app.db). Use named operations to manage projects, tasks, task links, task comments, and artifacts. updated_at is maintained automatically. The author field on task comments is filled automatically from your agent ID. claimTask atomically claims a todo task — only use this when operating in pull mode at the Conductor's direction, not as a substitute for working your assigned tasks. createArtifact/updateArtifact/deleteArtifact manage artifact metadata (file_path must be absolute; deleteArtifact removes the DB record only, not the file). This tool is only for the System2 management database — not for data pipeline databases (use bash for those). For ad-hoc or complex SQL not covered by these operations, you can also use bash with sqlite3 ~/.system2/app.db.",
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       const err = (msg: string) => ({
@@ -338,6 +350,57 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             }
             const deleted = db.deleteTaskComment(params.id);
             if (!deleted) return err(`No task comment found with id ${params.id}`);
+            return ok({ deleted: true, id: params.id });
+          }
+
+          case 'createArtifact': {
+            if (!params.file_path) return err('createArtifact requires: file_path');
+            if (!params.title) return err('createArtifact requires: title');
+            if (params.project !== undefined) {
+              const createArtifactScopeErr = checkProjectScope(self.project, params.project);
+              if (createArtifactScopeErr) return err(createArtifactScopeErr);
+            }
+            const result = db.createArtifact({
+              project: params.project ?? null,
+              file_path: params.file_path,
+              title: params.title,
+              description: params.description ?? null,
+              tags: params.tags ?? [],
+            });
+            return ok(result);
+          }
+
+          case 'updateArtifact': {
+            if (params.id === undefined) return err('updateArtifact requires: id');
+            const existingArtifact = db.getArtifact(params.id);
+            if (!existingArtifact) return err(`No artifact found with id ${params.id}`);
+            const updateArtifactScopeErr = checkProjectScope(
+              self.project,
+              existingArtifact.project
+            );
+            if (updateArtifactScopeErr) return err(updateArtifactScopeErr);
+            const result = db.updateArtifact(params.id, {
+              ...(params.project !== undefined && { project: params.project }),
+              ...(params.file_path !== undefined && { file_path: params.file_path }),
+              ...(params.title !== undefined && { title: params.title }),
+              ...(params.description !== undefined && { description: params.description }),
+              ...(params.tags !== undefined && { tags: params.tags }),
+            });
+            if (!result) return err(`No artifact found with id ${params.id}`);
+            return ok(result);
+          }
+
+          case 'deleteArtifact': {
+            if (params.id === undefined) return err('deleteArtifact requires: id');
+            const deleteArtifactTarget = db.getArtifact(params.id);
+            if (!deleteArtifactTarget) return err(`No artifact found with id ${params.id}`);
+            const deleteArtifactScopeErr = checkProjectScope(
+              self.project,
+              deleteArtifactTarget.project
+            );
+            if (deleteArtifactScopeErr) return err(deleteArtifactScopeErr);
+            const deleted = db.deleteArtifact(params.id);
+            if (!deleted) return err(`No artifact found with id ${params.id}`);
             return ok({ deleted: true, id: params.id });
           }
 
