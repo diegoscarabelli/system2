@@ -38,7 +38,7 @@ type ServerMessage =
   | { type: 'assistant_end' }
   | { type: 'tool_call_start'; name: string; input?: string }
   | { type: 'tool_call_end'; name: string; result: string }
-  | { type: 'artifact'; url: string }
+  | { type: 'artifact'; url: string; title?: string; filePath?: string }
   | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number }
   | { type: 'error'; message: string }
   | { type: 'ready_for_input' }
@@ -51,7 +51,7 @@ type ServerMessage =
 | `thinking_chunk` / `thinking_end` | Streaming extended thinking blocks |
 | `assistant_chunk` / `assistant_end` | Streaming response text |
 | `tool_call_start` / `tool_call_end` | Tool execution lifecycle |
-| `artifact` | Display HTML artifact in UI left panel. Also sent on live reload (file watch). |
+| `artifact` | Display artifact in a UI tab. Includes `title` (from DB or filename) and `filePath` (absolute path for tab dedup and reload targeting). Also sent on live reload (file watch). |
 | `context_usage` | Context window usage after each agent turn |
 | `error` | Error message |
 | `ready_for_input` | Agent finished, ready for next message |

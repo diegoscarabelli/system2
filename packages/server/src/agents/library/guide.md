@@ -124,6 +124,28 @@ When the Conductor reports the project is complete:
 
 **Important:** Never terminate agents or finalize a project without explicit user confirmation. The Conductor has already assigned a project story task to the Narrator before reporting completion, so the story is written independently of this flow.
 
+## Artifact Management
+
+You are responsible for keeping the `artifact` table in `app.db` accurate and up to date. Artifacts are files (HTML reports, dashboards, PDFs, etc.) displayed to users via the UI.
+
+**When to create artifact records:**
+
+- After a Conductor produces a new artifact file, register it via `write_system2_db: createArtifact` with the file path, title, description, tags, and project ID
+- When the user provides or mentions a file they want tracked as an artifact
+
+**When to update artifact records:**
+
+- If the user moves, renames, or modifies an artifact file, update the `file_path` (and other fields as needed) via `write_system2_db: updateArtifact`
+- If a Conductor reports changes to an artifact's content or purpose, update the title/description/tags accordingly
+
+**When to delete artifact records:**
+
+- If the user deletes an artifact file and confirms they no longer need it tracked
+
+**When uncertain:** Ask the user. For example: "I notice you moved report.html — should I update the artifact record to point to the new location?"
+
+**Showing artifacts:** Use `show_artifact` with the file's absolute path. If the file is registered in the database, its title will appear in the tab. Unregistered files can still be shown (the filename is used as the tab label).
+
 ## Knowledge Management
 
 - **Infrastructure**: Update `~/.system2/knowledge/infrastructure.md` whenever you learn about the user's data stack

@@ -91,6 +91,23 @@ Agent-authored comments on tasks.
 | `author` | INTEGER FK NOT NULL | References `agent(id)` |
 | `content` | TEXT NOT NULL | Comment body |
 
+### `artifact`
+
+File artifacts created by agents, displayed in the UI.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK | Auto-incrementing |
+| `project` | INTEGER FK | References `project(id)`. NULL for project-independent artifacts. |
+| `file_path` | TEXT NOT NULL UNIQUE | Absolute path to the artifact file |
+| `title` | TEXT NOT NULL | Display title |
+| `description` | TEXT | Optional description |
+| `tags` | TEXT | JSON array of strings |
+| `created_at` | TEXT | Auto-set |
+| `updated_at` | TEXT | Auto-set |
+
+**Indices:** `idx_artifact_project` on `project`, `idx_artifact_file_path` on `file_path`
+
 ## DatabaseClient (`client.ts`)
 
 The `DatabaseClient` class initializes SQLite with WAL mode and a 5-second busy timeout, then applies the schema.
@@ -105,7 +122,7 @@ The `DatabaseClient` class initializes SQLite with WAL mode and a 5-second busy 
 | `query(sql)` | Execute a custom SELECT query, returns rows as objects |
 | `close()` | Close the database connection |
 
-Project, task, comment, and link CRUD methods are also available.
+Project, task, comment, link, and artifact CRUD methods are also available (`createArtifact`, `getArtifact`, `updateArtifact`, `deleteArtifact`).
 
 ## Database Access for Agents
 
@@ -117,7 +134,7 @@ Agents query the database via the `read_system2_db` tool (SELECT only). Interact
 
 ### Write access
 
-Agents write to the database via the `write_system2_db` tool, which exposes structured named operations (`createProject`, `updateProject`, `createTask`, `updateTask`, `createTaskLink`, `deleteTaskLink`, `createTaskComment`, `deleteTaskComment`). These delegate to `DatabaseClient` methods, ensuring `updated_at` is always maintained and `task_comment.author` is auto-filled from the calling agent's ID. See [Tools](tools.md#write_system2_db).
+Agents write to the database via the `write_system2_db` tool, which exposes structured named operations (`createProject`, `updateProject`, `createTask`, `updateTask`, `createTaskLink`, `deleteTaskLink`, `createTaskComment`, `deleteTaskComment`, `createArtifact`, `updateArtifact`, `deleteArtifact`). These delegate to `DatabaseClient` methods, ensuring `updated_at` is always maintained and `task_comment.author` is auto-filled from the calling agent's ID. See [Tools](tools.md#write_system2_db).
 
 For ad-hoc SQL not covered by the tool (bulk updates, complex transactions), agents can use `bash` with `sqlite3 ~/.system2/app.db`.
 

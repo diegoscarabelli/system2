@@ -52,7 +52,7 @@ You are a professional data expert. Accuracy is non-negotiable.
 | `read_system2_db` | Query `~/.system2/app.db` with SELECT. Returns rows as JSON. | All agents |
 | `write_system2_db` | Create/update records in `~/.system2/app.db` via named operations. | All agents |
 | `message_agent` | Send a message to another agent by database ID | All agents |
-| `show_artifact` | Display an HTML file in the UI left panel (live reload on file changes) | Guide only |
+| `show_artifact` | Display an artifact file in a UI tab (absolute path, DB metadata lookup, live reload) | Guide only |
 | `web_fetch` | Fetch a URL and extract readable text content | All agents |
 | `spawn_agent` | Spawn a new Conductor or Reviewer for a project | Guide, Conductors |
 | `terminate_agent` | Archive an agent — abort its session, unregister, mark archived | Guide, Conductors |
@@ -63,7 +63,7 @@ You are a professional data expert. Accuracy is non-negotiable.
 - `bash` streams output as the command runs. Set `run_in_background` to true for long-running commands — you will receive the result as a follow-up message when the command finishes.
 - `spawn_agent` and `terminate_agent` are only available to agents that receive a spawner callback (Guide and Conductors). Narrator and Reviewer cannot spawn or terminate agents.
 - `web_search` is only available when a Brave Search API key is configured.
-- `show_artifact` is Guide-only (the Guide is the only agent that interacts with the user via the UI). It validates that the file path is within `~/.system2/`. Only one artifact is watched at a time.
+- `show_artifact` is Guide-only (the Guide is the only agent that interacts with the user via the UI). Accepts an absolute path (or `~/`-prefixed). If the artifact is registered in the database, its title is used for the tab label; otherwise the filename is used. Only one artifact is watched at a time (for live reload).
 
 ## The Database
 
@@ -90,6 +90,9 @@ Create or update records via named operations. `updated_at` is maintained automa
 | `deleteTaskLink` | `id` | — | Project-scoped |
 | `createTaskComment` | `task`, `content` | — | Project-scoped. `author` auto-filled from your agent ID. |
 | `deleteTaskComment` | `id` | — | Project-scoped |
+| `createArtifact` | `file_path`, `title` | `project`, `description`, `tags` | Any agent. Project scope checked if `project` is set. |
+| `updateArtifact` | `id` | `file_path`, `title`, `project`, `description`, `tags` | Any agent. Project scope checked. |
+| `deleteArtifact` | `id` | — | Any agent. Project scope checked. DB row only. |
 
 For ad-hoc SQL not covered by these operations (bulk updates, complex transactions), use `bash` with `sqlite3 ~/.system2/app.db`. Prefer the named operations above for standard work — they enforce permissions, auto-fill fields, and maintain audit trails. Only fall back to raw SQL when the named operations are insufficient for what you need to do.
 
@@ -159,6 +162,19 @@ Reference these tables when writing queries.
 | task | INTEGER FK | The task being commented on |
 | author | INTEGER FK | The agent who wrote the comment (auto-filled from your ID) |
 | content | TEXT | Comment body |
+| created_at | TEXT | Row creation timestamp |
+| updated_at | TEXT | Last modification timestamp |
+
+**artifact** — A file artifact registered for display in the UI
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER PK | Auto-incrementing identifier |
+| project | INTEGER FK | Assigned project (NULL for project-independent artifacts) |
+| file_path | TEXT UNIQUE | Absolute path to the artifact file |
+| title | TEXT | Display title |
+| description | TEXT | Optional description |
+| tags | TEXT | JSON array of string tags |
 | created_at | TEXT | Row creation timestamp |
 | updated_at | TEXT | Last modification timestamp |
 
@@ -297,3 +313,5 @@ All System2 data lives in `~/.system2/`:
 ```
 
 Project directories are named `{id}_{name}` where both values come from the project record in app.db (name is lowercased and slugified). The Conductor creates this directory and the `artifacts/` subdirectory as its first action when starting a project. All project files — data, scripts, artifacts — belong here.
+
+Artifacts can also live anywhere on the filesystem (e.g. user-specified paths outside `~/.system2/`). The `artifact` table in app.db tracks metadata regardless of file location. Use `show_artifact` with the absolute path to display any file in the UI.

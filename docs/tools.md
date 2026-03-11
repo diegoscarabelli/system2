@@ -104,6 +104,9 @@ Executes against `~/.system2/app.db` using structured named operations that dele
 | `deleteTaskLink` | `id` | — | Project-scoped (checked via source task) |
 | `createTaskComment` | `task`, `content` | — | Project-scoped. `author` auto-filled from agent ID. |
 | `deleteTaskComment` | `id` | — | Project-scoped |
+| `createArtifact` | `file_path`, `title` | `project`, `description`, `tags` | Any agent. Project scope checked if `project` is set. |
+| `updateArtifact` | `id` | `file_path`, `title`, `project`, `description`, `tags` | Any agent. Project scope checked. |
+| `deleteArtifact` | `id` | — | Any agent. Project scope checked. DB row only (does not delete the file). |
 
 Valid `status` values: `"todo"`, `"in progress"`, `"review"`, `"done"`, `"abandoned"`
 Valid `priority` values: `"low"`, `"medium"`, `"high"`
@@ -127,14 +130,17 @@ Routes through `AgentRegistry` to find the target `AgentHost`, then calls `deliv
 
 ### `show_artifact`
 
-Display an HTML file in the UI's left panel. **Guide-only** — the Guide is the only agent that interacts with the user via the UI.
+Display an artifact file in the UI panel. **Guide-only** — the Guide is the only agent that interacts with the user via the UI. Supports tabbed display (multiple artifacts open at once).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `file_path` | string | Path relative to `~/.system2/` |
+| `file_path` | string | Absolute path to the artifact file. Supports `~/` prefix for home directory. |
 
-- **Live reload:** the server starts an `fs.watch` on the file; modifications trigger automatic UI refresh
-- **Only one artifact watched at a time** -- showing a new artifact closes the previous watcher
+- **DB metadata lookup:** queries the `artifact` table for title. If registered, the DB title is used as the tab label; otherwise, the filename is used.
+- **Unregistered files:** files not in the `artifact` table can still be shown — the filename is used as the tab label.
+- **Missing registered files:** if the file is registered but missing from disk, returns an error with the title and a hint to search for the filename.
+- **Live reload:** the server starts an `fs.watch` on the file; modifications trigger automatic UI refresh of the correct tab.
+- **Only one artifact watched at a time** -- showing a new artifact closes the previous watcher.
 
 ### `web_fetch`
 

@@ -14,16 +14,17 @@ src/
 ├── main.tsx               # React DOM entry
 ├── index.css              # Global styles
 ├── components/
-│   ├── Layout.tsx         # 2-panel layout (artifact + chat)
+│   ├── Layout.tsx         # 2-panel layout (artifact + chat) with catalog toggle
 │   ├── Chat.tsx           # Chat container (composes MessageList + MessageInput)
 │   ├── MessageList.tsx    # Message timeline with streaming
 │   ├── MessageInput.tsx   # Auto-growing textarea with queue indicator
-│   └── ArtifactViewer.tsx # Sandboxed iframe for HTML artifacts
+│   ├── ArtifactViewer.tsx # Tabbed artifact display with sandboxed iframes
+│   └── ArtifactCatalog.tsx # Browsable overlay of all registered artifacts
 ├── hooks/
 │   └── useWebSocket.ts    # WebSocket connection and message handling
 ├── stores/
 │   ├── chat.ts            # Chat state (Zustand)
-│   ├── artifact.ts        # Artifact URL state (Zustand)
+│   ├── artifact.ts        # Artifact tab state (Zustand)
 │   └── theme.ts           # Theme preference (Zustand)
 └── theme/
     └── colors.ts          # Color palette constants
@@ -34,7 +35,8 @@ src/
 ```
 App (ThemeProvider)
 └── Layout (resizable 2-panel)
-    ├── ArtifactViewer (left panel, sandboxed iframe)
+    ├── ArtifactViewer (left panel, tabbed iframes)
+    │   └── ArtifactCatalog (overlay panel, toggled from header)
     └── Chat (right panel, 33% default width)
         ├── MessageList (scrollable timeline)
         └── MessageInput (textarea + send/stop button)
@@ -42,7 +44,7 @@ App (ThemeProvider)
 
 ### Layout
 
-Two-panel design with a draggable divider. The artifact panel takes the left side, the chat panel the right (20-60% resizable, default 33%). Header contains logo and light/dark theme toggle.
+Two-panel design with a draggable divider. The artifact panel takes the left side, the chat panel the right (20-60% resizable, default 33%). Header contains logo, artifact catalog toggle, and light/dark theme toggle.
 
 ### MessageList
 
@@ -63,7 +65,9 @@ Auto-growing textarea (1-10 lines, then scrolls). Shows context window usage per
 
 ### ArtifactViewer
 
-Displays HTML artifacts in a sandboxed iframe (`sandbox="allow-scripts allow-same-origin"`). Supports a `postMessage` bridge for dashboards that need database access:
+Tabbed artifact display. Each tab renders an artifact in a sandboxed iframe (`sandbox="allow-scripts allow-same-origin"`). Tab bar at top shows title and close button for each open artifact; clicking a tab activates it. Empty state shown when no tabs are open.
+
+Supports a `postMessage` bridge for dashboards that need database access:
 
 ```
 Iframe -> postMessage({ type: 'system2:query', requestId, sql })
@@ -71,6 +75,10 @@ Iframe -> postMessage({ type: 'system2:query', requestId, sql })
     -> Server executes SELECT -> returns { rows, count }
   -> ArtifactViewer posts back -> postMessage({ type: 'system2:query_result', requestId, data })
 ```
+
+### ArtifactCatalog
+
+Overlay panel (320px wide, absolute-positioned over the artifact area) showing all registered artifacts from the database. Fetches `GET /api/artifacts` on mount. Groups artifacts by project (null project shown as "General"). Clicking an item opens it as a new tab in ArtifactViewer. Toggled via button in the header bar.
 
 ## State Management
 
@@ -90,7 +98,20 @@ Three [Zustand](https://github.com/pmndrs/zustand) stores with no Redux or Conte
 
 ### `useArtifactStore`
 
-Tracks `currentUrl` with localStorage persistence (`system2:artifact-url`).
+Tab-based artifact state with localStorage persistence (`system2:artifact-tabs`).
+
+| State | Type | Description |
+|-------|------|-------------|
+| `tabs` | `ArtifactTab[]` | Open artifact tabs (id, url, filePath, title) |
+| `activeTabId` | `string \| null` | Currently active tab |
+| `catalogOpen` | `boolean` | Whether the catalog overlay is visible |
+
+Key behaviors:
+
+- `openArtifact`: if a tab with the same `filePath` exists, activate it and update its URL; otherwise create a new tab
+- `closeTab`: remove tab, activate next/previous/null
+- `reloadTab`: find tab by `filePath`, update URL (for fs.watch cache-bust reloads)
+- Tab dedup uses `filePath` with cache-bust query params stripped
 
 ### `useThemeStore`
 
@@ -116,7 +137,6 @@ In development, Vite runs on port 3001 and proxies to the backend on port 3000:
 | Proxy | Target |
 |-------|--------|
 | `/ws` | `ws://localhost:3000` |
-| `/artifacts` | `http://localhost:3000` |
 | `/api` | `http://localhost:3000` |
 
 UI changes hot-reload instantly. See [Contributing](../../CONTRIBUTING.md) for the full workflow.

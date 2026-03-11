@@ -2,6 +2,10 @@
 
 System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/badlogic/pi-mono), a SDK for building LLM-powered coding agents. The SDK provides the core agent loop, tool execution, session management (JSONL persistence), and auto-compaction. System2 adds multi-agent orchestration, LLM failover, a knowledge/memory system, custom tools, a scheduler, and a web UI.
 
+## Platform Support
+
+System2 runs on macOS, Linux, and Windows. Path handling uses `~/` expansion via Node.js `os.homedir()` (cross-platform). Shell commands use PowerShell on Windows and the default shell (`/bin/bash`) on macOS/Linux.
+
 ## Monorepo Structure
 
 ```
@@ -27,23 +31,23 @@ See individual package docs: [shared](packages/shared.md) | [server](packages/se
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  CLI (system2 start)                                     │
-│  - Loads config.toml                                     │
-│  - Spawns server process (daemon or foreground)          │
+│  CLI (system2 start)                                    │
+│  - Loads config.toml                                    │
+│  - Spawns server process (daemon or foreground)         │
 └──────────────────────────┬──────────────────────────────┘
                            │
 ┌──────────────────────────▼──────────────────────────────┐
-│  Server (Express + WebSocket on port 3000)               │
-│                                                          │
+│  Server (Express + WebSocket on port 3000)              │
+│                                                         │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
 │  │ Guide Agent  │  │Narrator Agent│  │   Scheduler   │  │
 │  │ (singleton)  │  │ (singleton)  │  │   (croner)    │  │
 │  └──────┬───────┘  └──────┬───────┘  └───────┬───────┘  │
-│         │                 │                   │          │
-│  ┌──────▼─────────────────▼───────────────────▼───────┐  │
-│  │            AgentRegistry (message routing)          │  │
-│  └────────────────────────────────────────────────────┘  │
-│                                                          │
+│         │                 │                  │          │
+│  ┌──────▼─────────────────▼──────────────────▼───────┐  │
+│  │           AgentRegistry (message routing)         │  │
+│  └───────────────────────────────────────────────────┘  │
+│                                                         │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
 │  │  SQLite DB  │  │  Knowledge  │  │  Chat History   │  │
 │  │  (app.db)   │  │  (markdown) │  │  (JSON ring)    │  │
@@ -51,9 +55,9 @@ See individual package docs: [shared](packages/shared.md) | [server](packages/se
 └──────────────────────────┬──────────────────────────────┘
                            │ WebSocket
 ┌──────────────────────────▼──────────────────────────────┐
-│  UI (React on port 3001 in dev, served by server in prod)│
-│  - Chat interface with streaming                         │
-│  - Artifact display (sandboxed iframe)                   │
+│  UI (React on port 3001 dev, served by server in prod)  │
+│  - Chat interface with streaming                        │
+│  - Artifact display (sandboxed iframe)                  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -65,7 +69,7 @@ All runtime state lives in `~/.system2/`. See [Configuration](configuration.md) 
 
 **Server as source of truth.** Chat history, database state, and agent sessions are all managed server-side. The UI is stateless -- it receives history on WebSocket connect and streams updates.
 
-**Dynamic system prompts.** Knowledge files and daily summaries are re-read on every LLM API call (not cached). This means any agent or the user can edit knowledge files and changes take effect immediately. Anthropic's prompt caching makes the static prefix cheap to resend. See [Agents](agents.md).
+**Dynamic system prompts.** Knowledge files and daily summaries are re-read on every LLM API call (not cached). This means any agent or the user can edit knowledge files and changes take effect immediately. Prompt caching (such as Anthropic and OpenAI) makes the static prefix cheap to resend. See [Agents](agents.md).
 
 **In-process scheduler.** Scheduled jobs run inside the server process using [Croner](https://github.com/Hexagon/croner). Since croner doesn't catch up missed jobs, the server checks staleness on startup and queues catch-up work. See [Scheduler](scheduler.md).
 
