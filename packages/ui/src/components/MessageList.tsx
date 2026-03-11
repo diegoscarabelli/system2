@@ -457,19 +457,37 @@ export function MessageList() {
   const { messages, currentAssistantMessage, currentTurnEvents, isWaitingForResponse } =
     useChatStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
 
   const hasCurrentActivity =
     currentAssistantMessage || currentTurnEvents.length > 0 || isWaitingForResponse;
+
+  // Track whether user is near the bottom of the scroll container
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const threshold = 80; // px from bottom to consider "at bottom"
+    const handleScroll = () => {
+      isNearBottomRef.current =
+        container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+    };
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const scrollTrigger =
     messages.length + currentTurnEvents.length + (currentAssistantMessage ? 1 : 0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: scrollTrigger drives auto-scroll on new content
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (isNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [scrollTrigger]);
 
   return (
     <Box
+      ref={scrollContainerRef}
       sx={{
         flex: 1,
         overflowY: 'auto',
