@@ -4,9 +4,10 @@
  * HTTP + WebSocket server that hosts the Guide and Narrator agents and serves the UI.
  */
 
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type {
@@ -119,16 +120,45 @@ export class Server {
     this.app = express();
     this.app.use(express.json());
 
-    // Serve artifact files from ~/.system2/
-    this.app.use(
-      '/artifacts',
-      express.static(SYSTEM2_DIR, {
-        dotfiles: 'deny',
-        setHeaders: (res) => {
-          res.setHeader('Cache-Control', 'no-cache');
-        },
-      })
-    );
+    // Serve artifact files from anywhere on the filesystem
+    this.app.get('/api/artifact', (req, res) => {
+      const filePath = req.query.path as string;
+      if (!filePath || typeof filePath !== 'string') {
+        res.status(400).json({ error: 'Missing path parameter' });
+        return;
+      }
+
+      let resolved = filePath;
+      if (resolved.startsWith('~/')) {
+        resolved = join(homedir(), resolved.slice(2));
+      }
+      resolved = normalize(resolved);
+
+      if (!isAbsolute(resolved)) {
+        res.status(400).json({ error: 'Path must be absolute' });
+        return;
+      }
+
+      if (!existsSync(resolved)) {
+        res.status(404).json({ error: 'File not found' });
+        return;
+      }
+
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(resolved);
+    });
+
+    // List all registered artifacts for the catalog UI
+    this.app.get('/api/artifacts', (_req, res) => {
+      try {
+        const artifacts = this.db.query(
+          'SELECT a.*, p.name AS project_name FROM artifact a LEFT JOIN project p ON a.project = p.id ORDER BY a.created_at DESC'
+        );
+        res.json({ artifacts });
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+      }
+    });
 
     // Query API for interactive artifact dashboards (postMessage bridge)
     this.app.post('/api/query', (req, res) => {
