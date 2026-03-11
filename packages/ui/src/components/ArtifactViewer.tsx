@@ -19,6 +19,7 @@ export function ArtifactViewer() {
   const closeTab = useArtifactStore((s) => s.closeTab);
   const setActiveTab = useArtifactStore((s) => s.setActiveTab);
   const colorMode = useThemeStore((s) => s.colorMode);
+  const particlesEnabled = useThemeStore((s) => s.particlesEnabled);
   const { accent } = useAccentColors();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const isLight = colorMode === 'light';
@@ -109,7 +110,7 @@ export function ArtifactViewer() {
         overflow: 'hidden',
       }}
     >
-      <ParticlesBackground />
+      {particlesEnabled && <ParticlesBackground />}
 
       {tabs.length === 0 ? (
         <Box sx={{ height: '100%', position: 'relative', zIndex: 1 }} />

@@ -12,6 +12,8 @@ interface ThemeState {
   colorMode: ColorMode;
   toggleColorMode: () => void;
   setColorMode: (mode: ColorMode) => void;
+  particlesEnabled: boolean;
+  toggleParticles: () => void;
 }
 
 // Update body class for scrollbar theming
@@ -41,6 +43,12 @@ function getInitialColorMode(): ColorMode {
   return 'dark';
 }
 
+function getInitialParticlesEnabled(): boolean {
+  if (typeof window === 'undefined') return true;
+  const stored = localStorage.getItem('system2-particles');
+  return stored !== 'false';
+}
+
 export const useThemeStore = create<ThemeState>((set, get) => ({
   colorMode: getInitialColorMode(),
 
@@ -55,5 +63,13 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     localStorage.setItem('system2-theme', mode);
     updateBodyClass(mode);
     set({ colorMode: mode });
+  },
+
+  particlesEnabled: getInitialParticlesEnabled(),
+
+  toggleParticles: () => {
+    const next = !get().particlesEnabled;
+    localStorage.setItem('system2-particles', String(next));
+    set({ particlesEnabled: next });
   },
 }));

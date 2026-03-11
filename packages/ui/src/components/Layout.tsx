@@ -4,7 +4,7 @@
  * VSCode-style layout: activity bar, optional drawer, artifact viewer, and chat.
  */
 
-import { MoonIcon, StackIcon, SunIcon } from '@primer/octicons-react';
+import { MoonIcon, StackIcon, SunIcon, ZapIcon } from '@primer/octicons-react';
 import { Box, IconButton } from '@primer/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useArtifactStore } from '../stores/artifact';
@@ -23,7 +23,7 @@ export function Layout() {
   const isDragging = useRef(false);
   const isCatalogDragging = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const { colorMode, toggleColorMode } = useThemeStore();
+  const { colorMode, toggleColorMode, particlesEnabled, toggleParticles } = useThemeStore();
   const { accent } = useAccentColors();
   const catalogOpen = useArtifactStore((s) => s.catalogOpen);
   const toggleCatalog = useArtifactStore((s) => s.toggleCatalog);
@@ -128,6 +128,14 @@ export function Layout() {
           />
         </Box>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+          <IconButton
+            aria-label={particlesEnabled ? 'Disable particles' : 'Enable particles'}
+            icon={ZapIcon}
+            variant="invisible"
+            size="medium"
+            onClick={toggleParticles}
+            sx={{ color: particlesEnabled ? accent : 'fg.muted' }}
+          />
           <IconButton
             aria-label={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             icon={colorMode === 'dark' ? SunIcon : MoonIcon}
