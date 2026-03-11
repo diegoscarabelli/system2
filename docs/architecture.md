@@ -69,8 +69,20 @@ All runtime state lives in `~/.system2/`. See [Configuration](configuration.md) 
 
 **Server as source of truth.** Chat history, database state, and agent sessions are all managed server-side. The UI is stateless -- it receives history on WebSocket connect and streams updates.
 
-**Dynamic system prompts.** Knowledge files and daily summaries are re-read on every LLM API call (not cached). This means any agent or the user can edit knowledge files and changes take effect immediately. Prompt caching (such as Anthropic and OpenAI) makes the static prefix cheap to resend. See [Agents](agents.md).
+**Multi-provider failover.** API errors trigger automatic retry with exponential backoff, then failover to the next key or provider. See [Configuration](configuration.md#automatic-failover).
 
 **In-process scheduler.** Scheduled jobs run inside the server process using [Croner](https://github.com/Hexagon/croner). Since croner doesn't catch up missed jobs, the server checks staleness on startup and queues catch-up work. See [Scheduler](scheduler.md).
 
-**Multi-provider failover.** API errors trigger automatic retry with exponential backoff, then failover to the next key or provider. See [Configuration](configuration.md#automatic-failover).
+**Role-based agent architecture.** Four roles (Guide, Conductor, Narrator, Reviewer) with distinct lifecycles -- Guide and Narrator are persistent singletons; Conductor and Reviewer are ephemeral and project-scoped. See [Agents](agents.md).
+
+**Push-based work management.** Conductors break work into tasks in the database, assign them to agents, and coordinate via messages. Agents check for assigned work on startup and keep task status current. See [Agents](agents.md#work-management).
+
+**Two-channel inter-agent communication.** Direct messages (`message_agent`) for real-time coordination with steer/followUp delivery; task comments for permanent audit trail. See [Agents](agents.md#message-delivery).
+
+**Custom tools with permission model.** Tools have role-based and project-scoped access control -- Guide-only (show_artifact), spawner-gated (spawn/terminate_agent), and config-gated (web_search). See [Tools](tools.md).
+
+**Git-tracked knowledge.** Knowledge files and project logs live in `~/.system2/` which is a git repository. The `edit` and `write` tools accept a `commit_message` parameter for auto-committing changes. See [Knowledge System](knowledge-system.md).
+
+**Session persistence and rotation.** Agent sessions are JSONL files with tree-structured branching and auto-compaction. Long-running singletons rotate at a configurable size threshold to prevent unbounded growth. See [Agents](agents.md#session-management).
+
+**Dynamic system prompts.** Knowledge files and daily summaries are re-read on every LLM API call (not cached). This means any agent or the user can edit knowledge files and changes take effect immediately. Prompt caching (such as Anthropic and OpenAI) makes the static prefix cheap to resend. See [Agents](agents.md).

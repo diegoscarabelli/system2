@@ -1,6 +1,6 @@
 # @system2/server
 
-HTTP + WebSocket server that hosts the Guide and Narrator agents, serves the UI, and runs the scheduler.
+HTTP + WebSocket server that hosts all agents (Guide and Narrator at startup, others spawned dynamically), serves the UI, and runs the scheduler.
 
 **Source:** `packages/server/src/`
 **Build:** [tsup](https://tsup.egoist.dev/) -> `dist/index.js`
@@ -20,10 +20,10 @@ src/
 │   ├── session-rotation.ts # JSONL file rotation at 10MB
 │   ├── types.ts           # Custom message type declarations
 │   ├── agents.md          # Shared reference (prepended to all system prompts)
-│   ├── library/           # Agent definitions (guide.md, conductor.md, narrator.md, reviewer.md)
-│   └── tools/             # 8 agent tools (bash, read, write, query, message, artifact, web-fetch, web-search)
+│   ├── library/           # Agent identity and system instructions (guide.md, conductor.md, narrator.md, reviewer.md)
+│   └── tools/             # Agent tools (see docs/tools.md)
 ├── db/
-│   ├── schema.sql         # SQLite schema (5 tables)
+│   ├── schema.sql         # SQLite schema
 │   └── client.ts          # DatabaseClient class
 ├── chat/
 │   └── history.ts         # MessageHistory (JSON ring buffer)
@@ -67,7 +67,7 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/artifacts/*` | GET | Static files from `~/.system2/` (no-cache, dotfiles denied) |
+| `/api/artifact` | GET | Serve artifact file by absolute path (`?path=`) with no-cache headers |
 | `/api/query` | POST | SQL query endpoint for artifact dashboards (SELECT only) |
 | `/*` | GET | UI static files (if `uiDistPath` configured) |
 
@@ -80,8 +80,8 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 Each subsystem has its own documentation page:
 
 - **Agents:** [AgentHost, AgentRegistry, AuthResolver](../agents.md)
-- **Tools:** [8 agent tools](../tools.md)
-- **Database:** [SQLite schema and client](../database.md)
+- **Tools:** [Agent tools](../tools.md)
+- **Database:** [SQLite database and client](../database.md)
 - **WebSocket:** [Protocol and handler](../websocket-protocol.md)
 - **Knowledge:** [Files, memory, git tracking](../knowledge-system.md)
 - **Scheduler:** [Croner jobs and pipelines](../scheduler.md)

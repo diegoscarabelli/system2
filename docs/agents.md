@@ -6,7 +6,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 - `packages/server/src/agents/host.ts` -- AgentHost class
 - `packages/server/src/agents/registry.ts` -- AgentRegistry
 - `packages/server/src/agents/auth-resolver.ts` -- AuthResolver
-- `packages/server/src/agents/library/` -- agent definitions (Markdown + YAML frontmatter)
+- `packages/server/src/agents/library/` -- agent identity and system instructions (Markdown + YAML frontmatter)
 - `packages/server/src/agents/agents.md` -- shared reference prepended to all system prompts
 
 ## Agent Roles
@@ -22,9 +22,9 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 **Conductor and Reviewer** are project-scoped — spawned by Guide for every project, archived when done. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project.
 
-## Agent Definitions
+## Agent Identity and System Instructions
 
-Each agent is defined as a Markdown file with YAML frontmatter in `packages/server/src/agents/library/`:
+Each agent's identity and system instructions are defined as a Markdown file with YAML frontmatter in `packages/server/src/agents/library/`:
 
 ```yaml
 ---
@@ -69,7 +69,7 @@ Anthropic's prompt caching optimizes the static prefix -- only the refreshed kno
 1. Look up agent record from database
 2. Create session directory (`~/.system2/sessions/{role}_{id}/`)
 3. Rotate session file if it exceeds 10MB
-4. Load shared reference (`agents.md`) and agent definition (`library/{role}.md`)
+4. Load shared reference (`agents.md`) and agent identity/instructions (`library/{role}.md`)
 5. Parse YAML frontmatter for model selection
 6. Create `DefaultResourceLoader` with `systemPromptOverride` callback
 7. Create session via `createAgentSession()` with JSONL persistence, custom tools, and `thinkingLevel: 'high'`
