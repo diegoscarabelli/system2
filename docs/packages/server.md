@@ -68,6 +68,7 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/api/artifact` | GET | Serve artifact file by absolute path (`?path=`) with no-cache headers |
+| `/api/artifacts` | GET | List all registered artifacts with project names (for catalog UI) |
 | `/api/query` | POST | SQL query endpoint for artifact dashboards (SELECT only) |
 | `/*` | GET | UI static files (if `uiDistPath` configured) |
 

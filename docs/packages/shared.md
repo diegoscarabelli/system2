@@ -44,6 +44,7 @@ TypeScript interfaces matching the SQLite schema. See [Database](../database.md)
 | `TaskLink` | Directed relationship (`blocked_by`, `relates_to`, `duplicates`) |
 | `TaskComment` | Agent-authored comment on a task |
 | `Agent` | Agent instance with role, project assignment, lifecycle status |
+| `Artifact` | Registered artifact with file path, title, project, tags |
 
 ### WebSocket Protocol Types (`types/messages.ts`)
 
