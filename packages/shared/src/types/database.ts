@@ -58,3 +58,14 @@ export interface Agent {
   created_at: string;
   updated_at: string;
 }
+
+export interface Artifact {
+  id: number;
+  project: number | null; // NULL for project-free artifacts
+  file_path: string; // Absolute path to the file on disk
+  title: string;
+  description: string | null;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}

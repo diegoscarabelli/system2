@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Agent, Project, Task, TaskComment, TaskLink } from '@system2/shared';
+import type { Agent, Artifact, Project, Task, TaskComment, TaskLink } from '@system2/shared';
 import Database from 'better-sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -384,6 +384,84 @@ export class DatabaseClient {
 
   deleteTaskComment(id: number): boolean {
     const stmt = this.db.prepare('DELETE FROM task_comment WHERE id = ?');
+    return stmt.run(id).changes > 0;
+  }
+
+  // Artifact operations
+  createArtifact(artifact: Omit<Artifact, 'id' | 'created_at' | 'updated_at'>): Artifact {
+    const stmt = this.db.prepare(`
+      INSERT INTO artifact (project, file_path, title, description, tags)
+      VALUES (?, ?, ?, ?, ?)
+      RETURNING *
+    `);
+
+    return stmt.get(
+      artifact.project,
+      artifact.file_path,
+      artifact.title,
+      artifact.description,
+      JSON.stringify(artifact.tags)
+    ) as Artifact;
+  }
+
+  getArtifact(id: number): Artifact | null {
+    const stmt = this.db.prepare('SELECT * FROM artifact WHERE id = ?');
+    return (stmt.get(id) as Artifact) || null;
+  }
+
+  getArtifactByPath(filePath: string): Artifact | null {
+    const stmt = this.db.prepare('SELECT * FROM artifact WHERE file_path = ?');
+    return (stmt.get(filePath) as Artifact) || null;
+  }
+
+  updateArtifact(
+    id: number,
+    updates: Partial<Pick<Artifact, 'project' | 'file_path' | 'title' | 'description' | 'tags'>>
+  ): Artifact | null {
+    const fields: string[] = [];
+    const values: (string | number | null)[] = [];
+
+    if (updates.project !== undefined) {
+      fields.push('project = ?');
+      values.push(updates.project);
+    }
+    if (updates.file_path !== undefined) {
+      fields.push('file_path = ?');
+      values.push(updates.file_path);
+    }
+    if (updates.title !== undefined) {
+      fields.push('title = ?');
+      values.push(updates.title);
+    }
+    if (updates.description !== undefined) {
+      fields.push('description = ?');
+      values.push(updates.description);
+    }
+    if (updates.tags !== undefined) {
+      fields.push('tags = ?');
+      values.push(JSON.stringify(updates.tags));
+    }
+
+    if (fields.length === 0) {
+      const stmt = this.db.prepare('SELECT * FROM artifact WHERE id = ?');
+      return (stmt.get(id) as Artifact) || null;
+    }
+
+    fields.push('updated_at = datetime("now")');
+    values.push(id);
+
+    const stmt = this.db.prepare(`
+      UPDATE artifact
+      SET ${fields.join(', ')}
+      WHERE id = ?
+      RETURNING *
+    `);
+
+    return (stmt.get(...values) as Artifact) || null;
+  }
+
+  deleteArtifact(id: number): boolean {
+    const stmt = this.db.prepare('DELETE FROM artifact WHERE id = ?');
     return stmt.run(id).changes > 0;
   }
 

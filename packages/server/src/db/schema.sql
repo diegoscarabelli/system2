@@ -78,3 +78,18 @@ CREATE TABLE IF NOT EXISTS task_comment (
 
 CREATE INDEX IF NOT EXISTS idx_task_comment_task ON task_comment(task);
 CREATE INDEX IF NOT EXISTS idx_task_comment_author ON task_comment(author);
+
+-- A file artifact created by agents, displayed in the UI
+CREATE TABLE IF NOT EXISTS artifact (
+  id INTEGER PRIMARY KEY,                      -- Auto-incrementing unique identifier
+  project INTEGER REFERENCES project(id),      -- Associated project, NULL for project-free artifacts
+  file_path TEXT NOT NULL UNIQUE,              -- Absolute path to the file on disk
+  title TEXT NOT NULL,                         -- Human-readable title
+  description TEXT,                            -- Brief summary of content/purpose
+  tags TEXT NOT NULL DEFAULT '[]',             -- JSON array of string tags for categorization
+  created_at TEXT DEFAULT (datetime('now')),   -- Row creation timestamp
+  updated_at TEXT DEFAULT (datetime('now'))    -- Last modification timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_project ON artifact(project);
+CREATE INDEX IF NOT EXISTS idx_artifact_file_path ON artifact(file_path);
