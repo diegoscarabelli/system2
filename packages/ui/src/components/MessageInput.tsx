@@ -11,6 +11,7 @@ import { Box } from '@primer/react';
 import { useRef, useState } from 'react';
 import { useChatStore } from '../stores/chat';
 import { colors } from '../theme/colors';
+import { useAccentColors } from '../theme/useAccentColors';
 
 const LINE_HEIGHT = 20; // px per line
 const MIN_LINES = 1;
@@ -27,6 +28,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
   const [input, setInput] = useState('');
   const { isStreaming, isWaitingForResponse, isConnected, messageQueue, contextPercent } =
     useChatStore();
+  const { accent, accentHover } = useAccentColors();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -66,8 +68,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
   };
 
-  const contextColor =
-    contextPercent !== null && contextPercent > 80 ? colors.critical : colors.amber;
+  const contextColor = contextPercent !== null && contextPercent > 80 ? colors.critical : accent;
 
   return (
     <Box
@@ -127,14 +128,14 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                backgroundColor: colors.amber,
+                backgroundColor: accent,
                 color: 'white',
                 border: 'none',
                 borderRadius: '8px',
                 width: '32px',
                 height: '32px',
                 cursor: 'pointer',
-                '&:hover:not([disabled])': { backgroundColor: colors.amberHover },
+                '&:hover:not([disabled])': { backgroundColor: accentHover },
                 '&[disabled]': { opacity: 0.5, cursor: 'not-allowed' },
               }}
             >

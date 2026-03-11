@@ -1,37 +1,53 @@
 /**
  * Color Palette
  *
- * Centralized color definitions for the System2 UI.
+ * Raw color definitions and theme-aware palettes for the System2 UI.
  */
 
+/** Raw color values — use `palettes` for theme-aware access */
 export const colors = {
-  /** Primary accent — teal */
   teal: '#00aaba',
   tealHover: '#009aa8',
-
-  /** Secondary accent — amber/orange */
   amber: '#ffb444',
   amberHover: '#e6a23c',
-
-  /** Highlight — magenta */
   magenta: '#fd2ef5',
-
-  /** Muted — gray */
   gray: '#8b949e',
-
-  /** Deep teal */
   deepTeal: '#066a7c',
-
-  /** Coral / red-orange */
   coral: '#ec4a2c',
-
-  /** Purple */
+  coralHover: '#d4432a',
   purple: '#b61899',
   purpleLight: '#c756ad',
-
-  /** Dark neutral */
   neutral: '#424242',
-
-  /** Status — critical red */
   critical: '#f85149',
 } as const;
+
+/**
+ * Semantic palette — colors that change between light and dark themes.
+ *
+ * Dark  → amber accent, magenta highlight
+ * Light → coral accent, purple highlight
+ */
+export interface ThemePalette {
+  /** Primary accent (buttons, labels, dots, active indicators) */
+  accent: string;
+  accentHover: string;
+  /** Subtle accent for tag backgrounds etc. (hex with alpha) */
+  accentSubtle: string;
+  /** Secondary highlight (tool calls, code actions) */
+  highlight: string;
+}
+
+export const palettes = {
+  dark: {
+    accent: colors.amber,
+    accentHover: colors.amberHover,
+    accentSubtle: `${colors.amber}22`,
+    highlight: colors.magenta,
+  },
+  light: {
+    accent: colors.coral,
+    accentHover: colors.coralHover,
+    accentSubtle: `${colors.coral}22`,
+    highlight: colors.purple,
+  },
+} as const satisfies Record<string, ThemePalette>;

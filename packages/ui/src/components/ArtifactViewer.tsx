@@ -10,6 +10,7 @@ import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef } from 'react';
 import { useArtifactStore } from '../stores/artifact';
 import { useThemeStore } from '../stores/theme';
+import { useAccentColors } from '../theme/useAccentColors';
 
 export function ArtifactViewer() {
   const tabs = useArtifactStore((s) => s.tabs);
@@ -17,16 +18,20 @@ export function ArtifactViewer() {
   const closeTab = useArtifactStore((s) => s.closeTab);
   const setActiveTab = useArtifactStore((s) => s.setActiveTab);
   const colorMode = useThemeStore((s) => s.colorMode);
+  const { accent } = useAccentColors();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const isLight = colorMode === 'light';
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
   // Resize iframe to its content height so the parent container handles scrolling.
+  // Uses ResizeObserver on the iframe body to track dynamic content changes
+  // (e.g. database viewer rendering query results after initial load).
   // biome-ignore lint/correctness/useExhaustiveDependencies: activeTab?.url triggers resize when artifact changes
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
+    let observer: ResizeObserver | null = null;
 
     function resizeToContent() {
       try {
@@ -39,10 +44,26 @@ export function ArtifactViewer() {
       }
     }
 
-    iframe.addEventListener('load', resizeToContent);
-    resizeToContent();
+    function setup() {
+      try {
+        if (!iframe) return;
+        const doc = iframe.contentDocument;
+        if (!doc?.body) return;
+        resizeToContent();
+        observer = new ResizeObserver(resizeToContent);
+        observer.observe(doc.body);
+      } catch {
+        // Cross-origin — ignore
+      }
+    }
 
-    return () => iframe.removeEventListener('load', resizeToContent);
+    iframe.addEventListener('load', setup);
+    setup();
+
+    return () => {
+      iframe.removeEventListener('load', setup);
+      observer?.disconnect();
+    };
   }, [activeTab?.url]);
 
   // postMessage bridge: listen for query requests from iframe
@@ -120,7 +141,7 @@ export function ArtifactViewer() {
               py: 1,
               cursor: 'pointer',
               borderBottom: tab.id === activeTabId ? '2px solid' : '2px solid transparent',
-              borderColor: tab.id === activeTabId ? 'accent.emphasis' : 'transparent',
+              borderColor: tab.id === activeTabId ? accent : 'transparent',
               backgroundColor: tab.id === activeTabId ? 'canvas.default' : 'transparent',
               color: tab.id === activeTabId ? 'fg.default' : 'fg.muted',
               fontSize: 0,
@@ -162,7 +183,7 @@ export function ArtifactViewer() {
               border: 'none',
               overflow: 'hidden',
               backgroundColor: isLight ? 'white' : 'transparent',
-              filter: isLight ? 'invert(1) hue-rotate(180deg)' : 'none',
+              filter: isLight ? 'none' : 'invert(1) hue-rotate(180deg)',
             }}
           />
         </Box>

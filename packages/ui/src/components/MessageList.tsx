@@ -16,9 +16,11 @@ import {
   useChatStore,
 } from '../stores/chat';
 import { colors } from '../theme/colors';
+import { useAccentColors } from '../theme/useAccentColors';
 
 // Brain loader - rotating brain with sequential dots
 function BrainLoader() {
+  const { accent } = useAccentColors();
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
       <Text
@@ -38,7 +40,7 @@ function BrainLoader() {
         <Text
           sx={{
             fontSize: 1,
-            color: colors.amber,
+            color: accent,
             animation: 'dot1 1.5s ease-in-out infinite',
             '@keyframes dot1': {
               '0%, 20%': { opacity: 0 },
@@ -51,7 +53,7 @@ function BrainLoader() {
         <Text
           sx={{
             fontSize: 1,
-            color: colors.amber,
+            color: accent,
             animation: 'dot2 1.5s ease-in-out infinite',
             '@keyframes dot2': {
               '0%, 40%': { opacity: 0 },
@@ -64,7 +66,7 @@ function BrainLoader() {
         <Text
           sx={{
             fontSize: 1,
-            color: colors.amber,
+            color: accent,
             animation: 'dot3 1.5s ease-in-out infinite',
             '@keyframes dot3': {
               '0%, 60%': { opacity: 0 },
@@ -237,6 +239,7 @@ function toolSummary(_name: string, input?: string): string {
 function ToolCallItem({ tc }: { tc: ToolCall }) {
   const isRunning = tc.status === 'running';
   const [collapsed, setCollapsed] = useState(false);
+  const { highlight } = useAccentColors();
   const hasContent = tc.input || tc.result;
 
   return (
@@ -255,7 +258,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
           sx={{
             fontSize: 0,
             fontWeight: 'semibold',
-            color: colors.magenta,
+            color: highlight,
           }}
         >
           {isRunning ? '⚙️ ' : '✓ '}
@@ -407,6 +410,7 @@ function ThinkingBlock({ thinking }: { thinking: ThinkingBlockType }) {
 
 // Render a single turn event (thinking or tool call)
 function TurnEventItem({ event, isLast }: { event: TurnEvent; isLast?: boolean }) {
+  const { highlight } = useAccentColors();
   if (event.type === 'thinking') {
     return <ThinkingBlock thinking={event.data} />;
   }
@@ -414,7 +418,7 @@ function TurnEventItem({ event, isLast }: { event: TurnEvent; isLast?: boolean }
   // Tool call
   const tc = event.data;
   return (
-    <TimelineItem dotColor={colors.magenta} pulse={tc.status === 'running'} isLast={isLast}>
+    <TimelineItem dotColor={highlight} pulse={tc.status === 'running'} isLast={isLast}>
       <ToolCallItem tc={tc} />
     </TimelineItem>
   );
@@ -422,6 +426,7 @@ function TurnEventItem({ event, isLast }: { event: TurnEvent; isLast?: boolean }
 
 // Render an assistant message with its turn events in chronological order
 function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: boolean }) {
+  const { accent } = useAccentColors();
   const hasTurnEvents = message.turnEvents && message.turnEvents.length > 0;
 
   return (
@@ -436,12 +441,12 @@ function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: 
         ))}
 
       {/* Response */}
-      <TimelineItem dotColor={colors.amber} isLast={isLast}>
+      <TimelineItem dotColor={accent} isLast={isLast}>
         <Text
           sx={{
             fontWeight: 'semibold',
             fontSize: 0,
-            color: colors.amber,
+            color: accent,
             marginBottom: 1,
           }}
         >
@@ -456,6 +461,7 @@ function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: 
 export function MessageList() {
   const { messages, currentAssistantMessage, currentTurnEvents, isWaitingForResponse } =
     useChatStore();
+  const { accent } = useAccentColors();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -476,8 +482,14 @@ export function MessageList() {
     return () => container.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const completedToolCalls = currentTurnEvents.filter(
+    (e) => e.type === 'tool_call' && e.data.status === 'completed'
+  ).length;
   const scrollTrigger =
-    messages.length + currentTurnEvents.length + (currentAssistantMessage ? 1 : 0);
+    messages.length +
+    currentTurnEvents.length +
+    completedToolCalls +
+    (currentAssistantMessage ? 1 : 0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: scrollTrigger drives auto-scroll on new content
   useEffect(() => {
     if (isNearBottomRef.current) {
@@ -546,7 +558,7 @@ export function MessageList() {
 
       {/* Waiting for response indicator */}
       {isWaitingForResponse && currentTurnEvents.length === 0 && !currentAssistantMessage && (
-        <TimelineItem dotColor={colors.amber} pulse isLast>
+        <TimelineItem dotColor={accent} pulse isLast>
           <BrainLoader />
         </TimelineItem>
       )}
@@ -562,12 +574,12 @@ export function MessageList() {
 
       {/* Current streaming: response */}
       {currentAssistantMessage && (
-        <TimelineItem dotColor={colors.amber} pulse isLast>
+        <TimelineItem dotColor={accent} pulse isLast>
           <Text
             sx={{
               fontWeight: 'semibold',
               fontSize: 0,
-              color: colors.amber,
+              color: accent,
               marginBottom: 1,
             }}
           >
