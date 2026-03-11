@@ -159,7 +159,7 @@ export function Layout() {
         <Box
           onMouseDown={handleCatalogMouseDown}
           sx={{
-            width: '4px',
+            width: '2px',
             cursor: 'col-resize',
             backgroundColor: 'border.default',
             '&:hover': { backgroundColor: accent },
@@ -185,7 +185,7 @@ export function Layout() {
       <Box
         onMouseDown={handleMouseDown}
         sx={{
-          width: '4px',
+          width: '2px',
           cursor: 'col-resize',
           backgroundColor: 'border.default',
           '&:hover': { backgroundColor: accent },
@@ -200,8 +200,6 @@ export function Layout() {
           flexShrink: 0,
           display: 'flex',
           flexDirection: 'column',
-          borderLeft: '1px solid',
-          borderColor: 'border.default',
           backgroundColor: 'canvas.subtle',
         }}
       >
