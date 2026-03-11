@@ -51,10 +51,16 @@ interface AgentDefinition {
   name: string;
   description: string;
   version: string;
+  thinking_level?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   models: {
     anthropic: string;
     openai: string;
     google: string;
+    mistral: string;
+    openrouter: string;
+    xai: string;
+    groq: string;
+    cerebras: string;
   };
 }
 
@@ -76,6 +82,7 @@ export class AgentHost {
   private servicesConfig?: ServicesConfig;
   private toolsConfig?: ToolsConfig;
   private spawner?: AgentSpawner;
+  private llmConfig: LlmConfig;
   private authResolver: AuthResolver;
   private modelRegistry: ModelRegistry;
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
@@ -95,6 +102,9 @@ export class AgentHost {
     this.servicesConfig = config.servicesConfig;
     this.toolsConfig = config.toolsConfig;
     this.spawner = config.spawner;
+
+    // Store LLM config for openai-compatible provider registration
+    this.llmConfig = config.llmConfig;
 
     // Initialize AuthResolver with failover support
     this.authResolver = new AuthResolver(config.llmConfig);
@@ -157,7 +167,7 @@ export class AgentHost {
     // Static parts of the system prompt (loaded once)
     const staticPrompt = `${agentsRefContent}\n\n${agentPrompt}`;
 
-    const llmProvider = this.currentProvider;
+    let llmProvider = this.currentProvider;
 
     console.log('[AgentHost] Agent config loaded:', {
       name: agentConfig.name,
@@ -165,10 +175,61 @@ export class AgentHost {
       provider: llmProvider,
     });
 
-    // Get model ID from agent library config
-    const modelId = agentConfig.models[llmProvider as keyof typeof agentConfig.models];
-    if (!modelId) {
-      throw new Error(`No model configured for provider: ${llmProvider}`);
+    // Resolve model ID — openai-compatible gets it from config, others from agent YAML
+    let modelId: string | undefined;
+
+    if (llmProvider === 'openai-compatible') {
+      const providerConfig = this.llmConfig.providers['openai-compatible'];
+      if (!providerConfig?.model || !providerConfig?.base_url) {
+        throw new Error(
+          'openai-compatible provider requires both base_url and model in config.toml'
+        );
+      }
+      modelId = providerConfig.model;
+
+      // Register dynamically since it's not a SDK built-in
+      this.modelRegistry.registerProvider('openai-compatible', {
+        baseUrl: providerConfig.base_url,
+        api: 'openai-completions',
+        models: [
+          {
+            id: modelId,
+            name: modelId,
+            reasoning: providerConfig.compat_reasoning ?? true,
+            input: ['text'],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 128000,
+            maxTokens: 4096,
+          },
+        ],
+      });
+    } else {
+      // Try active provider first, then fallback providers in order
+      const providersToTry = [
+        llmProvider,
+        ...this.authResolver.providerOrder.filter((p) => p !== llmProvider),
+      ];
+
+      let resolvedProvider: LlmProvider | undefined;
+      for (const provider of providersToTry) {
+        const id = agentConfig.models[provider as keyof typeof agentConfig.models];
+        if (id) {
+          modelId = id;
+          resolvedProvider = provider;
+          if (provider !== llmProvider) {
+            console.log(
+              `[AgentHost] No model for ${llmProvider} in ${agentConfig.name}, falling back to ${provider}`
+            );
+          }
+          break;
+        }
+      }
+
+      if (!resolvedProvider || !modelId) {
+        throw new Error(`No model configured for any provider in agent: ${agentConfig.name}`);
+      }
+
+      llmProvider = resolvedProvider;
     }
 
     console.log('[AgentHost] Selected model:', modelId, 'for provider:', llmProvider);
@@ -205,7 +266,7 @@ export class AgentHost {
       resourceLoader,
       model,
       customTools: this.buildTools(),
-      thinkingLevel: 'high', // Enable extended thinking for transparency
+      thinkingLevel: agentConfig.thinking_level ?? 'high',
     });
 
     this.session = session;
