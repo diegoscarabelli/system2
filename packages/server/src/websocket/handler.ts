@@ -179,11 +179,16 @@ export class WebSocketHandler {
         // If show_artifact completed successfully, emit artifact message and watch for changes
         if (event.toolName === 'show_artifact' && !event.isError) {
           const details = event.result?.details as
-            | { url?: string; absolutePath?: string }
+            | { url?: string; absolutePath?: string; title?: string }
             | undefined;
           console.log('[WebSocket] show_artifact result:', JSON.stringify(event.result));
           if (details?.url && details?.absolutePath) {
-            this.send({ type: 'artifact', url: details.url });
+            this.send({
+              type: 'artifact',
+              url: details.url,
+              title: details.title,
+              filePath: details.absolutePath,
+            });
             this.watchArtifact(details.url, details.absolutePath);
           } else {
             console.warn('[WebSocket] show_artifact missing details:', details);
@@ -255,10 +260,11 @@ export class WebSocketHandler {
       this.artifactWatcher = watch(absolutePath, (eventType, filename) => {
         console.log('[WebSocket] fs.watch event:', eventType, filename);
         if (eventType === 'change') {
-          // Cache-bust so the iframe actually reloads
-          const bustUrl = `${this.artifactUrl}?t=${Date.now()}`;
+          // Cache-bust so the iframe actually reloads (use & since URL already has ?path=)
+          const separator = this.artifactUrl?.includes('?') ? '&' : '?';
+          const bustUrl = `${this.artifactUrl}${separator}t=${Date.now()}`;
           console.log('[WebSocket] Sending artifact reload:', bustUrl);
-          this.send({ type: 'artifact', url: bustUrl });
+          this.send({ type: 'artifact', url: bustUrl, filePath: absolutePath });
         }
       });
 
