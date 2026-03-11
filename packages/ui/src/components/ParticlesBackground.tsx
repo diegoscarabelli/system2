@@ -26,36 +26,39 @@ export function ParticlesBackground() {
     };
   }, []);
 
-  const options = useMemo(() => ({
-    fpsLimit: 60,
-    pauseOnOutsideViewport: true,
-    particles: {
-      number: { value: 120, density: { enable: true } },
-      color: { value: [accent, colors.teal] },
-      opacity: { value: 0.35 },
-      size: { value: { min: 1, max: 3 } },
-      links: {
-        enable: true,
+  const options = useMemo(
+    () => ({
+      fpsLimit: 60,
+      pauseOnOutsideViewport: true,
+      particles: {
+        number: { value: 120, density: { enable: true } },
         color: { value: [accent, colors.teal] },
-        opacity: 0.2,
-        distance: 150,
-        width: 1,
+        opacity: { value: 0.35 },
+        size: { value: { min: 1, max: 3 } },
+        links: {
+          enable: true,
+          color: { value: [accent, colors.teal] },
+          opacity: 0.2,
+          distance: 150,
+          width: 1,
+        },
+        move: {
+          enable: true,
+          speed: 0.8,
+          outModes: { default: 'bounce' as const },
+        },
       },
-      move: {
-        enable: true,
-        speed: 0.8,
-        outModes: { default: 'bounce' as const },
+      interactivity: {
+        events: {
+          onHover: { enable: true, mode: 'attract' as const },
+        },
+        modes: {
+          attract: { distance: 200, duration: 0.4, speed: 3 },
+        },
       },
-    },
-    interactivity: {
-      events: {
-        onHover: { enable: true, mode: 'attract' as const },
-      },
-      modes: {
-        attract: { distance: 200, duration: 0.4, speed: 3 },
-      },
-    },
-  }), [accent]);
+    }),
+    [accent]
+  );
 
   if (!engineReady) return null;
 

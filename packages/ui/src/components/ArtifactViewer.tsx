@@ -100,86 +100,94 @@ export function ArtifactViewer() {
   }, []);
 
   return (
-    <Box sx={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <Box
+      sx={{
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        overflow: 'hidden',
+      }}
+    >
       <ParticlesBackground />
 
       {tabs.length === 0 ? (
         <Box sx={{ height: '100%', position: 'relative', zIndex: 1 }} />
       ) : (
-      <>
-      {/* Tab bar */}
-      <Box
-        sx={{
-          display: 'flex',
-          overflowX: 'auto',
-          borderBottom: '1px solid',
-          borderColor: 'border.default',
-          backgroundColor: 'canvas.subtle',
-          flexShrink: 0,
-          position: 'relative',
-          zIndex: 1,
-        }}
-      >
-        {tabs.map((tab) => (
+        <>
+          {/* Tab bar */}
           <Box
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
             sx={{
               display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              px: 2,
-              py: 1,
-              cursor: 'pointer',
-              borderBottom: tab.id === activeTabId ? '2px solid' : '2px solid transparent',
-              borderColor: tab.id === activeTabId ? accent : 'transparent',
-              backgroundColor: tab.id === activeTabId ? 'canvas.default' : 'transparent',
-              color: tab.id === activeTabId ? 'fg.default' : 'fg.muted',
-              fontSize: 0,
-              whiteSpace: 'nowrap',
-              '&:hover': {
-                backgroundColor: 'canvas.default',
-              },
+              overflowX: 'auto',
+              borderBottom: '1px solid',
+              borderColor: 'border.default',
+              backgroundColor: 'canvas.subtle',
+              flexShrink: 0,
+              position: 'relative',
+              zIndex: 1,
             }}
           >
-            <Text sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {tab.title}
-            </Text>
-            <IconButton
-              aria-label="Close tab"
-              icon={XIcon}
-              variant="invisible"
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeTab(tab.id);
-              }}
-              sx={{ color: 'fg.muted', flexShrink: 0 }}
-            />
+            {tabs.map((tab) => (
+              <Box
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  px: 2,
+                  py: 1,
+                  cursor: 'pointer',
+                  borderBottom: tab.id === activeTabId ? '2px solid' : '2px solid transparent',
+                  borderColor: tab.id === activeTabId ? accent : 'transparent',
+                  backgroundColor: tab.id === activeTabId ? 'canvas.default' : 'transparent',
+                  color: tab.id === activeTabId ? 'fg.default' : 'fg.muted',
+                  fontSize: 0,
+                  whiteSpace: 'nowrap',
+                  '&:hover': {
+                    backgroundColor: 'canvas.default',
+                  },
+                }}
+              >
+                <Text sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {tab.title}
+                </Text>
+                <IconButton
+                  aria-label="Close tab"
+                  icon={XIcon}
+                  variant="invisible"
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(tab.id);
+                  }}
+                  sx={{ color: 'fg.muted', flexShrink: 0 }}
+                />
+              </Box>
+            ))}
           </Box>
-        ))}
-      </Box>
 
-      {/* Active tab content */}
-      {activeTab && (
-        <Box sx={{ flex: 1, overflow: 'auto', position: 'relative', zIndex: 1 }}>
-          <iframe
-            ref={iframeRef}
-            src={activeTab.url}
-            sandbox="allow-scripts allow-same-origin"
-            title={activeTab.title}
-            scrolling="no"
-            style={{
-              width: '100%',
-              border: 'none',
-              overflow: 'hidden',
-              backgroundColor: isLight ? 'white' : 'transparent',
-              filter: isLight ? 'none' : 'invert(1) hue-rotate(180deg)',
-            }}
-          />
-        </Box>
-      )}
-      </>
+          {/* Active tab content */}
+          {activeTab && (
+            <Box sx={{ flex: 1, overflow: 'auto', position: 'relative', zIndex: 1 }}>
+              <iframe
+                ref={iframeRef}
+                src={activeTab.url}
+                sandbox="allow-scripts allow-same-origin"
+                title={activeTab.title}
+                scrolling="no"
+                style={{
+                  width: '100%',
+                  border: 'none',
+                  overflow: 'hidden',
+                  backgroundColor: isLight ? 'white' : 'transparent',
+                  filter: isLight ? 'none' : 'invert(1) hue-rotate(180deg)',
+                }}
+              />
+            </Box>
+          )}
+        </>
       )}
     </Box>
   );

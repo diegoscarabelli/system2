@@ -136,7 +136,9 @@ export function ArtifactCatalog() {
           flexShrink: 0,
         }}
       >
-        <Box as="h2" sx={{ fontSize: 2, fontWeight: 'bold', margin: 0 }}>Artifacts</Box>
+        <Box as="h2" sx={{ fontSize: 2, fontWeight: 'bold', margin: 0 }}>
+          Artifacts
+        </Box>
       </Box>
 
       {/* Search + filters */}
