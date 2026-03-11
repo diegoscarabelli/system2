@@ -10,22 +10,20 @@ export const colors = {
   tealHover: '#009aa8',
   amber: '#ffb444',
   amberHover: '#e6a23c',
+  coral: '#f15a2b',
+  coralHover: '#d95126',
+  gold: '#d97706',
+  goldHover: '#c46b05',
   magenta: '#fd2ef5',
+  purple: '#cb19aa',
   gray: '#8b949e',
-  deepTeal: '#066a7c',
-  coral: '#ec4a2c',
-  coralHover: '#d4432a',
-  purple: '#b61899',
-  purpleLight: '#c756ad',
-  neutral: '#424242',
-  critical: '#f85149',
 } as const;
 
 /**
  * Semantic palette — colors that change between light and dark themes.
  *
  * Dark  → amber accent, magenta highlight
- * Light → coral accent, purple highlight
+ * Light → gold accent, purple highlight
  */
 export interface ThemePalette {
   /** Primary accent (buttons, labels, dots, active indicators) */
@@ -35,6 +33,8 @@ export interface ThemePalette {
   accentSubtle: string;
   /** Secondary highlight (tool calls, code actions) */
   highlight: string;
+  /** Text color on top of accent background */
+  accentText: string;
 }
 
 export const palettes = {
@@ -43,11 +43,13 @@ export const palettes = {
     accentHover: colors.amberHover,
     accentSubtle: `${colors.amber}22`,
     highlight: colors.magenta,
+    accentText: '#000',
   },
   light: {
-    accent: colors.coral,
-    accentHover: colors.coralHover,
-    accentSubtle: `${colors.coral}22`,
+    accent: colors.gold,
+    accentHover: colors.goldHover,
+    accentSubtle: `${colors.gold}22`,
     highlight: colors.purple,
+    accentText: '#ffffff',
   },
 } as const satisfies Record<string, ThemePalette>;

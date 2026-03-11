@@ -11,6 +11,7 @@ import { useEffect, useRef } from 'react';
 import { useArtifactStore } from '../stores/artifact';
 import { useThemeStore } from '../stores/theme';
 import { useAccentColors } from '../theme/useAccentColors';
+import { ParticlesBackground } from './ParticlesBackground';
 
 export function ArtifactViewer() {
   const tabs = useArtifactStore((s) => s.tabs);
@@ -98,26 +99,14 @@ export function ArtifactViewer() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  if (tabs.length === 0) {
-    return (
-      <Box
-        sx={{
-          padding: 4,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100%',
-          color: 'fg.muted',
-        }}
-      >
-        <Text sx={{ fontSize: 1 }}>Chat with the Guide on the right</Text>
-      </Box>
-    );
-  }
-
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <Box sx={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <ParticlesBackground />
+
+      {tabs.length === 0 ? (
+        <Box sx={{ height: '100%', position: 'relative', zIndex: 1 }} />
+      ) : (
+      <>
       {/* Tab bar */}
       <Box
         sx={{
@@ -127,6 +116,8 @@ export function ArtifactViewer() {
           borderColor: 'border.default',
           backgroundColor: 'canvas.subtle',
           flexShrink: 0,
+          position: 'relative',
+          zIndex: 1,
         }}
       >
         {tabs.map((tab) => (
@@ -171,7 +162,7 @@ export function ArtifactViewer() {
 
       {/* Active tab content */}
       {activeTab && (
-        <Box sx={{ flex: 1, overflow: 'auto' }}>
+        <Box sx={{ flex: 1, overflow: 'auto', position: 'relative', zIndex: 1 }}>
           <iframe
             ref={iframeRef}
             src={activeTab.url}
@@ -187,6 +178,8 @@ export function ArtifactViewer() {
             }}
           />
         </Box>
+      )}
+      </>
       )}
     </Box>
   );

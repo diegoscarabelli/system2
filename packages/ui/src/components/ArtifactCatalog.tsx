@@ -30,7 +30,7 @@ export function ArtifactCatalog() {
   const [artifacts, setArtifacts] = useState<CatalogArtifact[]>([]);
   const [loading, setLoading] = useState(true);
   const openArtifact = useArtifactStore((s) => s.openArtifact);
-  const { accent, accentSubtle } = useAccentColors();
+  const { accent, accentSubtle, accentText } = useAccentColors();
   const [query, setQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
@@ -127,7 +127,19 @@ export function ArtifactCatalog() {
         minHeight: 0,
       }}
     >
-      {/* Header */}
+      {/* Title row — matches System2 header height */}
+      <Box
+        sx={{
+          padding: 2,
+          borderBottom: '1px solid',
+          borderColor: 'border.default',
+          flexShrink: 0,
+        }}
+      >
+        <Box as="h2" sx={{ fontSize: 2, fontWeight: 'bold', margin: 0 }}>Artifacts</Box>
+      </Box>
+
+      {/* Search + filters */}
       <Box
         sx={{
           px: 2,
@@ -140,11 +152,10 @@ export function ArtifactCatalog() {
           flexShrink: 0,
         }}
       >
-        <Text sx={{ fontWeight: 'bold', fontSize: 1, px: 1 }}>Artifacts</Text>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           <TextInput
             leadingVisual={SearchIcon}
-            placeholder="Filter title, description, project, and tags..."
+            placeholder="Search artifacts..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             size="small"
@@ -216,7 +227,7 @@ export function ArtifactCatalog() {
                   borderRadius: 2,
                   cursor: 'pointer',
                   backgroundColor: accent,
-                  color: '#000',
+                  color: accentText,
                 }}
               >
                 {project} ×
@@ -233,7 +244,7 @@ export function ArtifactCatalog() {
                   borderRadius: 2,
                   cursor: 'pointer',
                   backgroundColor: accent,
-                  color: '#000',
+                  color: accentText,
                 }}
               >
                 {tag} ×
@@ -310,7 +321,7 @@ export function ArtifactCatalog() {
                               borderRadius: 2,
                               cursor: 'pointer',
                               backgroundColor: active ? accent : accentSubtle,
-                              color: active ? '#000' : accent,
+                              color: active ? accentText : accent,
                             }}
                           >
                             {tag}

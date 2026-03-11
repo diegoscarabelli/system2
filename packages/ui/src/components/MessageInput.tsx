@@ -68,7 +68,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
   };
 
-  const contextColor = contextPercent !== null && contextPercent > 80 ? colors.critical : accent;
+  const contextColor = contextPercent !== null && contextPercent > 80 ? colors.coral : accent;
 
   return (
     <Box
