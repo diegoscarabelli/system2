@@ -54,7 +54,76 @@ Project-scoped files live outside `knowledge/`:
    - **System-wide agents** (Guide, Narrator): loads the 2 most recent daily summary files (sorted by filename, chronological order)
 4. Returns all content under a `## Knowledge Base` header, separated by `---`
 
-This is appended to the static system prompt (agents.md + role instructions).
+Each section is prefixed with a `### ~/.system2/...` heading so agents can identify the source of each piece of context. The block ends with `---\n\nConversation history follows.` to mark the boundary between instructions and the messages array.
+
+### Examples
+
+**Guide** (system-wide agent):
+
+```text
+SYSTEM PROMPT (rebuilt on every LLM call):
+  1. agents.md — shared reference (static)
+  2. library/guide.md — Guide role instructions (static)
+  3. ## Knowledge Base (dynamic, re-read every call)
+       ### ~/.system2/knowledge/infrastructure.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/user.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/memory.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/daily_summaries/2026-03-10.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/daily_summaries/2026-03-11.md
+       [content]
+       ---
+       Conversation history follows.
+
+MESSAGES (from JSONL session, ~/.system2/sessions/guide_1/):
+  [turn 1] user: ...
+  [turn 1] assistant: ...
+  [turn 2] user: ...
+  [turn 2] assistant: ...
+  ... (or a compaction summary if context was compressed)
+
+CURRENT TURN:
+  [user message / scheduled trigger / inbound agent message]
+```
+
+**Conductor** (project-scoped, project `1_linkedin-campaign`):
+
+```text
+SYSTEM PROMPT (rebuilt on every LLM call):
+  1. agents.md — shared reference (static)
+  2. library/conductor.md — Conductor role instructions (static)
+  3. ## Knowledge Base (dynamic, re-read every call)
+       ### ~/.system2/knowledge/infrastructure.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/user.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/memory.md
+       [content]
+       ---
+       ### ~/.system2/projects/1_linkedin-campaign/log.md
+       [content]
+       ---
+       Conversation history follows.
+
+MESSAGES (from JSONL session, ~/.system2/sessions/conductor_3/):
+  [turn 1] user: [Message from guide agent (id=1)] Here is your project...
+  [turn 1] assistant: ...
+  ... (or a compaction summary if context was compressed)
+
+CURRENT TURN:
+  [inbound agent message / task assignment]
+```
+
+Files with 10 lines or fewer are skipped. If no knowledge files have content, the `## Knowledge Base` block is omitted but `Conversation history follows.` is still appended. The `user` role in agent JSONL is used for all inbound messages — from the user, other agents, or the scheduler.
 
 ## memory.md
 

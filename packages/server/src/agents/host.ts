@@ -248,7 +248,7 @@ export class AgentHost {
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
       // Override system prompt: static agent instructions + fresh knowledge files on every call
-      systemPromptOverride: () => `${staticPrompt}${this.loadKnowledgeContext()}`,
+      systemPromptOverride: () => `${staticPrompt}${this.loadKnowledgeContext()}\n\n---\n\nConversation history follows.`,
       // Disable default resource discovery (we manage our own)
       noExtensions: true,
       noSkills: true,
@@ -415,13 +415,18 @@ export class AgentHost {
   private loadKnowledgeContext(): string {
     const knowledgeDir = join(SYSTEM2_DIR, 'knowledge');
     const sections: string[] = [];
+
+    const addSection = (filePath: string, content: string) => {
+      if (content.trim().split('\n').length > 10) {
+        const label = filePath.replace(homedir(), '~').replace(/\\/g, '/');
+        sections.push(`### ${label}\n\n${content.trim()}`);
+      }
+    };
+
     for (const file of ['infrastructure.md', 'user.md', 'memory.md']) {
       const filePath = join(knowledgeDir, file);
       if (existsSync(filePath)) {
-        const content = readFileSync(filePath, 'utf-8');
-        if (content.trim().split('\n').length > 10) {
-          sections.push(content);
-        }
+        addSection(filePath, readFileSync(filePath, 'utf-8'));
       }
     }
 
@@ -430,10 +435,7 @@ export class AgentHost {
     if (this.agentProject !== null && this.agentProjectDirName) {
       const projectLogPath = join(SYSTEM2_DIR, 'projects', this.agentProjectDirName, 'log.md');
       if (existsSync(projectLogPath)) {
-        const content = readFileSync(projectLogPath, 'utf-8');
-        if (content.trim().split('\n').length > 10) {
-          sections.push(content);
-        }
+        addSection(projectLogPath, readFileSync(projectLogPath, 'utf-8'));
       }
     } else {
       const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -445,10 +447,8 @@ export class AgentHost {
           .slice(0, 2)
           .reverse(); // chronological order
         for (const file of summaryFiles) {
-          const content = readFileSync(join(summariesDir, file), 'utf-8');
-          if (content.trim().split('\n').length > 10) {
-            sections.push(content);
-          }
+          const filePath = join(summariesDir, file);
+          addSection(filePath, readFileSync(filePath, 'utf-8'));
         }
       }
     }

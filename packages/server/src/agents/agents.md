@@ -281,6 +281,77 @@ Your conversation is persisted as JSONL files in `~/.system2/sessions/{role}_{id
 - **Session rotation:** when a JSONL file exceeds 10MB, a new file is created with compacted history carried over.
 - This reference and your role-specific instructions are always in your context. Knowledge files are refreshed on every turn.
 
+### System Prompt Structure
+
+Your full context on every LLM call is assembled as follows. The system prompt is rebuilt each time; the messages array carries your conversation history.
+
+**Guide** (system-wide agent):
+
+```text
+SYSTEM PROMPT (rebuilt on every LLM call):
+  1. agents.md — shared reference (static)
+  2. library/guide.md — Guide role instructions (static)
+  3. ## Knowledge Base (dynamic, re-read every call)
+       ### ~/.system2/knowledge/infrastructure.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/user.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/memory.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/daily_summaries/2026-03-10.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/daily_summaries/2026-03-11.md
+       [content]
+       ---
+       Conversation history follows.
+
+MESSAGES (from JSONL session, ~/.system2/sessions/guide_1/):
+  [turn 1] user: ...
+  [turn 1] assistant: ...
+  [turn 2] user: ...
+  [turn 2] assistant: ...
+  ... (or a compaction summary if context was compressed)
+
+CURRENT TURN:
+  [user message / scheduled trigger / inbound agent message]
+```
+
+**Conductor** (project-scoped, project `1_linkedin-campaign`):
+
+```text
+SYSTEM PROMPT (rebuilt on every LLM call):
+  1. agents.md — shared reference (static)
+  2. library/conductor.md — Conductor role instructions (static)
+  3. ## Knowledge Base (dynamic, re-read every call)
+       ### ~/.system2/knowledge/infrastructure.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/user.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/memory.md
+       [content]
+       ---
+       ### ~/.system2/projects/1_linkedin-campaign/log.md
+       [content]
+       ---
+       Conversation history follows.
+
+MESSAGES (from JSONL session, ~/.system2/sessions/conductor_3/):
+  [turn 1] user: [Message from guide agent (id=1)] Here is your project...
+  [turn 1] assistant: ...
+  ... (or a compaction summary if context was compressed)
+
+CURRENT TURN:
+  [inbound agent message / task assignment]
+```
+
+The `user` role in JSONL is used for all inbound messages — from the user, other agents, or the scheduler.
+
 ## File System
 
 All System2 data lives in `~/.system2/`:

@@ -67,22 +67,14 @@ All runtime state lives in `~/.system2/`. See [Configuration](configuration.md) 
 
 ## Key Design Decisions
 
-**Server as source of truth.** Chat history, database state, and agent sessions are all managed server-side. The UI is stateless -- it receives history on WebSocket connect and streams updates.
+**Single user-facing agent.** The user interacts exclusively with the Guide. Other agents (Conductors, Reviewers, etc.) are spawned on demand based on the nature and scope of the work, and the Narrator operates continuously in the background. The user never addresses these agents directly. This shields the user from multi-agent complexity, bridging the throughput of parallel agents with the human's finite capacity to absorb information. See [Agents](agents.md).
 
-**Multi-provider failover.** API errors trigger automatic retry with exponential backoff, then failover to the next key or provider. See [Configuration](configuration.md#automatic-failover).
+**No chat sessions, continuous interaction.** There is no concept of starting a new chat. The Guide maintains a single persistent session and a structured memory system, creating an unbroken thread of interaction that accumulates memories over time rather than resetting between conversations. See [Agents](agents.md#session-management) | [Knowledge System](knowledge-system.md).
 
-**In-process scheduler.** Scheduled jobs run inside the server process using [Croner](https://github.com/Hexagon/croner). Since croner doesn't catch up missed jobs, the server checks staleness on startup and queues catch-up work. See [Scheduler](scheduler.md).
+**Artifact canvas for interactive content.** The UI provides a dedicated display area where the Guide or user can surface rich, interactive content on demand -- charts, dashboards, custom UIs, or any HTML/JS artifact. Artifacts are stored as files and tracked with metadata (title, description, timestamps) so they can be revisited and  refined in later conversations. See [UI](packages/ui.md)
 
-**Role-based agent architecture.** Four roles (Guide, Conductor, Narrator, Reviewer) with distinct lifecycles -- Guide and Narrator are persistent singletons; Conductor and Reviewer are ephemeral and project-scoped. See [Agents](agents.md).
+**Orchestrated multi-agent work.** Agents are spawned on demand based on the scope and nature of the work; others run continuously in the background. Work is broken into tasks stored in the database, then distributed and coordinated via two channels: direct messages for real-time steering and task comments for a permanent audit trail. A dedicated review role provides critical assessment before work is considered complete. Tools are gated by role and project scope. See [Agents](agents.md) | [Tools](tools.md) | [Database](database.md).
 
-**Push-based work management.** Conductors break work into tasks in the database, assign them to agents, and coordinate via messages. Agents check for assigned work on startup and keep task status current. See [Agents](agents.md#work-management).
+**Persistent, evolving context.** Every agent's context is assembled from three layers on each LLM call: static instructions (shared agent reference and role-specific prompt, loaded once at startup or spawn); a Knowledge Base of files re-read fresh from disk — knowledge files, plus daily summaries or a project log depending on scope — so any edit takes effect immediately; and the full conversation history replayed from a JSONL session file, with a compaction summary substituted when the context was compressed. Knowledge files and session logs are both versioned in git. Long-running singletons rotate their session files at a configurable size threshold to prevent unbounded growth. See [Agents](agents.md#session-management) | [Knowledge System](knowledge-system.md).
 
-**Two-channel inter-agent communication.** Direct messages (`message_agent`) for real-time coordination with steer/followUp delivery; task comments for permanent audit trail. See [Agents](agents.md#message-delivery).
-
-**Custom tools with permission model.** Tools have role-based and project-scoped access control -- Guide-only (show_artifact), spawner-gated (spawn/terminate_agent), and config-gated (web_search). See [Tools](tools.md).
-
-**Git-tracked knowledge.** Knowledge files and project logs live in `~/.system2/` which is a git repository. The `edit` and `write` tools accept a `commit_message` parameter for auto-committing changes. See [Knowledge System](knowledge-system.md).
-
-**Session persistence and rotation.** Agent sessions are JSONL files with tree-structured branching and auto-compaction. Long-running singletons rotate at a configurable size threshold to prevent unbounded growth. See [Agents](agents.md#session-management).
-
-**Dynamic system prompts.** Knowledge files and daily summaries are re-read on every LLM API call (not cached). This means any agent or the user can edit knowledge files and changes take effect immediately. Prompt caching (such as Anthropic and OpenAI) makes the static prefix cheap to resend. See [Agents](agents.md).
+**Reliable infrastructure.** Chat history, database state, and agent sessions are managed server-side; the UI is stateless and receives full history on WebSocket connect. API errors trigger automatic retry with exponential backoff, then failover to the next configured key or provider. Scheduled jobs run in-process and are checked for staleness on startup so missed work is caught up automatically. See [Configuration](configuration.md#automatic-failover) | [Scheduler](scheduler.md).
