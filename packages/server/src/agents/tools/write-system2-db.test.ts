@@ -142,7 +142,7 @@ describe('write_system2_db tool', () => {
         description: 'A test project',
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('New Project');
+      expect((result.content[0] as { text: string }).text).toContain('New Project');
     });
 
     it('fails for non-Guide', async () => {
@@ -156,7 +156,7 @@ describe('write_system2_db tool', () => {
         description: 'Y',
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('restricted to the Guide');
+      expect((result.content[0] as { text: string }).text).toContain('restricted to the Guide');
     });
   });
 
@@ -173,7 +173,7 @@ describe('write_system2_db tool', () => {
         name: 'Updated',
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('Updated');
+      expect((result.content[0] as { text: string }).text).toContain('Updated');
     });
 
     it('succeeds for Conductor on own project', async () => {
@@ -188,7 +188,7 @@ describe('write_system2_db tool', () => {
         status: 'in progress',
       } as WriteDbParams);
 
-      expect(result.content[0].text).not.toContain('Error');
+      expect((result.content[0] as { text: string }).text).not.toContain('Error');
     });
 
     it('fails for Conductor on other project', async () => {
@@ -203,7 +203,9 @@ describe('write_system2_db tool', () => {
         name: 'X',
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('only update their own project');
+      expect((result.content[0] as { text: string }).text).toContain(
+        'only update their own project'
+      );
     });
 
     it('fails for Reviewer', async () => {
@@ -217,7 +219,9 @@ describe('write_system2_db tool', () => {
         name: 'X',
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('restricted to Guide and Conductor');
+      expect((result.content[0] as { text: string }).text).toContain(
+        'restricted to Guide and Conductor'
+      );
     });
   });
 
@@ -234,7 +238,7 @@ describe('write_system2_db tool', () => {
         description: 'Desc',
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('scoped to project 10');
+      expect((result.content[0] as { text: string }).text).toContain('scoped to project 10');
     });
 
     it('restricts assignee to Guide/Conductor', async () => {
@@ -250,7 +254,7 @@ describe('write_system2_db tool', () => {
         assignee: 5,
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('Only Guide and Conductor');
+      expect((result.content[0] as { text: string }).text).toContain('Only Guide and Conductor');
     });
 
     it('succeeds for Guide with assignee', async () => {
@@ -266,7 +270,7 @@ describe('write_system2_db tool', () => {
         assignee: 2,
       } as WriteDbParams);
 
-      expect(result.content[0].text).not.toContain('Error');
+      expect((result.content[0] as { text: string }).text).not.toContain('Error');
     });
   });
 
@@ -283,7 +287,7 @@ describe('write_system2_db tool', () => {
         status: 'done',
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('scoped to project 10');
+      expect((result.content[0] as { text: string }).text).toContain('scoped to project 10');
     });
 
     it('restricts assignee to Guide/Conductor', async () => {
@@ -298,7 +302,7 @@ describe('write_system2_db tool', () => {
         assignee: 5,
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('Only Guide and Conductor');
+      expect((result.content[0] as { text: string }).text).toContain('Only Guide and Conductor');
     });
   });
 
@@ -314,7 +318,7 @@ describe('write_system2_db tool', () => {
         id: 50,
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('claimed');
+      expect((result.content[0] as { text: string }).text).toContain('claimed');
     });
 
     it('fails for task in different project', async () => {
@@ -328,7 +332,7 @@ describe('write_system2_db tool', () => {
         id: 50,
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('failed');
+      expect((result.content[0] as { text: string }).text).toContain('failed');
     });
   });
 
@@ -347,7 +351,7 @@ describe('write_system2_db tool', () => {
         relationship: 'blocked_by',
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('scoped to project 10');
+      expect((result.content[0] as { text: string }).text).toContain('scoped to project 10');
     });
   });
 
@@ -371,7 +375,7 @@ describe('write_system2_db tool', () => {
         id: 1,
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('scoped to project 10');
+      expect((result.content[0] as { text: string }).text).toContain('scoped to project 10');
     });
   });
 
@@ -388,7 +392,7 @@ describe('write_system2_db tool', () => {
         content: 'Hello',
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('scoped to project 10');
+      expect((result.content[0] as { text: string }).text).toContain('scoped to project 10');
     });
 
     it('succeeds and auto-fills author', async () => {
@@ -403,7 +407,7 @@ describe('write_system2_db tool', () => {
         content: 'A comment',
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('A comment');
+      expect((result.content[0] as { text: string }).text).toContain('A comment');
       // Verify author was set to agentId (2)
       const comment = [...db._taskComments.values()].pop();
       expect(comment?.author).toBe(2);
@@ -430,7 +434,7 @@ describe('write_system2_db tool', () => {
         id: 1,
       } as WriteDbParams);
 
-      expect(result.content[0].text).toContain('scoped to project 10');
+      expect((result.content[0] as { text: string }).text).toContain('scoped to project 10');
     });
   });
 
@@ -441,8 +445,8 @@ describe('write_system2_db tool', () => {
 
     const result: WriteDbResult = await tool.execute('test', {
       operation: 'unknownOp',
-    } as WriteDbParams);
+    } as unknown as WriteDbParams);
 
-    expect(result.content[0].text).toContain('Unknown operation');
+    expect((result.content[0] as { text: string }).text).toContain('Unknown operation');
   });
 });

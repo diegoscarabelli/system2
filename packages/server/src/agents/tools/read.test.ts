@@ -37,13 +37,13 @@ describe('read tool', () => {
 
     const result = await exec({ path: file });
 
-    expect(result.content[0].text).toBe('hello world');
+    expect((result.content[0] as { text: string }).text).toBe('hello world');
     expect(result.details).toHaveProperty('size', 11);
   });
 
   it('returns error for nonexistent file', async () => {
     const result = await exec({ path: `/tmp/nonexistent-${randomUUID()}` });
 
-    expect(result.content[0].text).toContain('File not found');
+    expect((result.content[0] as { text: string }).text).toContain('File not found');
   });
 });

@@ -38,7 +38,7 @@ describe('edit tool', () => {
 
     const result = await exec({ path: file, old_string: 'line two', new_string: 'line TWO' });
 
-    expect(result.content[0].text).toContain('Edited');
+    expect((result.content[0] as { text: string }).text).toContain('Edited');
     expect(readFileSync(file, 'utf-8')).toBe('line one\nline TWO\nline three\n');
   });
 
@@ -53,7 +53,7 @@ describe('edit tool', () => {
       new_string: 'header\nnew middle line\nfooter',
     });
 
-    expect(result.content[0].text).toContain('Edited');
+    expect((result.content[0] as { text: string }).text).toContain('Edited');
     expect(readFileSync(file, 'utf-8')).toBe('header\nnew middle line\nfooter\n');
   });
 
@@ -64,7 +64,7 @@ describe('edit tool', () => {
 
     const result = await exec({ path: file, old_string: 'nonexistent', new_string: 'x' });
 
-    expect(result.content[0].text).toContain('not found');
+    expect((result.content[0] as { text: string }).text).toContain('not found');
     expect(result.details).toHaveProperty('error', 'not_found');
   });
 
@@ -75,7 +75,7 @@ describe('edit tool', () => {
 
     const result = await exec({ path: file, old_string: 'aaa', new_string: 'ccc' });
 
-    expect(result.content[0].text).toContain('2 times');
+    expect((result.content[0] as { text: string }).text).toContain('2 times');
     expect(result.details).toHaveProperty('error', 'not_unique');
   });
 
@@ -86,7 +86,7 @@ describe('edit tool', () => {
 
     const result = await exec({ path: file, old_string: 'content', new_string: 'content' });
 
-    expect(result.content[0].text).toContain('identical');
+    expect((result.content[0] as { text: string }).text).toContain('identical');
     expect(result.details).toHaveProperty('error', 'identical_strings');
   });
 
@@ -97,7 +97,7 @@ describe('edit tool', () => {
       new_string: 'y',
     });
 
-    expect(result.content[0].text).toContain('File not found');
+    expect((result.content[0] as { text: string }).text).toContain('File not found');
   });
 
   it('returns aborted when signal is already aborted', async () => {
@@ -109,7 +109,7 @@ describe('edit tool', () => {
       controller.signal
     );
 
-    expect(result.content[0].text).toBe('Edit aborted.');
+    expect((result.content[0] as { text: string }).text).toBe('Edit aborted.');
     expect(result.details).toHaveProperty('error', 'aborted');
   });
 });

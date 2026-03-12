@@ -40,7 +40,7 @@ describe('terminate_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 2 });
 
-    expect(result.content[0].text).toContain('terminated and archived');
+    expect((result.content[0] as { text: string }).text).toContain('terminated and archived');
     expect(updateAgentStatus).toHaveBeenCalledWith(2, 'archived');
     expect(abort).toHaveBeenCalled();
     expect(unregister).toHaveBeenCalledWith(2);
@@ -53,7 +53,7 @@ describe('terminate_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 3 });
 
-    expect(result.content[0].text).toContain('terminated');
+    expect((result.content[0] as { text: string }).text).toContain('terminated');
   });
 
   it('Conductor cannot terminate agent in other project', async () => {
@@ -63,7 +63,9 @@ describe('terminate_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 3 });
 
-    expect(result.content[0].text).toContain('only terminate agents in their own project');
+    expect((result.content[0] as { text: string }).text).toContain(
+      'only terminate agents in their own project'
+    );
   });
 
   it('prevents self-termination', async () => {
@@ -72,7 +74,7 @@ describe('terminate_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 2 });
 
-    expect(result.content[0].text).toContain('cannot terminate itself');
+    expect((result.content[0] as { text: string }).text).toContain('cannot terminate itself');
   });
 
   it('prevents terminating singleton (guide)', async () => {
@@ -82,7 +84,7 @@ describe('terminate_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 1 });
 
-    expect(result.content[0].text).toContain('singleton');
+    expect((result.content[0] as { text: string }).text).toContain('singleton');
   });
 
   it('prevents terminating singleton (narrator)', async () => {
@@ -92,7 +94,7 @@ describe('terminate_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 3 });
 
-    expect(result.content[0].text).toContain('singleton');
+    expect((result.content[0] as { text: string }).text).toContain('singleton');
   });
 
   it('errors for unauthorized role (reviewer)', async () => {
@@ -102,7 +104,7 @@ describe('terminate_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 2 });
 
-    expect(result.content[0].text).toContain('Only Guide and Conductor');
+    expect((result.content[0] as { text: string }).text).toContain('Only Guide and Conductor');
   });
 
   it('errors when target not found', async () => {
@@ -111,6 +113,6 @@ describe('terminate_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 99 });
 
-    expect(result.content[0].text).toContain('not found');
+    expect((result.content[0] as { text: string }).text).toContain('not found');
   });
 });

@@ -44,7 +44,7 @@ describe('message_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 2, message: 'Hello conductor' });
 
-    expect(result.content[0].text).toContain('delivered');
+    expect((result.content[0] as { text: string }).text).toContain('delivered');
     expect(deliverMessage).toHaveBeenCalledTimes(1);
     const [content] = deliverMessage.mock.calls[0];
     expect(content).toContain('[Message from guide agent (id=1)]');
@@ -57,7 +57,9 @@ describe('message_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 1, message: 'Hello me' });
 
-    expect(result.content[0].text).toContain('Cannot send a message to yourself');
+    expect((result.content[0] as { text: string }).text).toContain(
+      'Cannot send a message to yourself'
+    );
   });
 
   it('errors when target agent not in database', async () => {
@@ -66,7 +68,7 @@ describe('message_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 99, message: 'Hello' });
 
-    expect(result.content[0].text).toContain('No agent found');
+    expect((result.content[0] as { text: string }).text).toContain('No agent found');
   });
 
   it('errors when target agent not active', async () => {
@@ -77,7 +79,7 @@ describe('message_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 2, message: 'Hello' });
 
-    expect(result.content[0].text).toContain('not currently active');
+    expect((result.content[0] as { text: string }).text).toContain('not currently active');
   });
 
   it('propagates delivery errors', async () => {
@@ -95,6 +97,6 @@ describe('message_agent tool', () => {
 
     const result = await exec(tool, { agent_id: 2, message: 'Hello' });
 
-    expect(result.content[0].text).toContain('delivery failed');
+    expect((result.content[0] as { text: string }).text).toContain('delivery failed');
   });
 });

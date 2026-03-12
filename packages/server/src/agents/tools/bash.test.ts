@@ -40,14 +40,14 @@ describe('bash tool', () => {
     it('runs a simple command', async () => {
       const result = await exec({ command: 'echo hello' });
 
-      expect(result.content[0].text).toContain('hello');
+      expect((result.content[0] as { text: string }).text).toContain('hello');
       expect(result.details).toHaveProperty('exitCode', 0);
     });
 
     it('captures stderr', async () => {
       const result = await exec({ command: 'echo err >&2' });
 
-      expect(result.content[0].text).toContain('err');
+      expect((result.content[0] as { text: string }).text).toContain('err');
       expect(result.details).toHaveProperty('stderr');
       expect((result.details as { stderr: string }).stderr).toContain('err');
     });
@@ -55,7 +55,7 @@ describe('bash tool', () => {
     it('returns error for failed command', async () => {
       const result = await exec({ command: 'exit 1' });
 
-      expect(result.content[0].text).toContain('failed');
+      expect((result.content[0] as { text: string }).text).toContain('failed');
       expect((result.details as { exitCode: number }).exitCode).not.toBe(0);
     });
 
@@ -63,7 +63,7 @@ describe('bash tool', () => {
       const dir = trackDir(makeTmpDir());
       const result = await exec({ command: 'pwd', cwd: dir });
 
-      expect(result.content[0].text.trim()).toContain(dir);
+      expect((result.content[0] as { text: string }).text.trim()).toContain(dir);
     });
 
     it('returns error when signal is already aborted', async () => {
@@ -72,7 +72,7 @@ describe('bash tool', () => {
 
       const result = await exec({ command: 'echo hello' }, controller.signal);
 
-      expect(result.content[0].text).toContain('aborted');
+      expect((result.content[0] as { text: string }).text).toContain('aborted');
     });
 
     it('calls onUpdate with streaming output', async () => {
@@ -81,7 +81,7 @@ describe('bash tool', () => {
 
       expect(onUpdate).toHaveBeenCalled();
       const lastCall = onUpdate.mock.calls[onUpdate.mock.calls.length - 1][0];
-      expect(lastCall.content[0].text).toContain('streaming');
+      expect((lastCall.content[0] as { text: string }).text).toContain('streaming');
     });
   });
 
@@ -95,7 +95,7 @@ describe('bash tool', () => {
         run_in_background: true,
       } as BashParams);
 
-      expect(result.content[0].text).toContain('started in background');
+      expect((result.content[0] as { text: string }).text).toContain('started in background');
       expect((result.details as { background: boolean }).background).toBe(true);
 
       // Wait for background process to finish
@@ -115,7 +115,7 @@ describe('bash tool', () => {
       } as BashParams);
 
       // Should execute synchronously and return output directly
-      expect(result.content[0].text).toContain('fallthrough');
+      expect((result.content[0] as { text: string }).text).toContain('fallthrough');
       expect(result.details).toHaveProperty('exitCode', 0);
     });
   });

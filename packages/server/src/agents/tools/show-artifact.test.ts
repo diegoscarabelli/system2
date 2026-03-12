@@ -39,7 +39,7 @@ describe('show_artifact tool', () => {
       tool.execute('test-call', params as ShowArtifactParams);
     const result = await exec({ file_path: absPath });
 
-    expect(result.content[0].text).toBe('Artifact displayed');
+    expect((result.content[0] as { text: string }).text).toBe('Artifact displayed');
     expect((result.details as { url: string }).url).toContain('/api/artifact?path=');
     expect((result.details as { absolutePath: string }).absolutePath).toBe(absPath);
     expect((result.details as { title: string }).title).toBe(filename);
@@ -51,7 +51,7 @@ describe('show_artifact tool', () => {
       tool.execute('test-call', params as ShowArtifactParams);
     const result = await exec({ file_path: `/tmp/nonexistent-${randomUUID()}.html` });
 
-    expect(result.content[0].text).toContain('not found');
+    expect((result.content[0] as { text: string }).text).toContain('not found');
     expect((result.details as { error: string }).error).toBe('not_found');
   });
 
@@ -67,7 +67,7 @@ describe('show_artifact tool', () => {
       tool.execute('test-call', params as ShowArtifactParams);
     const result = await exec({ file_path: absPath });
 
-    expect(result.content[0].text).toBe('Artifact displayed');
+    expect((result.content[0] as { text: string }).text).toBe('Artifact displayed');
     expect((result.details as { title: string }).title).toBe('My Dashboard');
   });
 
@@ -82,7 +82,7 @@ describe('show_artifact tool', () => {
       tool.execute('test-call', params as ShowArtifactParams);
     const result = await exec({ file_path: `~/${filename}` });
 
-    expect(result.content[0].text).toBe('Artifact displayed');
+    expect((result.content[0] as { text: string }).text).toBe('Artifact displayed');
     expect((result.details as { absolutePath: string }).absolutePath).toBe(absPath);
   });
 
@@ -92,7 +92,7 @@ describe('show_artifact tool', () => {
       tool.execute('test-call', params as ShowArtifactParams);
     const result = await exec({ file_path: 'relative/path.html' });
 
-    expect(result.content[0].text).toContain('must be absolute');
+    expect((result.content[0] as { text: string }).text).toContain('must be absolute');
     expect((result.details as { error: string }).error).toBe('invalid_path');
   });
 
@@ -104,8 +104,8 @@ describe('show_artifact tool', () => {
       tool.execute('test-call', params as ShowArtifactParams);
     const result = await exec({ file_path: '/tmp/gone.html' });
 
-    expect(result.content[0].text).toContain('Lost Report');
-    expect(result.content[0].text).toContain('moved');
+    expect((result.content[0] as { text: string }).text).toContain('Lost Report');
+    expect((result.content[0] as { text: string }).text).toContain('moved');
     expect((result.details as { error: string }).error).toBe('not_found');
   });
 });

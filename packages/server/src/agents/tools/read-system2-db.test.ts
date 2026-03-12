@@ -28,8 +28,8 @@ describe('read_system2_db tool', () => {
       sql: 'SELECT * FROM project',
     } as DbParams);
 
-    expect(result.content[0].text).toContain('2 row(s)');
-    expect(result.content[0].text).toContain('Project A');
+    expect((result.content[0] as { text: string }).text).toContain('2 row(s)');
+    expect((result.content[0] as { text: string }).text).toContain('Project A');
     expect((result.details as { count: number }).count).toBe(2);
   });
 
@@ -40,7 +40,7 @@ describe('read_system2_db tool', () => {
       sql: 'SELECT * FROM project WHERE 1=0',
     } as DbParams);
 
-    expect(result.content[0].text).toBe('No results found.');
+    expect((result.content[0] as { text: string }).text).toBe('No results found.');
     expect((result.details as { count: number }).count).toBe(0);
   });
 
@@ -49,7 +49,7 @@ describe('read_system2_db tool', () => {
 
     const result: DbResult = await tool.execute('test', { sql: 'DROP TABLE project' } as DbParams);
 
-    expect(result.content[0].text).toContain('Error');
-    expect(result.content[0].text).toContain('not authorized');
+    expect((result.content[0] as { text: string }).text).toContain('Error');
+    expect((result.content[0] as { text: string }).text).toContain('not authorized');
   });
 });

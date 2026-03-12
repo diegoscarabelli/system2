@@ -49,8 +49,8 @@ describe('spawn_agent tool', () => {
       initial_message: 'Start work',
     });
 
-    expect(result.content[0].text).toContain('Agent spawned');
-    expect(result.content[0].text).toContain('42');
+    expect((result.content[0] as { text: string }).text).toContain('Agent spawned');
+    expect((result.content[0] as { text: string }).text).toContain('42');
     expect(spawner).toHaveBeenCalledWith('conductor', 10, 1, 'Start work');
   });
 
@@ -63,7 +63,7 @@ describe('spawn_agent tool', () => {
       initial_message: 'Review work',
     });
 
-    expect(result.content[0].text).toContain('Agent spawned');
+    expect((result.content[0] as { text: string }).text).toContain('Agent spawned');
   });
 
   it('Conductor cannot spawn in other project', async () => {
@@ -75,7 +75,9 @@ describe('spawn_agent tool', () => {
       initial_message: 'x',
     });
 
-    expect(result.content[0].text).toContain('only spawn agents within their own project');
+    expect((result.content[0] as { text: string }).text).toContain(
+      'only spawn agents within their own project'
+    );
   });
 
   it('Reviewer cannot spawn', async () => {
@@ -87,7 +89,7 @@ describe('spawn_agent tool', () => {
       initial_message: 'x',
     });
 
-    expect(result.content[0].text).toContain('Only Guide and Conductor');
+    expect((result.content[0] as { text: string }).text).toContain('Only Guide and Conductor');
   });
 
   it('errors when project not found', async () => {
@@ -99,7 +101,7 @@ describe('spawn_agent tool', () => {
       initial_message: 'x',
     });
 
-    expect(result.content[0].text).toContain('not found');
+    expect((result.content[0] as { text: string }).text).toContain('not found');
   });
 
   it('propagates spawner errors', async () => {
@@ -112,6 +114,6 @@ describe('spawn_agent tool', () => {
       initial_message: 'x',
     });
 
-    expect(result.content[0].text).toContain('spawn failed');
+    expect((result.content[0] as { text: string }).text).toContain('spawn failed');
   });
 });

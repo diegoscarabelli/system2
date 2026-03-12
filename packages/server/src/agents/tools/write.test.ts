@@ -37,7 +37,7 @@ describe('write tool', () => {
 
     const result = await exec({ path: file, content: 'new content' });
 
-    expect(result.content[0].text).toContain('Successfully wrote');
+    expect((result.content[0] as { text: string }).text).toContain('Successfully wrote');
     expect(readFileSync(file, 'utf-8')).toBe('new content');
   });
 
