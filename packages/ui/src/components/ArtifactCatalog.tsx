@@ -5,7 +5,13 @@
  * Groups artifacts by project. Clicking an item opens it in a new tab.
  */
 
-import { ChevronDownIcon, ChevronRightIcon, FilterIcon, ProjectIcon, SearchIcon } from '@primer/octicons-react';
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FilterIcon,
+  ProjectIcon,
+  SearchIcon,
+} from '@primer/octicons-react';
 import { ActionList, ActionMenu, Box, IconButton, Text, TextInput } from '@primer/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useArtifactStore } from '../stores/artifact';
@@ -284,83 +290,85 @@ export function ArtifactCatalog() {
           [...grouped.entries()].map(([group, items]) => {
             const isCollapsed = collapsedGroups.has(group);
             return (
-            <Box key={group} sx={{ mb: 2 }}>
-              <Box
-                onClick={() => toggleGroupCollapse(group)}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                  cursor: 'pointer',
-                  py: 1,
-                  color: 'fg.muted',
-                  '&:hover': { color: 'fg.default' },
-                }}
-              >
-                {isCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}
-                <Text sx={{ fontSize: 0, fontWeight: 'bold' }}>{group}</Text>
-                <Text sx={{ fontSize: 0, ml: 'auto' }}>{items.length}</Text>
-              </Box>
-              {!isCollapsed && items.map((artifact) => (
+              <Box key={group} sx={{ mb: 2 }}>
                 <Box
-                  key={artifact.id}
-                  onClick={() => handleClick(artifact)}
+                  onClick={() => toggleGroupCollapse(group)}
                   sx={{
-                    p: 2,
-                    mb: 1,
-                    borderRadius: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
                     cursor: 'pointer',
-                    '&:hover': { backgroundColor: 'canvas.subtle' },
+                    py: 1,
+                    color: 'fg.muted',
+                    '&:hover': { color: 'fg.default' },
                   }}
                 >
-                  <Text sx={{ fontSize: 1, display: 'block' }}>{artifact.title}</Text>
-                  {artifact.description && (
-                    <Text
+                  {isCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}
+                  <Text sx={{ fontSize: 0, fontWeight: 'bold' }}>{group}</Text>
+                  <Text sx={{ fontSize: 0, ml: 'auto' }}>{items.length}</Text>
+                </Box>
+                {!isCollapsed &&
+                  items.map((artifact) => (
+                    <Box
+                      key={artifact.id}
+                      onClick={() => handleClick(artifact)}
                       sx={{
-                        fontSize: 0,
-                        color: 'fg.muted',
-                        display: '-webkit-box',
-                        mt: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
+                        p: 2,
+                        mb: 1,
+                        borderRadius: 2,
+                        cursor: 'pointer',
+                        '&:hover': { backgroundColor: 'canvas.subtle' },
                       }}
                     >
-                      {artifact.description}
-                    </Text>
-                  )}
-                  {artifact.tags.length > 0 && (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-                      {artifact.tags.map((tag) => {
-                        const active = selectedTags.has(tag);
-                        return (
-                          <Text
-                            key={tag}
-                            onClick={(e: React.MouseEvent) => {
-                              e.stopPropagation();
-                              toggleTag(tag);
-                            }}
-                            sx={{
-                              fontSize: '10px',
-                              px: 1,
-                              py: '1px',
-                              borderRadius: 2,
-                              cursor: 'pointer',
-                              backgroundColor: active ? accent : accentSubtle,
-                              color: active ? accentText : accent,
-                            }}
-                          >
-                            {tag}
-                          </Text>
-                        );
-                      })}
+                      <Text sx={{ fontSize: 1, display: 'block' }}>{artifact.title}</Text>
+                      {artifact.description && (
+                        <Text
+                          sx={{
+                            fontSize: 0,
+                            color: 'fg.muted',
+                            display: '-webkit-box',
+                            mt: 1,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                          }}
+                        >
+                          {artifact.description}
+                        </Text>
+                      )}
+                      {artifact.tags.length > 0 && (
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                          {artifact.tags.map((tag) => {
+                            const active = selectedTags.has(tag);
+                            return (
+                              <Text
+                                key={tag}
+                                onClick={(e: React.MouseEvent) => {
+                                  e.stopPropagation();
+                                  toggleTag(tag);
+                                }}
+                                sx={{
+                                  fontSize: '10px',
+                                  px: 1,
+                                  py: '1px',
+                                  borderRadius: 2,
+                                  cursor: 'pointer',
+                                  backgroundColor: active ? accent : accentSubtle,
+                                  color: active ? accentText : accent,
+                                }}
+                              >
+                                {tag}
+                              </Text>
+                            );
+                          })}
+                        </Box>
+                      )}
                     </Box>
-                  )}
-                </Box>
-              ))}
-            </Box>
-          );})}
+                  ))}
+              </Box>
+            );
+          })}
       </Box>
     </Box>
   );
