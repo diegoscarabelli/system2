@@ -7,8 +7,8 @@ Agents interact with the system through custom tools defined in `packages/server
 Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts`):
 
 - Eight tools are always included: `bash`, `read`, `edit`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `web_fetch`
-- `show_artifact` is Guide-only — the Guide is the only agent that interacts with the user via the UI
-- `spawn_agent` and `terminate_agent` are conditional — only agents that receive a spawner callback (Guide and Conductors) get these tools
+- `show_artifact` is Guide-only: the Guide is the only agent that interacts with the user via the UI
+- `spawn_agent` and `terminate_agent` are conditional: only agents that receive a spawner callback (Guide and Conductors) get these tools
 - `web_search` is conditional on a Brave Search API key being configured
 
 ## Tool Reference
@@ -55,7 +55,7 @@ Edit a file by replacing an exact string match. The `old_string` must appear exa
 
 - **Uniqueness check:** if `old_string` appears 0 or >1 times, the edit fails with an error instructing the agent to add more context
 - **Insertions:** use surrounding context as `old_string` and embed new content in `new_string`
-- **Preferred over `write`** for modifying existing files — only changes what is specified
+- **Preferred over `write`** for modifying existing files: only changes what is specified
 - For bulk operations where `edit` is inconvenient, use `bash` with `sed`, `awk`, `>>`, etc.
 
 ### `write`
@@ -70,7 +70,7 @@ Write or create files on the filesystem. Overwrites the entire file.
 
 Auto-creates parent directories if they don't exist. Use for creating new files or complete rewrites. For modifying specific parts of an existing file, prefer `edit`. For operations where neither is convenient, use `bash`.
 
-**Auto-commit (`edit` and `write`):** When `commit_message` is provided, the tool runs `git add <file> && git commit -m <message>` in `~/.system2/` after the file operation. Git failure is non-fatal — the file change still succeeds. This is the primary mechanism for version-tracking knowledge and project files.
+**Auto-commit (`edit` and `write`):** When `commit_message` is provided, the tool runs `git add <file> && git commit -m <message>` in `~/.system2/` after the file operation. Git failure is non-fatal: the file change still succeeds. This is the primary mechanism for version-tracking knowledge and project files.
 
 ### `read_system2_db`
 
@@ -80,7 +80,7 @@ Query the System2 app database (read-only).
 |-----------|------|-------------|
 | `sql` | string | SQL SELECT query |
 
-Executes against `~/.system2/app.db`. Returns rows as JSON. Only SELECT queries are allowed. **Only for System2's management database** — for data pipeline databases use `bash`. See [Database](database.md) for the schema.
+Executes against `~/.system2/app.db`. Returns rows as JSON. Only SELECT queries are allowed. **Only for System2's management database**: for data pipeline databases use `bash`. See [Database](database.md) for the schema.
 
 ### `write_system2_db`
 
@@ -91,7 +91,7 @@ Create or update records in the System2 app database.
 | `operation` | string | Named operation (see table below) |
 | _(varies)_ | _(varies)_ | Additional params depend on operation |
 
-Executes against `~/.system2/app.db` using structured named operations that delegate to `DatabaseClient` methods. `updated_at` is always maintained automatically. The `author` field on task comments is auto-filled from the calling agent's ID. **Only for System2's management database** — for data pipeline databases use `bash`. For ad-hoc SQL not covered by these operations, use `bash` with `sqlite3 ~/.system2/app.db`.
+Executes against `~/.system2/app.db` using structured named operations that delegate to `DatabaseClient` methods. `updated_at` is always maintained automatically. The `author` field on task comments is auto-filled from the calling agent's ID. **Only for System2's management database**: for data pipeline databases use `bash`. For ad-hoc SQL not covered by these operations, use `bash` with `sqlite3 ~/.system2/app.db`.
 
 | Operation | Required | Optional | Notes |
 |-----------|----------|----------|-------|
@@ -99,7 +99,7 @@ Executes against `~/.system2/app.db` using structured named operations that dele
 | `updateProject` | `id` | `name`, `description`, `status`, `labels`, `start_at`, `end_at` | **Guide and Conductor only.** Conductors restricted to own project. |
 | `createTask` | `project`, `title`, `description` | `status`, `priority`, `assignee`, `labels`, `parent`, `start_at` | Project-scoped. `assignee` restricted to Guide and Conductor. `status` defaults to `"todo"`, `priority` to `"medium"`. |
 | `updateTask` | `id` | `title`, `description`, `status`, `priority`, `assignee`, `labels`, `parent`, `start_at`, `end_at` | Project-scoped. `assignee` restricted to Guide and Conductor. |
-| `claimTask` | `id` | — | Atomically claims a `todo` task; enforces scope match (project-scoped agents: same project; project-less agents: project-less tasks only); `assignee` set to calling agent's ID. Returns `{ claimed: true, task }` or `{ claimed: false, error }`. Secondary mechanism — prefer assigned tasks. |
+| `claimTask` | `id` | — | Atomically claims a `todo` task; enforces scope match (project-scoped agents: same project; project-less agents: project-less tasks only); `assignee` set to calling agent's ID. Returns `{ claimed: true, task }` or `{ claimed: false, error }`. Secondary mechanism: prefer assigned tasks. |
 | `createTaskLink` | `source`, `target`, `relationship` | — | Project-scoped (checked via source task). `relationship`: `blocked_by` \| `relates_to` \| `duplicates` |
 | `deleteTaskLink` | `id` | — | Project-scoped (checked via source task) |
 | `createTaskComment` | `task`, `content` | — | Project-scoped. `author` auto-filled from agent ID. |
@@ -130,17 +130,17 @@ Routes through `AgentRegistry` to find the target `AgentHost`, then calls `deliv
 
 ### `show_artifact`
 
-Display an artifact file in the UI panel. **Guide-only** — the Guide is the only agent that interacts with the user via the UI. Supports tabbed display (multiple artifacts open at once).
+Display an artifact file in the UI panel. **Guide-only**: the Guide is the only agent that interacts with the user via the UI. Supports tabbed display (multiple artifacts open at once).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `file_path` | string | Absolute path to the artifact file. Supports `~/` prefix for home directory. |
 
 - **DB metadata lookup:** queries the `artifact` table for title. If registered, the DB title is used as the tab label; otherwise, the filename is used.
-- **Unregistered files:** files not in the `artifact` table can still be shown — the filename is used as the tab label.
+- **Unregistered files:** files not in the `artifact` table can still be shown; the filename is used as the tab label.
 - **Missing registered files:** if the file is registered but missing from disk, returns an error with the title and a hint to search for the filename.
 - **Live reload:** the server starts an `fs.watch` on the file; modifications trigger automatic UI refresh of the correct tab.
-- **Only one artifact watched at a time** -- showing a new artifact closes the previous watcher.
+- **Only one artifact watched at a time:** showing a new artifact closes the previous watcher.
 
 ### `web_fetch`
 
@@ -186,7 +186,7 @@ Creates an agent record in app.db, starts a new `AgentHost` session, registers i
 
 ### `terminate_agent`
 
-Archive an active agent — abort its session, unregister from `AgentRegistry`, and mark `status: "archived"` in app.db.
+Archive an active agent: abort its session, unregister from `AgentRegistry`, and mark `status: "archived"` in app.db.
 
 | Parameter  | Type   | Description                         |
 |------------|--------|-------------------------------------|
@@ -201,7 +201,7 @@ Archive an active agent — abort its session, unregister from `AgentRegistry`, 
 
 ## See Also
 
-- [Agents](agents.md) -- agent roles, lifecycle, spawn/terminate, work management
-- [Database](database.md) -- schema for `read_system2_db` and `write_system2_db`
-- [Configuration](configuration.md) -- web search configuration
-- [UI](packages/ui.md) -- artifact display and postMessage bridge
+- [Agents](agents.md): agent roles, lifecycle, spawn/terminate, work management
+- [Database](database.md): schema for `read_system2_db` and `write_system2_db`
+- [Configuration](configuration.md): web search configuration
+- [UI](packages/ui.md): artifact display and postMessage bridge

@@ -3,8 +3,8 @@
 System2 uses [SQLite](https://www.sqlite.org/) via [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) with WAL mode for concurrent read/write access.
 
 **Key source files:**
-- `packages/server/src/db/schema.sql` -- full schema
-- `packages/server/src/db/client.ts` -- DatabaseClient class
+- `packages/server/src/db/schema.sql`: full schema
+- `packages/server/src/db/client.ts`: DatabaseClient class
 
 **Location:** `~/.system2/app.db`
 
@@ -37,15 +37,15 @@ AI agent instances.
 | `id` | INTEGER PK | Auto-incrementing |
 | `role` | TEXT NOT NULL | `guide` \| `conductor` \| `narrator` \| `reviewer` |
 | `project` | INTEGER FK | References `project(id)`. NULL for system-wide agents. |
-| `status` | TEXT | `idle` \| `active` \| `archived` |
+| `status` | TEXT | `active` \| `archived` |
 | `created_at` | TEXT | Auto-set |
 | `updated_at` | TEXT | Auto-set |
 
 **Indices:**
 - `idx_agent_project` on `project`
 - `idx_agent_role` on `role`
-- `idx_agent_guide_singleton` -- unique on `role` WHERE `role = 'guide'` (enforces singleton)
-- `idx_agent_narrator_singleton` -- unique on `role` WHERE `role = 'narrator'` (enforces singleton)
+- `idx_agent_guide_singleton`: unique on `role` WHERE `role = 'guide'` (enforces singleton)
+- `idx_agent_narrator_singleton`: unique on `role` WHERE `role = 'narrator'` (enforces singleton)
 
 ### `task`
 
@@ -126,7 +126,7 @@ Project, task, comment, link, and artifact CRUD methods are also available (`cre
 
 ## Database Access for Agents
 
-Both tools operate exclusively on `~/.system2/app.db` — the System2 management database. They are **not** for querying data pipeline databases (TimescaleDB, DuckDB, etc.); use `bash` for those.
+Both tools operate exclusively on `~/.system2/app.db`, the System2 management database. They are **not** for querying data pipeline databases (TimescaleDB, DuckDB, etc.); use `bash` for those.
 
 ### Read access
 
@@ -140,6 +140,6 @@ For ad-hoc SQL not covered by the tool (bulk updates, complex transactions), age
 
 ## See Also
 
-- [Shared Types](packages/shared.md) -- TypeScript interfaces matching this schema
-- [Tools](tools.md) -- `read_system2_db` and `write_system2_db` tools
-- [Server](packages/server.md) -- `/api/query` endpoint
+- [Shared Types](packages/shared.md): TypeScript interfaces matching this schema
+- [Tools](tools.md): `read_system2_db` and `write_system2_db` tools
+- [Server](packages/server.md): `/api/query` endpoint

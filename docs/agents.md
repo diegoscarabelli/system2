@@ -3,11 +3,11 @@
 System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/pi-mono) SDK, which provides the core agent loop, tool execution, and JSONL session persistence. System2 adds multi-agent orchestration, LLM failover, dynamic knowledge injection, and inter-agent messaging.
 
 **Key source files:**
-- `packages/server/src/agents/host.ts` -- AgentHost class
-- `packages/server/src/agents/registry.ts` -- AgentRegistry
-- `packages/server/src/agents/auth-resolver.ts` -- AuthResolver
-- `packages/server/src/agents/library/` -- agent identity and system instructions (Markdown + YAML frontmatter)
-- `packages/server/src/agents/agents.md` -- shared reference prepended to all system prompts
+- `packages/server/src/agents/host.ts`: AgentHost class
+- `packages/server/src/agents/registry.ts`: AgentRegistry
+- `packages/server/src/agents/auth-resolver.ts`: AuthResolver
+- `packages/server/src/agents/library/`: agent identity and system instructions (Markdown + YAML frontmatter)
+- `packages/server/src/agents/agents.md`: shared reference prepended to all system prompts
 
 ## Agent Roles
 
@@ -20,7 +20,9 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 **Guide and Narrator** are singletons created at server startup. Their sessions persist indefinitely across restarts (via `SessionManager.continueRecent()`).
 
-**Conductor and Reviewer** are project-scoped — spawned by Guide for every project, archived when done. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project.
+**Conductor and Reviewer** are project-scoped, spawned by Guide for every project and archived when done. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project. On server restart, all non-archived project-scoped agents are restored automatically. If an agent fails to restore, it is archived.
+
+**Agent status** has two values in the database: `active` (alive, should be restored on restart) and `archived` (terminated, will not be restored). Whether an agent is currently processing work is tracked in memory via `AgentHost.isBusy()`, not in the database.
 
 ## Agent Identity and System Instructions
 
@@ -58,7 +60,7 @@ The static layers are concatenated into `staticPrompt`. The dynamic layers are l
 
 Files with 10 or fewer lines are skipped (to ignore empty templates).
 
-Anthropic's prompt caching optimizes the static prefix -- only the refreshed knowledge portion is reprocessed on each call.
+Prompt caching (where supported by the provider) optimizes the static prefix: only the refreshed knowledge portion is reprocessed on each call.
 
 ## AgentHost (`host.ts`)
 
@@ -73,7 +75,7 @@ Anthropic's prompt caching optimizes the static prefix -- only the refreshed kno
 5. Parse YAML frontmatter for model selection
 6. Create `DefaultResourceLoader` with `systemPromptOverride` callback
 7. Create session via `createAgentSession()` with JSONL persistence, custom tools, and `thinkingLevel: 'high'`
-8. Subscribe to session events for error detection and listener forwarding
+8. Subscribe to session events for error detection, busy state tracking, and listener forwarding
 
 ### Methods
 
@@ -84,6 +86,18 @@ Anthropic's prompt caching optimizes the static prefix -- only the refreshed kno
 | `subscribe(listener)` | Listen to all session events. Returns unsubscribe function. |
 | `abort()` | Cancel current execution. |
 | `getContextUsage()` | Get context window usage stats. |
+| `isBusy()` | Whether the agent is currently processing (derived from session events). |
+| `getProvider()` | Current LLM provider name. |
+
+### Busy State
+
+`AgentHost` tracks whether the agent is actively processing via an in-memory `busy` flag. This is not stored in the database (it is transient runtime state, not lifecycle state).
+
+- **Set to true** on `message_update` or `tool_execution_start` events (agent is thinking, generating, or running tools)
+- **Set to false** on `agent_end` event (turn complete)
+- **Broadcast:** when the busy flag changes, the server broadcasts `agents_changed` over WebSocket so the UI can update the agents pane in real time
+
+The `/api/agents` endpoint combines DB agent records with the in-memory busy state for each registered AgentHost.
 
 ## Message Delivery
 
@@ -211,7 +225,7 @@ User request → Guide creates project in app.db
 
 ## Work Management via app.db
 
-Every System2 agent — Guide, Conductor, Narrator, Reviewer, and any specialist agent spawned by Conductor — **must** use `app.db` (`~/.system2/app.db`) as the single source of truth for all project and task management. The tools `read_system2_db` and `write_system2_db` are the primary interface. See [database.md](database.md) for the full schema and [tools.md](tools.md) for tool reference.
+Every System2 agent (Guide, Conductor, Narrator, Reviewer, and any specialist agent spawned by Conductor) **must** use `app.db` (`~/.system2/app.db`) as the single source of truth for all project and task management. The tools `read_system2_db` and `write_system2_db` are the primary interface. See [database.md](database.md) for the full schema and [tools.md](tools.md) for tool reference.
 
 ### Work Assignment Model
 
@@ -219,11 +233,11 @@ Every System2 agent — Guide, Conductor, Narrator, Reviewer, and any specialist
 
 **Conductor** is the primary planner. In projects where the Conductor is the sole executor, it self-assigns tasks via `createTask`/`updateTask` and coordinates the Reviewer directly. When specialist agents are active, the Conductor creates tasks, assigns them, and messages each agent its task IDs.
 
-**Guide** and **Narrator** are system-wide singleton roles — they do not belong to a project and are not subject to project-scoped work assignment.
+**Guide** and **Narrator** are system-wide singleton roles: they do not belong to a project and are not subject to project-scoped work assignment.
 
 **Pull-based work claiming** via `claimTask` is a secondary mechanism, appropriate only when the Conductor has explicitly set up a pool of unassigned `todo` tasks for an agent to self-schedule, and the task scope matches the agent's scope.
 
-If you have no assigned work and no pull-mode arrangement, **ask the Conductor** what to do next — do not self-assign arbitrarily.
+If you have no assigned work and no pull-mode arrangement, **ask the Conductor** what to do next: do not self-assign arbitrarily.
 
 ### Mandatory Behaviors
 
@@ -283,13 +297,13 @@ The Conductor is the primary planner for any project it is assigned to. Upon rec
 | Channel        | Tool                                   | Use for                                                         |
 |----------------|----------------------------------------|-----------------------------------------------------------------|
 | Direct message | `message_agent`                        | Real-time coordination, urgent updates, plan adjustment notices |
-| Task comment   | `write_system2_db` `createTaskComment` | Progress, decisions, results — permanent audit trail            |
+| Task comment   | `write_system2_db` `createTaskComment` | Progress, decisions, results (permanent audit trail)            |
 
 Always include task/project/comment IDs in messages. The recipient can then run a single `read_system2_db` query to get full context.
 
 **Example message from a data agent to Conductor:**
 
-> "Task #42 (Extract LinkedIn data) done. 12,450 rows written to `~/.system2/data/linkedin_raw.csv`. Sparse data in 2024-Q1 — details in comment #87 on task #42. Task #43 (Normalize data) is now unblocked per blocked_by link."
+> "Task #42 (Extract LinkedIn data) done. 12,450 rows written to `~/.system2/data/linkedin_raw.csv`. Sparse data in 2024-Q1; details in comment #87 on task #42. Task #43 (Normalize data) is now unblocked per blocked_by link."
 
 ---
 
@@ -299,7 +313,7 @@ Always include task/project/comment IDs in messages. The recipient can then run 
 
 **Agents**: Guide (singleton), Conductor (project-scoped), DataAgent-Extract (spawned by Conductor), DataAgent-Analyze (spawned by Conductor), Reviewer (project-scoped), Narrator (singleton).
 
-#### Phase 1 — User Request to Project Creation
+#### Phase 1: User Request to Project Creation
 
 1. **User → Guide**: "Analyze our LinkedIn campaigns for the last 6 months."
 
@@ -315,7 +329,7 @@ Always include task/project/comment IDs in messages. The recipient can then run 
    message_agent → Reviewer: "Project #1. Review Conductor's analytical work on request."
    ```
 
-#### Phase 2 — Conductor Plans the Task Hierarchy
+#### Phase 2: Conductor Plans the Task Hierarchy
 
 Conductor reads project #1, creates tasks and dependency links:
 
@@ -335,7 +349,7 @@ Task links: #11 `blocked_by` #10 → #12 `blocked_by` #11 → #15 `blocked_by` #
 
 **Guide → User**: "Project underway. Data extraction starts now."
 
-#### Phase 3 — Parallel Execution and Mid-Flight Adjustment
+#### Phase 3: Parallel Execution and Mid-Flight Adjustment
 
 DataAgent-Extract, DataAgent-Analyze, and Reviewer work through their tasks in dependency order. When Reviewer finds an error in the engagement rate formula, it sends an urgent message to Conductor. Conductor creates a correction task (#18), notifies DataAgent-Analyze, and keeps Guide informed. After correction, Reviewer approves.
 
@@ -343,7 +357,7 @@ DataAgent-Extract, DataAgent-Analyze, and Reviewer work through their tasks in d
 
 **Guide → User**: relays concise synthesis at natural conversation points.
 
-#### Phase 4 — Completion and Story
+#### Phase 4: Completion and Story
 
 1. DataAgent-Analyze generates `~/.system2/artifacts/linkedin_report.html`.
 2. Conductor creates task "Write project story" assigned to Narrator, messages Narrator with task ID and project details.
@@ -357,9 +371,9 @@ DataAgent-Extract, DataAgent-Analyze, and Reviewer work through their tasks in d
 
 ## See Also
 
-- [Tools](tools.md) -- all tools available to agents, including spawn_agent and terminate_agent
-- [Knowledge System](knowledge-system.md) -- knowledge files injected into system prompts
-- [Database](database.md) -- app.db schema (projects, tasks, agents, task_links, task_comments)
-- [Scheduler](scheduler.md) -- how scheduled jobs deliver messages to Narrator
-- [Configuration](configuration.md) -- LLM provider and failover configuration
-- [WebSocket Protocol](websocket-protocol.md) -- how agent events stream to the UI
+- [Tools](tools.md): all tools available to agents, including spawn_agent and terminate_agent
+- [Knowledge System](knowledge-system.md): knowledge files injected into system prompts
+- [Database](database.md): app.db schema (projects, tasks, agents, task_links, task_comments)
+- [Scheduler](scheduler.md): how scheduled jobs deliver messages to Narrator
+- [Configuration](configuration.md): LLM provider and failover configuration
+- [WebSocket Protocol](websocket-protocol.md): how agent events stream to the UI

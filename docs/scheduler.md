@@ -3,8 +3,8 @@
 System2 runs an in-process scheduler using [Croner](https://github.com/Hexagon/croner) for periodic Narrator jobs. Jobs pre-compute deterministic data and deliver it to the Narrator via `deliverMessage()`.
 
 **Key source files:**
-- `packages/server/src/scheduler/scheduler.ts` -- Scheduler class
-- `packages/server/src/scheduler/jobs.ts` -- job definitions and data collection
+- `packages/server/src/scheduler/scheduler.ts`: Scheduler class
+- `packages/server/src/scheduler/jobs.ts`: job definitions and data collection
 
 ## Scheduler Class
 
@@ -51,12 +51,12 @@ Each project log is a single continuous file per project lifetime (unlike daily 
    - `memory.md` frontmatter
    - Fall back to `intervalMinutes` ago
 2. **Create today's file** if it doesn't exist (with empty YAML frontmatter)
-3. **Read previous context** -- last 20 lines of the most recent daily summary
+3. **Read previous context:** last 20 lines of the most recent daily summary
 4. **Build message** with two sections:
-   - **Project Activity** -- per-project sections with project-scoped agent JSONL and project DB changes (reused from Phase 1)
-   - **Non-Project Activity** -- Guide JSONL (full stream spanning all projects) and DB changes not tied to any active project. The Narrator's own JSONL is excluded to prevent a recursive feedback loop (each message would embed prior messages).
-5. **Check for activity** -- skip delivery if there's no meaningful activity
-6. **Deliver** -- send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
+   - **Project Activity:** per-project sections with project-scoped agent JSONL and project DB changes (reused from Phase 1)
+   - **Non-Project Activity:** Guide JSONL (full stream spanning all projects) and DB changes not tied to any active project. The Narrator's own JSONL is excluded to prevent a recursive feedback loop (each message would embed prior messages).
+5. **Check for activity:** skip delivery if there's no meaningful activity
+6. **Deliver:** send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
 
 The Narrator synthesizes each section into narrative summaries, avoiding repetition of project-specific content already covered in project-log entries (which are processed first).
 
@@ -81,7 +81,7 @@ This runs once at server start, after agent sessions are initialized.
 
 ## See Also
 
-- [Knowledge System](knowledge-system.md) -- files that the Narrator updates
-- [Agents](agents.md) -- `deliverMessage()` and delivery modes
-- [Configuration](configuration.md) -- `daily_summary_interval_minutes`
-- [Server](packages/server.md) -- catch-up logic in `start()`
+- [Knowledge System](knowledge-system.md): files that the Narrator updates
+- [Agents](agents.md): `deliverMessage()` and delivery modes
+- [Configuration](configuration.md): `daily_summary_interval_minutes`
+- [Server](packages/server.md): catch-up logic in `start()`

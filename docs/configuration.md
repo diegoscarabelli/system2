@@ -3,9 +3,9 @@
 All System2 settings live in `~/.system2/config.toml`, created by `system2 onboard` with `0600` permissions (contains API keys).
 
 **Key source files:**
-- `packages/shared/src/types/config.ts` -- TypeScript types
-- `packages/cli/src/utils/config.ts` -- TOML loading and validation
-- `packages/server/src/agents/auth-resolver.ts` -- failover logic
+- `packages/shared/src/types/config.ts`: TypeScript types
+- `packages/cli/src/utils/config.ts`: TOML loading and validation
+- `packages/server/src/agents/auth-resolver.ts`: failover logic
 
 ## config.toml Reference
 
@@ -106,7 +106,7 @@ max_history_messages = 100  # Max messages in chat history ring buffer
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
 
-The `openai-compatible` provider requires `base_url` and `model` fields in addition to keys. Use it for self-hosted proxies or providers not listed above. The optional `compat_reasoning` field (default `true`) declares whether the model supports extended thinking. For built-in providers (anthropic, openai, etc.), the SDK already knows which models support reasoning — `compat_reasoning` only applies to `openai-compatible` since the SDK has no way to know the capabilities of an arbitrary endpoint. Setting it to `true` for a model that doesn't support reasoning is safe: the SDK only sends `reasoning_effort` when the provider's compatibility layer confirms support, and most backends ignore unknown parameters.
+The `openai-compatible` provider requires `base_url` and `model` fields in addition to keys. Use it for self-hosted proxies or providers not listed above. The optional `compat_reasoning` field (default `true`) declares whether the model supports extended thinking. For built-in providers (anthropic, openai, etc.), the SDK already knows which models support reasoning; `compat_reasoning` only applies to `openai-compatible` since the SDK has no way to know the capabilities of an arbitrary endpoint. Setting it to `true` for a model that doesn't support reasoning is safe: the SDK only sends `reasoning_effort` when the provider's compatibility layer confirms support, and most backends ignore unknown parameters.
 
 ## Automatic Failover
 
@@ -153,7 +153,7 @@ Auto-backups: `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`
 
 ## See Also
 
-- [CLI](packages/cli.md) -- `system2 onboard` creates the config
-- [Agents](agents.md) -- how LLM config drives provider selection
-- [Knowledge System](knowledge-system.md) -- knowledge directory details
-- [Scheduler](scheduler.md) -- `daily_summary_interval_minutes`
+- [CLI](packages/cli.md): `system2 onboard` creates the config
+- [Agents](agents.md): how LLM config drives provider selection
+- [Knowledge System](knowledge-system.md): knowledge directory details
+- [Scheduler](scheduler.md): `daily_summary_interval_minutes`

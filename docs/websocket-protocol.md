@@ -3,15 +3,15 @@
 The UI communicates with the server over a single WebSocket connection. The server streams agent events in real time.
 
 **Key source files:**
-- `packages/shared/src/types/messages.ts` -- TypeScript types
-- `packages/server/src/websocket/handler.ts` -- WebSocketHandler
-- `packages/ui/src/hooks/useWebSocket.ts` -- client-side hook
+- `packages/shared/src/types/messages.ts`: TypeScript types
+- `packages/server/src/websocket/handler.ts`: WebSocketHandler
+- `packages/ui/src/hooks/useWebSocket.ts`: client-side hook
 
 ## Connection
 
 WebSocket connects to the server port (default 3000). In development, Vite proxies `ws://localhost:3001/ws` to the backend.
 
-On connect, the server sends a `chat_history` message with recent messages from `MessageHistory` (ring buffer, default 100 messages). The server is the single source of truth for chat history -- the UI does not persist messages.
+On connect, the server sends a `chat_history` message with recent messages from `MessageHistory` (ring buffer, default 100 messages). The server is the single source of truth for chat history: the UI does not persist messages.
 
 ## Client -> Server
 
@@ -45,7 +45,9 @@ type ServerMessage =
   | { type: 'error'; message: string }
   | { type: 'ready_for_input' }
   | { type: 'chat_history'; messages: ChatMessage[] }
-  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number };
+  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number }
+  | { type: 'catalog_changed' }
+  | { type: 'agents_changed' };
 ```
 
 | Message | Description |
@@ -55,12 +57,14 @@ type ServerMessage =
 | `tool_call_start` / `tool_call_end` | Tool execution lifecycle |
 | `artifact` | Display artifact in a UI tab. Includes `title` (from DB or filename) and `filePath` (absolute path for tab dedup and reload targeting). Also sent on live reload (file watch). |
 | `context_usage` | Context window usage after each agent turn |
-| `provider_info` | Sent on connect -- current LLM provider name |
-| `provider_change` | Sent on failover -- provider switched due to API issues |
+| `provider_info` | Sent on connect: current LLM provider name |
+| `provider_change` | Sent on failover: provider switched due to API issues |
 | `error` | Error message |
 | `ready_for_input` | Agent finished, ready for next message |
-| `chat_history` | Sent on connect -- recent messages from server |
-| `user_message_broadcast` | User message from another tab -- broadcast to all other connected clients |
+| `chat_history` | Sent on connect: recent messages from server |
+| `user_message_broadcast` | User message from another tab, broadcast to all other connected clients |
+| `catalog_changed` | Artifact catalog entries created/updated/deleted, UI should re-fetch |
+| `agents_changed` | Any agent's busy state changed, agents pane should re-fetch |
 
 ## Message Flow
 
@@ -123,6 +127,6 @@ Each WebSocket connection gets its own `WebSocketHandler` instance. It:
 
 ## See Also
 
-- [Shared Types](packages/shared.md) -- TypeScript type definitions
-- [UI](packages/ui.md) -- client-side WebSocket hook and chat store
-- [Agents](agents.md) -- `prompt()` and `deliverMessage()` methods
+- [Shared Types](packages/shared.md): TypeScript type definitions
+- [UI](packages/ui.md): client-side WebSocket hook and chat store
+- [Agents](agents.md): `prompt()` and `deliverMessage()` methods

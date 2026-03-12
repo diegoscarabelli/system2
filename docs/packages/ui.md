@@ -1,6 +1,6 @@
 # @system2/ui
 
-React web interface providing a real-time chat experience with artifact display. Chat history is managed server-side -- the UI is stateless and receives history on WebSocket connect.
+React web interface providing a real-time chat experience with artifact display. Chat history is managed server-side: the UI is stateless and receives history on WebSocket connect.
 
 **Source:** `packages/ui/src/`
 **Build:** [Vite](https://vite.dev/) -> `dist/` (static assets)
@@ -19,6 +19,7 @@ src/
 │   ├── MessageList.tsx    # Message timeline with streaming
 │   ├── MessageInput.tsx   # Auto-growing textarea with queue indicator
 │   ├── ArtifactViewer.tsx    # Tabbed artifact display with sandboxed iframes
+│   ├── AgentPane.tsx          # Active agent list with busy indicators
 │   ├── ArtifactCatalog.tsx  # Browsable overlay of all registered artifacts
 │   └── ParticlesBackground.tsx # Animated particle background (tsparticles)
 ├── hooks/
@@ -47,7 +48,7 @@ App (ThemeProvider)
 
 ### Layout
 
-Two-panel design with a draggable divider. The artifact panel takes the left side, the chat panel the right (20-60% resizable, default 33%). Header contains logo, artifact catalog toggle, and light/dark theme toggle.
+VSCode-style layout with an activity bar on the left edge (48px). The activity bar contains toggle buttons for the artifact catalog and agent pane (top), plus particles and theme toggles (bottom). Opening one side panel closes the other. The artifact viewer fills the center, with the chat panel on the right (20-60% resizable, default 33%). Both the side panel and chat panel have draggable resize handles.
 
 ### MessageList
 
@@ -87,7 +88,11 @@ Configuration: 120 particles in accent + teal colors, linked within 150px distan
 
 ### ArtifactCatalog
 
-Overlay panel (320px wide, absolute-positioned over the artifact area) showing all registered artifacts from the database. Fetches `GET /api/artifacts` on mount. Groups artifacts by project (null project shown as "General"). Clicking an item opens it as a new tab in ArtifactViewer. Toggled via button in the header bar.
+Side panel showing all registered artifacts from the database. Fetches `GET /api/artifacts` on mount and re-fetches on `catalog_changed` WebSocket events. Groups artifacts by project (null project shown as "General"). Supports text search and project/tag filtering. Clicking an item opens it as a new tab in ArtifactViewer. Toggled via StackIcon in the activity bar.
+
+### AgentPane
+
+Side panel showing all non-archived agents with real-time busy/idle indicators. Fetches `GET /api/agents` on mount and re-fetches on `agents_changed` WebSocket events. Groups agents into "System" (Guide, Narrator) listed first, then by project name. Each agent row shows a teal (`#00aaba`) circle when busy or grey when idle. Toggled via PeopleIcon in the activity bar.
 
 ## State Management
 
@@ -114,7 +119,8 @@ Tab-based artifact state with localStorage persistence (`system2:artifact-tabs`)
 |-------|------|-------------|
 | `tabs` | `ArtifactTab[]` | Open artifact tabs (id, url, filePath, title) |
 | `activeTabId` | `string \| null` | Currently active tab |
-| `catalogOpen` | `boolean` | Whether the catalog overlay is visible |
+| `catalogOpen` | `boolean` | Whether the catalog panel is visible |
+| `agentsOpen` | `boolean` | Whether the agents panel is visible |
 
 Key behaviors:
 
@@ -153,6 +159,6 @@ UI changes hot-reload instantly. See [Contributing](../../CONTRIBUTING.md) for t
 
 ## See Also
 
-- [WebSocket Protocol](../websocket-protocol.md) -- message types handled by the WebSocket hook
-- [Server](server.md) -- backend serving artifacts and handling WebSocket connections
-- [Architecture](../architecture.md) -- how the UI fits in the system
+- [WebSocket Protocol](../websocket-protocol.md): message types handled by the WebSocket hook
+- [Server](server.md): backend serving artifacts and handling WebSocket connections
+- [Architecture](../architecture.md): how the UI fits in the system

@@ -87,5 +87,5 @@ Rotates `~/.system2/logs/system2.log` when it exceeds the configured threshold (
 
 ## See Also
 
-- [Server](server.md) -- the server this CLI manages
-- [Configuration](../configuration.md) -- config.toml format and defaults
+- [Server](server.md): the server this CLI manages
+- [Configuration](../configuration.md): config.toml format and defaults

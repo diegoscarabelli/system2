@@ -1,12 +1,12 @@
 # Knowledge System
 
-System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked for change history. Knowledge files are injected into agent system prompts dynamically -- re-read on every LLM API call for immediate effect.
+System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked for change history. Knowledge files are injected into agent system prompts dynamically, re-read on every LLM API call for immediate effect.
 
 **Key source files:**
-- `packages/server/src/knowledge/init.ts` -- directory initialization
-- `packages/server/src/knowledge/templates.ts` -- default file templates
-- `packages/server/src/knowledge/git.ts` -- git repo setup
-- `packages/server/src/agents/host.ts` -- `loadKnowledgeContext()` method
+- `packages/server/src/knowledge/init.ts`: directory initialization
+- `packages/server/src/knowledge/templates.ts`: default file templates
+- `packages/server/src/knowledge/git.ts`: git repo setup
+- `packages/server/src/agents/host.ts`: `loadKnowledgeContext()` method
 
 ## Knowledge Directory
 
@@ -38,7 +38,7 @@ Project-scoped files live outside `knowledge/`:
 | `infrastructure.md` | Guide | During onboarding and as infrastructure evolves |
 | `user.md` | Guide | During onboarding and ongoing interactions |
 | `memory.md` | Narrator | Daily at 4 AM (memory-update job) |
-| `memory.md ## Notes` | Any agent | Anytime -- agents write important facts here |
+| `memory.md ## Notes` | Any agent | Anytime: agents write important facts here |
 | `daily_summaries/*.md` | Narrator | Every 30 minutes (configurable) |
 | `projects/{id}_{name}/log.md` | Narrator | Every 30 minutes (same cron as daily summary) |
 | `projects/{id}_{name}/project_story.md` | Narrator | Once, when Conductor assigns story task at project completion |
@@ -62,8 +62,8 @@ Each section is prefixed with a `### ~/.system2/...` heading so agents can ident
 
 ```text
 SYSTEM PROMPT (rebuilt on every LLM call):
-  1. agents.md — shared reference (static)
-  2. library/guide.md — Guide role instructions (static)
+  1. agents.md: shared reference (static)
+  2. library/guide.md: Guide role instructions (static)
   3. ## Knowledge Base (dynamic, re-read every call)
        ### ~/.system2/knowledge/infrastructure.md
        [content]
@@ -97,8 +97,8 @@ CURRENT TURN:
 
 ```text
 SYSTEM PROMPT (rebuilt on every LLM call):
-  1. agents.md — shared reference (static)
-  2. library/conductor.md — Conductor role instructions (static)
+  1. agents.md: shared reference (static)
+  2. library/conductor.md: Conductor role instructions (static)
   3. ## Knowledge Base (dynamic, re-read every call)
        ### ~/.system2/knowledge/infrastructure.md
        [content]
@@ -123,7 +123,7 @@ CURRENT TURN:
   [inbound agent message / task assignment]
 ```
 
-Files with 10 lines or fewer are skipped. If no knowledge files have content, the `## Knowledge Base` block is omitted but `Conversation history follows.` is still appended. The `user` role in agent JSONL is used for all inbound messages — from the user, other agents, or the scheduler.
+Files with 10 lines or fewer are skipped. If no knowledge files have content, the `## Knowledge Base` block is omitted but `Conversation history follows.` is still appended. The `user` role in agent JSONL is used for all inbound messages: from the user, other agents, or the scheduler.
 
 ## memory.md
 
@@ -142,7 +142,7 @@ Consolidated knowledge about the system, user, and project history.
 Agents write important facts here for the Narrator to incorporate.
 ```
 
-The **## Notes** section is a scratchpad -- any agent can append notes. During the daily memory-update job (4 AM), the Narrator reads all recent daily summaries, incorporates new information into the memory document, and clears processed notes.
+The **## Notes** section is a scratchpad: any agent can append notes. During the daily memory-update job (4 AM), the Narrator reads all recent daily summaries, incorporates new information into the memory document, and clears processed notes.
 
 ## Project Logs
 
@@ -208,10 +208,10 @@ See [Scheduler](scheduler.md) for the pipeline that produces project logs and da
 
 ## Initialization
 
-`initializeKnowledge()` creates the knowledge directory structure and writes template files if they don't exist. This is idempotent -- called on every server start.
+`initializeKnowledge()` creates the knowledge directory structure and writes template files if they don't exist. This is idempotent, called on every server start.
 
 ## See Also
 
-- [Agents](agents.md) -- system prompt construction using knowledge
-- [Scheduler](scheduler.md) -- jobs that trigger Narrator updates
-- [Configuration](configuration.md) -- `daily_summary_interval_minutes` setting
+- [Agents](agents.md): system prompt construction using knowledge
+- [Scheduler](scheduler.md): jobs that trigger Narrator updates
+- [Configuration](configuration.md): `daily_summary_interval_minutes` setting

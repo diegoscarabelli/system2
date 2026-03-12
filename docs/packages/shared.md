@@ -1,6 +1,6 @@
 # @system2/shared
 
-Shared TypeScript type definitions used by all other System2 packages. This package has no runtime dependencies -- it exports only types.
+Shared TypeScript type definitions used by all other System2 packages. This package has no runtime dependencies: it exports only types.
 
 **Source:** `packages/shared/src/`
 **Build:** [tsup](https://tsup.egoist.dev/) -> `dist/index.js`
@@ -57,6 +57,6 @@ Types for the WebSocket protocol between UI and server. See [WebSocket Protocol]
 
 ## See Also
 
-- [Database](../database.md) -- schema that these types map to
-- [WebSocket Protocol](../websocket-protocol.md) -- protocol using these message types
-- [Configuration](../configuration.md) -- config.toml structure
+- [Database](../database.md): schema that these types map to
+- [WebSocket Protocol](../websocket-protocol.md): protocol using these message types
+- [Configuration](../configuration.md): config.toml structure
