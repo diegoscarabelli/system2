@@ -138,7 +138,11 @@ export function AgentPane() {
           [...grouped.entries()].map(([group, items]) => {
             const isCollapsed = collapsedGroups.has(group);
             return (
-              <Box key={group} as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 0, mb: 3 }}>
+              <Box
+                key={group}
+                as="table"
+                sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 0, mb: 3 }}
+              >
                 <Box as="thead">
                   {/* Group header row */}
                   <Box
@@ -216,9 +220,10 @@ export function AgentPane() {
                             borderBottom: '1px solid',
                             borderColor: 'border.muted',
                             whiteSpace: 'nowrap',
-                            color: agentContextPercents[agent.id] != null
-                              ? contextColor(agentContextPercents[agent.id] as number, accent)
-                              : 'fg.muted',
+                            color:
+                              agentContextPercents[agent.id] != null
+                                ? contextColor(agentContextPercents[agent.id] as number, accent)
+                                : 'fg.muted',
                           }}
                         >
                           {agentContextPercents[agent.id] != null
