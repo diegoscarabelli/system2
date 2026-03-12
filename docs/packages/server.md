@@ -58,10 +58,11 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 ### `start()` Method
 
 1. Initialize Guide and Narrator agent sessions (`agentHost.initialize()`)
-2. Register Narrator scheduled jobs
-3. Check if Narrator needs catch-up (handles server downtime / laptop sleep)
-4. Register SIGTERM/SIGINT shutdown handlers
-5. Start listening on configured port
+2. Restore previously active spawned agents (conductors, reviewers, etc.) from the database via `initializeAgentHost()`
+3. Register Narrator scheduled jobs
+4. Check if Narrator needs catch-up (handles server downtime / laptop sleep)
+5. Register SIGTERM/SIGINT shutdown handlers
+6. Start listening on configured port
 
 ### Express Routes
 

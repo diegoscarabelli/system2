@@ -40,6 +40,8 @@ type ServerMessage =
   | { type: 'tool_call_end'; name: string; result: string }
   | { type: 'artifact'; url: string; title?: string; filePath?: string }
   | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number }
+  | { type: 'provider_info'; provider: string }
+  | { type: 'provider_change'; provider: string }
   | { type: 'error'; message: string }
   | { type: 'ready_for_input' }
   | { type: 'chat_history'; messages: ChatMessage[] }
@@ -53,6 +55,8 @@ type ServerMessage =
 | `tool_call_start` / `tool_call_end` | Tool execution lifecycle |
 | `artifact` | Display artifact in a UI tab. Includes `title` (from DB or filename) and `filePath` (absolute path for tab dedup and reload targeting). Also sent on live reload (file watch). |
 | `context_usage` | Context window usage after each agent turn |
+| `provider_info` | Sent on connect -- current LLM provider name |
+| `provider_change` | Sent on failover -- provider switched due to API issues |
 | `error` | Error message |
 | `ready_for_input` | Agent finished, ready for next message |
 | `chat_history` | Sent on connect -- recent messages from server |
@@ -106,7 +110,7 @@ Assistant message history is captured by a **single subscriber** registered in `
 
 Each WebSocket connection gets its own `WebSocketHandler` instance. It:
 
-1. Sends chat history on connect
+1. Sends chat history and current provider info on connect
 2. Subscribes to agent session events for streaming to its client
 3. Converts Pi SDK events to `ServerMessage` types:
    - `message_update` (with thinking) -> `thinking_chunk`

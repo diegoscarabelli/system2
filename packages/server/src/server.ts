@@ -204,6 +204,27 @@ export class Server {
   }
 
   /**
+   * Initialize an AgentHost for a given agent ID, register it, and return it.
+   * Single path for all non-singleton agent initialization (spawn + restore).
+   */
+  private async initializeAgentHost(agentId: number): Promise<AgentHost> {
+    const host = new AgentHost({
+      db: this.db,
+      agentId,
+      registry: this.agentRegistry,
+      llmConfig: this.config.llmConfig,
+      servicesConfig: this.config.servicesConfig,
+      toolsConfig: this.config.toolsConfig,
+      spawner: this.makeSpawner(),
+      onArtifactChange: () => this.broadcastCatalogChanged(),
+    });
+
+    await host.initialize();
+    this.agentRegistry.register(agentId, host);
+    return host;
+  }
+
+  /**
    * Create a spawner callback that creates, initializes, and registers new AgentHost instances.
    * The spawner is self-referential: spawned agents (Conductors) receive the same spawner so
    * they can in turn spawn specialist sub-agents and Reviewers.
@@ -213,20 +234,7 @@ export class Server {
       // Create agent record in DB
       const newAgent = this.db.createAgent({ role, project: projectId, status: 'active' });
 
-      // Create new AgentHost with identical config + recursive spawner
-      const newHost = new AgentHost({
-        db: this.db,
-        agentId: newAgent.id,
-        registry: this.agentRegistry,
-        llmConfig: this.config.llmConfig,
-        servicesConfig: this.config.servicesConfig,
-        toolsConfig: this.config.toolsConfig,
-        spawner, // recursive — Conductors can spawn sub-agents
-        onArtifactChange: () => this.broadcastCatalogChanged(),
-      });
-
-      await newHost.initialize();
-      this.agentRegistry.register(newAgent.id, newHost);
+      const newHost = await this.initializeAgentHost(newAgent.id);
 
       // Deliver the initial message from the caller (fire-and-forget)
       newHost.deliverMessage(initialMessage, {
@@ -379,6 +387,9 @@ export class Server {
     await this.agentHost.initialize();
     await this.narratorHost.initialize();
 
+    // Restore previously active spawned agents (conductors, reviewers, etc.)
+    await this.restoreActiveAgents();
+
     // Start scheduled jobs
     const intervalMinutes = this.config.schedulerConfig?.daily_summary_interval_minutes ?? 30;
     registerNarratorJobs(
@@ -436,6 +447,29 @@ export class Server {
         SYSTEM2_DIR,
         intervalMinutes
       );
+    }
+  }
+
+  /**
+   * Restore spawned agents that were active before the last shutdown.
+   * Re-creates their AgentHost, initializes the session, and registers them.
+   */
+  private async restoreActiveAgents(): Promise<void> {
+    const activeAgents = this.db.query(
+      "SELECT * FROM agent WHERE status = 'active' AND role NOT IN ('guide', 'narrator') ORDER BY id"
+    ) as import('@system2/shared').Agent[];
+    if (activeAgents.length === 0) return;
+
+    console.log(`[Server] Restoring ${activeAgents.length} active agent(s)...`);
+
+    for (const agent of activeAgents) {
+      try {
+        await this.initializeAgentHost(agent.id);
+        console.log(`[Server] Restored ${agent.role} agent (id=${agent.id})`);
+      } catch (error) {
+        console.error(`[Server] Failed to restore ${agent.role} agent (id=${agent.id}):`, error);
+        this.db.updateAgentStatus(agent.id, 'idle');
+      }
     }
   }
 

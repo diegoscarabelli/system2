@@ -64,7 +64,7 @@ Each assistant message shows its turn events (thinking -> tool calls -> response
 
 ### MessageInput
 
-Auto-growing textarea (1-10 lines, then scrolls). Shows context window usage percentage (turns red above 80%) and queued message count. Toggles between Send and Stop buttons based on streaming state.
+Auto-growing textarea (1-10 lines, then scrolls). Shows the current LLM provider name and context window usage percentage (turns red above 80%) in the status bar, plus queued message count. Toggles between Send and Stop buttons based on streaming state. Provider changes on failover trigger a system message in the chat timeline.
 
 ### ArtifactViewer
 
@@ -104,6 +104,7 @@ Three [Zustand](https://github.com/pmndrs/zustand) stores with no Redux or Conte
 | `isWaitingForResponse` | `boolean` | Sent message, no response yet |
 | `messageQueue` | `Array` | FIFO queue (steering messages prepended) |
 | `contextPercent` | `number \| null` | Context window usage % |
+| `provider` | `string \| null` | Current LLM provider name |
 
 ### `useArtifactStore`
 
@@ -131,7 +132,7 @@ Tracks `colorMode` (light/dark) and `particlesEnabled` (boolean) with localStora
 Manages the WebSocket connection to the server:
 
 - Connects to `ws://localhost:3000` (or via Vite proxy in dev)
-- On connect: receives `chat_history` from server
+- On connect: receives `chat_history` and `provider_info` from server
 - Processes all `ServerMessage` types and updates chat store
 - Exposes `sendMessage()`, `sendSteering()`, `abort()`
 - On `ready_for_input`: dequeues next message from queue

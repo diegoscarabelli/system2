@@ -282,6 +282,7 @@ export class DatabaseClient {
     return stmt.all() as Agent[];
   }
 
+
   updateAgentStatus(id: number, status: Agent['status']): Agent | null {
     const stmt = this.db.prepare(`
       UPDATE agent
