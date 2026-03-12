@@ -113,7 +113,6 @@ Agent tools (`bash`, `read`, `write`, `edit`) run with the user's full filesyste
 | UI | React, Zustand, Vite |
 | Package manager | pnpm workspaces |
 | Lint / format | Biome |
-| Knowledge tracking | Git (`simple-git`) |
 
 ## Platform Support
 
