@@ -34,4 +34,9 @@ export class AgentRegistry {
   listIds(): number[] {
     return Array.from(this.agents.keys());
   }
+
+  /** Iterate over all [id, host] pairs */
+  entries(): IterableIterator<[number, AgentHost]> {
+    return this.agents.entries();
+  }
 }

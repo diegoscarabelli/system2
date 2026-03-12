@@ -23,6 +23,7 @@ interface ArtifactState {
   catalogVersion: number;
   agentsOpen: boolean;
   agentsVersion: number;
+  agentContextPercents: Record<number, number | null>;
 
   openArtifact: (url: string, title?: string, filePath?: string) => void;
   closeTab: (tabId: string) => void;
@@ -32,6 +33,7 @@ interface ArtifactState {
   toggleAgents: () => void;
   incrementCatalogVersion: () => void;
   incrementAgentsVersion: () => void;
+  updateAgentContext: (context: Record<number, number | null>) => void;
 }
 
 function extractFilePath(url: string): string {
@@ -83,6 +85,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   catalogVersion: 0,
   agentsOpen: false,
   agentsVersion: 0,
+  agentContextPercents: {},
 
   openArtifact: (url: string, title?: string, filePath?: string) => {
     const state = get();
@@ -158,5 +161,9 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   incrementAgentsVersion: () => {
     set((state) => ({ agentsVersion: state.agentsVersion + 1 }));
+  },
+
+  updateAgentContext: (context: Record<number, number | null>) => {
+    set({ agentContextPercents: context });
   },
 }));

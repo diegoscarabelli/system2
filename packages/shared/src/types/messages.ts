@@ -29,4 +29,4 @@ export type ServerMessage =
   | { type: 'provider_info'; provider: string } // Sent on connect — current LLM provider
   | { type: 'provider_change'; provider: string } // Sent on failover — provider switched
   | { type: 'catalog_changed' } // Sent when artifact catalog entries are created/updated/deleted
-  | { type: 'agents_changed' }; // Sent when any agent's busy state changes
+  | { type: 'agents_changed'; context: Record<number, number | null> }; // Sent when any agent's busy state changes; context maps agentId -> contextPercent

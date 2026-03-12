@@ -280,7 +280,11 @@ export class Server {
   }
 
   private broadcastAgentsChanged(): void {
-    const data = JSON.stringify({ type: 'agents_changed' });
+    const context: Record<number, number | null> = {};
+    for (const [id, host] of this.agentRegistry.entries()) {
+      context[id] = host.getContextUsage()?.percent ?? null;
+    }
+    const data = JSON.stringify({ type: 'agents_changed', context });
     for (const client of this.wss.clients) {
       if (client.readyState === client.OPEN) {
         client.send(data);

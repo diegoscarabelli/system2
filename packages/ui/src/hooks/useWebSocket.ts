@@ -140,6 +140,7 @@ export function useWebSocket() {
 
         case 'agents_changed':
           useArtifactStore.getState().incrementAgentsVersion();
+          useArtifactStore.getState().updateAgentContext(message.context);
           break;
 
         case 'error':

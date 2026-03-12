@@ -10,6 +10,7 @@ import { Box, Text } from '@primer/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useArtifactStore } from '../stores/artifact';
 import { colors } from '../theme/colors';
+import { useAccentColors } from '../theme/useAccentColors';
 
 interface AgentInfo {
   id: number;
@@ -21,10 +22,45 @@ interface AgentInfo {
   created_at: string;
 }
 
+const COLS = ['ID', 'Role', 'Context %', 'State'] as const;
+
+function TableHeaders() {
+  return (
+    <Box as="tr">
+      {COLS.map((col) => (
+        <Box
+          key={col}
+          as="th"
+          sx={{
+            px: 2,
+            py: 1,
+            textAlign: col === 'State' ? 'center' : 'left',
+            fontWeight: 'bold',
+            color: 'fg.muted',
+            borderBottom: '1px solid',
+            borderColor: 'border.default',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {col}
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function contextColor(percent: number, accent: string): string {
+  if (percent >= 90) return colors.coral;
+  if (percent >= 60) return accent;
+  return colors.teal;
+}
+
 export function AgentPane() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const agentsVersion = useArtifactStore((s) => s.agentsVersion);
+  const agentContextPercents = useArtifactStore((s) => s.agentContextPercents);
+  const { accent } = useAccentColors();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: agentsVersion is an intentional external trigger to re-fetch
@@ -86,60 +122,133 @@ export function AgentPane() {
         </Box>
       </Box>
 
-      <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
-        {loading && <Text sx={{ color: 'fg.muted', fontSize: 0 }}>Loading...</Text>}
+      <Box sx={{ flex: 1, overflow: 'auto' }}>
+        {loading && (
+          <Text sx={{ color: 'fg.muted', fontSize: 0, p: 2, display: 'block' }}>Loading...</Text>
+        )}
 
         {!loading && agents.length === 0 && (
-          <Text sx={{ color: 'fg.muted', fontSize: 0 }}>No active agents.</Text>
+          <Text sx={{ color: 'fg.muted', fontSize: 0, p: 2, display: 'block' }}>
+            No active agents.
+          </Text>
         )}
 
         {!loading &&
+          agents.length > 0 &&
           [...grouped.entries()].map(([group, items]) => {
             const isCollapsed = collapsedGroups.has(group);
             return (
-              <Box key={group} sx={{ mb: 2 }}>
-                <Box
-                  onClick={() => toggleGroupCollapse(group)}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    cursor: 'pointer',
-                    py: 1,
-                    color: 'fg.muted',
-                    '&:hover': { color: 'fg.default' },
-                  }}
-                >
-                  {isCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}
-                  <Text sx={{ fontSize: 0, fontWeight: 'bold' }}>{group}</Text>
-                  <Text sx={{ fontSize: 0, ml: 'auto' }}>{items.length}</Text>
-                </Box>
-                {!isCollapsed &&
-                  items.map((agent) => (
+              <Box key={group} as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 0, mb: 3 }}>
+                <Box as="thead">
+                  {/* Group header row */}
+                  <Box
+                    as="tr"
+                    onClick={() => toggleGroupCollapse(group)}
+                    sx={{ cursor: 'pointer', '&:hover td': { color: 'fg.default' } }}
+                  >
                     <Box
-                      key={agent.id}
+                      as="td"
+                      colSpan={4}
                       sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 2,
-                        py: 1,
                         px: 2,
-                        borderRadius: 2,
+                        py: 1,
+                        color: 'fg.muted',
+                        borderBottom: '1px solid',
+                        borderColor: 'border.muted',
                       }}
                     >
-                      <Box
-                        sx={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: '50%',
-                          backgroundColor: agent.busy ? colors.teal : colors.gray,
-                          flexShrink: 0,
-                        }}
-                      />
-                      <Text sx={{ fontSize: 1, textTransform: 'capitalize' }}>{agent.role}</Text>
-                      <Text sx={{ fontSize: 0, color: 'fg.muted', ml: 'auto' }}>#{agent.id}</Text>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {isCollapsed ? (
+                          <ChevronRightIcon size={12} />
+                        ) : (
+                          <ChevronDownIcon size={12} />
+                        )}
+                        <Text sx={{ fontWeight: 'bold' }}>{group}</Text>
+                        <Text sx={{ ml: 'auto' }}>{items.length}</Text>
+                      </Box>
                     </Box>
-                  ))}
+                  </Box>
+                  {/* Column headers */}
+                  {!isCollapsed && <TableHeaders />}
+                </Box>
+                {!isCollapsed && (
+                  <Box as="tbody">
+                    {items.map((agent) => (
+                      <Box
+                        key={agent.id}
+                        as="tr"
+                        sx={{
+                          '&:hover': { backgroundColor: 'canvas.subtle' },
+                          '&:last-child td': { borderBottom: 'none' },
+                        }}
+                      >
+                        <Box
+                          as="td"
+                          sx={{
+                            px: 2,
+                            py: 1,
+                            borderBottom: '1px solid',
+                            borderColor: 'border.muted',
+                            whiteSpace: 'nowrap',
+                            fontFamily: 'mono',
+                          }}
+                        >
+                          {agent.id}
+                        </Box>
+                        <Box
+                          as="td"
+                          sx={{
+                            px: 2,
+                            py: 1,
+                            borderBottom: '1px solid',
+                            borderColor: 'border.muted',
+                            textTransform: 'capitalize',
+                            width: '100%',
+                          }}
+                        >
+                          {agent.role}
+                        </Box>
+                        <Box
+                          as="td"
+                          sx={{
+                            px: 2,
+                            py: 1,
+                            borderBottom: '1px solid',
+                            borderColor: 'border.muted',
+                            whiteSpace: 'nowrap',
+                            color: agentContextPercents[agent.id] != null
+                              ? contextColor(agentContextPercents[agent.id] as number, accent)
+                              : 'fg.muted',
+                          }}
+                        >
+                          {agentContextPercents[agent.id] != null
+                            ? Math.round(agentContextPercents[agent.id] as number)
+                            : '—'}
+                        </Box>
+                        <Box
+                          as="td"
+                          sx={{
+                            px: 2,
+                            py: 1,
+                            textAlign: 'center',
+                            borderBottom: '1px solid',
+                            borderColor: 'border.muted',
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: '50%',
+                              backgroundColor: agent.busy ? colors.teal : colors.gray,
+                              display: 'inline-block',
+                            }}
+                          />
+                        </Box>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
               </Box>
             );
           })}
