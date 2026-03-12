@@ -5,7 +5,7 @@
  * Groups artifacts by project. Clicking an item opens it in a new tab.
  */
 
-import { FilterIcon, ProjectIcon, SearchIcon } from '@primer/octicons-react';
+import { ChevronDownIcon, ChevronRightIcon, FilterIcon, ProjectIcon, SearchIcon } from '@primer/octicons-react';
 import { ActionList, ActionMenu, Box, IconButton, Text, TextInput } from '@primer/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useArtifactStore } from '../stores/artifact';
@@ -81,6 +81,16 @@ export function ArtifactCatalog() {
       const next = new Set(prev);
       if (next.has(project)) next.delete(project);
       else next.add(project);
+      return next;
+    });
+  }, []);
+
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const toggleGroupCollapse = useCallback((group: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
       return next;
     });
   }, []);
@@ -271,14 +281,27 @@ export function ArtifactCatalog() {
         )}
 
         {!loading &&
-          [...grouped.entries()].map(([group, items]) => (
-            <Box key={group} sx={{ mb: 3 }}>
-              <Text
-                sx={{ fontSize: 0, fontWeight: 'bold', color: 'fg.muted', mb: 1, display: 'block' }}
+          [...grouped.entries()].map(([group, items]) => {
+            const isCollapsed = collapsedGroups.has(group);
+            return (
+            <Box key={group} sx={{ mb: 2 }}>
+              <Box
+                onClick={() => toggleGroupCollapse(group)}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  cursor: 'pointer',
+                  py: 1,
+                  color: 'fg.muted',
+                  '&:hover': { color: 'fg.default' },
+                }}
               >
-                {group}
-              </Text>
-              {items.map((artifact) => (
+                {isCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}
+                <Text sx={{ fontSize: 0, fontWeight: 'bold' }}>{group}</Text>
+                <Text sx={{ fontSize: 0, ml: 'auto' }}>{items.length}</Text>
+              </Box>
+              {!isCollapsed && items.map((artifact) => (
                 <Box
                   key={artifact.id}
                   onClick={() => handleClick(artifact)}
@@ -337,7 +360,7 @@ export function ArtifactCatalog() {
                 </Box>
               ))}
             </Box>
-          ))}
+          );})}
       </Box>
     </Box>
   );

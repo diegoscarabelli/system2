@@ -123,7 +123,7 @@ export function ArtifactViewer() {
               overflowX: 'auto',
               borderBottom: '1px solid',
               borderColor: 'border.default',
-              backgroundColor: 'canvas.subtle',
+              backgroundColor: 'transparent',
               flexShrink: 0,
               position: 'relative',
               zIndex: 1,
@@ -142,13 +142,10 @@ export function ArtifactViewer() {
                   cursor: 'pointer',
                   borderBottom: tab.id === activeTabId ? '2px solid' : '2px solid transparent',
                   borderColor: tab.id === activeTabId ? accent : 'transparent',
-                  backgroundColor: tab.id === activeTabId ? 'canvas.default' : 'transparent',
+                  backgroundColor: tab.id === activeTabId ? 'canvas.default' : 'canvas.subtle',
                   color: tab.id === activeTabId ? 'fg.default' : 'fg.muted',
                   fontSize: 0,
                   whiteSpace: 'nowrap',
-                  '&:hover': {
-                    backgroundColor: 'canvas.default',
-                  },
                 }}
               >
                 <Text sx={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -172,20 +169,41 @@ export function ArtifactViewer() {
           {/* Active tab content */}
           {activeTab && (
             <Box sx={{ flex: 1, overflow: 'auto', position: 'relative', zIndex: 1 }}>
-              <iframe
-                ref={iframeRef}
-                src={activeTab.url}
-                sandbox="allow-scripts allow-same-origin"
-                title={activeTab.title}
-                scrolling="no"
-                style={{
-                  width: '100%',
-                  border: 'none',
-                  overflow: 'hidden',
-                  backgroundColor: isLight ? 'white' : 'transparent',
-                  filter: isLight ? 'none' : 'invert(1) hue-rotate(180deg)',
-                }}
-              />
+              {/\.html?$/i.test(activeTab.filePath) ? (
+                <iframe
+                  ref={iframeRef}
+                  src={activeTab.url}
+                  sandbox="allow-scripts allow-same-origin"
+                  title={activeTab.title}
+                  scrolling="no"
+                  style={{
+                    width: '100%',
+                    border: 'none',
+                    overflow: 'hidden',
+                    backgroundColor: isLight ? 'white' : 'transparent',
+                    filter: isLight ? 'none' : 'invert(1) hue-rotate(180deg)',
+                  }}
+                />
+              ) : (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '100%',
+                    gap: 2,
+                    color: 'fg.muted',
+                    textAlign: 'center',
+                    px: 4,
+                  }}
+                >
+                  <Text sx={{ fontSize: 2 }}>Cannot preview this file type</Text>
+                  <Text sx={{ fontSize: 0, fontFamily: 'mono', wordBreak: 'break-all' }}>
+                    {activeTab.filePath}
+                  </Text>
+                </Box>
+              )}
             </Box>
           )}
         </>
