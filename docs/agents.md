@@ -11,12 +11,12 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 ## Agent Roles
 
-| Agent | Role | Lifecycle | Scope | Models |
-|-------|------|-----------|-------|--------|
-| **Guide** | User-facing agent. Answers questions, delegates complex work to Conductor. Populates knowledge files. | Singleton, persistent | System-wide | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
-| **Conductor** | Project orchestrator. Breaks work into tasks, creates schemas and pipelines, tracks progress. | Per-project, ephemeral | Project-specific | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
-| **Narrator** | Memory keeper. Curates project logs and daily summaries, maintains long-term memory, writes project stories. Schedule-driven. | Singleton, persistent | System-wide | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
-| **Reviewer** | Validation agent. Checks SQL logic, data transformations, analytical assumptions. | Per-project, ephemeral | Project-specific | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
+| Agent | Role | Lifecycle | Models |
+| --- | --- | --- | --- |
+| **Guide** | The only agent the user talks to. Helps brainstorm and plan, starts projects, interfaces with the multi-agent system, and relays updates. | Singleton, persistent | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
+| **Narrator** | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. Schedule-driven. | Singleton, persistent | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
+| **Conductor** | Orchestrates and executes work within a project: breaks it into tasks, spawns specialist agents or executes directly, and coordinates with the Reviewer before reporting completion. | Per-project, ephemeral | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
+| **Reviewer** | Critically assesses work before it is considered complete. | Per-project, ephemeral | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
 
 **Guide and Narrator** are singletons created at server startup. Their sessions persist indefinitely across restarts (via `SessionManager.continueRecent()`).
 

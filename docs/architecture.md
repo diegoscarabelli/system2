@@ -52,14 +52,7 @@ System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/b
 └─────────────────────────────────────────────────────────┘
 ```
 
-| Role | Lifecycle | Purpose |
-| --- | --- | --- |
-| **Guide** | Singleton | The only agent the user talks to. Helps brainstorm and plan, starts projects, interfaces with the multi-agent system, and relays updates. |
-| **Narrator** | Singleton | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. |
-| **Conductor** | Spawned per project | Orchestrates and executes work within a project: breaks it into tasks, spawns specialist agents or executes directly, and always spawns a Reviewer to assess the work before completion. |
-| **Reviewer** | Spawned per project | Critically assesses work before it is considered complete. |
-
-See [Agents](agents.md) for role permissions, lifecycle, and tool access.
+See [Agents](agents.md) for agent roles, lifecycle, permissions, and tool access.
 
 All runtime state lives in `~/.system2/`. See [Configuration](configuration.md) for the full directory layout.
 
@@ -105,13 +98,13 @@ Agent tools (`bash`, `read`, `write`, `edit`) run with the user's full filesyste
 | Layer | Technology |
 | --- | --- |
 | Runtime | Node.js, TypeScript |
-| Agent SDK | [@mariozechner/pi-agent-core](https://github.com/badlogic/pi-mono) |
-| HTTP / WebSocket | Express, `ws` |
-| Database | SQLite (`better-sqlite3`), WAL mode |
-| Scheduling | `croner` |
-| Schema validation | `@sinclair/typebox` |
+| Agent SDK | pi-coding-agent |
+| HTTP / WebSocket | Express, ws |
+| Database | SQLite, WAL mode |
 | UI | React, Zustand, Vite |
-| Package manager | pnpm workspaces |
+| Scheduling | croner |
+| Schema validation | TypeBox |
+| Package manager | pnpm |
 | Lint / format | Biome |
 
 ## Platform Support
