@@ -2,36 +2,25 @@
 
 System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/badlogic/pi-mono), a SDK for building LLM-powered coding agents. The SDK provides the core agent loop, tool execution, session management (JSONL persistence), and auto-compaction. System2 adds multi-agent orchestration, LLM failover, a knowledge/memory system, custom tools, a scheduler, and a web UI.
 
-## Platform Support
+## Key Design Decisions
 
-System2 runs on macOS, Linux, and Windows. Path handling uses `~/` expansion via Node.js `os.homedir()` (cross-platform). Shell commands use PowerShell on Windows and the default shell (`/bin/bash`) on macOS/Linux.
+**Single user-facing agent.** The user interacts exclusively with the Guide. Other agents (Conductors, Reviewers, etc.) are spawned on demand based on the nature and scope of the work, and the Narrator operates continuously in the background. The user never addresses these agents directly. This shields the user from multi-agent complexity, bridging the throughput of parallel agents with the human's finite capacity to absorb information. See [Agents](agents.md).
 
-## Monorepo Structure
+**No chat sessions, continuous interaction.** There is no concept of starting a new chat. The Guide maintains a single persistent session and a structured memory system, creating an unbroken thread of interaction that accumulates memories over time rather than resetting between conversations. See [Agents](agents.md#session-management) | [Knowledge System](knowledge-system.md).
 
-```
-system2/
-├── packages/
-│   ├── shared/    @system2/shared    Shared TypeScript types
-│   ├── server/    @system2/server    HTTP/WS server + agent runtime
-│   ├── ui/        @system2/ui        React chat interface
-│   └── cli/       @system2/cli       CLI entry point
-├── docs/                              Developer documentation
-├── biome.json                         Formatting/linting config
-├── tsconfig.json                      Root TypeScript config
-└── pnpm-workspace.yaml                Workspace declaration
-```
+**Artifact canvas for interactive content.** The UI provides a dedicated display area where the Guide or user can surface rich, interactive content on demand -- charts, dashboards, custom UIs, or any HTML/JS artifact. Artifacts are stored as files and tracked with metadata (title, description, timestamps) so they can be revisited and  refined in later conversations. See [UI](packages/ui.md)
 
-**Dependency graph:** `shared` -> `server` + `ui` -> `cli`
+**Orchestrated multi-agent work.** Agents are spawned on demand based on the scope and nature of the work; others run continuously in the background. Work is broken into tasks stored in the database, then distributed and coordinated via two channels: direct messages for real-time steering and task comments for a permanent audit trail. A dedicated review role provides critical assessment before work is considered complete. Tools are gated by role and project scope. A background agent (the Narrator) continuously maintains long-term memory by writing project logs, daily summaries, and project stories — so knowledge accumulates without user involvement. See [Agents](agents.md) | [Tools](tools.md) | [Database](database.md) | [Scheduler](scheduler.md) | [Knowledge System](knowledge-system.md).
 
-**Build order:** `shared` first, then `server` + `ui` in parallel, then `cli` last.
+**Persistent, evolving context.** Every agent's context is assembled from three layers on each LLM call: static instructions (shared agent reference and role-specific prompt, loaded once at startup or spawn); a Knowledge Base of files re-read fresh from disk — knowledge files, plus daily summaries or a project log depending on scope — so any edit takes effect immediately; and the full conversation history replayed from a JSONL session file, with a compaction summary substituted when the context was compressed. Knowledge files are versioned in git; session JSONL files are gitignored (large, private). Session logs rotate at a configurable size threshold to prevent unbounded growth. See [Agents](agents.md#session-management) | [Knowledge System](knowledge-system.md).
 
-See individual package docs: [shared](packages/shared.md) | [server](packages/server.md) | [ui](packages/ui.md) | [cli](packages/cli.md)
+**Reliable infrastructure.** Chat history, database state, and agent sessions are managed server-side; the UI is stateless and receives full history on WebSocket connect. API errors trigger automatic retry with exponential backoff, then failover to the next configured key or provider. Scheduled jobs run in-process and are checked for staleness on startup so missed work is caught up automatically. See [Configuration](configuration.md#automatic-failover) | [Scheduler](scheduler.md).
 
 ## Runtime Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  LLM API  (Anthropic / OpenAI / Cerebras / ...)         │
+│  LLM API  (Anthropic / Cerebras / Gemini / OpenAI / ...)│
 └──────────────────────────┬──────────────────────────────┘
                            │ HTTPS (multi-provider, failover)
 ┌──────────────────────────▼──────────────────────────────┐
@@ -65,16 +54,35 @@ See individual package docs: [shared](packages/shared.md) | [server](packages/se
 
 | Role | Lifecycle | Purpose |
 | --- | --- | --- |
-| **Guide** | Singleton | The only agent the user talks to. Orchestrates work and surfaces results. |
+| **Guide** | Singleton | The only agent the user talks to. Helps brainstorm and plan, starts projects, interfaces with the multi-agent system, and relays updates. |
 | **Narrator** | Singleton | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. |
-| **Conductor** | Spawned per project | Plans and coordinates all work within a project. Can spawn Reviewers. |
+| **Conductor** | Spawned per project | Orchestrates and executes work within a project: breaks it into tasks, spawns specialist agents or executes directly, and always spawns a Reviewer to assess the work before completion. |
 | **Reviewer** | Spawned per project | Critically assesses work before it is considered complete. |
 
 See [Agents](agents.md) for role permissions, lifecycle, and tool access.
 
-## Application Directory
-
 All runtime state lives in `~/.system2/`. See [Configuration](configuration.md) for the full directory layout.
+
+## Monorepo Structure
+
+```
+system2/
+├── packages/
+│   ├── shared/    @system2/shared    Shared TypeScript types
+│   ├── server/    @system2/server    HTTP/WS server + agent runtime
+│   ├── ui/        @system2/ui        React chat interface
+│   └── cli/       @system2/cli       CLI entry point
+├── docs/                              Developer documentation
+├── biome.json                         Formatting/linting config
+├── tsconfig.json                      Root TypeScript config
+└── pnpm-workspace.yaml                Workspace declaration
+```
+
+**Dependency graph:** `shared` -> `server` + `ui` -> `cli`
+
+**Build order:** `shared` first, then `server` + `ui` in parallel, then `cli` last.
+
+See individual package docs: [shared](packages/shared.md) | [server](packages/server.md) | [ui](packages/ui.md) | [cli](packages/cli.md)
 
 ## Request Lifecycle
 
@@ -107,16 +115,6 @@ Agent tools (`bash`, `read`, `write`, `edit`) run with the user's full filesyste
 | Lint / format | Biome |
 | Knowledge tracking | Git (`simple-git`) |
 
-## Key Design Decisions
+## Platform Support
 
-**Single user-facing agent.** The user interacts exclusively with the Guide. Other agents (Conductors, Reviewers, etc.) are spawned on demand based on the nature and scope of the work, and the Narrator operates continuously in the background. The user never addresses these agents directly. This shields the user from multi-agent complexity, bridging the throughput of parallel agents with the human's finite capacity to absorb information. See [Agents](agents.md).
-
-**No chat sessions, continuous interaction.** There is no concept of starting a new chat. The Guide maintains a single persistent session and a structured memory system, creating an unbroken thread of interaction that accumulates memories over time rather than resetting between conversations. See [Agents](agents.md#session-management) | [Knowledge System](knowledge-system.md).
-
-**Artifact canvas for interactive content.** The UI provides a dedicated display area where the Guide or user can surface rich, interactive content on demand -- charts, dashboards, custom UIs, or any HTML/JS artifact. Artifacts are stored as files and tracked with metadata (title, description, timestamps) so they can be revisited and  refined in later conversations. See [UI](packages/ui.md)
-
-**Orchestrated multi-agent work.** Agents are spawned on demand based on the scope and nature of the work; others run continuously in the background. Work is broken into tasks stored in the database, then distributed and coordinated via two channels: direct messages for real-time steering and task comments for a permanent audit trail. A dedicated review role provides critical assessment before work is considered complete. Tools are gated by role and project scope. A background agent (the Narrator) continuously maintains long-term memory by writing project logs, daily summaries, and project stories — so knowledge accumulates without user involvement. See [Agents](agents.md) | [Tools](tools.md) | [Database](database.md) | [Scheduler](scheduler.md) | [Knowledge System](knowledge-system.md).
-
-**Persistent, evolving context.** Every agent's context is assembled from three layers on each LLM call: static instructions (shared agent reference and role-specific prompt, loaded once at startup or spawn); a Knowledge Base of files re-read fresh from disk — knowledge files, plus daily summaries or a project log depending on scope — so any edit takes effect immediately; and the full conversation history replayed from a JSONL session file, with a compaction summary substituted when the context was compressed. Knowledge files are versioned in git; session JSONL files are gitignored (large, private). Session logs rotate at a configurable size threshold to prevent unbounded growth. See [Agents](agents.md#session-management) | [Knowledge System](knowledge-system.md).
-
-**Reliable infrastructure.** Chat history, database state, and agent sessions are managed server-side; the UI is stateless and receives full history on WebSocket connect. API errors trigger automatic retry with exponential backoff, then failover to the next configured key or provider. Scheduled jobs run in-process and are checked for staleness on startup so missed work is caught up automatically. See [Configuration](configuration.md#automatic-failover) | [Scheduler](scheduler.md).
+System2 runs on macOS, Linux, and Windows. Path handling uses `~/` expansion via Node.js `os.homedir()` (cross-platform). Shell commands use PowerShell on Windows and the default shell (`/bin/bash`) on macOS/Linux.
