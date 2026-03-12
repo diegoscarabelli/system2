@@ -20,12 +20,14 @@ interface ArtifactState {
   tabs: ArtifactTab[];
   activeTabId: string | null;
   catalogOpen: boolean;
+  catalogVersion: number;
 
   openArtifact: (url: string, title?: string, filePath?: string) => void;
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
   reloadTab: (filePath: string, newUrl: string) => void;
   toggleCatalog: () => void;
+  incrementCatalogVersion: () => void;
 }
 
 function extractFilePath(url: string): string {
@@ -74,6 +76,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   tabs: initial.tabs,
   activeTabId: initial.activeTabId,
   catalogOpen: false,
+  catalogVersion: 0,
 
   openArtifact: (url: string, title?: string, filePath?: string) => {
     const state = get();
@@ -137,5 +140,9 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   toggleCatalog: () => {
     set((state) => ({ catalogOpen: !state.catalogOpen }));
+  },
+
+  incrementCatalogVersion: () => {
+    set((state) => ({ catalogVersion: state.catalogVersion + 1 }));
   },
 }));

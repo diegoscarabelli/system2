@@ -125,6 +125,19 @@ export function useWebSocket() {
           break;
         }
 
+        case 'provider_info':
+          useChatStore.getState().setProvider(message.provider);
+          break;
+
+        case 'provider_change':
+          useChatStore.getState().setProvider(message.provider);
+          useChatStore.getState().addSystemMessage(`Switched to ${message.provider}`);
+          break;
+
+        case 'catalog_changed':
+          useArtifactStore.getState().incrementCatalogVersion();
+          break;
+
         case 'error':
           console.error('Server error:', message.message);
           setWaitingForResponse(false);

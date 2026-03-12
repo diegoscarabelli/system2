@@ -33,7 +33,7 @@ function checkProjectScope(
   return null;
 }
 
-export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
+export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number, onArtifactChange?: () => void) {
   const params = Type.Object({
     operation: Type.Union(
       [
@@ -369,6 +369,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
               description: params.description ?? null,
               tags: params.tags ?? [],
             });
+            onArtifactChange?.();
             return ok(result);
           }
 
@@ -389,6 +390,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
               ...(params.tags !== undefined && { tags: params.tags }),
             });
             if (!result) return err(`No artifact found with id ${params.id}`);
+            onArtifactChange?.();
             return ok(result);
           }
 
@@ -403,6 +405,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             if (deleteArtifactScopeErr) return err(deleteArtifactScopeErr);
             const deleted = db.deleteArtifact(params.id);
             if (!deleted) return err(`No artifact found with id ${params.id}`);
+            onArtifactChange?.();
             return ok({ deleted: true, id: params.id });
           }
 

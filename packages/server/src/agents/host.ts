@@ -72,6 +72,7 @@ export interface AgentHostConfig {
   servicesConfig?: ServicesConfig;
   toolsConfig?: ToolsConfig;
   spawner?: AgentSpawner;
+  onArtifactChange?: () => void;
 }
 
 export class AgentHost {
@@ -94,6 +95,7 @@ export class AgentHost {
   private agentProject: number | null = null;
   private agentProjectDirName: string | null = null;
   private sessionDir: string | null = null;
+  private onArtifactChange?: () => void;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -102,6 +104,7 @@ export class AgentHost {
     this.servicesConfig = config.servicesConfig;
     this.toolsConfig = config.toolsConfig;
     this.spawner = config.spawner;
+    this.onArtifactChange = config.onArtifactChange;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -315,6 +318,9 @@ export class AgentHost {
     const retryKey = `${this.currentProvider}:${category}`;
     const currentAttempts = this.retryAttempts.get(retryKey) ?? 0;
 
+    // Capture before any await — prompt() may clear it after session.prompt() resolves
+    const promptToRetry = this.pendingPrompt;
+
     // Check if we should retry
     if (shouldRetry(category, currentAttempts)) {
       const delay = calculateDelay(currentAttempts);
@@ -328,9 +334,9 @@ export class AgentHost {
       await sleep(delay);
 
       // Retry the pending prompt if there is one
-      if (this.pendingPrompt && this.session) {
+      if (promptToRetry && this.session) {
         console.log('[AgentHost] Retrying prompt...');
-        await this.session.prompt(this.pendingPrompt);
+        await this.session.prompt(promptToRetry);
       }
       return;
     }
@@ -350,7 +356,7 @@ export class AgentHost {
         const nextProvider = this.authResolver.getNextProvider();
         if (nextProvider) {
           console.log(`[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`);
-          await this.reinitializeWithProvider(nextProvider);
+          await this.reinitializeWithProvider(nextProvider, promptToRetry);
           return;
         }
       }
@@ -365,7 +371,10 @@ export class AgentHost {
   /**
    * Reinitialize the agent session with a different provider.
    */
-  private async reinitializeWithProvider(provider: LlmProvider): Promise<void> {
+  private async reinitializeWithProvider(
+    provider: LlmProvider,
+    promptToRetry?: string | null
+  ): Promise<void> {
     if (this.isReinitializing) {
       console.log('[AgentHost] Already reinitializing, skipping');
       return;
@@ -391,6 +400,7 @@ export class AgentHost {
       // Emit a custom event to notify UI of provider change
       const failoverEvent: AgentSessionEvent = {
         type: 'status' as AgentSessionEvent['type'],
+        provider,
         message: `Switched to ${provider} due to API issues`,
       } as AgentSessionEvent;
       this.listeners.forEach((listener) => {
@@ -398,9 +408,9 @@ export class AgentHost {
       });
 
       // Retry the pending prompt with the new provider
-      if (this.pendingPrompt && this.session) {
+      if (promptToRetry && this.session) {
         console.log('[AgentHost] Retrying prompt with new provider...');
-        await this.session.prompt(this.pendingPrompt);
+        await this.session.prompt(promptToRetry);
       }
     } catch (error) {
       console.error('[AgentHost] Failed to reinitialize:', error);
@@ -465,7 +475,7 @@ export class AgentHost {
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous tool collection matches SDK's AgentTool<any>[]
     const tools: AgentTool<any>[] = [
       createReadSystem2DbTool(this.db),
-      createWriteSystem2DbTool(this.db, this.agentId),
+      createWriteSystem2DbTool(this.db, this.agentId, this.onArtifactChange),
       createMessageAgentTool(this.agentId, this.registry, this.db),
       createBashTool((content, details) => {
         this.session?.sendCustomMessage(
@@ -532,15 +542,20 @@ export class AgentHost {
    * Deliver an inter-agent message into this agent's session.
    * Uses sendCustomMessage with customType 'agent_message'.
    *
+   * Fire-and-forget: does NOT await the triggered turn. When the receiver is
+   * idle, sendCustomMessage internally calls agent.prompt() which blocks until
+   * the entire turn completes — awaiting that would deadlock the caller if
+   * agents message each other during their turns.
+   *
    * @param content LLM-visible message content (includes sender prefix)
    * @param details Metadata for programmatic use (not sent to LLM)
    * @param urgent If true, uses 'steer' delivery (interrupts mid-turn). Default: 'followUp' (waits for current turn to finish).
    */
-  async deliverMessage(
+  deliverMessage(
     content: string,
     details: { sender: number; receiver: number; timestamp: number },
     urgent?: boolean
-  ): Promise<void> {
+  ): void {
     if (!this.session) {
       throw new Error('AgentHost not initialized. Call initialize() first.');
     }
@@ -550,18 +565,20 @@ export class AgentHost {
       rotateSessionIfNeeded(this.sessionDir, SYSTEM2_DIR);
     }
 
-    await this.session.sendCustomMessage(
-      {
-        customType: 'agent_message',
-        content,
-        display: false,
-        details,
-      },
-      {
-        deliverAs: urgent ? 'steer' : 'followUp',
-        triggerTurn: true,
-      }
-    );
+    this.session
+      .sendCustomMessage(
+        {
+          customType: 'agent_message',
+          content,
+          display: false,
+          details,
+        },
+        {
+          deliverAs: urgent ? 'steer' : 'followUp',
+          triggerTurn: true,
+        }
+      )
+      .catch((err) => console.error('[AgentHost] deliverMessage error:', err));
   }
 
   /**
@@ -588,5 +605,9 @@ export class AgentHost {
    */
   getContextUsage() {
     return this.session?.getContextUsage();
+  }
+
+  getProvider(): string {
+    return this.currentProvider;
   }
 }

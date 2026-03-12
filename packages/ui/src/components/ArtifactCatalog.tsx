@@ -30,6 +30,7 @@ export function ArtifactCatalog() {
   const [artifacts, setArtifacts] = useState<CatalogArtifact[]>([]);
   const [loading, setLoading] = useState(true);
   const openArtifact = useArtifactStore((s) => s.openArtifact);
+  const catalogVersion = useArtifactStore((s) => s.catalogVersion);
   const { accent, accentSubtle, accentText } = useAccentColors();
   const [query, setQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
@@ -55,7 +56,7 @@ export function ArtifactCatalog() {
       })
       .catch((err) => console.error('Failed to load artifacts:', err))
       .finally(() => setLoading(false));
-  }, []);
+  }, [catalogVersion]);
 
   const handleClick = useCallback(
     (artifact: CatalogArtifact) => {

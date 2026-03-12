@@ -88,6 +88,7 @@ export class Server {
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
       spawner: this.makeSpawner(),
+      onArtifactChange: () => this.broadcastCatalogChanged(),
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
 
@@ -101,6 +102,7 @@ export class Server {
       llmConfig: config.llmConfig,
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
+      onArtifactChange: () => this.broadcastCatalogChanged(),
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
 
@@ -220,13 +222,14 @@ export class Server {
         servicesConfig: this.config.servicesConfig,
         toolsConfig: this.config.toolsConfig,
         spawner, // recursive — Conductors can spawn sub-agents
+        onArtifactChange: () => this.broadcastCatalogChanged(),
       });
 
       await newHost.initialize();
       this.agentRegistry.register(newAgent.id, newHost);
 
-      // Deliver the initial message from the caller
-      await newHost.deliverMessage(initialMessage, {
+      // Deliver the initial message from the caller (fire-and-forget)
+      newHost.deliverMessage(initialMessage, {
         sender: callerAgentId,
         receiver: newAgent.id,
         timestamp: Date.now(),
@@ -236,6 +239,15 @@ export class Server {
     };
 
     return spawner;
+  }
+
+  private broadcastCatalogChanged(): void {
+    const data = JSON.stringify({ type: 'catalog_changed' });
+    for (const client of this.wss.clients) {
+      if (client.readyState === client.OPEN) {
+        client.send(data);
+      }
+    }
   }
 
   /**

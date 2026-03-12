@@ -25,4 +25,7 @@ export type ServerMessage =
   | { type: 'error'; message: string }
   | { type: 'ready_for_input' } // Signals that the agent is ready for the next message
   | { type: 'chat_history'; messages: ChatMessage[] } // Sent on connect — recent message history from server
-  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number }; // Broadcast to other tabs
+  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number } // Broadcast to other tabs
+  | { type: 'provider_info'; provider: string } // Sent on connect — current LLM provider
+  | { type: 'provider_change'; provider: string } // Sent on failover — provider switched
+  | { type: 'catalog_changed' }; // Sent when artifact catalog entries are created/updated/deleted
