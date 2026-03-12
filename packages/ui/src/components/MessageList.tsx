@@ -238,7 +238,7 @@ function toolSummary(_name: string, input?: string): string {
 // Tool call display component (collapsible)
 function ToolCallItem({ tc }: { tc: ToolCall }) {
   const isRunning = tc.status === 'running';
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const { highlight } = useAccentColors();
   const hasContent = tc.input || tc.result;
 
@@ -364,7 +364,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
 
 // Thinking block component (collapsible even while streaming)
 function ThinkingBlock({ thinking }: { thinking: ThinkingBlockType }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   return (
     <TimelineItem dotColor={colors.gray} pulse={thinking.isStreaming}>
