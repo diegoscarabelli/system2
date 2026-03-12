@@ -31,27 +31,29 @@ See individual package docs: [shared](packages/shared.md) | [server](packages/se
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  CLI (system2 start)                                    │
-│  - Loads config.toml                                    │
-│  - Spawns server process (daemon or foreground)         │
+│  LLM API  (Anthropic / OpenAI / Cerebras / ...)         │
 └──────────────────────────┬──────────────────────────────┘
-                           │
+                           │ HTTPS (multi-provider, failover)
 ┌──────────────────────────▼──────────────────────────────┐
 │  Server (Express + WebSocket on port 3000)              │
 │                                                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
-│  │ Guide Agent  │  │Narrator Agent│  │   Scheduler   │  │
-│  │ (singleton)  │  │ (singleton)  │  │   (croner)    │  │
-│  └──────┬───────┘  └──────┬───────┘  └───────┬───────┘  │
-│         │                 │                  │          │
-│  ┌──────▼─────────────────▼──────────────────▼───────┐  │
-│  │           AgentRegistry (message routing)         │  │
+│  ┌──────────────┐  ┌──────────────┐  + per-project:     │
+│  │ Guide Agent  │  │Narrator Agent│    Conductor(s)     │
+│  │ (singleton)  │  │ (singleton)  │    Reviewer(s)      │
+│  └──────┬───────┘  └──────┬───────┘                     │
+│         │                 │                             │
+│  ┌──────▼─────────────────▼──────────────────────────┐  │
+│  │          AgentRegistry (message routing)          │  │
 │  └───────────────────────────────────────────────────┘  │
 │                                                         │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
 │  │  SQLite DB  │  │  Knowledge  │  │  Chat History   │  │
 │  │  (app.db)   │  │  (markdown) │  │  (JSON ring)    │  │
 │  └─────────────┘  └─────────────┘  └─────────────────┘  │
+│                                                         │
+│  ┌────────────────────────────────────────────────┐     │
+│  │           Scheduler  (croner)                  │     │
+│  └────────────────────────────────────────────────┘     │
 └──────────────────────────┬──────────────────────────────┘
                            │ WebSocket
 ┌──────────────────────────▼──────────────────────────────┐
@@ -61,9 +63,49 @@ See individual package docs: [shared](packages/shared.md) | [server](packages/se
 └─────────────────────────────────────────────────────────┘
 ```
 
+| Role | Lifecycle | Purpose |
+| --- | --- | --- |
+| **Guide** | Singleton | The only agent the user talks to. Orchestrates work and surfaces results. |
+| **Narrator** | Singleton | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. |
+| **Conductor** | Spawned per project | Plans and coordinates all work within a project. Can spawn Reviewers. |
+| **Reviewer** | Spawned per project | Critically assesses work before it is considered complete. |
+
+See [Agents](agents.md) for role permissions, lifecycle, and tool access.
+
 ## Application Directory
 
 All runtime state lives in `~/.system2/`. See [Configuration](configuration.md) for the full directory layout.
+
+## Request Lifecycle
+
+1. The UI sends a `user_message` over WebSocket to the server.
+2. The server captures the message in the chat history ring buffer and forwards it to the Guide.
+3. The Guide processes the message — reading fresh knowledge files on every LLM call, calling tools, and optionally spawning Conductors — while streaming text and tool events back over WebSocket.
+4. If the Guide spawns a Conductor, it is registered in the AgentRegistry and receives an initial message. It runs independently and posts updates to the Guide via `message_agent`. The Guide relays relevant progress to the user.
+5. When the Guide's turn completes, the full response is persisted to the ring buffer.
+
+See [WebSocket Protocol](websocket-protocol.md) for the full message-type reference and flow diagrams. See [Agents](agents.md) for agent-to-agent routing and message delivery modes.
+
+## Trust and Scope
+
+System2 is a **single-user, local system**. The server binds to `localhost` only — no network exposure by default. There is no authentication between the UI and server; all connected clients are considered trusted. The `/api/query` endpoint accepts SQL `SELECT` statements for use by interactive artifacts, but no mutations are permitted.
+
+Agent tools (`bash`, `read`, `write`, `edit`) run with the user's full filesystem and shell permissions. No sandboxing is applied between agents. The trust model assumes that the user controls what agents are spawned and what instructions they receive.
+
+## Tech Stack
+
+| Layer | Technology |
+| --- | --- |
+| Runtime | Node.js, TypeScript |
+| Agent SDK | [@mariozechner/pi-agent-core](https://github.com/badlogic/pi-mono) |
+| HTTP / WebSocket | Express, `ws` |
+| Database | SQLite (`better-sqlite3`), WAL mode |
+| Scheduling | `croner` |
+| Schema validation | `@sinclair/typebox` |
+| UI | React, Zustand, Vite |
+| Package manager | pnpm workspaces |
+| Lint / format | Biome |
+| Knowledge tracking | Git (`simple-git`) |
 
 ## Key Design Decisions
 
@@ -73,7 +115,7 @@ All runtime state lives in `~/.system2/`. See [Configuration](configuration.md) 
 
 **Artifact canvas for interactive content.** The UI provides a dedicated display area where the Guide or user can surface rich, interactive content on demand -- charts, dashboards, custom UIs, or any HTML/JS artifact. Artifacts are stored as files and tracked with metadata (title, description, timestamps) so they can be revisited and  refined in later conversations. See [UI](packages/ui.md)
 
-**Orchestrated multi-agent work.** Agents are spawned on demand based on the scope and nature of the work; others run continuously in the background. Work is broken into tasks stored in the database, then distributed and coordinated via two channels: direct messages for real-time steering and task comments for a permanent audit trail. A dedicated review role provides critical assessment before work is considered complete. Tools are gated by role and project scope. See [Agents](agents.md) | [Tools](tools.md) | [Database](database.md).
+**Orchestrated multi-agent work.** Agents are spawned on demand based on the scope and nature of the work; others run continuously in the background. Work is broken into tasks stored in the database, then distributed and coordinated via two channels: direct messages for real-time steering and task comments for a permanent audit trail. A dedicated review role provides critical assessment before work is considered complete. Tools are gated by role and project scope. A background agent (the Narrator) continuously maintains long-term memory by writing project logs, daily summaries, and project stories — so knowledge accumulates without user involvement. See [Agents](agents.md) | [Tools](tools.md) | [Database](database.md) | [Scheduler](scheduler.md) | [Knowledge System](knowledge-system.md).
 
 **Persistent, evolving context.** Every agent's context is assembled from three layers on each LLM call: static instructions (shared agent reference and role-specific prompt, loaded once at startup or spawn); a Knowledge Base of files re-read fresh from disk — knowledge files, plus daily summaries or a project log depending on scope — so any edit takes effect immediately; and the full conversation history replayed from a JSONL session file, with a compaction summary substituted when the context was compressed. Knowledge files are versioned in git; session JSONL files are gitignored (large, private). Session logs rotate at a configurable size threshold to prevent unbounded growth. See [Agents](agents.md#session-management) | [Knowledge System](knowledge-system.md).
 
