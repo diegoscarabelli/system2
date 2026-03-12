@@ -16,7 +16,7 @@ function makeAgent(id: number, role: string): Agent {
 }
 
 function setup(selfId: number, agents: Agent[], registeredIds: number[]) {
-  const deliverMessage = vi.fn().mockResolvedValue(undefined);
+  const deliverMessage = vi.fn().mockReturnValue(undefined);
   const db = {
     getAgent: (id: number) => agents.find((a) => a.id === id) ?? null,
   } as unknown as DatabaseClient;
@@ -82,7 +82,7 @@ describe('message_agent tool', () => {
     expect((result.content[0] as { text: string }).text).toContain('not currently active');
   });
 
-  it('propagates delivery errors', async () => {
+  it('returns success even when deliverMessage throws (fire-and-forget)', async () => {
     const guide = makeAgent(1, 'guide');
     const conductor = makeAgent(2, 'conductor');
     const db = {
@@ -90,13 +90,16 @@ describe('message_agent tool', () => {
     } as unknown as DatabaseClient;
     const registry = {
       get: () => ({
-        deliverMessage: vi.fn().mockRejectedValue(new Error('delivery failed')),
+        deliverMessage: vi.fn().mockImplementation(() => {
+          throw new Error('delivery failed');
+        }),
       }),
     } as unknown as AgentRegistry;
     const tool = createMessageAgentTool(1, registry, db);
 
     const result = await exec(tool, { agent_id: 2, message: 'Hello' });
 
+    // deliverMessage is fire-and-forget; synchronous throws are caught by the try/catch
     expect((result.content[0] as { text: string }).text).toContain('delivery failed');
   });
 });

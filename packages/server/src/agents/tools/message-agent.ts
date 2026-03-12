@@ -38,7 +38,13 @@ export function createMessageAgentTool(
     description:
       "Send a message to another agent in the system. The message appears in the receiver's context and triggers processing. Use read_system2_db to look up available agents by role.",
     parameters: params,
-    execute: async (_toolCallId, args) => {
+    execute: async (_toolCallId, args, signal) => {
+      if (signal?.aborted) {
+        return {
+          content: [{ type: 'text', text: 'Aborted.' }],
+          details: { error: 'aborted' },
+        };
+      }
       const { agent_id, message, urgent } = args;
 
       // Cannot message self
@@ -80,7 +86,7 @@ export function createMessageAgentTool(
       const timestamp = Date.now();
 
       try {
-        await receiverHost.deliverMessage(
+        receiverHost.deliverMessage(
           content,
           { sender: selfId, receiver: agent_id, timestamp },
           urgent
