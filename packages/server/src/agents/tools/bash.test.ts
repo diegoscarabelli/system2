@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBashTool } from './bash.js';
 
@@ -17,6 +18,11 @@ function trackDir(dir: string): string {
   return dir;
 }
 
+// Derive types from the tool so tests stay in sync with implementation
+const _refTool = createBashTool();
+type BashResult = Awaited<ReturnType<typeof _refTool.execute>>;
+type BashParams = Parameters<typeof _refTool.execute>[1];
+
 describe('bash tool', () => {
   afterEach(() => {
     for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
@@ -25,8 +31,11 @@ describe('bash tool', () => {
 
   describe('foreground execution', () => {
     const tool = createBashTool();
-    const exec = (params: Record<string, unknown>, signal?: AbortSignal, onUpdate?: any) =>
-      tool.execute('test-call', params as any, signal, onUpdate) as any;
+    const exec = (
+      params: Record<string, unknown>,
+      signal?: AbortSignal,
+      onUpdate?: AgentToolUpdateCallback<BashResult['details']>
+    ) => tool.execute('test-call', params as BashParams, signal, onUpdate);
 
     it('runs a simple command', async () => {
       const result = await exec({ command: 'echo hello' });
@@ -40,14 +49,14 @@ describe('bash tool', () => {
 
       expect(result.content[0].text).toContain('err');
       expect(result.details).toHaveProperty('stderr');
-      expect((result.details as any).stderr).toContain('err');
+      expect((result.details as { stderr: string }).stderr).toContain('err');
     });
 
     it('returns error for failed command', async () => {
       const result = await exec({ command: 'exit 1' });
 
       expect(result.content[0].text).toContain('failed');
-      expect((result.details as any).exitCode).not.toBe(0);
+      expect((result.details as { exitCode: number }).exitCode).not.toBe(0);
     });
 
     it('uses custom cwd', async () => {
@@ -81,13 +90,13 @@ describe('bash tool', () => {
       const notifyBackground = vi.fn();
       const tool = createBashTool(notifyBackground);
 
-      const result: any = await tool.execute('bg-call', {
+      const result: BashResult = await tool.execute('bg-call', {
         command: 'echo background',
         run_in_background: true,
-      } as any);
+      } as BashParams);
 
       expect(result.content[0].text).toContain('started in background');
-      expect((result.details as any).background).toBe(true);
+      expect((result.details as { background: boolean }).background).toBe(true);
 
       // Wait for background process to finish
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -100,10 +109,10 @@ describe('bash tool', () => {
 
     it('falls through to foreground when no notifyBackground callback', async () => {
       const tool = createBashTool(); // no callback
-      const result: any = await tool.execute('fg-call', {
+      const result: BashResult = await tool.execute('fg-call', {
         command: 'echo fallthrough',
         run_in_background: true,
-      } as any);
+      } as BashParams);
 
       // Should execute synchronously and return output directly
       expect(result.content[0].text).toContain('fallthrough');

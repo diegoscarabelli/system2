@@ -1,5 +1,6 @@
 import type { Agent, Project } from '@system2/shared';
 import { describe, expect, it, vi } from 'vitest';
+import type { DatabaseClient } from '../../db/client.js';
 import { createSpawnAgentTool } from './spawn-agent.js';
 
 function makeAgent(id: number, role: string, project: number | null): Agent {
@@ -17,7 +18,7 @@ function makeProject(id: number): Project {
     end_at: null,
     created_at: 'now',
     updated_at: 'now',
-  } as any;
+  } as unknown as Project;
 }
 
 function setup(agentId: number, agents: Agent[], projects: Project[]) {
@@ -25,14 +26,19 @@ function setup(agentId: number, agents: Agent[], projects: Project[]) {
   const db = {
     getAgent: (id: number) => agents.find((a) => a.id === id) ?? null,
     getProject: (id: number) => projects.find((p) => p.id === id) ?? null,
-  } as any;
+  } as unknown as DatabaseClient;
   const tool = createSpawnAgentTool(db, agentId, spawner);
   return { tool, spawner };
 }
 
+// Derive types from the tool so tests stay in sync with implementation
+const { tool: _refTool } = setup(1, [], []);
+type SpawnParams = Parameters<typeof _refTool.execute>[1];
+type SpawnResult = Awaited<ReturnType<typeof _refTool.execute>>;
+
 describe('spawn_agent tool', () => {
-  const exec = (tool: any, params: Record<string, unknown>) =>
-    tool.execute('test', params as any) as any;
+  const exec = (tool: typeof _refTool, params: Record<string, unknown>): Promise<SpawnResult> =>
+    tool.execute('test', params as SpawnParams);
 
   it('Guide spawns conductor successfully', async () => {
     const { tool, spawner } = setup(1, [makeAgent(1, 'guide', null)], [makeProject(10)]);

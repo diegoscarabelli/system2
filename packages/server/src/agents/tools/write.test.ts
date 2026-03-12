@@ -17,9 +17,14 @@ function trackDir(dir: string): string {
   return dir;
 }
 
+// Derive types from the tool so tests stay in sync with implementation
+const _refTool = createWriteTool();
+type WriteParams = Parameters<typeof _refTool.execute>[1];
+
 describe('write tool', () => {
   const tool = createWriteTool();
-  const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+  const exec = (params: Record<string, unknown>) =>
+    tool.execute('test-call', params as WriteParams);
 
   afterEach(() => {
     for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });

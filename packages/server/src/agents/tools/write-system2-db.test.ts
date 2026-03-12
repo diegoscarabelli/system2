@@ -1,5 +1,6 @@
 import type { Agent, Project, Task, TaskComment, TaskLink } from '@system2/shared';
 import { describe, expect, it } from 'vitest';
+import type { DatabaseClient } from '../../db/client.js';
 import { createWriteSystem2DbTool } from './write-system2-db.js';
 
 // Minimal mock DatabaseClient with controllable return values
@@ -24,25 +25,25 @@ function createMockDb() {
     getTaskLink: (id: number) => taskLinks.get(id) ?? null,
     getTaskComment: (id: number) => taskComments.get(id) ?? null,
 
-    createProject: (p: any) => {
+    createProject: (p: Partial<Project>) => {
       const id = nextId++;
-      const project = { id, ...p, created_at: 'now', updated_at: 'now' };
+      const project = { id, ...p, created_at: 'now', updated_at: 'now' } as Project;
       projects.set(id, project);
       return project;
     },
-    updateProject: (id: number, fields: any) => {
+    updateProject: (id: number, fields: Partial<Project>) => {
       const p = projects.get(id);
       if (!p) return null;
       Object.assign(p, fields);
       return p;
     },
-    createTask: (t: any) => {
+    createTask: (t: Partial<Task>) => {
       const id = nextId++;
-      const task = { id, ...t, created_at: 'now', updated_at: 'now' };
+      const task = { id, ...t, created_at: 'now', updated_at: 'now' } as Task;
       tasks.set(id, task);
       return task;
     },
-    updateTask: (id: number, fields: any) => {
+    updateTask: (id: number, fields: Partial<Task>) => {
       const t = tasks.get(id);
       if (!t) return null;
       Object.assign(t, fields);
@@ -60,16 +61,16 @@ function createMockDb() {
       task.status = 'in progress';
       return { claimed: true, task };
     },
-    createTaskLink: (l: any) => {
+    createTaskLink: (l: Partial<TaskLink>) => {
       const id = nextId++;
-      const link = { id, ...l, created_at: 'now', updated_at: 'now' };
+      const link = { id, ...l, created_at: 'now', updated_at: 'now' } as TaskLink;
       taskLinks.set(id, link);
       return link;
     },
     deleteTaskLink: (id: number) => taskLinks.delete(id),
-    createTaskComment: (c: any) => {
+    createTaskComment: (c: Partial<TaskComment>) => {
       const id = nextId++;
-      const comment = { id, ...c, created_at: 'now', updated_at: 'now' };
+      const comment = { id, ...c, created_at: 'now', updated_at: 'now' } as TaskComment;
       taskComments.set(id, comment);
       return comment;
     },
@@ -105,7 +106,7 @@ function addTask(db: MockDb, id: number, project: number) {
     end_at: null,
     created_at: 'now',
     updated_at: 'now',
-  } as any);
+  } as unknown as Task);
 }
 
 function addProject(db: MockDb, id: number) {
@@ -119,21 +120,27 @@ function addProject(db: MockDb, id: number) {
     end_at: null,
     created_at: 'now',
     updated_at: 'now',
-  } as any);
+  } as unknown as Project);
 }
+
+// Derive types from the tool so tests stay in sync with implementation
+const _refDb = createMockDb();
+const _refTool = createWriteSystem2DbTool(_refDb as unknown as DatabaseClient, 1);
+type WriteDbParams = Parameters<typeof _refTool.execute>[1];
+type WriteDbResult = Awaited<ReturnType<typeof _refTool.execute>>;
 
 describe('write_system2_db tool', () => {
   describe('createProject', () => {
     it('succeeds for Guide', async () => {
       const db = createMockDb();
       addAgent(db, 1, 'guide', null);
-      const tool = createWriteSystem2DbTool(db as any, 1);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'createProject',
         name: 'New Project',
         description: 'A test project',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('New Project');
     });
@@ -141,13 +148,13 @@ describe('write_system2_db tool', () => {
     it('fails for non-Guide', async () => {
       const db = createMockDb();
       addAgent(db, 2, 'conductor', 1);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'createProject',
         name: 'X',
         description: 'Y',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('restricted to the Guide');
     });
@@ -158,13 +165,13 @@ describe('write_system2_db tool', () => {
       const db = createMockDb();
       addAgent(db, 1, 'guide', null);
       addProject(db, 10);
-      const tool = createWriteSystem2DbTool(db as any, 1);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'updateProject',
         id: 10,
         name: 'Updated',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('Updated');
     });
@@ -173,13 +180,13 @@ describe('write_system2_db tool', () => {
       const db = createMockDb();
       addAgent(db, 2, 'conductor', 10);
       addProject(db, 10);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'updateProject',
         id: 10,
         status: 'in progress',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).not.toContain('Error');
     });
@@ -188,13 +195,13 @@ describe('write_system2_db tool', () => {
       const db = createMockDb();
       addAgent(db, 2, 'conductor', 10);
       addProject(db, 20);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'updateProject',
         id: 20,
         name: 'X',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('only update their own project');
     });
@@ -202,13 +209,13 @@ describe('write_system2_db tool', () => {
     it('fails for Reviewer', async () => {
       const db = createMockDb();
       addAgent(db, 3, 'reviewer', 10);
-      const tool = createWriteSystem2DbTool(db as any, 3);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 3);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'updateProject',
         id: 10,
         name: 'X',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('restricted to Guide and Conductor');
     });
@@ -218,14 +225,14 @@ describe('write_system2_db tool', () => {
     it('enforces project scope', async () => {
       const db = createMockDb();
       addAgent(db, 2, 'conductor', 10);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'createTask',
         project: 20,
         title: 'Task',
         description: 'Desc',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('scoped to project 10');
     });
@@ -233,15 +240,15 @@ describe('write_system2_db tool', () => {
     it('restricts assignee to Guide/Conductor', async () => {
       const db = createMockDb();
       addAgent(db, 3, 'reviewer', 10);
-      const tool = createWriteSystem2DbTool(db as any, 3);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 3);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'createTask',
         project: 10,
         title: 'Task',
         description: 'Desc',
         assignee: 5,
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('Only Guide and Conductor');
     });
@@ -249,15 +256,15 @@ describe('write_system2_db tool', () => {
     it('succeeds for Guide with assignee', async () => {
       const db = createMockDb();
       addAgent(db, 1, 'guide', null);
-      const tool = createWriteSystem2DbTool(db as any, 1);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'createTask',
         project: 10,
         title: 'Task',
         description: 'Desc',
         assignee: 2,
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).not.toContain('Error');
     });
@@ -268,13 +275,13 @@ describe('write_system2_db tool', () => {
       const db = createMockDb();
       addAgent(db, 2, 'conductor', 10);
       addTask(db, 50, 20); // task in project 20
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'updateTask',
         id: 50,
         status: 'done',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('scoped to project 10');
     });
@@ -283,13 +290,13 @@ describe('write_system2_db tool', () => {
       const db = createMockDb();
       addAgent(db, 3, 'reviewer', 10);
       addTask(db, 50, 10);
-      const tool = createWriteSystem2DbTool(db as any, 3);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 3);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'updateTask',
         id: 50,
         assignee: 5,
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('Only Guide and Conductor');
     });
@@ -300,12 +307,12 @@ describe('write_system2_db tool', () => {
       const db = createMockDb();
       addAgent(db, 2, 'conductor', 10);
       addTask(db, 50, 10);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'claimTask',
         id: 50,
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('claimed');
     });
@@ -314,12 +321,12 @@ describe('write_system2_db tool', () => {
       const db = createMockDb();
       addAgent(db, 2, 'conductor', 10);
       addTask(db, 50, 20);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'claimTask',
         id: 50,
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('failed');
     });
@@ -331,14 +338,14 @@ describe('write_system2_db tool', () => {
       addAgent(db, 2, 'conductor', 10);
       addTask(db, 50, 20); // source in project 20
       addTask(db, 51, 20);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'createTaskLink',
         source: 50,
         target: 51,
         relationship: 'blocked_by',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('scoped to project 10');
     });
@@ -356,13 +363,13 @@ describe('write_system2_db tool', () => {
         relationship: 'relates_to',
         created_at: 'now',
         updated_at: 'now',
-      } as any);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      } as unknown as TaskLink);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'deleteTaskLink',
         id: 1,
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('scoped to project 10');
     });
@@ -373,13 +380,13 @@ describe('write_system2_db tool', () => {
       const db = createMockDb();
       addAgent(db, 2, 'conductor', 10);
       addTask(db, 50, 20);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'createTaskComment',
         task: 50,
         content: 'Hello',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('scoped to project 10');
     });
@@ -388,13 +395,13 @@ describe('write_system2_db tool', () => {
       const db = createMockDb();
       addAgent(db, 2, 'conductor', 10);
       addTask(db, 50, 10);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'createTaskComment',
         task: 50,
         content: 'A comment',
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('A comment');
       // Verify author was set to agentId (2)
@@ -415,13 +422,13 @@ describe('write_system2_db tool', () => {
         content: 'x',
         created_at: 'now',
         updated_at: 'now',
-      } as any);
-      const tool = createWriteSystem2DbTool(db as any, 2);
+      } as unknown as TaskComment);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
 
-      const result: any = await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'deleteTaskComment',
         id: 1,
-      } as any);
+      } as WriteDbParams);
 
       expect(result.content[0].text).toContain('scoped to project 10');
     });
@@ -430,11 +437,11 @@ describe('write_system2_db tool', () => {
   it('returns error for unknown operation', async () => {
     const db = createMockDb();
     addAgent(db, 1, 'guide', null);
-    const tool = createWriteSystem2DbTool(db as any, 1);
+    const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
 
-    const result: any = await tool.execute('test', {
+    const result: WriteDbResult = await tool.execute('test', {
       operation: 'unknownOp',
-    } as any);
+    } as WriteDbParams);
 
     expect(result.content[0].text).toContain('Unknown operation');
   });

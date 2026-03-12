@@ -17,9 +17,13 @@ function trackDir(dir: string): string {
   return dir;
 }
 
+// Derive types from the tool so tests stay in sync with implementation
+const _refTool = createReadTool();
+type ReadParams = Parameters<typeof _refTool.execute>[1];
+
 describe('read tool', () => {
   const tool = createReadTool();
-  const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as any) as any;
+  const exec = (params: Record<string, unknown>) => tool.execute('test-call', params as ReadParams);
 
   afterEach(() => {
     for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });

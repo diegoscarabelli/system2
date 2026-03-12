@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
+import type { DatabaseClient } from '../../db/client.js';
 import { createReadSystem2DbTool } from './read-system2-db.js';
 
-function mockDb(queryResult: unknown[] | Error) {
+function mockDb(queryResult: unknown[] | Error): DatabaseClient {
   return {
     query: (_sql: string) => {
       if (queryResult instanceof Error) throw queryResult;
       return queryResult;
     },
-  } as any;
+  } as unknown as DatabaseClient;
 }
+
+// Derive types from the tool so tests stay in sync with implementation
+const _refTool = createReadSystem2DbTool(mockDb([]));
+type DbResult = Awaited<ReturnType<typeof _refTool.execute>>;
+type DbParams = Parameters<typeof _refTool.execute>[1];
 
 describe('read_system2_db tool', () => {
   it('returns rows as JSON', async () => {
@@ -18,28 +24,30 @@ describe('read_system2_db tool', () => {
     ];
     const tool = createReadSystem2DbTool(mockDb(rows));
 
-    const result: any = await tool.execute('test', { sql: 'SELECT * FROM project' } as any);
+    const result: DbResult = await tool.execute('test', {
+      sql: 'SELECT * FROM project',
+    } as DbParams);
 
     expect(result.content[0].text).toContain('2 row(s)');
     expect(result.content[0].text).toContain('Project A');
-    expect((result.details as any).count).toBe(2);
+    expect((result.details as { count: number }).count).toBe(2);
   });
 
   it('returns message for empty result', async () => {
     const tool = createReadSystem2DbTool(mockDb([]));
 
-    const result: any = await tool.execute('test', {
+    const result: DbResult = await tool.execute('test', {
       sql: 'SELECT * FROM project WHERE 1=0',
-    } as any);
+    } as DbParams);
 
     expect(result.content[0].text).toBe('No results found.');
-    expect((result.details as any).count).toBe(0);
+    expect((result.details as { count: number }).count).toBe(0);
   });
 
   it('returns error on SQL failure', async () => {
     const tool = createReadSystem2DbTool(mockDb(new Error('not authorized')));
 
-    const result: any = await tool.execute('test', { sql: 'DROP TABLE project' } as any);
+    const result: DbResult = await tool.execute('test', { sql: 'DROP TABLE project' } as DbParams);
 
     expect(result.content[0].text).toContain('Error');
     expect(result.content[0].text).toContain('not authorized');

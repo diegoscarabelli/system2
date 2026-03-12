@@ -248,7 +248,8 @@ export class AgentHost {
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
       // Override system prompt: static agent instructions + fresh knowledge files on every call
-      systemPromptOverride: () => `${staticPrompt}${this.loadKnowledgeContext()}\n\n---\n\nConversation history follows.`,
+      systemPromptOverride: () =>
+        `${staticPrompt}${this.loadKnowledgeContext()}\n\n---\n\nConversation history follows.`,
       // Disable default resource discovery (we manage our own)
       noExtensions: true,
       noSkills: true,

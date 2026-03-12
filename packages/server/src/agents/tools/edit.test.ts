@@ -17,10 +17,14 @@ function trackDir(dir: string): string {
   return dir;
 }
 
+// Derive types from the tool so tests stay in sync with implementation
+const _refTool = createEditTool();
+type EditParams = Parameters<typeof _refTool.execute>[1];
+
 describe('edit tool', () => {
   const tool = createEditTool();
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
-    tool.execute('test-call', params as any, signal) as any;
+    tool.execute('test-call', params as EditParams, signal);
 
   afterEach(() => {
     for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });

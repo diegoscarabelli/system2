@@ -1,5 +1,7 @@
 import type { Agent } from '@system2/shared';
 import { describe, expect, it, vi } from 'vitest';
+import type { DatabaseClient } from '../../db/client.js';
+import type { AgentRegistry } from '../registry.js';
 import { createTerminateAgentTool } from './terminate-agent.js';
 
 function makeAgent(id: number, role: string, project: number | null): Agent {
@@ -13,18 +15,23 @@ function setup(callerId: number, agents: Agent[], registeredIds: number[]) {
   const db = {
     getAgent: (id: number) => agents.find((a) => a.id === id) ?? null,
     updateAgentStatus,
-  } as any;
+  } as unknown as DatabaseClient;
   const registry = {
     get: (id: number) => (registeredIds.includes(id) ? { abort } : undefined),
     unregister,
-  } as any;
+  } as unknown as AgentRegistry;
   const tool = createTerminateAgentTool(db, callerId, registry);
   return { tool, abort, unregister, updateAgentStatus };
 }
 
+// Derive types from the tool so tests stay in sync with implementation
+const { tool: _refTool } = setup(1, [], []);
+type TerminateParams = Parameters<typeof _refTool.execute>[1];
+type TerminateResult = Awaited<ReturnType<typeof _refTool.execute>>;
+
 describe('terminate_agent tool', () => {
-  const exec = (tool: any, params: Record<string, unknown>) =>
-    tool.execute('test', params as any) as any;
+  const exec = (tool: typeof _refTool, params: Record<string, unknown>): Promise<TerminateResult> =>
+    tool.execute('test', params as TerminateParams);
 
   it('Guide terminates conductor', async () => {
     const guide = makeAgent(1, 'guide', null);

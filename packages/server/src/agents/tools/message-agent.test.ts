@@ -1,5 +1,7 @@
 import type { Agent } from '@system2/shared';
 import { describe, expect, it, vi } from 'vitest';
+import type { DatabaseClient } from '../../db/client.js';
+import type { AgentRegistry } from '../registry.js';
 import { createMessageAgentTool } from './message-agent.js';
 
 function makeAgent(id: number, role: string): Agent {
@@ -17,18 +19,23 @@ function setup(selfId: number, agents: Agent[], registeredIds: number[]) {
   const deliverMessage = vi.fn().mockResolvedValue(undefined);
   const db = {
     getAgent: (id: number) => agents.find((a) => a.id === id) ?? null,
-  } as any;
+  } as unknown as DatabaseClient;
   const registry = {
     get: (id: number) =>
       registeredIds.includes(id) ? { deliverMessage, abort: vi.fn() } : undefined,
-  } as any;
+  } as unknown as AgentRegistry;
   const tool = createMessageAgentTool(selfId, registry, db);
   return { tool, deliverMessage };
 }
 
+// Derive types from the tool so tests stay in sync with implementation
+const { tool: _refTool } = setup(1, [], []);
+type MessageParams = Parameters<typeof _refTool.execute>[1];
+type MessageResult = Awaited<ReturnType<typeof _refTool.execute>>;
+
 describe('message_agent tool', () => {
-  const exec = (tool: any, params: Record<string, unknown>) =>
-    tool.execute('test', params as any) as any;
+  const exec = (tool: typeof _refTool, params: Record<string, unknown>): Promise<MessageResult> =>
+    tool.execute('test', params as MessageParams);
 
   it('delivers a message successfully', async () => {
     const guide = makeAgent(1, 'guide');
@@ -78,12 +85,12 @@ describe('message_agent tool', () => {
     const conductor = makeAgent(2, 'conductor');
     const db = {
       getAgent: (id: number) => [guide, conductor].find((a) => a.id === id) ?? null,
-    } as any;
+    } as unknown as DatabaseClient;
     const registry = {
       get: () => ({
         deliverMessage: vi.fn().mockRejectedValue(new Error('delivery failed')),
       }),
-    } as any;
+    } as unknown as AgentRegistry;
     const tool = createMessageAgentTool(1, registry, db);
 
     const result = await exec(tool, { agent_id: 2, message: 'Hello' });
