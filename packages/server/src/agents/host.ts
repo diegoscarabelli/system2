@@ -73,6 +73,7 @@ export interface AgentHostConfig {
   toolsConfig?: ToolsConfig;
   spawner?: AgentSpawner;
   onArtifactChange?: () => void;
+  onBusyChange?: () => void;
 }
 
 export class AgentHost {
@@ -96,6 +97,8 @@ export class AgentHost {
   private agentProjectDirName: string | null = null;
   private sessionDir: string | null = null;
   private onArtifactChange?: () => void;
+  private onBusyChange?: () => void;
+  private busy = false;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -105,6 +108,7 @@ export class AgentHost {
     this.toolsConfig = config.toolsConfig;
     this.spawner = config.spawner;
     this.onArtifactChange = config.onArtifactChange;
+    this.onBusyChange = config.onBusyChange;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -280,6 +284,19 @@ export class AgentHost {
     session.subscribe((event) => {
       // Check for API errors that need failover handling
       this.handlePotentialError(event);
+
+      // Track busy state from agent activity
+      if (event.type === 'message_update' || event.type === 'tool_execution_start') {
+        if (!this.busy) {
+          this.busy = true;
+          this.onBusyChange?.();
+        }
+      } else if (event.type === 'agent_end') {
+        if (this.busy) {
+          this.busy = false;
+          this.onBusyChange?.();
+        }
+      }
 
       // Forward to external listeners
       this.listeners.forEach((listener) => {
@@ -609,5 +626,9 @@ export class AgentHost {
 
   getProvider(): string {
     return this.currentProvider;
+  }
+
+  isBusy(): boolean {
+    return this.busy;
   }
 }

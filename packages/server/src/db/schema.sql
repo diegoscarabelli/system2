@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS agent (
   id INTEGER PRIMARY KEY,                -- Auto-incrementing unique identifier
   role TEXT NOT NULL CHECK(role IN ('guide', 'conductor', 'narrator', 'reviewer')), -- Agent specialization (guide is system-wide)
   project INTEGER REFERENCES project(id), -- Assigned project, NULL for guide and narrator (system-wide)
-  status TEXT DEFAULT 'idle' CHECK(status IN ('idle', 'active', 'archived')), -- Current lifecycle state
+  status TEXT DEFAULT 'active' CHECK(status IN ('active', 'archived')), -- Current lifecycle state
   created_at TEXT DEFAULT (datetime('now')), -- Row creation timestamp
   updated_at TEXT DEFAULT (datetime('now'))  -- Last modification timestamp
 );

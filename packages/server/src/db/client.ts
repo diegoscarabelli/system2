@@ -308,7 +308,7 @@ export class DatabaseClient {
     return this.createAgent({
       role: 'guide',
       project: null,
-      status: 'idle',
+      status: 'active',
     });
   }
 
@@ -327,7 +327,7 @@ export class DatabaseClient {
     return this.createAgent({
       role: 'narrator',
       project: null,
-      status: 'idle',
+      status: 'active',
     });
   }
 

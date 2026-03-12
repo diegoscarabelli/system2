@@ -89,6 +89,7 @@ export class Server {
       toolsConfig: config.toolsConfig,
       spawner: this.makeSpawner(),
       onArtifactChange: () => this.broadcastCatalogChanged(),
+      onBusyChange: () => this.broadcastAgentsChanged(),
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
 
@@ -103,6 +104,7 @@ export class Server {
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
       onArtifactChange: () => this.broadcastCatalogChanged(),
+      onBusyChange: () => this.broadcastAgentsChanged(),
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
 
@@ -157,6 +159,24 @@ export class Server {
           'SELECT a.*, p.name AS project_name FROM artifact a LEFT JOIN project p ON a.project = p.id ORDER BY a.created_at DESC'
         );
         res.json({ artifacts });
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+      }
+    });
+
+    // List all non-archived agents with their busy state for the agents pane
+    this.app.get('/api/agents', (_req, res) => {
+      try {
+        const agents = this.db.query(
+          "SELECT a.id, a.role, a.project, a.status, a.created_at, p.name AS project_name FROM agent a LEFT JOIN project p ON a.project = p.id WHERE a.status != 'archived' ORDER BY a.id"
+        ) as (import('@system2/shared').Agent & { project_name: string | null })[];
+
+        const result = agents.map((agent) => ({
+          ...agent,
+          busy: this.agentRegistry.get(agent.id)?.isBusy() ?? false,
+        }));
+
+        res.json({ agents: result });
       } catch (error) {
         res.status(500).json({ error: (error as Error).message });
       }
@@ -217,6 +237,7 @@ export class Server {
       toolsConfig: this.config.toolsConfig,
       spawner: this.makeSpawner(),
       onArtifactChange: () => this.broadcastCatalogChanged(),
+      onBusyChange: () => this.broadcastAgentsChanged(),
     });
 
     await host.initialize();
@@ -251,6 +272,15 @@ export class Server {
 
   private broadcastCatalogChanged(): void {
     const data = JSON.stringify({ type: 'catalog_changed' });
+    for (const client of this.wss.clients) {
+      if (client.readyState === client.OPEN) {
+        client.send(data);
+      }
+    }
+  }
+
+  private broadcastAgentsChanged(): void {
+    const data = JSON.stringify({ type: 'agents_changed' });
     for (const client of this.wss.clients) {
       if (client.readyState === client.OPEN) {
         client.send(data);
@@ -455,20 +485,20 @@ export class Server {
    * Re-creates their AgentHost, initializes the session, and registers them.
    */
   private async restoreActiveAgents(): Promise<void> {
-    const activeAgents = this.db.query(
-      "SELECT * FROM agent WHERE status = 'active' AND role NOT IN ('guide', 'narrator') ORDER BY id"
+    const agents = this.db.query(
+      "SELECT * FROM agent WHERE status != 'archived' AND role NOT IN ('guide', 'narrator') ORDER BY id"
     ) as import('@system2/shared').Agent[];
-    if (activeAgents.length === 0) return;
+    if (agents.length === 0) return;
 
-    console.log(`[Server] Restoring ${activeAgents.length} active agent(s)...`);
+    console.log(`[Server] Restoring ${agents.length} agent(s)...`);
 
-    for (const agent of activeAgents) {
+    for (const agent of agents) {
       try {
         await this.initializeAgentHost(agent.id);
         console.log(`[Server] Restored ${agent.role} agent (id=${agent.id})`);
       } catch (error) {
         console.error(`[Server] Failed to restore ${agent.role} agent (id=${agent.id}):`, error);
-        this.db.updateAgentStatus(agent.id, 'idle');
+        this.db.updateAgentStatus(agent.id, 'archived');
       }
     }
   }

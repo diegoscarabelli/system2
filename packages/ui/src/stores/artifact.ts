@@ -21,13 +21,17 @@ interface ArtifactState {
   activeTabId: string | null;
   catalogOpen: boolean;
   catalogVersion: number;
+  agentsOpen: boolean;
+  agentsVersion: number;
 
   openArtifact: (url: string, title?: string, filePath?: string) => void;
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
   reloadTab: (filePath: string, newUrl: string) => void;
   toggleCatalog: () => void;
+  toggleAgents: () => void;
   incrementCatalogVersion: () => void;
+  incrementAgentsVersion: () => void;
 }
 
 function extractFilePath(url: string): string {
@@ -77,6 +81,8 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   activeTabId: initial.activeTabId,
   catalogOpen: false,
   catalogVersion: 0,
+  agentsOpen: false,
+  agentsVersion: 0,
 
   openArtifact: (url: string, title?: string, filePath?: string) => {
     const state = get();
@@ -139,10 +145,18 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   },
 
   toggleCatalog: () => {
-    set((state) => ({ catalogOpen: !state.catalogOpen }));
+    set((state) => ({ catalogOpen: !state.catalogOpen, agentsOpen: false }));
+  },
+
+  toggleAgents: () => {
+    set((state) => ({ agentsOpen: !state.agentsOpen, catalogOpen: false }));
   },
 
   incrementCatalogVersion: () => {
     set((state) => ({ catalogVersion: state.catalogVersion + 1 }));
+  },
+
+  incrementAgentsVersion: () => {
+    set((state) => ({ agentsVersion: state.agentsVersion + 1 }));
   },
 }));

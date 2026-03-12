@@ -28,4 +28,5 @@ export type ServerMessage =
   | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number } // Broadcast to other tabs
   | { type: 'provider_info'; provider: string } // Sent on connect — current LLM provider
   | { type: 'provider_change'; provider: string } // Sent on failover — provider switched
-  | { type: 'catalog_changed' }; // Sent when artifact catalog entries are created/updated/deleted
+  | { type: 'catalog_changed' } // Sent when artifact catalog entries are created/updated/deleted
+  | { type: 'agents_changed' }; // Sent when any agent's busy state changes

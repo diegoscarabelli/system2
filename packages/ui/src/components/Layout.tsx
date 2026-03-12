@@ -4,12 +4,13 @@
  * VSCode-style layout: activity bar, optional drawer, artifact viewer, and chat.
  */
 
-import { MoonIcon, StackIcon, SunIcon, ZapIcon } from '@primer/octicons-react';
+import { MoonIcon, PeopleIcon, StackIcon, SunIcon, ZapIcon } from '@primer/octicons-react';
 import { Box, IconButton } from '@primer/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useArtifactStore } from '../stores/artifact';
 import { useThemeStore } from '../stores/theme';
 import { useAccentColors } from '../theme/useAccentColors';
+import { AgentPane } from './AgentPane';
 import { ArtifactCatalog } from './ArtifactCatalog';
 import { ArtifactViewer } from './ArtifactViewer';
 import { Chat } from './Chat';
@@ -26,7 +27,10 @@ export function Layout() {
   const { colorMode, toggleColorMode, particlesEnabled, toggleParticles } = useThemeStore();
   const { accent } = useAccentColors();
   const catalogOpen = useArtifactStore((s) => s.catalogOpen);
+  const agentsOpen = useArtifactStore((s) => s.agentsOpen);
   const toggleCatalog = useArtifactStore((s) => s.toggleCatalog);
+  const toggleAgents = useArtifactStore((s) => s.toggleAgents);
+  const sideDrawerOpen = catalogOpen || agentsOpen;
 
   const handleMouseDown = useCallback(() => {
     isDragging.current = true;
@@ -126,6 +130,29 @@ export function Layout() {
                 : {},
             }}
           />
+          <IconButton
+            aria-label="Toggle agents"
+            icon={PeopleIcon}
+            variant="invisible"
+            size="medium"
+            onClick={toggleAgents}
+            sx={{
+              color: agentsOpen ? 'fg.default' : 'fg.muted',
+              position: 'relative',
+              '&::before': agentsOpen
+                ? {
+                    content: '""',
+                    position: 'absolute',
+                    left: '-8px',
+                    top: '25%',
+                    bottom: '25%',
+                    width: '2px',
+                    backgroundColor: accent,
+                    borderRadius: 1,
+                  }
+                : {},
+            }}
+          />
         </Box>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
           <IconButton
@@ -147,8 +174,8 @@ export function Layout() {
         </Box>
       </Box>
 
-      {/* Catalog drawer */}
-      {catalogOpen && (
+      {/* Side drawer (catalog or agents) */}
+      {sideDrawerOpen && (
         <Box
           sx={{
             width: `${catalogWidth}%`,
@@ -158,12 +185,13 @@ export function Layout() {
             overflow: 'hidden',
           }}
         >
-          <ArtifactCatalog />
+          {catalogOpen && <ArtifactCatalog />}
+          {agentsOpen && <AgentPane />}
         </Box>
       )}
 
-      {/* Catalog resize handle */}
-      {catalogOpen && (
+      {/* Side drawer resize handle */}
+      {sideDrawerOpen && (
         <Box
           onMouseDown={handleCatalogMouseDown}
           sx={{

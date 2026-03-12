@@ -138,6 +138,10 @@ export function useWebSocket() {
           useArtifactStore.getState().incrementCatalogVersion();
           break;
 
+        case 'agents_changed':
+          useArtifactStore.getState().incrementAgentsVersion();
+          break;
+
         case 'error':
           console.error('Server error:', message.message);
           setWaitingForResponse(false);
