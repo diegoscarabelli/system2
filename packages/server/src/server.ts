@@ -89,6 +89,7 @@ export class Server {
       toolsConfig: config.toolsConfig,
       spawner: this.makeSpawner(),
       onArtifactChange: () => this.broadcastCatalogChanged(),
+      onTaskChange: () => this.broadcastTasksChanged(),
       onBusyChange: () => this.broadcastAgentsChanged(),
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
@@ -104,6 +105,7 @@ export class Server {
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
       onArtifactChange: () => this.broadcastCatalogChanged(),
+      onTaskChange: () => this.broadcastTasksChanged(),
       onBusyChange: () => this.broadcastAgentsChanged(),
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
@@ -182,6 +184,76 @@ export class Server {
       }
     });
 
+    // Kanban board data — all tasks with project + assignee info, all projects, all agents
+    this.app.get('/api/kanban', (_req, res) => {
+      try {
+        const tasks = this.db.query(`
+          SELECT t.id, t.parent, t.project, t.title, t.description,
+                 t.status, t.priority, t.assignee, t.labels,
+                 t.start_at, t.end_at, t.created_at,
+                 p.name AS project_name, a.role AS assignee_role
+          FROM task t
+          LEFT JOIN project p ON t.project = p.id
+          LEFT JOIN agent a ON t.assignee = a.id
+          ORDER BY t.created_at ASC
+        `);
+        const projects = this.db.query(`
+          SELECT * FROM project
+          ORDER BY
+            CASE status WHEN 'done' THEN 1 WHEN 'abandoned' THEN 2 ELSE 0 END,
+            created_at ASC
+        `);
+        const agents = this.db.query("SELECT id, role, project FROM agent WHERE status = 'active'");
+        res.json({ tasks, projects, agents });
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+      }
+    });
+
+    // Task detail — full task with comments and links
+    this.app.get('/api/tasks/:id', (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) {
+          res.status(400).json({ error: 'Invalid task id' });
+          return;
+        }
+        const [task] = this.db.query(
+          `SELECT t.*, p.name AS project_name, a.role AS assignee_role
+           FROM task t
+           LEFT JOIN project p ON t.project = p.id
+           LEFT JOIN agent a ON t.assignee = a.id
+           WHERE t.id = ?`,
+          [id]
+        );
+        if (!task) {
+          res.status(404).json({ error: 'Task not found' });
+          return;
+        }
+        const comments = this.db.query(
+          `SELECT tc.*, ag.role AS author_role
+           FROM task_comment tc JOIN agent ag ON tc.author = ag.id
+           WHERE tc.task = ? ORDER BY tc.created_at ASC`,
+          [id]
+        );
+        const links = this.db.query(
+          `SELECT tl.id, tl.relationship, tl.target AS linked_task_id,
+                  t.title AS linked_task_title, t.status AS linked_task_status,
+                  'outgoing' AS direction
+           FROM task_link tl JOIN task t ON tl.target = t.id WHERE tl.source = ?
+           UNION ALL
+           SELECT tl.id, tl.relationship, tl.source AS linked_task_id,
+                  t.title AS linked_task_title, t.status AS linked_task_status,
+                  'incoming' AS direction
+           FROM task_link tl JOIN task t ON tl.source = t.id WHERE tl.target = ?`,
+          [id, id]
+        );
+        res.json({ task, comments, links });
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+      }
+    });
+
     // Query API for interactive artifact dashboards (postMessage bridge)
     this.app.post('/api/query', (req, res) => {
       try {
@@ -237,6 +309,7 @@ export class Server {
       toolsConfig: this.config.toolsConfig,
       spawner: this.makeSpawner(),
       onArtifactChange: () => this.broadcastCatalogChanged(),
+      onTaskChange: () => this.broadcastTasksChanged(),
       onBusyChange: () => this.broadcastAgentsChanged(),
     });
 
@@ -272,6 +345,15 @@ export class Server {
 
   private broadcastCatalogChanged(): void {
     const data = JSON.stringify({ type: 'catalog_changed' });
+    for (const client of this.wss.clients) {
+      if (client.readyState === client.OPEN) {
+        client.send(data);
+      }
+    }
+  }
+
+  private broadcastTasksChanged(): void {
+    const data = JSON.stringify({ type: 'tasks_changed' });
     for (const client of this.wss.clients) {
       if (client.readyState === client.OPEN) {
         client.send(data);
