@@ -27,7 +27,7 @@ export type ChatTurnEvent =
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
   turnEvents?: ChatTurnEvent[];

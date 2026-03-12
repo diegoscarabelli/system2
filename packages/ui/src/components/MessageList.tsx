@@ -497,6 +497,14 @@ export function MessageList() {
     }
   }, [scrollTrigger]);
 
+  // During streaming, pin scroll to bottom on every token so it follows text as it arrives
+  useEffect(() => {
+    if (!currentAssistantMessage || !isNearBottomRef.current) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [currentAssistantMessage]);
+
   return (
     <Box
       ref={scrollContainerRef}
@@ -522,6 +530,23 @@ export function MessageList() {
       {/* Message history */}
       {messages.map((message, idx) => {
         const isLastMessage = idx === messages.length - 1 && !hasCurrentActivity;
+
+        if (message.role === 'system') {
+          return (
+            <Box
+              key={message.id}
+              sx={{
+                textAlign: 'center',
+                py: 2,
+                fontSize: 0,
+                color: 'fg.muted',
+                fontStyle: 'italic',
+              }}
+            >
+              {message.content}
+            </Box>
+          );
+        }
 
         if (message.role === 'user') {
           return (

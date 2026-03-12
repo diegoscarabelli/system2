@@ -39,8 +39,11 @@ interface ChatState {
   messageQueue: QueuedMessage[];
   // Context window usage
   contextPercent: number | null;
+  // Current LLM provider
+  provider: string | null;
 
   addUserMessage: (content: string, id?: string, timestamp?: number) => void;
+  addSystemMessage: (content: string) => void;
   loadHistory: (messages: Message[]) => void;
   queueMessage: (content: string, isSteering?: boolean) => void;
   dequeueMessage: () => QueuedMessage | undefined;
@@ -57,6 +60,7 @@ interface ChatState {
   setStreaming: (streaming: boolean) => void;
   setWaitingForResponse: (waiting: boolean) => void;
   setContextPercent: (percent: number | null) => void;
+  setProvider: (provider: string) => void;
 }
 
 export const useChatStore = create<ChatState>()((set, get) => ({
@@ -69,6 +73,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   isWaitingForResponse: false,
   messageQueue: [],
   contextPercent: null,
+  provider: null,
 
   addUserMessage: (content: string, id?: string, timestamp?: number) => {
     const message: Message = {
@@ -83,6 +88,18 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       currentTurnEvents: [],
       activeThinkingId: null,
       isWaitingForResponse: true,
+    }));
+  },
+
+  addSystemMessage: (content: string) => {
+    const message: Message = {
+      id: `msg-${Date.now()}`,
+      role: 'system',
+      content,
+      timestamp: Date.now(),
+    };
+    set((state) => ({
+      messages: [...state.messages, message],
     }));
   },
 
@@ -239,5 +256,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
   setContextPercent: (percent: number | null) => {
     set({ contextPercent: percent });
+  },
+
+  setProvider: (provider: string) => {
+    set({ provider });
   },
 }));

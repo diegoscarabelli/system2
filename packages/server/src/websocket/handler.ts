@@ -28,8 +28,9 @@ export class WebSocketHandler {
     this.history = history;
     this.wss = wss;
 
-    // Send chat history on connect — server is the source of truth
+    // Send chat history and provider info on connect — server is the source of truth
     this.send({ type: 'chat_history', messages: history.getMessages() });
+    this.send({ type: 'provider_info', provider: agentHost.getProvider() });
 
     // Subscribe to agent events for streaming to this client
     this.unsubscribe = agentHost.subscribe((event) => {
@@ -118,6 +119,16 @@ export class WebSocketHandler {
   }
 
   private handleAgentEvent(event: AgentSessionEvent): void {
+    // Handle synthetic events (not part of AgentSessionEvent type)
+    const eventType = event.type as string;
+    if (eventType === 'status') {
+      const statusEvent = event as unknown as { provider?: string };
+      if (statusEvent.provider) {
+        this.send({ type: 'provider_change', provider: statusEvent.provider });
+      }
+      return;
+    }
+
     switch (event.type) {
       case 'message_update':
         // Stream text as it's generated
