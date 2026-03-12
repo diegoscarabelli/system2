@@ -42,6 +42,10 @@ export const ParticlesBackground = memo(function ParticlesBackground() {
           distance: 150,
           width: 1,
         },
+        collisions: {
+          enable: true,
+          mode: 'bounce' as const,
+        },
         move: {
           enable: true,
           speed: 0.8,
