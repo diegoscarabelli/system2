@@ -498,7 +498,17 @@ export class Server {
         console.log(`[Server] Restored ${agent.role} agent (id=${agent.id})`);
       } catch (error) {
         console.error(`[Server] Failed to restore ${agent.role} agent (id=${agent.id}):`, error);
-        this.db.updateAgentStatus(agent.id, 'archived');
+
+        // Notify the Guide about the restore failure (agent stays active in DB)
+        const errorMsg =
+          `Failed to restore ${agent.role} agent (id=${agent.id}): ${(error as Error).message}. ` +
+          `The agent record is still active in the database but has no running session. ` +
+          `Investigate and decide whether to retry or archive the agent.`;
+        this.agentHost.deliverMessage(errorMsg, {
+          sender: agent.id,
+          receiver: this.agentHost.agentId,
+          timestamp: Date.now(),
+        });
       }
     }
   }

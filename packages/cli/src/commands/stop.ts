@@ -63,10 +63,13 @@ export async function stop(): Promise<void> {
     console.log(`Stopping System2 (PID: ${pid})...`);
     await killProcess(pid, false);
 
-    // Wait a bit for graceful shutdown
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // Poll for exit (up to 10 seconds) instead of a fixed wait
+    const deadline = Date.now() + 10_000;
+    while (isProcessRunning(pid) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
 
-    // Check if still running
+    // Force kill if graceful shutdown didn't complete in time
     if (isProcessRunning(pid)) {
       console.log('Process still running, forcing shutdown...');
       await killProcess(pid, true);

@@ -381,6 +381,12 @@ export class AgentHost {
       console.log('[AgentHost] No fallback providers available, error will be surfaced to user');
     }
 
+    // All recovery paths exhausted; ensure busy is cleared
+    if (this.busy) {
+      this.busy = false;
+      this.onBusyChange?.();
+    }
+
     // Reset retry attempts for next error
     this.retryAttempts.clear();
   }
@@ -399,6 +405,12 @@ export class AgentHost {
 
     this.isReinitializing = true;
     console.log(`[AgentHost] Reinitializing with provider: ${provider}`);
+
+    // Old session is dead; clear busy so the agent doesn't appear stuck
+    if (this.busy) {
+      this.busy = false;
+      this.onBusyChange?.();
+    }
 
     try {
       // Update current provider
@@ -604,6 +616,11 @@ export class AgentHost {
   abort(): void {
     if (this.session) {
       this.session.abort();
+      // abort() may not trigger agent_end, so clear busy explicitly
+      if (this.busy) {
+        this.busy = false;
+        this.onBusyChange?.();
+      }
     }
   }
 

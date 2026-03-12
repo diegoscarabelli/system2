@@ -20,7 +20,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 **Guide and Narrator** are singletons created at server startup. Their sessions persist indefinitely across restarts (via `SessionManager.continueRecent()`).
 
-**Conductor and Reviewer** are project-scoped, spawned by Guide for every project and archived when done. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project. On server restart, all non-archived project-scoped agents are restored automatically. If an agent fails to restore, it is archived.
+**Conductor and Reviewer** are project-scoped, spawned by Guide for every project and archived when done. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project. On server restart, all non-archived project-scoped agents are restored automatically. If an agent fails to restore, its status remains `active` in the database, the error is logged, and the Guide is notified so it can investigate.
 
 **Agent status** has two values in the database: `active` (alive, should be restored on restart) and `archived` (terminated, will not be restored). Whether an agent is currently processing work is tracked in memory via `AgentHost.isBusy()`, not in the database.
 
@@ -91,10 +91,14 @@ Prompt caching (where supported by the provider) optimizes the static prefix: on
 
 ### Busy State
 
-`AgentHost` tracks whether the agent is actively processing via an in-memory `busy` flag. This is not stored in the database (it is transient runtime state, not lifecycle state).
+`AgentHost` tracks whether the agent is actively processing via an in-memory `busy` flag. This is not stored in the database (it is transient runtime state, not lifecycle state). On server restart, all agents start as not-busy since nothing is processing yet.
 
 - **Set to true** on `message_update` or `tool_execution_start` events (agent is thinking, generating, or running tools)
-- **Set to false** on `agent_end` event (turn complete)
+- **Set to false** in four scenarios:
+  - `agent_end` event (normal turn completion)
+  - `abort()` called (user cancellation; the SDK may not emit `agent_end` after abort)
+  - `reinitializeWithProvider()` (failover tears down the old session, clearing stale busy state before the new session starts)
+  - `handlePotentialError()` exhausts all retries and failovers (unrecoverable error, agent has stopped processing)
 - **Broadcast:** when the busy flag changes, the server broadcasts `agents_changed` over WebSocket so the UI can update the agents pane in real time
 
 The `/api/agents` endpoint combines DB agent records with the in-memory busy state for each registered AgentHost.

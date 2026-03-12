@@ -173,6 +173,120 @@ describe('AgentHost', () => {
     });
   });
 
+  describe('busy state', () => {
+    function makeHostWithBusyTracking() {
+      const onBusyChange = vi.fn();
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        onBusyChange,
+      });
+      const internal = host as unknown as {
+        busy: boolean;
+        session: { prompt: ReturnType<typeof vi.fn>; abort: ReturnType<typeof vi.fn> };
+        listeners: Set<(event: unknown) => void>;
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+        pendingPrompt: string | null;
+      };
+      return { host, internal, onBusyChange };
+    }
+
+    /** Set up a fake session and subscribe via initialize's event handler path */
+    function setupWithFakeSession(
+      internal: ReturnType<typeof makeHostWithBusyTracking>['internal']
+    ) {
+      // The real subscribe path goes through session.subscribe in initialize().
+      // Since we can't call initialize() (needs real filesystem), we simulate
+      // by directly adding a listener that mirrors the busy tracking logic.
+      // Instead, we just set the session and test via the public listener mechanism
+      // plus direct busy flag manipulation.
+      internal.session = {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        abort: vi.fn(),
+      };
+    }
+
+    it('starts not busy', () => {
+      const { host } = makeHostWithBusyTracking();
+      expect(host.isBusy()).toBe(false);
+    });
+
+    it('abort() clears busy and calls onBusyChange', () => {
+      const { host, internal, onBusyChange } = makeHostWithBusyTracking();
+      setupWithFakeSession(internal);
+
+      // Simulate being busy
+      internal.busy = true;
+
+      host.abort();
+
+      expect(host.isBusy()).toBe(false);
+      expect(onBusyChange).toHaveBeenCalledTimes(1);
+    });
+
+    it('abort() is a no-op when already idle', () => {
+      const { host, internal, onBusyChange } = makeHostWithBusyTracking();
+      setupWithFakeSession(internal);
+
+      host.abort();
+
+      expect(host.isBusy()).toBe(false);
+      expect(onBusyChange).not.toHaveBeenCalled();
+    });
+
+    it('handlePotentialError clears busy when all recovery paths exhausted', async () => {
+      const { host, internal, onBusyChange } = makeHostWithBusyTracking();
+      setupWithFakeSession(internal);
+
+      // Simulate being busy
+      internal.busy = true;
+      internal.currentProvider = 'cerebras';
+
+      // No next provider available
+      internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(true);
+      internal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      const errorEvent = {
+        type: 'message_end',
+        message: {
+          stopReason: 'error',
+          errorMessage: 'Error 401: Unauthorized',
+        },
+      };
+
+      await internal.handlePotentialError(errorEvent);
+
+      expect(host.isBusy()).toBe(false);
+      expect(onBusyChange).toHaveBeenCalled();
+    });
+
+    it('onBusyChange is not called when busy state does not change', () => {
+      const { host, internal, onBusyChange } = makeHostWithBusyTracking();
+      setupWithFakeSession(internal);
+
+      // Already idle, abort should not trigger callback
+      host.abort();
+      expect(onBusyChange).not.toHaveBeenCalled();
+
+      // Already idle, clearing busy via error exhaustion should not trigger callback
+      internal.currentProvider = 'cerebras';
+      internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 401: Unauthorized' },
+      });
+      expect(onBusyChange).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getProvider', () => {
     it('returns the current provider', () => {
       const host = new AgentHost({

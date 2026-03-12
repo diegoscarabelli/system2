@@ -108,7 +108,7 @@ export function Layout() {
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
           <IconButton
-            aria-label="Toggle artifact catalog"
+            aria-label="Artifact catalog"
             icon={StackIcon}
             variant="invisible"
             size="medium"
@@ -131,7 +131,7 @@ export function Layout() {
             }}
           />
           <IconButton
-            aria-label="Toggle agents"
+            aria-label="Active agents"
             icon={PeopleIcon}
             variant="invisible"
             size="medium"
