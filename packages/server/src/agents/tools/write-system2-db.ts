@@ -33,7 +33,11 @@ function checkProjectScope(
   return null;
 }
 
-export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number, onArtifactChange?: () => void) {
+export function createWriteSystem2DbTool(
+  db: DatabaseClient,
+  agentId: number,
+  onArtifactChange?: () => void
+) {
   const params = Type.Object({
     operation: Type.Union(
       [

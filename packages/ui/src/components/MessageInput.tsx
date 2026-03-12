@@ -26,7 +26,7 @@ interface MessageInputProps {
 
 export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
   const [input, setInput] = useState('');
-  const { isStreaming, isWaitingForResponse, isConnected, messageQueue, contextPercent } =
+  const { isStreaming, isWaitingForResponse, isConnected, messageQueue, contextPercent, provider } =
     useChatStore();
   const { accent, accentHover } = useAccentColors();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -174,12 +174,13 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
               {messageQueue.length} message{messageQueue.length > 1 ? 's' : ''} queued
             </Box>
           )}
+          {provider && <Box sx={{ fontSize: 0, color: 'fg.muted', ml: 'auto' }}>{provider}</Box>}
           {contextPercent !== null && (
             <Box
               sx={{
                 fontSize: 0,
                 color: 'fg.muted',
-                ml: 'auto',
+                ml: provider ? 0 : 'auto',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 1,

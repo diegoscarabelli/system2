@@ -36,6 +36,7 @@ export function ArtifactCatalog() {
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: catalogVersion is an intentional external trigger to re-fetch
   useEffect(() => {
     setLoading(true);
     fetch('/api/artifacts')
