@@ -1,6 +1,6 @@
 ---
 name: narrator
-description: Memory keeper: maintains long-term memory and creates daily activity summaries
+description: "Memory keeper: maintains long-term memory and creates daily activity summaries"
 version: 3.0.0
 thinking_level: medium
 models:
