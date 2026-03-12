@@ -18,10 +18,12 @@ src/
 │   ├── Chat.tsx           # Chat container (composes MessageList + MessageInput)
 │   ├── MessageList.tsx    # Message timeline with streaming
 │   ├── MessageInput.tsx   # Auto-growing textarea with queue indicator
-│   ├── ArtifactViewer.tsx # Tabbed artifact display with sandboxed iframes
-│   └── ArtifactCatalog.tsx # Browsable overlay of all registered artifacts
+│   ├── ArtifactViewer.tsx    # Tabbed artifact display with sandboxed iframes
+│   ├── ArtifactCatalog.tsx  # Browsable overlay of all registered artifacts
+│   └── ParticlesBackground.tsx # Animated particle background (tsparticles)
 ├── hooks/
-│   └── useWebSocket.ts    # WebSocket connection and message handling
+│   ├── useWebSocket.ts    # WebSocket connection and message handling
+│   └── useAccentColors.ts # Derived accent colors from theme
 ├── stores/
 │   ├── chat.ts            # Chat state (Zustand)
 │   ├── artifact.ts        # Artifact tab state (Zustand)
@@ -36,6 +38,7 @@ src/
 App (ThemeProvider)
 └── Layout (resizable 2-panel)
     ├── ArtifactViewer (left panel, tabbed iframes)
+    │   ├── ParticlesBackground (animated background, toggleable)
     │   └── ArtifactCatalog (overlay panel, toggled from header)
     └── Chat (right panel, 33% default width)
         ├── MessageList (scrollable timeline)
@@ -76,6 +79,12 @@ Iframe -> postMessage({ type: 'system2:query', requestId, sql })
   -> ArtifactViewer posts back -> postMessage({ type: 'system2:query_result', requestId, data })
 ```
 
+### ParticlesBackground
+
+Animated particle background rendered behind the artifact panel using [tsparticles](https://particles.js.org/) (`@tsparticles/react` + `@tsparticles/slim`). Toggled via a button in the activity bar; state persisted in `useThemeStore`.
+
+Configuration: 120 particles in accent + teal colors, linked within 150px distance, moving at 0.8 speed with bounce-off-walls and bounce-off-each-other collision. Hover interaction attracts nearby particles. A custom `windowResize` override prevents particle recreation when the container resizes (e.g., dragging the panel divider).
+
 ### ArtifactCatalog
 
 Overlay panel (320px wide, absolute-positioned over the artifact area) showing all registered artifacts from the database. Fetches `GET /api/artifacts` on mount. Groups artifacts by project (null project shown as "General"). Clicking an item opens it as a new tab in ArtifactViewer. Toggled via button in the header bar.
@@ -115,7 +124,7 @@ Key behaviors:
 
 ### `useThemeStore`
 
-Tracks `colorMode` (light/dark) with localStorage persistence (`system2-theme`). Falls back to system preference.
+Tracks `colorMode` (light/dark) and `particlesEnabled` (boolean) with localStorage persistence (`system2-theme` and `system2-particles` respectively). Color mode falls back to system preference; particles default to enabled.
 
 ## WebSocket Hook (`useWebSocket.ts`)
 
