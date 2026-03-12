@@ -5,7 +5,7 @@ version: 1.0.0
 thinking_level: high
 models:
   anthropic: claude-opus-4-6
-  cerebras: qwen-3-235b-a22b-instruct-2507
+  cerebras: zai-glm-4.7
   google: gemini-3.1-pro-preview
   groq: llama-3.3-70b-versatile
   mistral: mistral-large-latest

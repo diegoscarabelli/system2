@@ -146,7 +146,7 @@ export class AgentHost {
       mkdirSync(agentSessionDir, { recursive: true });
     }
 
-    // Store for periodic rotation checks (e.g., long-running singletons)
+    // Store session dir for rotation checks
     this.sessionDir = agentSessionDir;
 
     // Rotate session file if it exceeds size threshold (10MB)
