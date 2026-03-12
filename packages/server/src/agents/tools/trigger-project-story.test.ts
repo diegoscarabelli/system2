@@ -33,7 +33,7 @@ function makeProject(id: number, name: string): Project {
     name,
     description: 'test project',
     status: 'in progress',
-    labels: '[]',
+    labels: [],
     start_at: 'now',
     end_at: null,
     created_at: 'now',

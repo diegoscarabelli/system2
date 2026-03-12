@@ -152,10 +152,10 @@ export function createTriggerProjectStoryTool(
           project: project.id,
           title: 'Write project story',
           description: `Reconstruct project "${project.name}" journalistically using the provided data.`,
-          status: 'pending',
+          status: 'todo',
           priority: 'medium',
           assignee: narratorId,
-          labels: '["narrative"]',
+          labels: ['narrative'],
           start_at: null,
           end_at: null,
         });
