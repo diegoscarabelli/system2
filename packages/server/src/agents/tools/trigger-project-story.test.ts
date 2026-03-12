@@ -171,7 +171,7 @@ describe('trigger_project_story tool', () => {
         title: 'Write project story',
         assignee: 10,
         priority: 'medium',
-        labels: '["narrative"]',
+        labels: ['narrative'],
       })
     );
   });
