@@ -136,6 +136,12 @@ importers:
 
   packages/ui:
     dependencies:
+      '@fontsource/geist':
+        specifier: ^5.2.8
+        version: 5.2.8
+      '@fontsource/geist-mono':
+        specifier: ^5.2.7
+        version: 5.2.7
       '@primer/octicons-react':
         specifier: ^19.22.0
         version: 19.22.0(react@18.3.1)
@@ -1421,6 +1427,14 @@ packages:
     requiresBuild: true
     dev: true
     optional: true
+
+  /@fontsource/geist-mono@5.2.7:
+    resolution: {integrity: sha512-xVPVFISJg/K0VVd+aQN0Y7X/sw9hUcJPyDWFJ5GpyU3bHELhoRsJkPSRSHXW32mOi0xZCUQDOaPj1sqIFJ1FGg==}
+    dev: false
+
+  /@fontsource/geist@5.2.8:
+    resolution: {integrity: sha512-pI54klK6vz8fVpAVyV+iODGLEzw73cs1XJqV9PIXgW8MYMmBcwK6lKKaWqJrNHwEx8ppz9cuhussb6arXQ/PVQ==}
+    dev: false
 
   /@github/combobox-nav@2.3.1:
     resolution: {integrity: sha512-gwxPzLw8XKecy1nP63i9lOBritS3bWmxl02UX6G0TwMQZbMem1BCS1tEZgYd3mkrkiDrUMWaX+DbFCuDFo3K+A==}
