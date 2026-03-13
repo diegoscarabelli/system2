@@ -90,7 +90,6 @@ export class Server {
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
       spawner: this.makeSpawner(),
-      onBusyChange: () => this.broadcastAgentsChanged(),
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
 
@@ -104,7 +103,6 @@ export class Server {
       llmConfig: config.llmConfig,
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
-      onBusyChange: () => this.broadcastAgentsChanged(),
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
 
@@ -171,10 +169,14 @@ export class Server {
           "SELECT a.id, a.role, a.project, a.status, a.created_at, p.name AS project_name FROM agent a LEFT JOIN project p ON a.project = p.id WHERE a.status != 'archived' ORDER BY a.id"
         ) as (import('@system2/shared').Agent & { project_name: string | null })[];
 
-        const result = agents.map((agent) => ({
-          ...agent,
-          busy: this.agentRegistry.get(agent.id)?.isBusy() ?? false,
-        }));
+        const result = agents.map((agent) => {
+          const host = this.agentRegistry.get(agent.id);
+          return {
+            ...agent,
+            busy: host?.isBusy() ?? false,
+            contextPercent: host?.getContextUsage()?.percent ?? null,
+          };
+        });
 
         res.json({ agents: result });
       } catch (error) {
@@ -306,7 +308,6 @@ export class Server {
       servicesConfig: this.config.servicesConfig,
       toolsConfig: this.config.toolsConfig,
       spawner: this.makeSpawner(),
-      onBusyChange: () => this.broadcastAgentsChanged(),
     });
 
     await host.initialize();
@@ -337,19 +338,6 @@ export class Server {
     };
 
     return spawner;
-  }
-
-  private broadcastAgentsChanged(): void {
-    const context: Record<number, number | null> = {};
-    for (const [id, host] of this.agentRegistry.entries()) {
-      context[id] = host.getContextUsage()?.percent ?? null;
-    }
-    const data = JSON.stringify({ type: 'agents_changed', context });
-    for (const client of this.wss.clients) {
-      if (client.readyState === client.OPEN) {
-        client.send(data);
-      }
-    }
   }
 
   /**

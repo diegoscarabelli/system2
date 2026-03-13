@@ -134,10 +134,6 @@ export function useWebSocket() {
           useChatStore.getState().addSystemMessage(`Switched to ${message.provider}`);
           break;
 
-        case 'agents_changed':
-          useArtifactStore.getState().updateAgentContext(message.context);
-          break;
-
         case 'error':
           console.error('Server error:', message.message);
           setWaitingForResponse(false);

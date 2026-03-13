@@ -23,15 +23,12 @@ interface ArtifactState {
   activeTabId: string | null;
   catalogOpen: boolean;
   agentsOpen: boolean;
-  agentContextPercents: Record<number, number | null>;
-
   openArtifact: (url: string, title?: string, filePath?: string) => void;
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
   reloadTab: (filePath: string, newUrl: string) => void;
   toggleCatalog: () => void;
   toggleAgents: () => void;
-  updateAgentContext: (context: Record<number, number | null>) => void;
   openKanbanTab: () => void;
   toggleKanbanTab: () => void;
 }
@@ -89,7 +86,6 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   activeTabId: initial.activeTabId,
   catalogOpen: false,
   agentsOpen: false,
-  agentContextPercents: {},
 
   openArtifact: (url: string, title?: string, filePath?: string) => {
     const state = get();
@@ -158,10 +154,6 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   toggleAgents: () => {
     set((state) => ({ agentsOpen: !state.agentsOpen, catalogOpen: false }));
-  },
-
-  updateAgentContext: (context: Record<number, number | null>) => {
-    set({ agentContextPercents: context });
   },
 
   openKanbanTab: () => {

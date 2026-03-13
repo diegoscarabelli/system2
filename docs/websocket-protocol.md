@@ -45,8 +45,7 @@ type ServerMessage =
   | { type: 'error'; message: string }
   | { type: 'ready_for_input' }
   | { type: 'chat_history'; messages: ChatMessage[] }
-  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number }
-  | { type: 'agents_changed'; context: Record<number, number | null> };
+  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number };
 ```
 
 | Message | Description |
@@ -62,7 +61,6 @@ type ServerMessage =
 | `ready_for_input` | Agent finished, ready for next message |
 | `chat_history` | Sent on connect: recent messages from server |
 | `user_message_broadcast` | User message from another tab, broadcast to all other connected clients |
-| `agents_changed` | Agent busy state changed; carries `context` map (agentId -> contextPercent). UI uses this for real-time context % display only; agent list data is polled separately. |
 
 Note: the Board, Catalog, and Agent Pane poll their REST endpoints every 2 seconds rather than relying on push notifications. This ensures the UI reflects database changes regardless of how they were made (tool callbacks, direct sqlite3 access, etc.).
 

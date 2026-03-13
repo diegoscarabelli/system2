@@ -99,9 +99,7 @@ Prompt caching (where supported by the provider) optimizes the static prefix: on
   - `abort()` called (user cancellation; the SDK may not emit `agent_end` after abort)
   - `reinitializeWithProvider()` (failover tears down the old session, clearing stale busy state before the new session starts)
   - `handlePotentialError()` exhausts all retries and failovers (unrecoverable error, agent has stopped processing)
-- **Broadcast:** when the busy flag changes, the server broadcasts `agents_changed` over WebSocket carrying per-agent context window percentages. The UI uses this for real-time context % display; the agent list itself is polled every 2 seconds from `GET /api/agents`.
-
-The `/api/agents` endpoint combines DB agent records with the in-memory busy state for each registered AgentHost.
+The `/api/agents` endpoint combines DB agent records with in-memory runtime state (`busy`, `contextPercent`) from each registered AgentHost. The UI polls this endpoint every 2 seconds.
 
 ## Message Delivery
 

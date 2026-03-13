@@ -127,7 +127,7 @@ Scroll position is reset to top whenever the displayed task changes.
 
 ### AgentPane
 
-Side panel showing all non-archived agents with real-time busy/idle indicators. Polls `GET /api/agents` every 2 seconds. Context window percentages update in real time via the `agents_changed` WebSocket message. Groups agents into "System" (Guide, Narrator) listed first, then by project name. Each agent row shows a teal (`#00aaba`) circle when busy or grey when idle. Toggled via PeopleIcon in the activity bar.
+Side panel showing all non-archived agents with busy/idle indicators. Polls `GET /api/agents` every 2 seconds for agent list, busy state, and context window percentages. Groups agents into "System" (Guide, Narrator) listed first, then by project name. Each agent row shows a teal (`#00aaba`) circle when busy or grey when idle. Toggled via PeopleIcon in the activity bar.
 
 ## State Management
 
@@ -156,7 +156,6 @@ Tab-based artifact state with localStorage persistence (`system2:artifact-tabs`)
 | `activeTabId` | `string \| null` | Currently active tab |
 | `catalogOpen` | `boolean` | Whether the catalog panel is visible |
 | `agentsOpen` | `boolean` | Whether the agents panel is visible |
-| `agentContextPercents` | `Record<number, number \| null>` | Per-agent context window usage (from WebSocket) |
 
 Key behaviors:
 
@@ -165,7 +164,6 @@ Key behaviors:
 - `reloadTab`: find tab by `filePath`, update URL (for fs.watch cache-bust reloads)
 - `openKanbanTab`: create (or activate existing) native kanban tab at position 0
 - `toggleKanbanTab`: close kanban tab if open, otherwise call `openKanbanTab` (used by activity bar button)
-- `updateAgentContext`: called by WebSocket hook on `agents_changed`, updates context % for each agent
 - Tab dedup uses `filePath` with cache-bust query params stripped
 
 ### `useThemeStore`
@@ -179,7 +177,6 @@ Manages the WebSocket connection to the server:
 - Connects to `ws://localhost:3000` (or via Vite proxy in dev)
 - On connect: receives `chat_history` and `provider_info` from server
 - Processes all `ServerMessage` types and updates chat/artifact stores
-- Handles `agents_changed` to update real-time context % (agent list data is polled separately)
 - Exposes `sendMessage()`, `sendSteering()`, `abort()`
 - On `ready_for_input`: dequeues next message from queue
 - Steering messages are prepended to queue (higher priority)

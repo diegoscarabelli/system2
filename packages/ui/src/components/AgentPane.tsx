@@ -9,7 +9,6 @@ import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
-import { useArtifactStore } from '../stores/artifact';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
@@ -60,7 +59,6 @@ function contextColor(percent: number, accent: string): string {
 export function AgentPane() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const agentContextPercents = useArtifactStore((s) => s.agentContextPercents);
   const { accent } = useAccentColors();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const initialized = useRef(false);
@@ -244,20 +242,12 @@ export function AgentPane() {
                             borderColor: 'border.muted',
                             whiteSpace: 'nowrap',
                             color:
-                              (agentContextPercents[agent.id] ?? agent.contextPercent) != null
-                                ? contextColor(
-                                    (agentContextPercents[agent.id] ??
-                                      agent.contextPercent) as number,
-                                    accent
-                                  )
+                              agent.contextPercent != null
+                                ? contextColor(agent.contextPercent, accent)
                                 : 'fg.muted',
                           }}
                         >
-                          {(agentContextPercents[agent.id] ?? agent.contextPercent) != null
-                            ? Math.round(
-                                (agentContextPercents[agent.id] ?? agent.contextPercent) as number
-                              )
-                            : '—'}
+                          {agent.contextPercent != null ? Math.round(agent.contextPercent) : '—'}
                         </Box>
                         <Box
                           as="td"

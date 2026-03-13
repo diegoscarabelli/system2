@@ -74,7 +74,6 @@ export interface AgentHostConfig {
   servicesConfig?: ServicesConfig;
   toolsConfig?: ToolsConfig;
   spawner?: AgentSpawner;
-  onBusyChange?: () => void;
 }
 
 export class AgentHost {
@@ -98,7 +97,6 @@ export class AgentHost {
   private agentProjectDirName: string | null = null;
   private sessionDir: string | null = null;
   private resourceLoader: DefaultResourceLoader | null = null;
-  private onBusyChange?: () => void;
   private busy = false;
   private compactionCount = 0;
   private compactionDepth = 0;
@@ -111,7 +109,6 @@ export class AgentHost {
     this.servicesConfig = config.servicesConfig;
     this.toolsConfig = config.toolsConfig;
     this.spawner = config.spawner;
-    this.onBusyChange = config.onBusyChange;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -302,12 +299,10 @@ export class AgentHost {
       if (event.type === 'message_update' || event.type === 'tool_execution_start') {
         if (!this.busy) {
           this.busy = true;
-          this.onBusyChange?.();
         }
       } else if (event.type === 'agent_end') {
         if (this.busy) {
           this.busy = false;
-          this.onBusyChange?.();
         }
       }
 
@@ -401,7 +396,6 @@ export class AgentHost {
     // All recovery paths exhausted; ensure busy is cleared
     if (this.busy) {
       this.busy = false;
-      this.onBusyChange?.();
     }
 
     // Reset retry attempts for next error
@@ -426,7 +420,6 @@ export class AgentHost {
     // Old session is dead; clear busy so the agent doesn't appear stuck
     if (this.busy) {
       this.busy = false;
-      this.onBusyChange?.();
     }
 
     try {
@@ -657,7 +650,6 @@ export class AgentHost {
       // abort() may not trigger agent_end, so clear busy explicitly
       if (this.busy) {
         this.busy = false;
-        this.onBusyChange?.();
       }
     }
   }

@@ -178,13 +178,11 @@ describe('AgentHost', () => {
 
   describe('busy state', () => {
     function makeHostWithBusyTracking() {
-      const onBusyChange = vi.fn();
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
         registry: makeRegistryStub(),
         llmConfig: makeLlmConfig(),
-        onBusyChange,
       });
       const internal = host as unknown as {
         busy: boolean;
@@ -199,7 +197,7 @@ describe('AgentHost', () => {
         currentProvider: string;
         pendingPrompt: string | null;
       };
-      return { host, internal, onBusyChange };
+      return { host, internal };
     }
 
     /** Set up a fake session and subscribe via initialize's event handler path */
@@ -222,8 +220,8 @@ describe('AgentHost', () => {
       expect(host.isBusy()).toBe(false);
     });
 
-    it('abort() clears busy and calls onBusyChange', () => {
-      const { host, internal, onBusyChange } = makeHostWithBusyTracking();
+    it('abort() clears busy', () => {
+      const { host, internal } = makeHostWithBusyTracking();
       setupWithFakeSession(internal);
 
       // Simulate being busy
@@ -232,21 +230,19 @@ describe('AgentHost', () => {
       host.abort();
 
       expect(host.isBusy()).toBe(false);
-      expect(onBusyChange).toHaveBeenCalledTimes(1);
     });
 
     it('abort() is a no-op when already idle', () => {
-      const { host, internal, onBusyChange } = makeHostWithBusyTracking();
+      const { host, internal } = makeHostWithBusyTracking();
       setupWithFakeSession(internal);
 
       host.abort();
 
       expect(host.isBusy()).toBe(false);
-      expect(onBusyChange).not.toHaveBeenCalled();
     });
 
     it('handlePotentialError clears busy when all recovery paths exhausted', async () => {
-      const { host, internal, onBusyChange } = makeHostWithBusyTracking();
+      const { host, internal } = makeHostWithBusyTracking();
       setupWithFakeSession(internal);
 
       // Simulate being busy
@@ -268,25 +264,24 @@ describe('AgentHost', () => {
       await internal.handlePotentialError(errorEvent);
 
       expect(host.isBusy()).toBe(false);
-      expect(onBusyChange).toHaveBeenCalled();
     });
 
-    it('onBusyChange is not called when busy state does not change', () => {
-      const { host, internal, onBusyChange } = makeHostWithBusyTracking();
+    it('busy stays false when already idle', () => {
+      const { host, internal } = makeHostWithBusyTracking();
       setupWithFakeSession(internal);
 
-      // Already idle, abort should not trigger callback
+      // Already idle, abort should not change state
       host.abort();
-      expect(onBusyChange).not.toHaveBeenCalled();
+      expect(host.isBusy()).toBe(false);
 
-      // Already idle, clearing busy via error exhaustion should not trigger callback
+      // Already idle, clearing busy via error exhaustion should not change state
       internal.currentProvider = 'cerebras';
       internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
       internal.handlePotentialError({
         type: 'message_end',
         message: { stopReason: 'error', errorMessage: 'Error 401: Unauthorized' },
       });
-      expect(onBusyChange).not.toHaveBeenCalled();
+      expect(host.isBusy()).toBe(false);
     });
   });
 
