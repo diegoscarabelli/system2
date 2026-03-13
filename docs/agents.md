@@ -114,10 +114,14 @@ Two methods for sending messages, chosen based on the sender:
 
 ### Delivery Modes
 
-| Mode | Behavior | Used When |
-|------|----------|-----------|
-| `steer` | Interrupts receiver mid-turn | User steering messages, urgent inter-agent messages |
-| `followUp` | Waits for current turn to finish | Normal inter-agent messages, scheduler jobs |
+pi-agent-core provides two message queues on each agent session: a **steering queue** (checked after every tool execution) and a **follow-up queue** (checked when the agent has no more work). `sendCustomMessage()` accepts a `deliverAs` option that routes into the appropriate queue.
+
+`AgentHost.deliverMessage()` wraps this, choosing the mode based on urgency:
+
+| Mode       | Behavior                                                   | Used When                                           |
+|------------|------------------------------------------------------------|-----------------------------------------------------|
+| `steer`    | Interrupts receiver mid-turn (injected between tool calls) | User steering messages, urgent inter-agent messages |
+| `followUp` | Waits for current turn to finish, then starts a new turn   | Normal inter-agent messages, scheduler jobs         |
 
 ## AgentRegistry (`registry.ts`)
 
