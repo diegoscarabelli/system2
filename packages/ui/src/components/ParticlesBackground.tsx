@@ -19,11 +19,21 @@ export const ParticlesBackground = memo(function ParticlesBackground() {
   // The default implementation resizes the canvas then calls container.refresh(),
   // which destroys and recreates all particles. Override it to resize-only so
   // particles continue uninterrupted when the container changes dimensions.
+  //
+  // Also resume animation on tab focus: browsers throttle/freeze rAF in hidden tabs,
+  // and tsparticles may not auto-resume when the tab becomes visible again.
   const particlesLoaded = useCallback(async (container?: Container) => {
     if (!container) return;
     container.canvas.windowResize = async () => {
       container.canvas.resize();
     };
+    const onVisibilityChange = () => {
+      if (!document.hidden) container.play();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    container.canvas.element?.addEventListener('remove', () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    });
   }, []);
 
   const options = useMemo(
