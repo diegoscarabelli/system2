@@ -391,8 +391,13 @@ export function buildAndDeliverDailySummary(
   const projectLogSystemAgents = allAgents.filter(
     (a) => a.project_name === null && a.id !== narratorId
   );
-  // For daily summary non-project section: system-wide agents including Narrator
-  const dailySummarySystemAgents = allAgents.filter((a) => a.project_name === null);
+  // For daily summary non-project section: system-wide agents excluding Narrator
+  // (including Narrator would create a feedback loop: its own custom_messages
+  // get collected as "agent activity" and nested inside the next injection,
+  // causing exponential growth)
+  const dailySummarySystemAgents = allAgents.filter(
+    (a) => a.project_name === null && a.id !== narratorId
+  );
 
   // 5. Find active projects (conductor not archived) and deliver project logs
   const activeProjects = db.query(

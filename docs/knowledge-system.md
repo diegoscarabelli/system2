@@ -219,7 +219,7 @@ Conductor planned 7 tasks...
 Guide answered user question about TimescaleDB configuration...
 ```
 
-The scheduler pre-computes activity data grouped into project sections (project-scoped agent JSONL + project DB changes) and a non-project section (Guide and Narrator JSONL + non-project DB changes). The Narrator synthesizes each section, avoiding repetition of content already covered in project-log entries. See [Scheduler](scheduler.md) for the pipeline details.
+The scheduler pre-computes activity data grouped into project sections (project-scoped agent JSONL + project DB changes) and a non-project section (Guide JSONL + non-project DB changes; the Narrator is excluded to prevent recursive embedding of its own injections). The Narrator synthesizes each section, avoiding repetition of content already covered in project-log entries. See [Scheduler](scheduler.md) for the pipeline details.
 
 System-wide agents (Guide, Narrator) receive the two most recent daily summaries in their system prompt.
 

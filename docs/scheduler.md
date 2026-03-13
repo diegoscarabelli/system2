@@ -54,7 +54,7 @@ Each project log is a single continuous file per project lifetime (unlike daily 
    - Fall back to `intervalMinutes` ago
 4. **Build message** with two sections:
    - **Project Activity:** per-project sections with project-scoped agent JSONL and project DB changes (reused from Phase 1)
-   - **Non-Project Activity:** Guide and Narrator JSONL (full stream spanning all projects, via `dailySummarySystemAgents`) and DB changes not tied to any active project.
+   - **Non-Project Activity:** Guide JSONL (via `dailySummarySystemAgents`, which excludes Narrator to prevent recursive embedding of its own `custom_message` injections) and DB changes not tied to any active project.
 5. **Check for activity:** skip delivery if there's no meaningful activity
 6. **Deliver:** send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
 
