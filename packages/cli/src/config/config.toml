@@ -1,0 +1,50 @@
+# System2 Configuration
+# This file contains all System2 settings including API keys.
+# Permissions: 0600 (owner read/write only).
+#
+# LLM provider keys are configured during onboarding (system2 onboard).
+# To edit manually, uncomment and fill in the sections below.
+
+# [llm]
+# primary = "anthropic"
+# fallback = ["google", "openai"]
+#
+# [llm.anthropic]
+# keys = [
+#   { key = "sk-ant-...", label = "default" },
+# ]
+#
+# [llm.google]
+# keys = [
+#   { key = "AIza...", label = "default" },
+# ]
+#
+# [llm.openai]
+# keys = [
+#   { key = "sk-...", label = "default" },
+# ]
+
+# [services.brave_search]
+# key = "BSA..."
+
+# [tools.web_search]
+# enabled = true
+# max_results = 5
+
+[backup]
+# Hours between automatic backups (minimum: 1)
+cooldown_hours = 24
+
+# Maximum number of automatic backups to keep
+max_backups = 3
+
+[session]
+# Session file size threshold for rotation in MB
+rotation_threshold_mb = 10
+
+[logs]
+# Log file size threshold for rotation in MB
+rotation_threshold_mb = 10
+
+# Maximum number of archived log files to keep
+max_archives = 5

@@ -1,0 +1,91 @@
+# @system2/cli
+
+Command-line interface for managing the System2 server lifecycle. Provides interactive onboarding, daemon management, and status reporting.
+
+**Source:** `packages/cli/src/`
+**Build:** [tsup](https://tsup.egoist.dev/) -> `dist/index.js`
+**Binary:** `system2` (global install via npm)
+**Dependencies:** [Commander.js](https://github.com/tj/commander.js), [@clack/prompts](https://github.com/bombshell-dev/clack), [@iarna/toml](https://github.com/iarna/iarna-toml)
+
+## Source Structure
+
+```
+src/
+├── index.ts               # CLI entry point (Commander setup)
+├── commands/
+│   ├── onboard.ts         # Interactive setup wizard
+│   ├── start.ts           # Start server (daemon or foreground)
+│   ├── stop.ts            # Graceful shutdown
+│   └── status.ts          # Server status info
+├── utils/
+│   ├── config.ts          # TOML config loading/validation
+│   ├── backup.ts          # Auto-backup on start
+│   └── log-rotation.ts    # Log file rotation
+└── config/
+    └── config.toml        # Template config file
+```
+
+## Commands
+
+### `system2 onboard`
+
+Interactive setup wizard using [@clack/prompts](https://github.com/bombshell-dev/clack):
+
+1. Select primary LLM provider (Anthropic / Google / OpenAI)
+2. Enter API keys (supports multiple labeled keys per provider)
+3. Optionally configure fallback provider
+4. Optionally configure Brave Search API key
+5. Creates `~/.system2/` directory and writes `config.toml` (permissions `0600`)
+
+### `system2 start`
+
+Starts the server process.
+
+| Flag | Description |
+|------|-------------|
+| `-p, --port <number>` | Server port (default: 3000) |
+| `--no-browser` | Don't open browser after start |
+| `--foreground` | Run in foreground (logs to stdout) |
+
+**Start sequence:**
+1. Load and validate `config.toml`
+2. Rotate logs if size > 10MB
+3. Create automatic backup of `~/.system2/` (24h cooldown, max 3 backups)
+4. Check for existing PID file (prevent double-start)
+5. Spawn server as detached process (or run in foreground)
+6. Write PID file
+7. Open browser (unless `--no-browser`)
+
+### `system2 stop`
+
+Reads PID file, sends SIGTERM. Polls for up to 10 seconds, then force-kills with SIGKILL if the process is still running. Cross-platform (uses `taskkill` on Windows).
+
+### `system2 status`
+
+Shows whether the server is running, its PID, log file size, and commands for tailing logs.
+
+## Config Loading (`utils/config.ts`)
+
+The config utility handles:
+- Reading and parsing TOML from `~/.system2/config.toml`
+- Converting snake_case TOML keys to camelCase TypeScript interfaces
+- Deep-merging with defaults (backup cooldown: 24h, max backups: 3, etc.)
+- Validating required fields (at least one LLM provider with keys)
+- Building a `ServerConfig` object for the server package
+
+See [Configuration](../configuration.md) for the full config.toml reference.
+
+## Utilities
+
+### Auto-Backup (`utils/backup.ts`)
+
+On every `system2 start`, creates a timestamped copy of `~/.system2/` at `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`. Skipped if the last backup is less than `cooldown_hours` old. Old backups are pruned to keep at most `max_backups`.
+
+### Log Rotation (`utils/log-rotation.ts`)
+
+Rotates `~/.system2/logs/system2.log` when it exceeds the configured threshold (default 10MB). Archived files are named `system2.log.1` through `system2.log.N`.
+
+## See Also
+
+- [Server](server.md): the server this CLI manages
+- [Configuration](../configuration.md): config.toml format and defaults
