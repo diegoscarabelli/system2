@@ -3,7 +3,9 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { AgentHost } from '../agents/host.js';
 import {
+  buildAndDeliverMemoryUpdate,
   collectAgentActivity,
   formatMarkdownTable,
   readFrontmatterField,
@@ -175,5 +177,87 @@ describe('collectAgentActivity', () => {
     expect(result).not.toContain('before');
     expect(result).not.toContain('after');
     expect(result).not.toContain('excluded-type');
+  });
+});
+
+describe('buildAndDeliverMemoryUpdate', () => {
+  function mockNarratorHost(): AgentHost & { calls: Array<{ content: string; details: unknown }> } {
+    const calls: Array<{ content: string; details: unknown }> = [];
+    return {
+      calls,
+      deliverMessage(content: string, details: unknown) {
+        calls.push({ content, details });
+      },
+    } as unknown as AgentHost & { calls: Array<{ content: string; details: unknown }> };
+  }
+
+  it('skips delivery when no daily summary files exist', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const knowledgeDir = join(dir, 'knowledge');
+    mkdirSync(knowledgeDir, { recursive: true });
+    writeFileSync(
+      join(knowledgeDir, 'memory.md'),
+      '---\nlast_narrator_update_ts: 2026-03-10T00:00:00Z\n---\n# Memory'
+    );
+
+    const host = mockNarratorHost();
+    buildAndDeliverMemoryUpdate(host, 2, dir);
+    expect(host.calls).toHaveLength(0);
+  });
+
+  it('skips delivery when all summaries are older than last update', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const knowledgeDir = join(dir, 'knowledge');
+    const summariesDir = join(knowledgeDir, 'daily_summaries');
+    mkdirSync(summariesDir, { recursive: true });
+    writeFileSync(
+      join(knowledgeDir, 'memory.md'),
+      '---\nlast_narrator_update_ts: 2026-03-12T00:00:00Z\n---\n# Memory'
+    );
+    writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Old summary');
+
+    const host = mockNarratorHost();
+    buildAndDeliverMemoryUpdate(host, 2, dir);
+    expect(host.calls).toHaveLength(0);
+  });
+
+  it('delivers message with summary files since last update', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const knowledgeDir = join(dir, 'knowledge');
+    const summariesDir = join(knowledgeDir, 'daily_summaries');
+    mkdirSync(summariesDir, { recursive: true });
+    writeFileSync(
+      join(knowledgeDir, 'memory.md'),
+      '---\nlast_narrator_update_ts: 2026-03-10T00:00:00Z\n---\n# Memory'
+    );
+    writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary 10');
+    writeFileSync(join(summariesDir, '2026-03-11.md'), '---\n---\n# Summary 11');
+    writeFileSync(join(summariesDir, '2026-03-09.md'), '---\n---\n# Before');
+
+    const host = mockNarratorHost();
+    buildAndDeliverMemoryUpdate(host, 2, dir);
+    expect(host.calls).toHaveLength(1);
+
+    const msg = host.calls[0].content;
+    expect(msg).toContain('[Scheduled task: memory-update]');
+    expect(msg).toContain('2026-03-10.md');
+    expect(msg).toContain('2026-03-11.md');
+    expect(msg).not.toContain('2026-03-09.md');
+    expect(msg).toContain('IMPORTANT');
+    expect(msg).toContain('UTC ISO 8601');
+  });
+
+  it('includes all summaries when memory.md has no timestamp', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const knowledgeDir = join(dir, 'knowledge');
+    const summariesDir = join(knowledgeDir, 'daily_summaries');
+    mkdirSync(summariesDir, { recursive: true });
+    writeFileSync(join(knowledgeDir, 'memory.md'), '---\nlast_narrator_update_ts:\n---\n# Memory');
+    writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary');
+
+    const host = mockNarratorHost();
+    buildAndDeliverMemoryUpdate(host, 2, dir);
+    expect(host.calls).toHaveLength(1);
+    expect(host.calls[0].content).toContain('2026-03-10.md');
   });
 });

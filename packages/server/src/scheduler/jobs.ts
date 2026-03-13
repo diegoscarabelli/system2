@@ -471,6 +471,8 @@ file: ${logFile}
 last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
+IMPORTANT: After writing the log entry, you MUST set last_narrator_update_ts to exactly "${newRunTs}" (UTC ISO 8601) in the frontmatter of ${logFile}. This advances the cursor for the next run.
+
 ## Most recent log.md content
 
 ${projectLogContext}
@@ -508,6 +510,8 @@ ${projectDbChanges}`;
 file: ${filePath}
 last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
+
+IMPORTANT: After writing the summary, you MUST set last_narrator_update_ts to exactly "${newRunTs}" (UTC ISO 8601) in the frontmatter of ${filePath}. This advances the cursor for the next run.
 
 ## Current daily summary file content
 
@@ -567,45 +571,58 @@ export function registerNarratorJobs(
     buildAndDeliverDailySummary(db, narratorHost, narratorId, system2Dir, intervalMinutes);
   });
 
-  // Memory update — daily at 4 AM
-  scheduler.schedule('memory-update', '0 4 * * *', () => {
+  // Memory update — daily at 11 AM
+  scheduler.schedule('memory-update', '0 11 * * *', () => {
     console.log('[Scheduler] Triggering memory-update job');
+    buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir);
+  });
+}
 
-    const newRunTs = new Date().toISOString();
-    const memoryFile = join(system2Dir, 'knowledge', 'memory.md');
-    const summariesDir = join(system2Dir, 'knowledge', 'daily_summaries');
+/**
+ * Build and deliver a memory-update message to the Narrator.
+ * Shared by both the cron handler and server catch-up.
+ */
+export function buildAndDeliverMemoryUpdate(
+  narratorHost: AgentHost,
+  narratorId: number,
+  system2Dir: string
+): void {
+  const newRunTs = new Date().toISOString();
+  const memoryFile = join(system2Dir, 'knowledge', 'memory.md');
+  const summariesDir = join(system2Dir, 'knowledge', 'daily_summaries');
 
-    // Read last_narrator_update_ts from memory.md
-    const lastTs = readFrontmatterField(memoryFile, 'last_narrator_update_ts');
-    const lastDate = lastTs ? lastTs.slice(0, 10) : '1970-01-01';
+  // Read last_narrator_update_ts from memory.md
+  const lastTs = readFrontmatterField(memoryFile, 'last_narrator_update_ts');
+  const lastDate = lastTs ? lastTs.slice(0, 10) : '1970-01-01';
 
-    // List daily summaries since lastDate (inclusive)
-    const summaryFiles = existsSync(summariesDir)
-      ? readdirSync(summariesDir)
-          .filter((f) => f.endsWith('.md'))
-          .filter((f) => f.replace('.md', '') >= lastDate)
-          .sort()
-          .map((f) => join(summariesDir, f))
-      : [];
+  // List daily summaries since lastDate (inclusive)
+  const summaryFiles = existsSync(summariesDir)
+    ? readdirSync(summariesDir)
+        .filter((f) => f.endsWith('.md'))
+        .filter((f) => f.replace('.md', '') >= lastDate)
+        .sort()
+        .map((f) => join(summariesDir, f))
+    : [];
 
-    if (summaryFiles.length === 0) {
-      console.log('[Scheduler] No daily summaries to incorporate, skipping memory-update');
-      return;
-    }
+  if (summaryFiles.length === 0) {
+    console.log('[Scheduler] No daily summaries to incorporate, skipping memory-update');
+    return;
+  }
 
-    const message = `[Scheduled task: memory-update]
+  const message = `[Scheduled task: memory-update]
 
 memory_file: ${memoryFile}
 last_narrator_update_ts: ${lastTs ?? '(none)'}
 new_run_ts: ${newRunTs}
 
+IMPORTANT: After writing memory.md, you MUST set last_narrator_update_ts to exactly "${newRunTs}" (UTC ISO 8601) in the frontmatter of ${memoryFile}. This advances the cursor for the next run.
+
 Daily summaries to incorporate:
 ${summaryFiles.map((f) => `- ${f}`).join('\n')}`;
 
-    narratorHost.deliverMessage(message, {
-      sender: 0,
-      receiver: narratorId,
-      timestamp: Date.now(),
-    });
+  narratorHost.deliverMessage(message, {
+    sender: 0,
+    receiver: narratorId,
+    timestamp: Date.now(),
   });
 }

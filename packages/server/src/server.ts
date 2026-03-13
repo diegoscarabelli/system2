@@ -30,6 +30,8 @@ import { initializeGitRepo } from './knowledge/git.js';
 import { initializeKnowledge } from './knowledge/init.js';
 import {
   buildAndDeliverDailySummary,
+  buildAndDeliverMemoryUpdate,
+  readFrontmatterField,
   registerNarratorJobs,
   resolveDailySummaryTimestamp,
 } from './scheduler/jobs.js';
@@ -544,25 +546,40 @@ export class Server {
    */
   private checkNarratorCatchUp(): void {
     const intervalMinutes = this.config.schedulerConfig?.daily_summary_interval_minutes ?? 30;
-    const { lastRunTs } = resolveDailySummaryTimestamp(SYSTEM2_DIR, intervalMinutes);
 
+    // Daily summary catch-up
+    const { lastRunTs } = resolveDailySummaryTimestamp(SYSTEM2_DIR, intervalMinutes);
     if (!lastRunTs) {
-      console.log('[Server] First run, skipping narrator catch-up');
-      return;
+      console.log('[Server] No daily summary timestamps found, skipping daily-summary catch-up');
+    } else {
+      const staleness = Date.now() - new Date(lastRunTs).getTime();
+      if (staleness > intervalMinutes * 60 * 1000) {
+        console.log(
+          `[Server] Daily summary stale by ${Math.round(staleness / 60000)} min, queuing catch-up`
+        );
+        buildAndDeliverDailySummary(
+          this.db,
+          this.narratorHost,
+          this.narratorId,
+          SYSTEM2_DIR,
+          intervalMinutes
+        );
+      }
     }
 
-    const staleness = Date.now() - new Date(lastRunTs).getTime();
-    if (staleness > intervalMinutes * 60 * 1000) {
-      console.log(
-        `[Server] Narrator stale by ${Math.round(staleness / 60000)} min, queuing catch-up`
-      );
-      buildAndDeliverDailySummary(
-        this.db,
-        this.narratorHost,
-        this.narratorId,
-        SYSTEM2_DIR,
-        intervalMinutes
-      );
+    // Memory update catch-up (must be queued after daily-summary so the Narrator
+    // processes summaries first, then incorporates them into memory)
+    const memoryFile = join(SYSTEM2_DIR, 'knowledge', 'memory.md');
+    const memoryTs = readFrontmatterField(memoryFile, 'last_narrator_update_ts');
+    if (memoryTs) {
+      const memoryStaleness = Date.now() - new Date(memoryTs).getTime();
+      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+      if (memoryStaleness > ONE_DAY_MS) {
+        console.log(
+          `[Server] Memory stale by ${Math.round(memoryStaleness / 3600000)}h, queuing memory-update catch-up`
+        );
+        buildAndDeliverMemoryUpdate(this.narratorHost, this.narratorId, SYSTEM2_DIR);
+      }
     }
   }
 
@@ -603,13 +620,28 @@ export class Server {
     // Stop scheduled jobs first
     this.scheduler.stop();
 
+    // Initiate clean WebSocket close handshake with all clients
+    for (const client of this.wss.clients) {
+      client.close(1001, 'server shutting down');
+    }
+
+    // Allow 2s for clean close, then force-terminate stragglers
+    const graceTimer = setTimeout(() => {
+      for (const client of this.wss.clients) {
+        client.terminate();
+      }
+    }, 2000);
+
     return new Promise((resolve, reject) => {
       this.wss.close((err) => {
+        clearTimeout(graceTimer);
         if (err) {
           reject(err);
           return;
         }
 
+        // Force-drop lingering HTTP keep-alive connections
+        this.httpServer.closeAllConnections();
         this.httpServer.close((err) => {
           if (err) {
             reject(err);

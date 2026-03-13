@@ -62,7 +62,7 @@ Project-scoped files live outside `knowledge/`:
 |------|-----------|-------------|
 | `infrastructure.md` | Guide | During onboarding and as infrastructure evolves |
 | `user.md` | Guide | During onboarding and ongoing interactions |
-| `memory.md` | Narrator | Daily at 4 AM (memory-update job) |
+| `memory.md` | Narrator | Daily at 11 AM (memory-update job) |
 | `memory.md ## Notes` | Any agent | Anytime: agents write important facts here |
 | `{role}.md` | Agent of that role (any agent may contribute) | As role-specific lessons and patterns accumulate |
 | `daily_summaries/*.md` | Narrator | Every 30 minutes (configurable) |
@@ -71,7 +71,7 @@ Project-scoped files live outside `knowledge/`:
 
 ## How Knowledge Enters System Prompts
 
-`AgentHost.loadKnowledgeContext()` runs on every LLM call (via `systemPromptOverride` callback):
+`AgentHost.loadKnowledgeContext()` runs on every LLM call (via `resourceLoader.reload()` called before each prompt, which invokes the `systemPromptOverride` callback):
 
 1. Reads `infrastructure.md`, `user.md`, `memory.md`
 2. Reads `{role}.md` for the agent's role (guide.md, conductor.md, narrator.md, reviewer.md)
@@ -175,7 +175,7 @@ Consolidated knowledge about the system, user, and project history.
 Agents write important facts here for the Narrator to incorporate.
 ```
 
-The **## Notes** section is a scratchpad: any agent can append notes. During the daily memory-update job (4 AM), the Narrator reads all recent daily summaries, incorporates new information into the memory document, and clears processed notes.
+The **## Notes** section is a scratchpad: any agent can append notes. During the daily memory-update job (11 AM), the Narrator reads all recent daily summaries, incorporates new information into the memory document, and clears processed notes.
 
 ## Project Logs
 

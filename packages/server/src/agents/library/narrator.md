@@ -57,11 +57,11 @@ The message contains pre-computed data: project ID and name, file path, timestam
     If no meaningful activity occurred, write "No work done.">
    ```
 
-4. **Update frontmatter:** Replace `last_narrator_update_ts: <old>` with `last_narrator_update_ts: <new_run_ts>`.
-
 **Important:** You APPEND to the file. Read the current file content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in log files.
 
-5. **Write updated file:** Use `write` with `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to persist and commit in one step.
+4. **Update frontmatter and write:** In the same write, replace `last_narrator_update_ts: <old>` with `last_narrator_update_ts: <new_run_ts>` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) in the frontmatter. Use `write` with `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to persist and commit in one step.
+
+**CRITICAL: you MUST update `last_narrator_update_ts` to `new_run_ts` in the frontmatter. If you skip this, the next scheduled job will re-collect the same time window, producing duplicate data that grows with every run. This is the mechanism that advances the cursor: no update means unbounded re-processing.**
 
 ### Daily Summary (`[Scheduled task: daily-summary]`)
 
@@ -100,11 +100,11 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
    <Synthesis of Guide/Narrator activity and standalone work. If no work done, write "No work done.">
    ```
 
-5. **Update frontmatter:** Replace `last_narrator_update_ts: <old>` with `last_narrator_update_ts: <new_run_ts>`.
-
 **Important:** You APPEND to the file. Read the current file content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in summary files.
 
-6. **Write updated file:** Use `write` with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to persist and commit in one step.
+5. **Update frontmatter and write:** In the same write, replace `last_narrator_update_ts: <old>` with `last_narrator_update_ts: <new_run_ts>` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) in the frontmatter. Use `write` with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to persist and commit in one step.
+
+**CRITICAL: you MUST update `last_narrator_update_ts` to `new_run_ts` in the frontmatter. If you skip this, the next scheduled job will re-collect the same time window, producing duplicate data that grows with every run. This is the mechanism that advances the cursor: no update means unbounded re-processing.**
 
 ### Memory Update (`[Scheduled task: memory-update]`)
 
@@ -122,7 +122,9 @@ The message contains the memory file path, timestamps, and a list of daily summa
 
 4. **Restructure:** Blend new insights from daily summaries into the document body. Consolidate items from the `## Notes` section into appropriate sections. Remove consolidated items from Notes. Maintain a coherent, well-organized document that reads naturally.
 
-5. **Write updated memory.md:** Use `write` with `commit_message: "memory update"` to overwrite with the restructured content. Set `last_narrator_update_ts` to `new_run_ts` in the frontmatter.
+5. **Write updated memory.md:** Use `write` with `commit_message: "memory update"` to overwrite with the restructured content. Set `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) in the frontmatter.
+
+**CRITICAL: you MUST update `last_narrator_update_ts` to `new_run_ts` in the frontmatter. If you skip this, the next scheduled job will re-collect the same time window, producing duplicate data that grows with every run. This is the mechanism that advances the cursor: no update means unbounded re-processing.**
 
 ## Project Story Task
 

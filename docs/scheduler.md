@@ -19,10 +19,10 @@ class Scheduler {
 
 ## Registered Jobs
 
-| Job | Schedule | Description |
-|-----|----------|-------------|
-| `daily-summary` | Every N minutes (default: 30) | Collect activity, deliver project logs and daily summary to Narrator |
-| `memory-update` | Daily at 4 AM | Send daily summaries list to Narrator for memory consolidation |
+| Job              | Schedule                       | Description                                                          |
+|------------------|--------------------------------|----------------------------------------------------------------------|
+| `daily-summary`  | Every N minutes (default: 30)  | Collect activity, deliver project logs and daily summary to Narrator |
+| `memory-update`  | Daily at 11 AM                 | Send daily summaries list to Narrator for memory consolidation       |
 
 The `daily-summary` interval is configurable via `[scheduler].daily_summary_interval_minutes` in config.toml.
 
@@ -62,7 +62,7 @@ The Narrator synthesizes each section into narrative summaries, avoiding repetit
 
 ## Memory Update Pipeline
 
-Runs daily at 4 AM:
+`buildAndDeliverMemoryUpdate()` runs daily at 11 AM:
 
 1. Read `last_narrator_update_ts` from `memory.md`
 2. List daily summary files since that date
@@ -73,9 +73,8 @@ Runs daily at 4 AM:
 
 Croner does **not** catch up missed jobs after laptop sleep or server shutdown. The server handles this explicitly in `checkNarratorCatchUp()`:
 
-1. Resolve the last daily summary timestamp
-2. Calculate staleness (time since last run)
-3. If stale by more than `intervalMinutes`, queue `buildAndDeliverDailySummary()`
+1. **Daily summary**: resolve the last daily summary timestamp. If stale by more than `intervalMinutes`, queue `buildAndDeliverDailySummary()`
+2. **Memory update**: read `last_narrator_update_ts` from `memory.md`. If stale by more than 24 hours, queue `buildAndDeliverMemoryUpdate()`
 
 This runs once at server start, after agent sessions are initialized.
 
