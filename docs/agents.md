@@ -56,7 +56,7 @@ Each agent's system prompt is assembled from four layers:
 | Knowledge files | `~/.system2/knowledge/` (infrastructure.md, user.md, memory.md) | **Every LLM call** |
 | Role-aware context | Project log (`projects/{id}_{name}/log.md`) for project-scoped agents, or last 2 daily summaries for system-wide agents | **Every LLM call** |
 
-The static layers are concatenated into `staticPrompt`. The dynamic layers are loaded via `loadKnowledgeContext()`, which is passed as a `systemPromptOverride` callback to the Pi SDK's `DefaultResourceLoader`. This means knowledge updates take effect immediately without server restarts.
+The static layers are concatenated into `staticPrompt`. The dynamic layers are loaded via `loadKnowledgeContext()`, which is called from the `systemPromptOverride` callback passed to the Pi SDK's `DefaultResourceLoader`. Since the SDK only invokes this callback during `reload()` (not on every `prompt()` call), `AgentHost` explicitly calls `resourceLoader.reload()` before each prompt to ensure knowledge files are re-read. This means knowledge updates take effect immediately without server restarts.
 
 Empty files are skipped.
 
@@ -73,7 +73,7 @@ Prompt caching (where supported by the provider) optimizes the static prefix: on
 3. Rotate session file if it exceeds 10MB
 4. Load shared reference (`agents.md`) and agent identity/instructions (`library/{role}.md`)
 5. Parse YAML frontmatter for model selection
-6. Create `DefaultResourceLoader` with `systemPromptOverride` callback
+6. Create `DefaultResourceLoader` with `systemPromptOverride` callback and store it for per-prompt reloading
 7. Create session via `createAgentSession()` with JSONL persistence, custom tools, and `thinkingLevel: 'high'`
 8. Subscribe to session events for error detection, busy state tracking, and listener forwarding
 
@@ -81,8 +81,8 @@ Prompt caching (where supported by the provider) optimizes the static prefix: on
 
 | Method | Description |
 |--------|-------------|
-| `prompt(content, options?)` | Send a user message. Blocks until agent finishes. `options.isSteering` inserts ASAP into the agent loop. |
-| `deliverMessage(content, details, urgent?)` | Send inter-agent message via `sendCustomMessage()`. Non-blocking. |
+| `prompt(content, options?)` | Reload knowledge, then send a user message. Blocks until agent finishes. `options.isSteering` inserts ASAP into the agent loop. |
+| `deliverMessage(content, details, urgent?)` | Reload knowledge, then send inter-agent message via `sendCustomMessage()`. Non-blocking. Reload errors are swallowed to avoid dropping messages. |
 | `subscribe(listener)` | Listen to all session events. Returns unsubscribe function. |
 | `abort()` | Cancel current execution. |
 | `getContextUsage()` | Get context window usage stats. |

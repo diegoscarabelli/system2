@@ -99,6 +99,7 @@ export class AgentHost {
   private agentProject: number | null = null;
   private agentProjectDirName: string | null = null;
   private sessionDir: string | null = null;
+  private resourceLoader: DefaultResourceLoader | null = null;
   private onArtifactChange?: () => void;
   private onTaskChange?: () => void;
   private onBusyChange?: () => void;
@@ -259,10 +260,11 @@ export class AgentHost {
     console.log('[AgentHost] Model found:', model ? 'YES' : 'NO');
 
     // Create resource loader with custom system prompt
-    const resourceLoader = new DefaultResourceLoader({
+    this.resourceLoader = new DefaultResourceLoader({
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
-      // Override system prompt: static agent instructions + fresh knowledge files on every call
+      // Static agent instructions (from package) + dynamic knowledge files (from ~/.system2/).
+      // Knowledge files are re-read on every LLM call via reload() before each prompt.
       systemPromptOverride: () =>
         `${staticPrompt}${this.loadKnowledgeContext()}\n\n---\n\nConversation history follows.`,
       // Disable default resource discovery (we manage our own)
@@ -271,7 +273,7 @@ export class AgentHost {
       noPromptTemplates: true,
       noThemes: true,
     });
-    await resourceLoader.reload();
+    await this.resourceLoader.reload();
 
     // Create session with JSONL persistence - use continueRecent to persist across restarts
     const { session } = await createAgentSession({
@@ -280,7 +282,7 @@ export class AgentHost {
       sessionManager: SessionManager.continueRecent(SYSTEM2_DIR, agentSessionDir),
       authStorage: this.authResolver.createAuthStorage(),
       modelRegistry: this.modelRegistry,
-      resourceLoader,
+      resourceLoader: this.resourceLoader,
       model,
       customTools: this.buildTools(),
       thinkingLevel: agentConfig.thinking_level ?? 'high',
@@ -373,6 +375,7 @@ export class AgentHost {
       // Retry the pending prompt if there is one
       if (promptToRetry && this.session) {
         console.log('[AgentHost] Retrying prompt...');
+        await this.resourceLoader?.reload();
         await this.session.prompt(promptToRetry);
       }
       return;
@@ -590,6 +593,8 @@ export class AgentHost {
     // Use streamingBehavior to queue steering messages properly
     const promptOptions = options?.isSteering ? { streamingBehavior: 'steer' as const } : undefined;
 
+    // Reload resource loader to pick up knowledge file changes
+    await this.resourceLoader?.reload();
     await this.session.prompt(content, promptOptions);
     // Clear on successful completion (no error triggered failover)
     this.pendingPrompt = null;
@@ -622,18 +627,29 @@ export class AgentHost {
       rotateSessionIfNeeded(this.sessionDir, SYSTEM2_DIR);
     }
 
-    this.session
-      .sendCustomMessage(
-        {
-          customType: 'agent_message',
-          content,
-          display: false,
-          details,
-        },
-        {
-          deliverAs: urgent ? 'steer' : 'followUp',
-          triggerTurn: true,
-        }
+    // Reload resource loader to pick up knowledge file changes, then deliver.
+    // Reload errors are swallowed so a filesystem hiccup never drops a message.
+    const session = this.session;
+    const reload = this.resourceLoader
+      ? this.resourceLoader
+          .reload()
+          .catch((err) => console.warn('[AgentHost] reload failed, using cached knowledge:', err))
+      : Promise.resolve();
+
+    reload
+      .then(() =>
+        session.sendCustomMessage(
+          {
+            customType: 'agent_message',
+            content,
+            display: false,
+            details,
+          },
+          {
+            deliverAs: urgent ? 'steer' : 'followUp',
+            triggerTurn: true,
+          }
+        )
       )
       .catch((err) => console.error('[AgentHost] deliverMessage error:', err));
   }
