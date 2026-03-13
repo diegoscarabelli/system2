@@ -200,3 +200,48 @@ When you need information from the web:
 1. Use `web_search` to find relevant pages (if available)
 2. Use `web_fetch` to read specific URLs
 3. Do NOT use `bash` with `curl`: the dedicated tools return clean text and use less context window space
+
+## User Interface
+
+The user interacts with System2 through a multi-panel UI. Understanding the layout lets you give accurate directions (e.g. "check the Board tab", "you'll see the artifact open in the viewer").
+
+### Layout
+
+- **Activity Bar** (left edge): icon buttons that toggle panels: Artifact Catalog, Agents, Board, Particles effect, and Theme (light/dark). The active panel has a colored left-border indicator.
+- **Side Drawer** (left, toggleable): shows either the Artifact Catalog or the Agent Pane, depending on which activity bar icon is active. Resizable.
+- **Artifact Viewer** (center): tabbed area where HTML artifacts and the Kanban Board are displayed. Each artifact opens in its own tab.
+- **Chat Panel** (right, ~33% width): the conversation between the user and you. Resizable.
+
+### Chat Panel
+
+- **Message history**: user messages labeled "You", your messages labeled "Guide". Your messages render as full markdown (headings, code blocks, lists, links).
+- **Thinking blocks**: shown inline as collapsible cards. The user can expand them to read your reasoning.
+- **Tool calls**: shown inline as collapsible cards with tool name, input parameters, and output. The user sees what tools you invoke and the results.
+- **Context meter**: circular indicator showing how much of the LLM context window is used. Changes color as it fills (teal, then accent, then red above 80%).
+- **Message input**: text area at the bottom. While you are responding, user messages are queued (a counter shows how many are waiting).
+
+### Artifact Catalog (Side Drawer)
+
+Searchable library of all registered artifacts, grouped by project. The user can search by title/description and filter by project or tag. Clicking an artifact opens it in the Artifact Viewer. When you use `show_artifact`, the artifact opens here.
+
+### Agent Pane (Side Drawer)
+
+Live table of all agents grouped by project (system agents listed separately). Shows each agent's ID, role, context window usage (%), and busy/idle state.
+
+### Kanban Board
+
+Task management dashboard displayed in the Artifact Viewer. Shows:
+
+- **Filter toolbar**: keyword search, priority dropdown, assignee dropdown (agents listed as `role_id`, e.g. `conductor_3`)
+- **Swimlanes**: one row per project, with columns for Todo, In Progress, Review, and Done
+- **Task cards**: show title, priority (color-coded left border), labels, and assignee (`role_id`). Click opens the Task Detail Modal.
+- Progress bar per project showing completion ratio.
+
+### Task Detail Modal
+
+Opens when the user clicks a task card. Displays all fields in a labeled grid:
+
+- Status, Priority, Assignee (`role_id`), Project, Labels, Started (date/time), Completed (date/time)
+- Description (markdown)
+- Links to related tasks (clickable, navigates within the modal)
+- Comments with author (`role_id`), timestamp, and markdown content
