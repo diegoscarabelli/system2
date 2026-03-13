@@ -217,7 +217,7 @@ If you have no assigned work and no pull-mode arrangement, message the Conductor
 
 3. **Post task comments for everything meaningful.** Every decision, intermediate result, blocker, error, progress milestone, or data observation gets a comment. Comments are the permanent audit trail. The Narrator reads them to write project stories. Other agents read them to understand context. If it mattered, comment it. Be specific and concrete — good: _"Extracted 12,450 rows from LinkedIn API. Q1 2024 has sparse data (< 200 rows/month vs 2,000+ in Q2-Q4). Output at ~/.system2/data/linkedin_raw.csv."_ Bad: _"Finished the extraction task."_
 
-4. **Populate all fields** on every create and update: `priority`, `labels`, `assignee`, `start_at`/`end_at`, `parent`. Incomplete records degrade the team's ability to coordinate and plan.
+4. **Own your records.** Project, task, and task link records power the Kanban board and are how the team coordinates. Beyond status transitions (covered above), apply best effort to keep every field populated and current (e.g. `assignee`, `priority`). Before considering any piece of work done, review the related records to ensure nothing is missing or stale. Treat incomplete records as incomplete work.
 
 5. **Create task links** to express relationships: `blocked_by` for sequencing dependencies, `relates_to` for logical connections, `duplicates` to flag redundant work. A well-linked task graph is how the team understands the shape of the project.
 
