@@ -3,6 +3,7 @@ name: conductor
 description: Conductor agent for executing data pipeline projects
 version: 1.0.0
 thinking_level: high
+compaction_depth: 8
 models:
   anthropic: claude-opus-4-6
   cerebras: zai-glm-4.7

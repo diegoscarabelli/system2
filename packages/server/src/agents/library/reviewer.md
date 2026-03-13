@@ -3,6 +3,7 @@ name: reviewer
 description: Reviewer agent for validating analytical work and ensuring correctness
 version: 1.0.0
 thinking_level: high
+compaction_depth: 5
 models:
   anthropic: claude-opus-4-6
   cerebras: zai-glm-4.7

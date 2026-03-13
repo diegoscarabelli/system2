@@ -5,7 +5,7 @@
  * Includes automatic failover when API errors occur.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,7 @@ import type { DatabaseClient } from '../db/client.js';
 import { AuthResolver } from './auth-resolver.js';
 import type { AgentRegistry } from './registry.js';
 import { calculateDelay, categorizeError, shouldFailover, shouldRetry, sleep } from './retry.js';
-import { rotateSessionIfNeeded } from './session-rotation.js';
+import { parseSessionEntries, rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
 import { createEditTool } from './tools/edit.js';
 import { createMessageAgentTool } from './tools/message-agent.js';
@@ -53,6 +53,7 @@ interface AgentDefinition {
   description: string;
   version: string;
   thinking_level?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+  compaction_depth?: number;
   models: {
     anthropic: string;
     cerebras: string;
@@ -102,6 +103,9 @@ export class AgentHost {
   private onTaskChange?: () => void;
   private onBusyChange?: () => void;
   private busy = false;
+  private compactionCount = 0;
+  private compactionDepth = 0;
+  private isPruning = false;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -284,6 +288,15 @@ export class AgentHost {
 
     this.session = session;
 
+    // Initialize compaction pruning
+    this.compactionDepth = agentConfig.compaction_depth ?? 0;
+    if (this.compactionDepth > 0) {
+      this.compactionCount = this.readCompactionCount();
+      console.log(
+        `[AgentHost] Compaction pruning enabled: depth=${this.compactionDepth}, count=${this.compactionCount}`
+      );
+    }
+
     // Subscribe to session events and forward to listeners
     session.subscribe((event) => {
       // Check for API errors that need failover handling
@@ -301,6 +314,9 @@ export class AgentHost {
           this.onBusyChange?.();
         }
       }
+
+      // Track compaction for pruning
+      this.handleCompactionTracking(event);
 
       // Forward to external listeners
       this.listeners.forEach((listener) => {
@@ -659,5 +675,168 @@ export class AgentHost {
 
   isBusy(): boolean {
     return this.busy;
+  }
+
+  /**
+   * Handle compaction tracking for pruning.
+   * Increments counter on auto-compaction and triggers pruning when threshold is met.
+   */
+  private handleCompactionTracking(event: AgentSessionEvent): void {
+    if (this.compactionDepth <= 0) return;
+
+    // Track auto-compaction counter
+    if (event.type === 'auto_compaction_end') {
+      this.compactionCount++;
+      this.writeCompactionCount(this.compactionCount);
+    }
+
+    // Trigger pruning compaction at 30% context usage when counter reaches depth
+    if (
+      event.type === 'agent_end' &&
+      this.compactionCount >= this.compactionDepth &&
+      !this.isPruning
+    ) {
+      const usage = this.getContextUsage();
+      if (usage?.percent != null && usage.percent >= 30) {
+        this.isPruning = true;
+        this.triggerPruningCompaction()
+          .catch((err: unknown) => console.error('[AgentHost] Pruning compaction error:', err))
+          .finally(() => {
+            this.isPruning = false;
+          });
+      }
+    }
+  }
+
+  /**
+   * Read the persisted compaction count from the session directory.
+   * Returns 0 if the file doesn't exist (first run or deleted).
+   */
+  private readCompactionCount(): number {
+    if (!this.sessionDir) return 0;
+    const countFile = join(this.sessionDir, '.compaction-count');
+    try {
+      return parseInt(readFileSync(countFile, 'utf-8').trim(), 10) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Persist the compaction count to the session directory.
+   */
+  private writeCompactionCount(count: number): void {
+    if (!this.sessionDir) return;
+    const countFile = join(this.sessionDir, '.compaction-count');
+    writeFileSync(countFile, String(count), 'utf-8');
+  }
+
+  /**
+   * Trigger a pruning compaction that sheds stale information.
+   * Uses the Nth oldest compaction summary as a baseline to instruct the LLM
+   * to remove information that already existed in the baseline.
+   */
+  private async triggerPruningCompaction(): Promise<void> {
+    if (!this.session || !this.sessionDir) return;
+
+    const baseline = this.findBaselineSummary();
+    if (!baseline) {
+      console.log('[AgentHost] No baseline found for pruning, skipping');
+      return;
+    }
+
+    const customInstructions = [
+      'IMPORTANT: Override the previous statement about preserving everything',
+      'from the previous compaction summary. Instead, use the BASELINE below',
+      'as a temporal cutoff. Any information that already existed in this',
+      'baseline is stale and must be dropped. Only retain information that',
+      'was added AFTER the baseline, plus new messages from the conversation.',
+      '',
+      'BASELINE:',
+      baseline,
+    ].join('\n');
+
+    await this.session.compact(customInstructions);
+    this.compactionCount = 0;
+    this.writeCompactionCount(0);
+    console.log(`[AgentHost] Pruning compaction completed for agent ${this.agentId}`);
+  }
+
+  /**
+   * Find the baseline compaction summary for pruning.
+   * The baseline is the oldest compaction in the current window (compactionCount ago).
+   * May need to scan older JSONL files if session rotation moved entries.
+   */
+  private findBaselineSummary(): string | null {
+    if (!this.session || !this.sessionDir) return null;
+
+    // Collect compaction summaries from current session entries (chronological order)
+    const entries = this.session.sessionManager.getBranch();
+    const currentSummaries: string[] = [];
+    for (const entry of entries) {
+      if (entry.type === 'compaction') {
+        const summary = (entry as unknown as { summary?: string }).summary;
+        if (summary) currentSummaries.push(summary);
+      }
+    }
+
+    // Check if we have enough from current session
+    if (currentSummaries.length >= this.compactionCount) {
+      return currentSummaries[currentSummaries.length - this.compactionCount] ?? null;
+    }
+
+    // Need more compaction entries from older JSONL files
+    const needed = this.compactionCount - currentSummaries.length;
+    const olderSummaries = this.scanOlderSessionFiles(needed);
+
+    // Combine: older summaries (chronological) + current summaries
+    const allSummaries = [...olderSummaries, ...currentSummaries];
+    if (allSummaries.length < this.compactionCount) return null;
+
+    return allSummaries[allSummaries.length - this.compactionCount] ?? null;
+  }
+
+  /**
+   * Scan older (rotated) JSONL session files for compaction summaries.
+   * Returns up to `needed` summaries in chronological order.
+   */
+  private scanOlderSessionFiles(needed: number): string[] {
+    const sessionDir = this.sessionDir;
+    if (!sessionDir) return [];
+
+    let files: string[];
+    try {
+      files = readdirSync(sessionDir).filter((f) => f.endsWith('.jsonl'));
+    } catch {
+      return [];
+    }
+
+    // Sort by mtime descending (newest first)
+    const sorted = files
+      .map((f) => {
+        const fullPath = join(sessionDir, f);
+        const stat = statSync(fullPath);
+        return { path: fullPath, mtime: stat.mtime.getTime() };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+
+    // Skip the most recent file (current session)
+    const olderFiles = sorted.slice(1);
+
+    const summaries: string[] = [];
+
+    // Search from newest to oldest archived files
+    for (const file of olderFiles) {
+      const entries = parseSessionEntries(file.path);
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const summary = entries[i].type === 'compaction' ? entries[i].summary : undefined;
+        if (summary) {
+          summaries.unshift(summary);
+          if (summaries.length >= needed) return summaries;
+        }
+      }
+    }
+
+    return summaries;
   }
 }

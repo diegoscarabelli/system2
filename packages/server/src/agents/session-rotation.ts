@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 const SESSION_FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 
-interface SessionEntry {
+export interface SessionEntry {
   type: string;
   id?: string;
   parentId?: string | null;
@@ -52,7 +52,7 @@ function findMostRecentSession(sessionDir: string): string | null {
 /**
  * Parse JSONL file into entries.
  */
-function parseSessionEntries(filePath: string): SessionEntry[] {
+export function parseSessionEntries(filePath: string): SessionEntry[] {
   const content = readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter((line) => line.trim());
   const entries: SessionEntry[] = [];

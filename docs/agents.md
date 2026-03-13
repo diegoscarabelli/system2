@@ -58,17 +58,17 @@ Each agent's system prompt is assembled from four layers:
 
 The static layers are concatenated into `staticPrompt`. The dynamic layers are loaded via `loadKnowledgeContext()`, which is passed as a `systemPromptOverride` callback to the Pi SDK's `DefaultResourceLoader`. This means knowledge updates take effect immediately without server restarts.
 
-Files with 10 or fewer lines are skipped (to ignore empty templates).
+Empty files are skipped.
 
 Prompt caching (where supported by the provider) optimizes the static prefix: only the refreshed knowledge portion is reprocessed on each call.
 
 ## AgentHost (`host.ts`)
 
-`AgentHost` wraps a pi-coding-agent `AgentSession` for a single agent. One instance per active agent.
+`AgentHost` wraps a pi-coding-agent `AgentSession` for a single agent. One instance per active agent. The caller is responsible for creating the agent's database record first and passing the `agentId` to the constructor (singletons via `getOrCreateGuideAgent()`/`getOrCreateNarratorAgent()`, spawned agents via `createAgent()`).
 
 ### Initialization
 
-1. Look up agent record from database
+1. Look up the pre-existing agent record from the database (throws if not found)
 2. Create session directory (`~/.system2/sessions/{role}_{id}/`)
 3. Rotate session file if it exceeds 10MB
 4. Load shared reference (`agents.md`) and agent identity/instructions (`library/{role}.md`)
@@ -173,6 +173,7 @@ Exponential backoff with jitter: `min(baseDelay * 2^attempt + jitter, maxDelay)`
 Agent sessions are persisted as JSONL files in `~/.system2/sessions/{role}_{id}/`. The pi-coding-agent SDK manages:
 - **Session format:** tree structure with `id` and `parentId` for in-place branching
 - **Auto-compaction:** when context approaches model limits, older messages are summarized
+- **Compaction pruning:** long-running agents can set `compaction_depth: N` in their frontmatter. After N auto-compactions, a manual "pruning" compaction runs at 30% context usage. It uses the Nth oldest compaction summary as a baseline to shed stale information, creating a sliding window instead of an ever-growing chain. The compaction counter is persisted to `.compaction-count` in the session directory so it survives restarts.
 - **Session continuation:** `SessionManager.continueRecent()` picks up the latest session on restart
 
 **Session rotation** (`session-rotation.ts`): when a JSONL file exceeds 10MB, a new file is created carrying over the compacted history. The old file is archived. Rotation is checked both at initialization and before each `deliverMessage()` call, so long-running singleton agents (Guide, Narrator) don't grow unbounded between server restarts.
