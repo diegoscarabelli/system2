@@ -17,7 +17,7 @@ For installation and usage, see the [project README](../README.md).
 
 ## Core Systems
 
-- [Agents](agents.md): How the four agent roles (Guide, Conductor, Narrator, Reviewer) work together, including their lifecycles, how system prompts are assembled, and how LLM failover is handled.
+- [Agents](agents.md): How the four agent roles (Guide, Conductor, Narrator, Reviewer) work together, including their lifecycles, how system prompts are assembled, how LLM failover is handled, and how compaction pruning prevents context bloat in long-running agents.
 - [Tools](tools.md): The tools available to agents, including what each one does, how they are registered, and how permissions are enforced.
 - [Database](database.md): The SQLite schema that stores projects, tasks, agents, and comments, with table definitions, indices, and common query patterns.
 - [WebSocket Protocol](websocket-protocol.md): The message format between the UI and server, covering how chat messages, tool calls, and agent events are exchanged in real time.

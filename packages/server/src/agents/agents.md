@@ -280,6 +280,7 @@ Do not rely on your context surviving. Decisions, results, and observations must
 Your conversation is persisted as JSONL files in `~/.system2/sessions/{role}_{id}/`. You can read these files — your own or other agents' — when it would help you understand context, reconstruct what happened, or investigate an issue (e.g. Narrator writing project stories, debugging another agent's decisions, recovering context after compaction).
 
 - **Auto-compaction:** when your context approaches model limits, the SDK summarizes older messages. You may see a compaction summary at the start of your context — this is normal.
+- **Compaction pruning:** if your role has a `compaction_depth` set, a pruning compaction triggers after that many auto-compactions. It uses the oldest compaction summary as a baseline and sheds information that already existed before it, creating a sliding window instead of an ever-growing summary chain. After pruning, you may notice a shorter, more focused compaction summary — this is expected behavior.
 - **Session rotation:** when a JSONL file exceeds 10MB, a new file is created with compacted history carried over.
 - This reference and your role-specific instructions are always in your context. Knowledge files are refreshed on every turn.
 
