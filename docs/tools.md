@@ -8,7 +8,7 @@ Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts
 
 - Eight tools are always included: `bash`, `read`, `edit`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `web_fetch`
 - `show_artifact` is Guide-only: the Guide is the only agent that interacts with the user via the UI
-- `spawn_agent` and `terminate_agent` are conditional: only agents that receive a spawner callback (Guide and Conductors) get these tools
+- `spawn_agent`, `terminate_agent`, and `trigger_project_story` are conditional: only agents that receive a spawner callback (Guide and Conductors) get these tools
 - `web_search` is conditional on a Brave Search API key being configured
 
 ## Tool Reference
@@ -183,6 +183,18 @@ Creates an agent record in app.db, starts a new `AgentHost` session, registers i
 - Narrator has no spawner and cannot spawn agents
 
 **Conditional:** only registered when the `AgentHost` is created with a `spawner` callback (all agents except Narrator).
+
+### `trigger_project_story`
+
+Trigger the project story workflow for a completed project. Creates a story task for the Narrator, collects all project data (agent activity, DB changes, `log.md` content), and delivers two messages to the Narrator via FIFO queue: a final project-log update and a project story data package. Returns the story task ID.
+
+| Parameter    | Type   | Description                                |
+|--------------|--------|--------------------------------------------|
+| `project_id` | number | ID of the project to generate a story for  |
+
+**When to use:** during the Conductor's close-project routine, after all tasks are resolved.
+
+**Conditional:** only registered when the `AgentHost` is created with a `spawner` callback (Guide and Conductors).
 
 ### `terminate_agent`
 

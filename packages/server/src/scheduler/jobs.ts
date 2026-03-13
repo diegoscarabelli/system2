@@ -34,13 +34,13 @@ export function readFrontmatterField(filePath: string, field: string): string | 
 }
 
 /**
- * Read the last N lines of a file.
+ * Read the last N characters of a file.
  */
-export function readTailLines(filePath: string, n: number): string {
+export function readTailChars(filePath: string, n: number): string {
   if (!existsSync(filePath)) return '';
   const content = readFileSync(filePath, 'utf-8');
-  const lines = content.split('\n');
-  return lines.slice(-n).join('\n');
+  if (content.length <= n) return content;
+  return content.slice(-n);
 }
 
 /**
@@ -332,8 +332,8 @@ function hasActivity(agentActivity: string, dbChanges: string): boolean {
  * Build and deliver project logs and daily summary to the Narrator.
  *
  * For each active project (conductor not archived), a project-log message is
- * delivered first with all involved agents' activity (project-scoped + Guide +
- * Narrator) and project-scoped DB changes. The collected data is then reused
+ * delivered first with all involved agents' activity (project-scoped + Guide)
+ * and project-scoped DB changes. The collected data is then reused
  * in the daily summary, which groups activity by project vs non-project.
  *
  * Shared by both the cron handler and server catch-up.
@@ -355,18 +355,7 @@ export function buildAndDeliverDailySummary(
     mkdirSync(summariesDir, { recursive: true });
   }
 
-  // 1. Read previous context (last 20 lines of most recent summary)
-  let previousContext = '(none)';
-  const existingFiles = readdirSync(summariesDir)
-    .filter((f) => f.endsWith('.md'))
-    .sort()
-    .reverse();
-  if (existingFiles.length > 0) {
-    const tail = readTailLines(join(summariesDir, existingFiles[0]), 20);
-    if (tail.trim()) previousContext = tail;
-  }
-
-  // 2. Create today's file if needed
+  // 1. Create today's file if needed
   if (!existsSync(filePath)) {
     writeFileSync(
       filePath,
@@ -374,6 +363,11 @@ export function buildAndDeliverDailySummary(
       'utf-8'
     );
   }
+
+  // 2. Read full content of today's daily summary file
+  let dailySummaryContent = '(none)';
+  const content = readFileSync(filePath, 'utf-8');
+  if (content.trim()) dailySummaryContent = content;
 
   // 3. Resolve last_run_ts
   let lastRunTs = readFrontmatterField(filePath, 'last_narrator_update_ts');
@@ -393,7 +387,12 @@ export function buildAndDeliverDailySummary(
     "SELECT a.id, a.role, p.name as project_name FROM agent a LEFT JOIN project p ON a.project = p.id WHERE a.status != 'archived'"
   ) as AgentRow[];
 
-  const systemWideAgents = allAgents.filter((a) => a.project_name === null && a.id !== narratorId);
+  // For project logs: system-wide agents excluding Narrator (Guide only)
+  const projectLogSystemAgents = allAgents.filter(
+    (a) => a.project_name === null && a.id !== narratorId
+  );
+  // For daily summary non-project section: system-wide agents including Narrator
+  const dailySummarySystemAgents = allAgents.filter((a) => a.project_name === null);
 
   // 5. Find active projects (conductor not archived) and deliver project logs
   const activeProjects = db.query(
@@ -426,18 +425,18 @@ export function buildAndDeliverDailySummary(
       );
     }
 
-    // Read previous context from project log
-    let projectPreviousContext = '(none)';
-    const logTail = readTailLines(logFile, 20);
-    if (logTail.trim()) projectPreviousContext = logTail;
+    // Read most recent log.md content (last 10,000 characters)
+    let projectLogContext = '(none)';
+    const logTail = readTailChars(logFile, 10_000);
+    if (logTail.trim()) projectLogContext = logTail;
 
     // Project-scoped agents (Conductor, Reviewer, specialists)
     const projectScopedAgents = allAgents.filter(
       (a) => a.project_name === project.name
     ) as AgentRow[];
 
-    // All agents involved: project-scoped + Guide + Narrator (for project log)
-    const allProjectAgents = [...projectScopedAgents, ...systemWideAgents];
+    // All agents involved: project-scoped + Guide (for project log)
+    const allProjectAgents = [...projectScopedAgents, ...projectLogSystemAgents];
 
     const allProjectAgentActivity = collectAgentActivity(
       system2Dir,
@@ -461,7 +460,7 @@ export function buildAndDeliverDailySummary(
       dbChanges: projectDbChanges,
     });
 
-    // Deliver project-log message (with all agents including Guide + Narrator)
+    // Deliver project-log message (with all agents including Guide)
     if (!hasActivity(allProjectAgentActivity, projectDbChanges)) continue;
 
     const projectLogMessage = `[Scheduled task: project-log]
@@ -472,9 +471,9 @@ file: ${logFile}
 last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
-## Previous Context
+## Most recent log.md content
 
-${projectPreviousContext}
+${projectLogContext}
 
 ## Agent Activity
 
@@ -496,7 +495,7 @@ ${projectDbChanges}`;
   // Non-project: Guide + Narrator JSONL (full streams, span all projects)
   const nonProjectAgentActivity = collectAgentActivity(
     system2Dir,
-    systemWideAgents,
+    dailySummarySystemAgents,
     lastRunTs,
     newRunTs
   );
@@ -510,9 +509,9 @@ file: ${filePath}
 last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
-## Previous Context
+## Current daily summary file content
 
-${previousContext}`,
+${dailySummaryContent}`,
   ];
 
   if (projectDataList.length > 0) {
@@ -534,9 +533,9 @@ ${previousContext}`,
     hasActivity(pd.agentActivity, pd.dbChanges)
   );
   const hasNonProjectChanges = hasActivity(nonProjectAgentActivity, nonProjectDbChanges);
-  const hasPreviousContext = previousContext !== '(none)';
+  const hasDailySummaryContent = dailySummaryContent !== '(none)';
 
-  if (!hasProjectChanges && !hasNonProjectChanges && !hasPreviousContext) {
+  if (!hasProjectChanges && !hasNonProjectChanges && !hasDailySummaryContent) {
     console.log('[Scheduler] No activity since last run, skipping daily-summary');
     return;
   }

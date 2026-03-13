@@ -218,10 +218,13 @@ User request → Guide creates project in app.db
              → Conductor plans tasks in app.db
              → Conductor executes, spawning data agents as needed
              → Conductor coordinates Reviewer for analytical sign-off
-             → Conductor creates "Write project story" task for Narrator
              → Conductor messages Guide: project complete
-             → Guide asks user for confirmation
-             → User confirms → Guide terminates Conductor + Reviewer
+             → Guide relays to user, user confirms
+             → Guide messages Conductor: "close the project"
+             → Conductor resolves remaining tasks, calls trigger_project_story
+             → Narrator writes story, messages Conductor
+             → Conductor reports to Guide
+             → Guide terminates Conductor + Reviewer
              → Guide updates project status to "done"
 ```
 
@@ -364,12 +367,14 @@ DataAgent-Extract, DataAgent-Analyze, and Reviewer work through their tasks in d
 #### Phase 4: Completion and Story
 
 1. DataAgent-Analyze generates `~/.system2/artifacts/linkedin_report.html`.
-2. Conductor creates task "Write project story" assigned to Narrator, messages Narrator with task ID and project details.
-3. Conductor messages Guide: "Project #1 complete. Report at artifacts/linkedin_report.html. Story task #17 assigned to Narrator."
-4. **Guide → User**: "Project #1 is complete. [Summary]. Shall I finalize this project?"
-5. User confirms → Guide terminates Conductor (#2) and Reviewer (#4), sets project #1 to `done`.
-6. Guide informs user with final summary, artifact location, and story path (`~/.system2/projects/1_linkedin-campaign/project_story.md`).
-7. Narrator (independently) writes the project story by querying app.db, reading project log and session JSONL files.
+2. Conductor messages Guide: "Project #1 complete. Report at artifacts/linkedin_report.html."
+3. **Guide → User**: "Project #1 is complete. [Summary]. Shall I finalize this project?"
+4. User confirms → Guide messages Conductor: "close the project."
+5. Conductor resolves remaining tasks, calls `trigger_project_story` (which creates the story task and delivers pre-computed data to the Narrator).
+6. Narrator appends a final project-log entry, then writes the project story. Narrator messages Conductor when done.
+7. Conductor reports back to Guide.
+8. Guide terminates Conductor (#2) and Reviewer (#4), sets project #1 to `done`.
+9. Guide informs user with final summary, artifact location, and story path (`~/.system2/projects/1_linkedin-campaign/project_story.md`).
 
 ---
 

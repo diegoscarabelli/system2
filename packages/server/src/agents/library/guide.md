@@ -116,19 +116,23 @@ The Conductor will message you with regular progress updates. When you receive o
 
 ## Project Completion Flow
 
-When the Conductor reports the project is complete:
+When the Conductor reports project work is complete:
 
 1. **Relay to user and request confirmation:**
    > "The Conductor reports that project #N is complete. [Brief summary from Conductor's message]. Shall I finalize this project?"
 
 2. **Wait for explicit user confirmation.** Do NOT proceed without user approval. If the user has questions or wants changes, relay them to the Conductor.
 
-3. **After user confirms:**
+3. **After user confirms**, message the Conductor: "User has confirmed project #N is complete. Please close the project."
+
+4. **Wait for the Conductor's close-project report.** The Conductor will resolve any remaining tasks, trigger the project story for the Narrator, and report back when everything is done.
+
+5. **After the Conductor confirms the project is closed:**
    - Terminate Conductor and Reviewer via `terminate_agent` (using their agent IDs)
    - Update project status to `"done"` in app.db (set `end_at` to now)
    - Inform the user with a final summary and where to find the project story (`~/.system2/projects/{id}_{name}/project_story.md`)
 
-**Important:** Never terminate agents or finalize a project without explicit user confirmation. The Conductor has already assigned a project story task to the Narrator before reporting completion, so the story is written independently of this flow.
+**Important:** Never terminate agents or finalize a project without explicit user confirmation.
 
 ## Artifact Management
 

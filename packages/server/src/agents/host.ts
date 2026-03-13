@@ -33,6 +33,7 @@ import { createReadSystem2DbTool } from './tools/read-system2-db.js';
 import { createShowArtifactTool } from './tools/show-artifact.js';
 import { type AgentSpawner, createSpawnAgentTool } from './tools/spawn-agent.js';
 import { createTerminateAgentTool } from './tools/terminate-agent.js';
+import { createTriggerProjectStoryTool } from './tools/trigger-project-story.js';
 import { createWebFetchTool } from './tools/web-fetch.js';
 import { createWebSearchTool } from './tools/web-search.js';
 import { createWriteTool } from './tools/write.js';
@@ -73,6 +74,7 @@ export interface AgentHostConfig {
   toolsConfig?: ToolsConfig;
   spawner?: AgentSpawner;
   onArtifactChange?: () => void;
+  onTaskChange?: () => void;
   onBusyChange?: () => void;
 }
 
@@ -97,6 +99,7 @@ export class AgentHost {
   private agentProjectDirName: string | null = null;
   private sessionDir: string | null = null;
   private onArtifactChange?: () => void;
+  private onTaskChange?: () => void;
   private onBusyChange?: () => void;
   private busy = false;
 
@@ -108,6 +111,7 @@ export class AgentHost {
     this.toolsConfig = config.toolsConfig;
     this.spawner = config.spawner;
     this.onArtifactChange = config.onArtifactChange;
+    this.onTaskChange = config.onTaskChange;
     this.onBusyChange = config.onBusyChange;
 
     // Store LLM config for openai-compatible provider registration
@@ -504,7 +508,7 @@ export class AgentHost {
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous tool collection matches SDK's AgentTool<any>[]
     const tools: AgentTool<any>[] = [
       createReadSystem2DbTool(this.db),
-      createWriteSystem2DbTool(this.db, this.agentId, this.onArtifactChange),
+      createWriteSystem2DbTool(this.db, this.agentId, this.onArtifactChange, this.onTaskChange),
       createMessageAgentTool(this.agentId, this.registry, this.db),
       createBashTool((content, details) => {
         this.session?.sendCustomMessage(
@@ -530,10 +534,12 @@ export class AgentHost {
       tools.push(createShowArtifactTool(this.db));
     }
 
-    // spawn_agent and terminate_agent require a spawner callback (provided to Guide and Conductors, not Narrator)
+    // spawn_agent, terminate_agent, and trigger_project_story require a spawner callback
+    // (provided to Guide and Conductors, not Narrator)
     if (this.spawner) {
       tools.push(createSpawnAgentTool(this.db, this.agentId, this.spawner));
       tools.push(createTerminateAgentTool(this.db, this.agentId, this.registry));
+      tools.push(createTriggerProjectStoryTool(this.db, this.agentId, this.registry));
     }
 
     return tools;

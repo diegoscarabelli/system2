@@ -36,8 +36,8 @@ For each active project (those with a non-archived Conductor):
 
 1. Ensure `~/.system2/projects/{id}_{name}/` directory exists
 2. Create `log.md` with YAML frontmatter if it doesn't exist
-3. Read previous context (last 20 lines of `log.md`)
-4. Collect activity from all agents involved in the project (project-scoped agents + Guide; Narrator is excluded to prevent recursive embedding)
+3. Read most recent `log.md` content (last 10,000 characters via `readTailChars`)
+4. Collect activity from all agents involved in the project (project-scoped agents + Guide; Narrator is excluded via `projectLogSystemAgents` to prevent recursive embedding)
 5. Collect project-scoped DB changes (task, project, task_comment, task_link records belonging to the project)
 6. If there is activity, deliver a `[Scheduled task: project-log]` message to the Narrator
 
@@ -45,16 +45,16 @@ Each project log is a single continuous file per project lifetime (unlike daily 
 
 ### Phase 2: Daily Summary
 
-1. **Resolve timestamps** via fallback chain:
+1. **Create today's file** if it doesn't exist (with empty YAML frontmatter)
+2. **Read current daily summary file content:** full content of today's daily summary file
+3. **Resolve timestamps** via fallback chain:
    - Today's daily summary frontmatter (`last_narrator_update_ts`)
    - Most recent daily summary frontmatter (by filename sort)
    - `memory.md` frontmatter
    - Fall back to `intervalMinutes` ago
-2. **Create today's file** if it doesn't exist (with empty YAML frontmatter)
-3. **Read previous context:** last 20 lines of the most recent daily summary
 4. **Build message** with two sections:
    - **Project Activity:** per-project sections with project-scoped agent JSONL and project DB changes (reused from Phase 1)
-   - **Non-Project Activity:** Guide JSONL (full stream spanning all projects) and DB changes not tied to any active project. The Narrator's own JSONL is excluded to prevent a recursive feedback loop (each message would embed prior messages).
+   - **Non-Project Activity:** Guide and Narrator JSONL (full stream spanning all projects, via `dailySummarySystemAgents`) and DB changes not tied to any active project.
 5. **Check for activity:** skip delivery if there's no meaningful activity
 6. **Deliver:** send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
 

@@ -169,6 +169,7 @@ describe('trigger_project_story tool', () => {
       expect.objectContaining({
         project: 1,
         title: 'Write project story',
+        status: 'todo',
         assignee: 10,
         priority: 'medium',
         labels: ['narrative'],

@@ -41,7 +41,7 @@ Project-scoped files live outside `knowledge/`:
 | `memory.md ## Notes` | Any agent | Anytime: agents write important facts here |
 | `daily_summaries/*.md` | Narrator | Every 30 minutes (configurable) |
 | `projects/{id}_{name}/log.md` | Narrator | Every 30 minutes (same cron as daily summary) |
-| `projects/{id}_{name}/project_story.md` | Narrator | Once, when Conductor assigns story task at project completion |
+| `projects/{id}_{name}/project_story.md` | Narrator | Once, when Conductor calls `trigger_project_story` at project completion |
 
 ## How Knowledge Enters System Prompts
 
@@ -163,7 +163,7 @@ Conductor planned 7 tasks across 4 phases...
 DataAgent-Extract completed task #10...
 ```
 
-The scheduler delivers project-log messages to the Narrator on the same cron schedule as daily summaries (Phase 1 of the pipeline). The Narrator synthesizes activity from all agents involved in the project (project-scoped agents + Guide + Narrator) and project-scoped database changes.
+The scheduler delivers project-log messages to the Narrator on the same cron schedule as daily summaries (Phase 1 of the pipeline). The Narrator synthesizes activity from all agents involved in the project (project-scoped agents + Guide; Narrator is excluded to prevent recursive embedding) and project-scoped database changes.
 
 Project-scoped agents receive this file in their system prompt instead of daily summaries.
 
@@ -186,13 +186,18 @@ Conductor planned 7 tasks...
 Guide answered user question about TimescaleDB configuration...
 ```
 
-The scheduler pre-computes activity data grouped into project sections (project-scoped agent JSONL + project DB changes) and a non-project section (Guide + Narrator JSONL + non-project DB changes). The Narrator synthesizes each section, avoiding repetition of content already covered in project-log entries. See [Scheduler](scheduler.md) for the pipeline details.
+The scheduler pre-computes activity data grouped into project sections (project-scoped agent JSONL + project DB changes) and a non-project section (Guide and Narrator JSONL + non-project DB changes). The Narrator synthesizes each section, avoiding repetition of content already covered in project-log entries. See [Scheduler](scheduler.md) for the pipeline details.
 
 System-wide agents (Guide, Narrator) receive the two most recent daily summaries in their system prompt.
 
 ## Project Stories
 
-Written once per project at completion. The Conductor creates a "Write project story" task assigned to the Narrator as the last project task. The Narrator reconstructs the project journalistically by reading the project log, session JSONL files, and app.db records, then writes the story to `projects/{id}_{name}/project_story.md`.
+Written once per project at completion. The Conductor calls `trigger_project_story` during its close-project routine, which creates a story task and delivers two messages to the Narrator via FIFO queue:
+
+1. A final project-log update (same format as scheduled project-log messages)
+2. A project story data package (full `app.db` snapshot + `log.md` content)
+
+The Narrator processes Message 1 first (appends a final log entry), then Message 2 (writes the story to `projects/{id}_{name}/project_story.md`). The server pre-computes all data so the Narrator does not need to query for it. When done, the Narrator messages the Conductor, and the Conductor reports back to the Guide.
 
 See [Scheduler](scheduler.md) for the pipeline that produces project logs and daily summaries.
 

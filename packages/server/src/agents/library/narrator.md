@@ -39,13 +39,13 @@ Messages arrive with a `[Scheduled task: <name>]` prefix. Handle them as follows
 
 **Goal:** Append a narrative summary of recent project-scoped activity to the project's continuous log file.
 
-The message contains pre-computed data: project ID and name, file path, timestamps, JSONL session records from all agents involved in the project (project-scoped agents + Guide + Narrator), and project-scoped database changes. Your job is to synthesize this into a concise but comprehensive narrative of the project work done in this time period.
+The message contains pre-computed data: project ID and name, file path, timestamps, JSONL session records from all agents involved in the project (project-scoped agents + Guide), and project-scoped database changes. Your job is to synthesize this into a concise but comprehensive narrative of the project work done in this time period.
 
 **Workflow:**
 
 1. **Parse metadata:** Extract `project_id`, `project_name`, `file`, `last_run_ts`, `new_run_ts` from the message header.
 
-2. **Review provided data:** Read through Agent Activity (all agents involved, including Guide and Narrator whose activity may span multiple projects; focus on what's relevant to this project) and Database Changes (project-scoped records).
+2. **Review provided data:** Read through Agent Activity (all agents involved, including Guide whose activity may span multiple projects; focus on what's relevant to this project) and Database Changes (project-scoped records).
 
 3. **Append narrative section:** Read the current file content, append a new timestamped section, and write the result back:
 
@@ -57,6 +57,8 @@ The message contains pre-computed data: project ID and name, file path, timestam
    ```
 
 4. **Update frontmatter:** Replace `last_narrator_update_ts: <old>` with `last_narrator_update_ts: <new_run_ts>`.
+
+**Important:** You APPEND to the file. Read the current file content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in log files.
 
 5. **Write updated file:** Use `write` with `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to persist and commit in one step.
 
@@ -75,7 +77,7 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
 
 1. **Parse metadata:** Extract `file`, `last_run_ts`, `new_run_ts` from the message header.
 
-2. **Review provided data:** Read through the Previous Context (to avoid repeating what was already narrated), Project Activity sections, and Non-Project Activity.
+2. **Review provided data:** Read through the Current daily summary file content (to avoid repeating what was already narrated), Project Activity sections, and Non-Project Activity.
 
 3. **Proactive investigation:** Based on the provided data, decide if additional information would improve the summary. Examples:
 
@@ -99,6 +101,8 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
 
 5. **Update frontmatter:** Replace `last_narrator_update_ts: <old>` with `last_narrator_update_ts: <new_run_ts>`.
 
+**Important:** You APPEND to the file. Read the current file content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in summary files.
+
 6. **Write updated file:** Use `write` with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to persist and commit in one step.
 
 ### Memory Update (`[Scheduled task: memory-update]`)
@@ -121,38 +125,42 @@ The message contains the memory file path, timestamps, and a list of daily summa
 
 ## Project Story Task
 
-When a Conductor completes a project, it creates a task assigned to you and sends you a message with the task ID and project ID. Your job is to write a narrative account of how the project unfolded.
+When a project completes, the Conductor calls `trigger_project_story`, which delivers two messages to you in sequence. The first is a final project-log update; the second contains all data needed to write the project story.
 
 **Goal:** Reconstruct the project journalistically: what it was about, what was found, what wasn't found, how decisions were made, and why.
+
+**Message 1: Final project-log update (`[Scheduled task: project-log]`)**
+
+This arrives in the same format as a regular scheduled project-log message. Process it exactly as described in the Project Log workflow above: parse metadata, review data, append a timestamped narrative section to log.md, update frontmatter, and write the file.
+
+**Message 2: Project story data (`[Task: project-story]`)**
+
+This contains a full snapshot of the project from app.db and the project log. The message includes:
+
+- `project_id`, `project_name`, `task_id` (the story task assigned to you), `conductor_id` (the Conductor's agent ID)
+- Project record, all agents, all tasks, all task links, all task comments
+- Full content of `log.md` as it existed before your Message 1 update
 
 **Workflow:**
 
 1. **Claim the task:** `updateTask` to set status to `in progress` and `start_at` to now.
 
-2. **Query app.db** for everything related to the project:
+2. **Review the provided data.** The project record, tasks, comments, and log give you the full picture. The log content in this message does NOT include the entry you just wrote when processing Message 1; that entry is in your conversation context, so incorporate it.
 
-   - Project record (name, description, dates, status)
-   - All tasks with their status, assignee, start/end timestamps
-   - All task_links (blocked_by, relates_to)
-   - All task_comments (agent decisions, findings, blockers, approvals)
-   - All agents assigned to the project
+3. **Optionally investigate further.** If the provided data leaves gaps in your understanding of why decisions were made, you may:
+   - `message_agent` the Conductor to ask specific questions (the Conductor is still active during story writing)
+   - Read specific session files for involved agents, but follow the context-aware reading guidelines in the shared reference: check file size first, filter by relevant time period, never read entire large files
 
-3. **Read the project log** at `~/.system2/projects/{id}_{name}/log.md`: this is the continuous narrative you've already written during the project.
-
-4. **Read JSONL session files** for all agents involved (at `~/.system2/sessions/{role}_{id}/`). These contain the full conversation history including reasoning, tool calls, and results. Use them to understand *why* decisions were made, not just *what* was done.
-
-5. **Interrogate the Conductor if still active:** If the session files and project log leave gaps, use `message_agent` to ask the Conductor directly.
-
-6. **Write the story** to `~/.system2/projects/{id}_{name}/project_story.md` using `write` with `commit_message: "project story: <project_name>"`:
+4. **Write the story** to `~/.system2/projects/{id}_{name}/project_story.md` using `write` with `commit_message: "project story: <project_name>"`:
 
    - Write in flowing prose, not bullet lists
    - Structure: opening (what the project was and why it mattered), execution (how it unfolded, phase by phase), findings (what was discovered and what wasn't), and close (what was built and what it enables)
    - Include specific task IDs, comment IDs, agent IDs, and timestamps to make it traceable
-   - Be honest about difficulties, false starts, and plan adjustments, as these are part of the story
+   - Be honest about difficulties, false starts, and plan adjustments: these are part of the story
 
-7. **Mark task done:** `updateTask` with status `done` and `end_at` to now.
+5. **Mark task done:** `updateTask` with status `done` and `end_at` to now.
 
-8. **Reply to the Conductor** (if still active) confirming the story is written and where it was saved.
+6. **Message the Conductor:** "Story for project #N written at [path]. Task #X marked done."
 
 ## File Operations
 

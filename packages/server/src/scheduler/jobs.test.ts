@@ -7,7 +7,7 @@ import {
   collectAgentActivity,
   formatMarkdownTable,
   readFrontmatterField,
-  readTailLines,
+  readTailChars,
   resolveDailySummaryTimestamp,
 } from './jobs.js';
 
@@ -58,23 +58,30 @@ describe('readFrontmatterField', () => {
   });
 });
 
-describe('readTailLines', () => {
-  it('reads last N lines of a file', () => {
+describe('readTailChars', () => {
+  it('reads last N characters of a file', () => {
     const dir = trackTmpDir(makeTmpDir());
     const file = join(dir, 'log.txt');
-    writeFileSync(file, 'line1\nline2\nline3\nline4\nline5');
-    expect(readTailLines(file, 2)).toBe('line4\nline5');
+    writeFileSync(file, 'abcdefghij'); // 10 chars
+    expect(readTailChars(file, 5)).toBe('fghij');
   });
 
-  it('returns all lines if file has fewer than N', () => {
+  it('returns full content if file has fewer than N chars', () => {
     const dir = trackTmpDir(makeTmpDir());
     const file = join(dir, 'log.txt');
-    writeFileSync(file, 'line1\nline2');
-    expect(readTailLines(file, 10)).toBe('line1\nline2');
+    writeFileSync(file, 'short');
+    expect(readTailChars(file, 100)).toBe('short');
   });
 
   it('returns empty string for missing file', () => {
-    expect(readTailLines('/nonexistent/file.txt', 5)).toBe('');
+    expect(readTailChars('/nonexistent/file.txt', 5)).toBe('');
+  });
+
+  it('returns exact content when length equals N', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const file = join(dir, 'log.txt');
+    writeFileSync(file, 'exact');
+    expect(readTailChars(file, 5)).toBe('exact');
   });
 });
 
