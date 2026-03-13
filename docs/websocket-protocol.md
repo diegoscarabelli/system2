@@ -102,6 +102,10 @@ The UI maintains a FIFO message queue (`useChatStore.messageQueue`). When the ag
 2. Steering messages are prepended (higher priority)
 3. On `ready_for_input`, the next queued message is sent automatically
 
+## Server Shutdown
+
+On shutdown, the server sends a WebSocket close frame with code `1001` ("Going Away") and reason `"server shutting down"` to every connected client. Clients that don't complete the close handshake within 2 seconds are force-terminated.
+
 ## Multi-Tab Support
 
 Multiple browser tabs each open their own WebSocket connection. All tabs receive the same agent events (thinking, text, tool calls) because each handler subscribes independently to the agent.

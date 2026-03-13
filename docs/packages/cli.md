@@ -58,7 +58,7 @@ Starts the server process.
 
 ### `system2 stop`
 
-Reads PID file, sends SIGTERM. Force-kills with SIGKILL after 2s timeout. Cross-platform (uses `taskkill` on Windows).
+Reads PID file, sends SIGTERM. Polls for up to 10 seconds, then force-kills with SIGKILL if the process is still running. Cross-platform (uses `taskkill` on Windows).
 
 ### `system2 status`
 

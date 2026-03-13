@@ -78,7 +78,15 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 
 ### Graceful Shutdown
 
-`stop()` tears down in order: scheduler -> WebSocket server -> HTTP server -> database.
+`stop()` tears down in order: scheduler -> WebSocket clients -> WebSocket server -> HTTP server -> database.
+
+1. Stop all scheduled cron jobs
+2. Send `close(1001, "server shutting down")` to every connected WebSocket client (clean close handshake)
+3. Start a 2-second grace timer; when it fires, `terminate()` any clients that haven't completed the handshake
+4. Wait for `wss.close()` callback (fires once all clients are gone)
+5. Call `httpServer.closeAllConnections()` to drop lingering HTTP keep-alive sockets
+6. Close the HTTP server
+7. Close the database
 
 ## Key Subsystems
 
