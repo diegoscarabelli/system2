@@ -135,7 +135,7 @@ function KanbanCard({
       )}
       {task.assignee_role && (
         <Text sx={{ fontSize: '10px', color: 'fg.subtle', textAlign: 'right', mt: '2px' }}>
-          {task.assignee_role}
+          {task.assignee_role}_{task.assignee}
         </Text>
       )}
     </Box>
@@ -304,7 +304,7 @@ export function KanbanBoard() {
           <option value="">All assignees</option>
           {data.agents.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.role}
+              {a.role}_{a.id}
             </option>
           ))}
         </select>

@@ -113,7 +113,7 @@ export class Server {
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
 
     // Initialize chat history (server-side, persisted to disk)
-    const maxMessages = config.chatConfig?.max_history_messages ?? 100;
+    const maxMessages = config.chatConfig?.max_history_messages ?? 1000;
     this.messageHistory = new MessageHistory(join(SYSTEM2_DIR, 'chat-history.json'), maxMessages);
 
     // Single subscriber for capturing assistant messages into history.
@@ -205,7 +205,7 @@ export class Server {
             CASE status WHEN 'done' THEN 1 WHEN 'abandoned' THEN 2 ELSE 0 END,
             created_at ASC
         `);
-        const agents = this.db.query("SELECT id, role, project FROM agent WHERE status = 'active'");
+        const agents = this.db.query('SELECT id, role, project FROM agent');
         res.json({ tasks, projects, agents });
       } catch (error) {
         res.status(500).json({ error: (error as Error).message });

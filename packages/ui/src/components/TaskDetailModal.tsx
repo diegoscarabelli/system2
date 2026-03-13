@@ -68,10 +68,12 @@ const RELATIONSHIP_LABELS: Record<string, string> = {
 function formatDate(iso: string | null): string {
   if (!iso) return '';
   try {
-    return new Date(iso).toLocaleDateString(undefined, {
+    return new Date(`${iso}Z`).toLocaleString(undefined, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
     });
   } catch {
     return iso;
@@ -258,96 +260,65 @@ export function TaskDetailModal({
 
         {task && (
           <Box sx={{ px: 4, py: 3, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {/* Meta row */}
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-              <StatusBadge status={task.status} />
-              <PriorityBadge priority={task.priority} accent={accent} />
-              {task.assignee_role && (
-                <Box
-                  sx={{
-                    px: '8px',
-                    py: '2px',
-                    borderRadius: 10,
-                    backgroundColor: 'neutral.muted',
-                    fontSize: '11px',
-                    color: 'fg.muted',
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {task.assignee_role}
+            {/* Fields */}
+            <Box
+              as="dl"
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'auto 1fr',
+                columnGap: 3,
+                rowGap: 2,
+                m: 0,
+                fontSize: 0,
+                '& dt': {
+                  fontSize: '10px',
+                  color: 'fg.muted',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  lineHeight: '20px',
+                },
+                '& dd': { m: 0, lineHeight: '20px', color: 'fg.default' },
+              }}
+            >
+              <dt>Status:</dt>
+              <dd>
+                <StatusBadge status={task.status} />
+              </dd>
+              <dt>Priority:</dt>
+              <dd>
+                <PriorityBadge priority={task.priority} accent={accent} />
+              </dd>
+              <dt>Assignee:</dt>
+              <dd>{task.assignee_role ? `${task.assignee_role}_${task.assignee}` : ''}</dd>
+              <dt>Project:</dt>
+              <dd>{task.project_name ?? ''}</dd>
+              <dt>Labels:</dt>
+              <dd>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {labels.map((label) => (
+                    <Box
+                      key={label}
+                      sx={{
+                        px: '8px',
+                        py: '2px',
+                        borderRadius: 10,
+                        backgroundColor: `${accent}22`,
+                        border: `1px solid ${accent}44`,
+                        fontSize: '11px',
+                        color: accent,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      {label}
+                    </Box>
+                  ))}
                 </Box>
-              )}
-              {task.project_name && (
-                <Box
-                  sx={{
-                    px: '8px',
-                    py: '2px',
-                    borderRadius: 10,
-                    backgroundColor: 'neutral.muted',
-                    fontSize: '11px',
-                    color: 'fg.muted',
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {task.project_name}
-                </Box>
-              )}
-              {labels.map((label) => (
-                <Box
-                  key={label}
-                  sx={{
-                    px: '8px',
-                    py: '2px',
-                    borderRadius: 10,
-                    backgroundColor: `${accent}22`,
-                    border: `1px solid ${accent}44`,
-                    fontSize: '11px',
-                    color: accent,
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {label}
-                </Box>
-              ))}
+              </dd>
+              <dt>Started:</dt>
+              <dd>{task.start_at ? formatDate(task.start_at) : ''}</dd>
+              <dt>Completed:</dt>
+              <dd>{task.end_at ? formatDate(task.end_at) : ''}</dd>
             </Box>
-
-            {/* Dates */}
-            {(task.start_at || task.end_at) && (
-              <Box sx={{ display: 'flex', gap: 4 }}>
-                {task.start_at && (
-                  <Box>
-                    <Text
-                      sx={{
-                        fontSize: '10px',
-                        color: 'fg.muted',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em',
-                      }}
-                    >
-                      Started
-                    </Text>
-                    <Text sx={{ fontSize: 0, color: 'fg.default' }}>
-                      {formatDate(task.start_at)}
-                    </Text>
-                  </Box>
-                )}
-                {task.end_at && (
-                  <Box>
-                    <Text
-                      sx={{
-                        fontSize: '10px',
-                        color: 'fg.muted',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em',
-                      }}
-                    >
-                      Completed
-                    </Text>
-                    <Text sx={{ fontSize: 0, color: 'fg.default' }}>{formatDate(task.end_at)}</Text>
-                  </Box>
-                )}
-              </Box>
-            )}
 
             {/* Description */}
             {task.description && (
@@ -362,7 +333,7 @@ export function TaskDetailModal({
                     display: 'block',
                   }}
                 >
-                  Description
+                  Description:
                 </Text>
                 <Box
                   sx={{
@@ -405,7 +376,7 @@ export function TaskDetailModal({
                     display: 'block',
                   }}
                 >
-                  Links
+                  Links:
                 </Text>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {Object.entries(linksByRelationship).map(([rel, links]) => (
@@ -463,7 +434,7 @@ export function TaskDetailModal({
                     display: 'block',
                   }}
                 >
-                  Comments
+                  Comments:
                 </Text>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {data.comments.map((comment) => (
@@ -483,7 +454,7 @@ export function TaskDetailModal({
                             color: accent,
                           }}
                         >
-                          {comment.author_role}
+                          {comment.author_role}_{comment.author}
                         </Text>
                         <Text sx={{ fontSize: '11px', color: 'fg.subtle' }}>
                           {formatDate(comment.created_at)}
