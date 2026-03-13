@@ -13,8 +13,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@fontsource/geist": "^5.2.8",
-    "@fontsource/geist-mono": "^5.2.7",
     "@primer/octicons-react": "^19.22.0",
     "@primer/react": "^36.8.0",
     "@system2/shared": "workspace:*",

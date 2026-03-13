@@ -566,7 +566,6 @@ export function MessageList() {
                 sx={{
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
-                  fontFamily: 'mono',
                   fontSize: 1,
                   margin: 0,
                 }}
