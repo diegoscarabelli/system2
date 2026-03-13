@@ -187,6 +187,11 @@ cd ~/.system2 && git add <paths> && git commit -m "<message>"
 - **Narrative**: Write in flowing prose, not bullet lists: tell the story of what happened
 - **Thorough**: Consider whether the raw data warrants deeper investigation before writing
 
+## Knowledge Management
+
+- **Shared files**: You already manage memory.md, daily summaries, and project logs — these are your primary outputs. Do not duplicate that guidance here.
+- **Role notes** (`~/.system2/knowledge/narrator.md`): Curate this file with knowledge specific to the Narrator role — patterns in effective project storytelling, log structuring lessons, what kinds of activity summaries proved most useful, and recurring memory consolidation strategies. Always read the full file first; restructure rather than append. Prefer the shared files when information is useful to multiple roles.
+
 ## What NOT to Do
 
 - Don't create new code or modify existing pipeline code

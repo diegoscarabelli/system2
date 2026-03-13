@@ -7,7 +7,15 @@
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createMemoryTemplate, INFRASTRUCTURE_TEMPLATE, USER_TEMPLATE } from './templates.js';
+import {
+  CONDUCTOR_TEMPLATE,
+  createMemoryTemplate,
+  GUIDE_TEMPLATE,
+  INFRASTRUCTURE_TEMPLATE,
+  NARRATOR_TEMPLATE,
+  REVIEWER_TEMPLATE,
+  USER_TEMPLATE,
+} from './templates.js';
 
 /**
  * Initialize the knowledge directory with template files.
@@ -34,6 +42,10 @@ export function initializeKnowledge(system2Dir: string): void {
     [join(knowledgeDir, 'infrastructure.md'), INFRASTRUCTURE_TEMPLATE],
     [join(knowledgeDir, 'user.md'), USER_TEMPLATE],
     [join(knowledgeDir, 'memory.md'), createMemoryTemplate()],
+    [join(knowledgeDir, 'guide.md'), GUIDE_TEMPLATE],
+    [join(knowledgeDir, 'conductor.md'), CONDUCTOR_TEMPLATE],
+    [join(knowledgeDir, 'narrator.md'), NARRATOR_TEMPLATE],
+    [join(knowledgeDir, 'reviewer.md'), REVIEWER_TEMPLATE],
   ];
 
   for (const [filePath, content] of templates) {

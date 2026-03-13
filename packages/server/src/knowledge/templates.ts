@@ -37,6 +37,62 @@ export const USER_TEMPLATE = `# User Profile
 
 `;
 
+export const GUIDE_TEMPLATE = `# Guide Role Notes
+
+Role-specific patterns, preferences, and accumulated knowledge for the Guide agent.
+
+Updated by the Guide and by other agents when they have Guide-specific observations.
+Always read the full file before editing. Restructure for clarity rather than appending.
+Prefer shared knowledge files (infrastructure.md, user.md, memory.md) for information
+useful to multiple roles.
+
+## Patterns
+
+## Observations
+`;
+
+export const CONDUCTOR_TEMPLATE = `# Conductor Role Notes
+
+Role-specific patterns, preferences, and accumulated knowledge for the Conductor agent.
+
+Updated by the Conductor and by other agents when they have Conductor-specific observations.
+Always read the full file before editing. Restructure for clarity rather than appending.
+Prefer shared knowledge files (infrastructure.md, user.md, memory.md) for information
+useful to multiple roles.
+
+## Patterns
+
+## Observations
+`;
+
+export const NARRATOR_TEMPLATE = `# Narrator Role Notes
+
+Role-specific patterns, preferences, and accumulated knowledge for the Narrator agent.
+
+Updated by the Narrator and by other agents when they have Narrator-specific observations.
+Always read the full file before editing. Restructure for clarity rather than appending.
+Prefer shared knowledge files (infrastructure.md, user.md, memory.md) for information
+useful to multiple roles.
+
+## Patterns
+
+## Observations
+`;
+
+export const REVIEWER_TEMPLATE = `# Reviewer Role Notes
+
+Role-specific patterns, preferences, and accumulated knowledge for the Reviewer agent.
+
+Updated by the Reviewer and by other agents when they have Reviewer-specific observations.
+Always read the full file before editing. Restructure for clarity rather than appending.
+Prefer shared knowledge files (infrastructure.md, user.md, memory.md) for information
+useful to multiple roles.
+
+## Patterns
+
+## Observations
+`;
+
 export function createMemoryTemplate(): string {
   const now = new Date().toISOString();
   return `---

@@ -117,6 +117,12 @@ The Guide will message you when the user has confirmed the project is complete. 
 
 Do NOT terminate yourself or the Reviewer. The Guide handles agent termination after confirming with the user.
 
+## Knowledge Management
+
+- **Infrastructure** (`~/.system2/knowledge/infrastructure.md`): Read during planning to understand available systems. Update when you discover configuration relevant to all agents.
+- **Long-term memory**: Write role-agnostic cross-project observations to the `## Notes` section of `~/.system2/knowledge/memory.md`.
+- **Role notes** (`~/.system2/knowledge/conductor.md`): Curate this file with knowledge specific to the Conductor role — effective task breakdown patterns, common pitfalls by project type, review coordination lessons, and execution heuristics. Always read the full file first; restructure rather than append. Prefer the shared files above when information is useful to multiple roles. The Guide or Reviewer may also contribute Conductor-specific observations here.
+
 ## Standards
 
 Follow conventions found in `${PIPELINES_REPO_PATH}`:

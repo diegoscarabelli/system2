@@ -15,11 +15,36 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked f
 ├── infrastructure.md      # Data stack details (databases, orchestrator, repos)
 ├── user.md                # User profile and preferences
 ├── memory.md              # Long-term memory with YAML frontmatter
+├── guide.md               # Guide role-specific accumulated knowledge
+├── conductor.md           # Conductor role-specific accumulated knowledge
+├── narrator.md            # Narrator role-specific accumulated knowledge
+├── reviewer.md            # Reviewer role-specific accumulated knowledge
 └── daily_summaries/       # Daily activity summaries
     ├── 2024-01-15.md
     ├── 2024-01-16.md
     └── ...
 ```
+
+### Role-Specific Knowledge Files
+
+Each agent role has its own knowledge file at `~/.system2/knowledge/{role}.md`
+(guide.md, conductor.md, narrator.md, reviewer.md). These are injected into each
+agent's context immediately after the shared files and before the activity context
+(project log or daily summaries).
+
+These files are **separate from and in addition to** the built-in system instructions
+each role receives (the static role prompts in `packages/server/src/agents/library/`).
+The static prompts define how an agent behaves; the role knowledge files accumulate
+what an agent has *learned* — patterns, preferences, and lessons that build up over
+time. They provide a path for self-improvement and customization without modifying
+the codebase: agents refine their own behavior by updating these files as they work.
+
+**Curation rules:**
+
+- The primary curator is any agent of that role, but any agent may contribute role-specific observations.
+- Always read the full file before updating. Restructure for clarity; do not just append.
+- Prefer the shared files when information is relevant to multiple roles.
+- Empty files are skipped.
 
 Project-scoped files live outside `knowledge/`:
 
@@ -39,6 +64,7 @@ Project-scoped files live outside `knowledge/`:
 | `user.md` | Guide | During onboarding and ongoing interactions |
 | `memory.md` | Narrator | Daily at 4 AM (memory-update job) |
 | `memory.md ## Notes` | Any agent | Anytime: agents write important facts here |
+| `{role}.md` | Agent of that role (any agent may contribute) | As role-specific lessons and patterns accumulate |
 | `daily_summaries/*.md` | Narrator | Every 30 minutes (configurable) |
 | `projects/{id}_{name}/log.md` | Narrator | Every 30 minutes (same cron as daily summary) |
 | `projects/{id}_{name}/project_story.md` | Narrator | Once, when Conductor calls `trigger_project_story` at project completion |
@@ -48,11 +74,12 @@ Project-scoped files live outside `knowledge/`:
 `AgentHost.loadKnowledgeContext()` runs on every LLM call (via `systemPromptOverride` callback):
 
 1. Reads `infrastructure.md`, `user.md`, `memory.md`
-2. Skips files with 10 or fewer lines (empty templates)
-3. Loads role-aware context based on the agent's project assignment:
+2. Reads `{role}.md` for the agent's role (guide.md, conductor.md, narrator.md, reviewer.md)
+3. Skips empty files
+4. Loads role-aware context based on the agent's project assignment:
    - **Project-scoped agents** (Conductor, Reviewer, specialists): loads `projects/{id}_{name}/log.md`
    - **System-wide agents** (Guide, Narrator): loads the 2 most recent daily summary files (sorted by filename, chronological order)
-4. Returns all content under a `## Knowledge Base` header, separated by `---`
+5. Returns all content under a `## Knowledge Base` header, separated by `---`
 
 Each section is prefixed with a `### ~/.system2/...` heading so agents can identify the source of each piece of context. The block ends with `---\n\nConversation history follows.` to mark the boundary between instructions and the messages array.
 
@@ -72,6 +99,9 @@ SYSTEM PROMPT (rebuilt on every LLM call):
        [content]
        ---
        ### ~/.system2/knowledge/memory.md
+       [content]
+       ---
+       ### ~/.system2/knowledge/guide.md
        [content]
        ---
        ### ~/.system2/knowledge/daily_summaries/2026-03-10.md
@@ -109,6 +139,9 @@ SYSTEM PROMPT (rebuilt on every LLM call):
        ### ~/.system2/knowledge/memory.md
        [content]
        ---
+       ### ~/.system2/knowledge/conductor.md
+       [content]
+       ---
        ### ~/.system2/projects/1_linkedin-campaign/log.md
        [content]
        ---
@@ -123,7 +156,7 @@ CURRENT TURN:
   [inbound agent message / task assignment]
 ```
 
-Files with 10 lines or fewer are skipped. If no knowledge files have content, the `## Knowledge Base` block is omitted but `Conversation history follows.` is still appended. The `user` role in agent JSONL is used for all inbound messages: from the user, other agents, or the scheduler.
+Empty files are skipped. If no knowledge files have content, the `## Knowledge Base` block is omitted but `Conversation history follows.` is still appended. The `user` role in agent JSONL is used for all inbound messages: from the user, other agents, or the scheduler.
 
 ## memory.md
 

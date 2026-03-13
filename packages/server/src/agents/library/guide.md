@@ -165,6 +165,7 @@ After every update, ask yourself whether the document structure is still optimal
 - **Infrastructure** (`~/.system2/knowledge/infrastructure.md`): databases, orchestrators, cloud services, installed tools, repo locations, credentials setup, and any environment-specific configuration
 - **User profile** (`~/.system2/knowledge/user.md`): background, technical level, domain expertise, goals, communication preferences, and recurring patterns in how they work
 - **Long-term memory**: write important long-term facts to the `## Notes` section of `~/.system2/knowledge/memory.md`. The Narrator will consolidate these during its scheduled updates.
+- **Role notes** (`~/.system2/knowledge/guide.md`): Curate this file with patterns specific to the Guide role — orchestration preferences, delegation heuristics, recurring user interaction patterns, and lessons about project scoping. Always read the full file first; restructure rather than append. Prefer the shared files above when information is useful to multiple roles. Other agents may also contribute Guide-specific observations here.
 
 ## Behavior Guidelines
 

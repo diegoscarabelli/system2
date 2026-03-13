@@ -454,14 +454,14 @@ export class AgentHost {
 
   /**
    * Load knowledge files and return as context string for the system prompt.
-   * Files with only template scaffolding (<=10 lines) are skipped.
+   * Empty files (0 lines) are skipped.
    */
   private loadKnowledgeContext(): string {
     const knowledgeDir = join(SYSTEM2_DIR, 'knowledge');
     const sections: string[] = [];
 
     const addSection = (filePath: string, content: string) => {
-      if (content.trim().split('\n').length > 10) {
+      if (content.trim().split('\n').length > 0) {
         const label = filePath.replace(homedir(), '~').replace(/\\/g, '/');
         sections.push(`### ${label}\n\n${content.trim()}`);
       }
@@ -472,6 +472,12 @@ export class AgentHost {
       if (existsSync(filePath)) {
         addSection(filePath, readFileSync(filePath, 'utf-8'));
       }
+    }
+
+    // Role-specific knowledge file (guide.md, conductor.md, narrator.md, reviewer.md)
+    const roleKnowledgePath = join(knowledgeDir, `${this.agentRole}.md`);
+    if (existsSync(roleKnowledgePath)) {
+      addSection(roleKnowledgePath, readFileSync(roleKnowledgePath, 'utf-8'));
     }
 
     // Role-aware activity context:
