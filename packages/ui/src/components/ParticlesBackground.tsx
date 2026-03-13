@@ -55,11 +55,11 @@ export const ParticlesBackground = memo(function ParticlesBackground() {
         collisions: {
           enable: true,
           mode: 'bounce' as const,
+          maxSpeed: 2,
         },
         move: {
           enable: true,
           speed: 0.8,
-          maxSpeed: 1.5,
           outModes: { default: 'bounce' as const },
         },
       },
@@ -68,7 +68,7 @@ export const ParticlesBackground = memo(function ParticlesBackground() {
           onHover: { enable: true, mode: 'attract' as const },
         },
         modes: {
-          attract: { distance: 200, duration: 0.4, speed: 3 },
+          attract: { distance: 200, duration: 0.4, speed: 3, maxSpeed: 2 },
         },
       },
     }),
