@@ -5,18 +5,13 @@
  * Groups artifacts by project. Clicking an item opens it in a new tab.
  */
 
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  FilterIcon,
-  ProjectIcon,
-  SearchIcon,
-} from '@primer/octicons-react';
-import { ActionList, ActionMenu, Box, IconButton, Text, TextInput } from '@primer/react';
+import { ChevronDownIcon, ChevronRightIcon, SearchIcon } from '@primer/octicons-react';
+import { Box, Text, TextInput } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { useArtifactStore } from '../stores/artifact';
 import { useAccentColors } from '../theme/useAccentColors';
+import { MultiSelectDropdown } from './MultiSelectDropdown';
 
 interface CatalogArtifactRaw {
   id: number;
@@ -37,11 +32,13 @@ export function ArtifactCatalog() {
   const [artifacts, setArtifacts] = useState<CatalogArtifact[]>([]);
   const [loading, setLoading] = useState(true);
   const openArtifact = useArtifactStore((s) => s.openArtifact);
-  const { accent, accentSubtle, accentText } = useAccentColors();
+  const { accent, accentSubtle } = useAccentColors();
   const [query, setQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
   const initialized = useRef(false);
+  const tagsInitialized = useRef(false);
+  const projectsInitialized = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -65,6 +62,18 @@ export function ArtifactCatalog() {
             return { ...a, tags };
           });
           setArtifacts(parsed);
+          if (!tagsInitialized.current) {
+            tagsInitialized.current = true;
+            const tags = [...new Set<string>(parsed.flatMap((a: CatalogArtifact) => a.tags))];
+            setSelectedTags(new Set<string>(['', ...tags]));
+          }
+          if (!projectsInitialized.current) {
+            projectsInitialized.current = true;
+            const projects = [
+              ...new Set<string>(parsed.map((a: CatalogArtifact) => a.project_name || 'General')),
+            ];
+            setSelectedProjects(new Set<string>(projects));
+          }
           initialized.current = true;
           setLoading(false);
           timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
@@ -101,15 +110,6 @@ export function ArtifactCatalog() {
     });
   }, []);
 
-  const toggleProject = useCallback((project: string) => {
-    setSelectedProjects((prev) => {
-      const next = new Set(prev);
-      if (next.has(project)) next.delete(project);
-      else next.add(project);
-      return next;
-    });
-  }, []);
-
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const toggleGroupCollapse = useCallback((group: string) => {
     setCollapsedGroups((prev) => {
@@ -128,13 +128,19 @@ export function ArtifactCatalog() {
     [artifacts]
   );
 
+  const allTagsSelected = selectedTags.size === allTags.length + 1;
+  const allProjectsSelected = selectedProjects.size === allProjects.length;
+
   // Filter artifacts
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
     return artifacts.filter((a) => {
-      if (selectedTags.size > 0 && !a.tags.some((t) => selectedTags.has(t))) return false;
-      if (selectedProjects.size > 0 && !selectedProjects.has(a.project_name || 'General'))
-        return false;
+      if (!allTagsSelected) {
+        if (a.tags.length === 0) {
+          if (!selectedTags.has('')) return false;
+        } else if (!a.tags.some((t) => selectedTags.has(t))) return false;
+      }
+      if (!allProjectsSelected && !selectedProjects.has(a.project_name || 'General')) return false;
       if (!q) return true;
       return (
         a.title.toLowerCase().includes(q) ||
@@ -143,7 +149,7 @@ export function ArtifactCatalog() {
         a.tags.some((t) => t.toLowerCase().includes(q))
       );
     });
-  }, [artifacts, query, selectedTags, selectedProjects]);
+  }, [artifacts, query, allTagsSelected, selectedTags, allProjectsSelected, selectedProjects]);
 
   // Group filtered artifacts by project
   const grouped = new Map<string, CatalogArtifact[]>();
@@ -191,106 +197,33 @@ export function ArtifactCatalog() {
           flexShrink: 0,
         }}
       >
+        <TextInput
+          leadingVisual={SearchIcon}
+          placeholder="Search artifacts..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          size="small"
+          sx={{ fontSize: 0, width: '100%' }}
+        />
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <TextInput
-            leadingVisual={SearchIcon}
-            placeholder="Search artifacts..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            size="small"
-            sx={{ fontSize: 0, flex: 1 }}
-          />
           {allProjects.length > 0 && (
-            <ActionMenu>
-              <ActionMenu.Anchor>
-                <IconButton
-                  aria-label="Filter by project"
-                  icon={ProjectIcon}
-                  variant="invisible"
-                  size="small"
-                  sx={{ color: selectedProjects.size > 0 ? accent : 'fg.muted' }}
-                />
-              </ActionMenu.Anchor>
-              <ActionMenu.Overlay width="auto" sx={{ maxHeight: '300px', overflow: 'auto' }}>
-                <ActionList selectionVariant="multiple">
-                  {allProjects.map((project) => (
-                    <ActionList.Item
-                      key={project}
-                      selected={selectedProjects.has(project)}
-                      onSelect={() => toggleProject(project)}
-                    >
-                      {project}
-                    </ActionList.Item>
-                  ))}
-                </ActionList>
-              </ActionMenu.Overlay>
-            </ActionMenu>
+            <MultiSelectDropdown
+              label="projects"
+              options={allProjects.map((p) => ({ value: p, label: p }))}
+              selected={selectedProjects}
+              onChange={setSelectedProjects}
+            />
           )}
-          {allTags.length > 0 && (
-            <ActionMenu>
-              <ActionMenu.Anchor>
-                <IconButton
-                  aria-label="Filter by tag"
-                  icon={FilterIcon}
-                  variant="invisible"
-                  size="small"
-                  sx={{ color: selectedTags.size > 0 ? accent : 'fg.muted' }}
-                />
-              </ActionMenu.Anchor>
-              <ActionMenu.Overlay width="auto" sx={{ maxHeight: '300px', overflow: 'auto' }}>
-                <ActionList selectionVariant="multiple">
-                  {allTags.map((tag) => (
-                    <ActionList.Item
-                      key={tag}
-                      selected={selectedTags.has(tag)}
-                      onSelect={() => toggleTag(tag)}
-                    >
-                      {tag}
-                    </ActionList.Item>
-                  ))}
-                </ActionList>
-              </ActionMenu.Overlay>
-            </ActionMenu>
-          )}
+          <MultiSelectDropdown
+            label="tags"
+            options={[
+              { value: '', label: 'None' },
+              ...allTags.map((t) => ({ value: t, label: t })),
+            ]}
+            selected={selectedTags}
+            onChange={setSelectedTags}
+          />
         </Box>
-        {(selectedTags.size > 0 || selectedProjects.size > 0) && (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {[...selectedProjects].map((project) => (
-              <Text
-                key={`p:${project}`}
-                onClick={() => toggleProject(project)}
-                sx={{
-                  fontSize: '10px',
-                  px: 1,
-                  py: '1px',
-                  borderRadius: 2,
-                  cursor: 'pointer',
-                  backgroundColor: accent,
-                  color: accentText,
-                }}
-              >
-                {project} ×
-              </Text>
-            ))}
-            {[...selectedTags].map((tag) => (
-              <Text
-                key={`t:${tag}`}
-                onClick={() => toggleTag(tag)}
-                sx={{
-                  fontSize: '10px',
-                  px: 1,
-                  py: '1px',
-                  borderRadius: 2,
-                  cursor: 'pointer',
-                  backgroundColor: accent,
-                  color: accentText,
-                }}
-              >
-                {tag} ×
-              </Text>
-            ))}
-          </Box>
-        )}
       </Box>
 
       {/* Content */}
@@ -358,29 +291,26 @@ export function ArtifactCatalog() {
                       )}
                       {artifact.tags.length > 0 && (
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-                          {artifact.tags.map((tag) => {
-                            const active = selectedTags.has(tag);
-                            return (
-                              <Text
-                                key={tag}
-                                onClick={(e: React.MouseEvent) => {
-                                  e.stopPropagation();
-                                  toggleTag(tag);
-                                }}
-                                sx={{
-                                  fontSize: '10px',
-                                  px: 1,
-                                  py: '1px',
-                                  borderRadius: 2,
-                                  cursor: 'pointer',
-                                  backgroundColor: active ? accent : accentSubtle,
-                                  color: active ? accentText : accent,
-                                }}
-                              >
-                                {tag}
-                              </Text>
-                            );
-                          })}
+                          {artifact.tags.map((tag) => (
+                            <Text
+                              key={tag}
+                              onClick={(e: React.MouseEvent) => {
+                                e.stopPropagation();
+                                toggleTag(tag);
+                              }}
+                              sx={{
+                                fontSize: '10px',
+                                px: 1,
+                                py: '1px',
+                                borderRadius: 2,
+                                cursor: 'pointer',
+                                backgroundColor: accentSubtle,
+                                color: accent,
+                              }}
+                            >
+                              {tag}
+                            </Text>
+                          ))}
                         </Box>
                       )}
                     </Box>

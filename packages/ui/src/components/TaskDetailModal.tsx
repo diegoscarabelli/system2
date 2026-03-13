@@ -24,6 +24,7 @@ interface TaskDetail {
   start_at: string | null;
   end_at: string | null;
   created_at: string;
+  updated_at: string;
   project_name: string | null;
   assignee_role: string | null;
 }
@@ -57,6 +58,7 @@ function statusColor(status: string, accent: string, highlight: string): string 
   if (status === 'in progress') return accent;
   if (status === 'review') return highlight;
   if (status === 'done') return colors.teal;
+  if (status === 'abandoned') return colors.teal;
   return colors.gray;
 }
 
@@ -350,6 +352,10 @@ export function TaskDetailModal({
               <dd>{task.start_at ? formatDate(task.start_at) : ''}</dd>
               <dt>Completed:</dt>
               <dd>{task.end_at ? formatDate(task.end_at) : ''}</dd>
+              <dt>Created:</dt>
+              <dd>{formatDate(task.created_at)}</dd>
+              <dt>Updated:</dt>
+              <dd>{formatDate(task.updated_at)}</dd>
             </Box>
 
             {/* Description */}

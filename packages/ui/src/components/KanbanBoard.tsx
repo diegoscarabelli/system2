@@ -5,15 +5,17 @@
  * Fetches from /api/kanban and polls every 2 seconds for updates.
  */
 
-import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
-import { Box, Text } from '@primer/react';
+import { ChevronDownIcon, ChevronRightIcon, InfoIcon, SearchIcon } from '@primer/octicons-react';
+import { Box, IconButton, Text, TextInput } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
+import { MultiSelectDropdown } from './MultiSelectDropdown';
+import { ProjectDetailModal } from './ProjectDetailModal';
 import { TaskDetailModal } from './TaskDetailModal';
 
-const COLUMNS = ['todo', 'in progress', 'review', 'done'] as const;
+const COLUMNS = ['todo', 'in progress', 'review', 'done', 'abandoned'] as const;
 type Column = (typeof COLUMNS)[number];
 
 const STATUS_LABELS: Record<Column, string> = {
@@ -21,6 +23,7 @@ const STATUS_LABELS: Record<Column, string> = {
   'in progress': 'In Progress',
   review: 'Review',
   done: 'Done',
+  abandoned: 'Abandoned',
 };
 
 function statusColorForColumn(col: string, accent: string, highlight: string): string {
@@ -50,7 +53,13 @@ interface KanbanTask {
 interface KanbanProject {
   id: number;
   name: string;
+  description: string;
   status: string;
+  labels: string;
+  start_at: string | null;
+  end_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface KanbanAgent {
@@ -153,18 +162,41 @@ function KanbanCard({
   );
 }
 
+const ALL_PRIORITIES = new Set(['', 'high', 'medium', 'low']);
+const ALL_STATUSES = new Set(['todo', 'in progress', 'review', 'done', 'abandoned']);
+
 export function KanbanBoard() {
   const { accent, highlight } = useAccentColors();
   const [data, setData] = useState<KanbanData | null>(null);
   const [loading, setLoading] = useState(true);
   const initialized = useRef(false);
   const [filterKeyword, setFilterKeyword] = useState('');
-  const [filterPriority, setFilterPriority] = useState('');
-  const [filterAssignee, setFilterAssignee] = useState<number | null>(null);
+  const [filterPriorities, setFilterPriorities] = useState<Set<string>>(new Set(ALL_PRIORITIES));
+  const [filterAssignees, setFilterAssignees] = useState<Set<string>>(new Set());
+  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set(ALL_STATUSES));
+  const [filterLabels, setFilterLabels] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState<Set<number | null>>(new Set());
+  const collapsedInitialized = useRef(false);
+  const assigneesInitialized = useRef(false);
+  const labelsInitialized = useRef(false);
+
+  // Auto-collapse done/abandoned projects on first load
+  useEffect(() => {
+    if (!data || collapsedInitialized.current) return;
+    collapsedInitialized.current = true;
+    const doneIds = data.projects
+      .filter((p) => p.status === 'done' || p.status === 'abandoned')
+      .map((p) => p.id);
+    if (doneIds.length > 0) {
+      setCollapsed(new Set(doneIds));
+    }
+  }, [data]);
+
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const handleCloseModal = useCallback(() => setSelectedTaskId(null), []);
   const handleNavigate = useCallback((id: number) => setSelectedTaskId(id), []);
+  const handleCloseProjectModal = useCallback(() => setSelectedProjectId(null), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -188,6 +220,15 @@ export function KanbanBoard() {
             })(),
           }));
           setData({ ...raw, tasks });
+          if (!assigneesInitialized.current) {
+            assigneesInitialized.current = true;
+            setFilterAssignees(new Set(['', ...raw.agents.map((a: KanbanAgent) => String(a.id))]));
+          }
+          if (!labelsInitialized.current) {
+            labelsInitialized.current = true;
+            const labels = [...new Set(tasks.flatMap((t: KanbanTask) => t.labels))];
+            setFilterLabels(new Set(['', ...labels]));
+          }
           initialized.current = true;
           setLoading(false);
           timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
@@ -207,41 +248,69 @@ export function KanbanBoard() {
     };
   }, []);
 
+  // Visible columns based on status filter
+  const visibleColumns = useMemo(() => {
+    const allSelected = filterStatuses.size === ALL_STATUSES.size;
+    if (allSelected) return COLUMNS;
+    return COLUMNS.filter((col) => filterStatuses.has(col));
+  }, [filterStatuses]);
+
   const groups = useMemo<SwimlaneGroup[]>(() => {
     if (!data) return [];
 
-    const nonAbandoned = data.tasks.filter((t) => t.status !== 'abandoned');
     const result: SwimlaneGroup[] = [];
 
     // "No project" row first
-    const noProjectTasks = nonAbandoned.filter((t) => t.project === null);
+    const noProjectTasks = data.tasks.filter((t) => t.project === null);
     if (noProjectTasks.length > 0) {
       result.push({ id: null, name: 'No Project', status: 'todo', tasks: noProjectTasks });
     }
 
-    // Active projects first, completed last
+    // Active projects first, completed/abandoned last
     const activeProjects = data.projects.filter((p) => !['done', 'abandoned'].includes(p.status));
     const completedProjects = data.projects.filter((p) => ['done', 'abandoned'].includes(p.status));
 
     for (const p of [...activeProjects, ...completedProjects]) {
-      const projectTasks = nonAbandoned.filter((t) => t.project === p.id);
+      const projectTasks = data.tasks.filter((t) => t.project === p.id);
       result.push({ id: p.id, name: p.name, status: p.status, tasks: projectTasks });
     }
 
     return result;
   }, [data]);
 
+  const allLabels = useMemo(
+    () => [...new Set((data?.tasks ?? []).flatMap((t) => t.labels))].sort(),
+    [data]
+  );
+
+  const allPrioritiesSelected = filterPriorities.size === ALL_PRIORITIES.size;
+  const allAssigneesSelected = data !== null && filterAssignees.size === data.agents.length + 1;
+  const allLabelsSelected = filterLabels.size === allLabels.length + 1;
+
   const filteredTasks = useMemo<KanbanTask[]>(() => {
     if (!data) return [];
     return data.tasks.filter((t) => {
-      if (t.status === 'abandoned') return false;
       if (filterKeyword && !t.title.toLowerCase().includes(filterKeyword.toLowerCase()))
         return false;
-      if (filterPriority && t.priority !== filterPriority) return false;
-      if (filterAssignee !== null && t.assignee !== filterAssignee) return false;
+      if (!allPrioritiesSelected && !filterPriorities.has(t.priority ?? '')) return false;
+      if (!allAssigneesSelected && !filterAssignees.has(String(t.assignee ?? ''))) return false;
+      if (!allLabelsSelected) {
+        if (t.labels.length === 0) {
+          if (!filterLabels.has('')) return false;
+        } else if (!t.labels.some((l) => filterLabels.has(l))) return false;
+      }
       return true;
     });
-  }, [data, filterKeyword, filterPriority, filterAssignee]);
+  }, [
+    data,
+    filterKeyword,
+    allPrioritiesSelected,
+    filterPriorities,
+    allAssigneesSelected,
+    filterAssignees,
+    allLabelsSelected,
+    filterLabels,
+  ]);
 
   const toggleCollapse = (groupId: number | null) => {
     setCollapsed((prev) => {
@@ -252,15 +321,30 @@ export function KanbanBoard() {
     });
   };
 
-  const inputStyle: React.CSSProperties = {
-    background: 'transparent',
-    border: '1px solid var(--borderColor-default)',
-    borderRadius: 6,
-    padding: '4px 8px',
-    fontSize: 13,
-    color: 'var(--fgColor-default)',
-    outline: 'none',
-  };
+  const priorityOptions = [
+    { value: '', label: 'None' },
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'low', label: 'Low' },
+  ];
+
+  const assigneeOptions = [
+    { value: '', label: 'None' },
+    ...(data ? data.agents.map((a) => ({ value: String(a.id), label: `${a.role}_${a.id}` })) : []),
+  ];
+
+  const labelOptions = [
+    { value: '', label: 'None' },
+    ...allLabels.map((l) => ({ value: l, label: l })),
+  ];
+
+  const statusOptions = [
+    { value: 'todo', label: 'Todo' },
+    { value: 'in progress', label: 'In Progress' },
+    { value: 'review', label: 'Review' },
+    { value: 'done', label: 'Done' },
+    { value: 'abandoned', label: 'Abandoned' },
+  ];
 
   if (loading) {
     return (
@@ -284,6 +368,7 @@ export function KanbanBoard() {
       <Box
         sx={{
           display: 'flex',
+          flexWrap: 'wrap',
           gap: 2,
           px: 3,
           py: '10px',
@@ -293,228 +378,269 @@ export function KanbanBoard() {
           alignItems: 'center',
         }}
       >
-        <input
-          type="text"
+        <TextInput
+          leadingVisual={SearchIcon}
           placeholder="Filter by keyword..."
           value={filterKeyword}
           onChange={(e) => setFilterKeyword(e.target.value)}
-          style={{ ...inputStyle, width: 200 }}
+          size="small"
+          sx={{ fontSize: 0, width: 300, minWidth: 150, flexShrink: 1 }}
         />
-        <select
-          value={filterPriority}
-          onChange={(e) => setFilterPriority(e.target.value)}
-          style={{ ...inputStyle, cursor: 'pointer' }}
-        >
-          <option value="">All priorities</option>
-          <option value="high">High</option>
-          <option value="medium">Medium</option>
-          <option value="low">Low</option>
-        </select>
-        <select
-          value={filterAssignee ?? ''}
-          onChange={(e) => setFilterAssignee(e.target.value ? Number(e.target.value) : null)}
-          style={{ ...inputStyle, cursor: 'pointer' }}
-        >
-          <option value="">All assignees</option>
-          {data.agents.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.role}_{a.id}
-            </option>
-          ))}
-        </select>
+        <MultiSelectDropdown
+          label="priorities"
+          options={priorityOptions}
+          selected={filterPriorities}
+          onChange={setFilterPriorities}
+        />
+        <MultiSelectDropdown
+          label="assignees"
+          options={assigneeOptions}
+          selected={filterAssignees}
+          onChange={setFilterAssignees}
+        />
+        <MultiSelectDropdown
+          label="labels"
+          options={labelOptions}
+          selected={filterLabels}
+          onChange={setFilterLabels}
+        />
+        <MultiSelectDropdown
+          label="statuses"
+          options={statusOptions}
+          selected={filterStatuses}
+          onChange={setFilterStatuses}
+        />
       </Box>
 
-      {/* Board (scrollable) */}
-      <Box sx={{ flex: 1, overflow: 'auto' }}>
-        {/* Sticky column headers */}
+      {/* Board wrapper: horizontal scroll for both headers and content */}
+      <Box sx={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', minHeight: 0 }}>
         <Box
           sx={{
-            position: 'sticky',
-            top: 0,
-            zIndex: 10,
-            display: 'grid',
-            gridTemplateColumns: `repeat(${COLUMNS.length}, 1fr)`,
-            backgroundColor: 'canvas.default',
-            borderBottom: '1px solid',
-            borderColor: 'border.default',
+            minWidth: `${visibleColumns.length * 180}px`,
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
           }}
         >
-          {COLUMNS.map((col) => {
-            const count = filteredTasks.filter((t) => t.status === col).length;
-            return (
-              <Box key={col} sx={{ px: 3, py: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+          {/* Column headers */}
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${visibleColumns.length}, 1fr)`,
+              borderBottom: '1px solid',
+              borderColor: 'border.default',
+              flexShrink: 0,
+              overflow: 'hidden',
+              scrollbarGutter: 'stable',
+            }}
+          >
+            {visibleColumns.map((col, i) => {
+              const count = filteredTasks.filter((t) => t.status === col).length;
+              return (
                 <Box
+                  key={col}
                   sx={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: '50%',
-                    backgroundColor: statusColorForColumn(col, accent, highlight),
-                    flexShrink: 0,
-                  }}
-                />
-                <Text sx={{ fontSize: 1, fontWeight: 'semibold', color: 'fg.default' }}>
-                  {STATUS_LABELS[col]}
-                </Text>
-                <Box
-                  sx={{
-                    px: '5px',
-                    borderRadius: 10,
-                    backgroundColor: 'neutral.muted',
-                    fontSize: '11px',
-                    color: 'fg.muted',
-                    lineHeight: '18px',
-                    minWidth: 20,
-                    textAlign: 'center',
+                    px: 3,
+                    py: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 2,
+                    borderRight: i < visibleColumns.length - 1 ? '1px solid' : 'none',
+                    borderColor: 'border.muted',
                   }}
                 >
-                  {count}
-                </Box>
-              </Box>
-            );
-          })}
-        </Box>
-
-        {/* Swimlane rows */}
-        {groups.map((group) => {
-          const isCollapsed = collapsed.has(group.id);
-          const total = group.tasks.length;
-          const doneCount = group.tasks.filter((t) => t.status === 'done').length;
-          const statusCounts = {
-            done: doneCount,
-            review: group.tasks.filter((t) => t.status === 'review').length,
-            'in progress': group.tasks.filter((t) => t.status === 'in progress').length,
-            todo: group.tasks.filter((t) => t.status === 'todo').length,
-          };
-
-          return (
-            <Box
-              key={group.id ?? '__no_project__'}
-              sx={{ borderBottom: '1px solid', borderColor: 'border.muted' }}
-            >
-              {/* Swimlane header */}
-              <Box
-                onClick={() => toggleCollapse(group.id)}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 2,
-                  px: 3,
-                  py: '10px',
-                  cursor: 'pointer',
-                  backgroundColor: 'canvas.subtle',
-                  borderBottom: isCollapsed ? 'none' : '1px solid',
-                  borderColor: 'border.muted',
-                  '&:hover': { backgroundColor: 'canvas.overlay' },
-                }}
-              >
-                <Box sx={{ color: 'fg.muted', display: 'flex', alignItems: 'center' }}>
-                  {isCollapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}
-                </Box>
-                <Text sx={{ fontWeight: 'bold', fontSize: 1, color: 'fg.default' }}>
-                  {group.name}
-                </Text>
-                {group.id !== null &&
-                  (() => {
-                    const sc = statusColorForColumn(group.status, accent, highlight);
-                    return (
-                      <Box
-                        sx={{
-                          px: '5px',
-                          py: '1px',
-                          borderRadius: 4,
-                          backgroundColor: `${sc}22`,
-                          border: `1px solid ${sc}44`,
-                          fontSize: '11px',
-                          color: sc,
-                          lineHeight: 1.6,
-                        }}
-                      >
-                        {group.status}
-                      </Box>
-                    );
-                  })()}
-                <Text sx={{ fontSize: 0, color: 'fg.muted' }}>
-                  {doneCount}/{total}
-                </Text>
-                {total > 0 && (
                   <Box
                     sx={{
-                      height: '4px',
-                      borderRadius: 2,
-                      backgroundColor: 'border.muted',
-                      overflow: 'hidden',
-                      width: 80,
-                      display: 'flex',
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      backgroundColor: statusColorForColumn(col, accent, highlight),
+                      flexShrink: 0,
+                    }}
+                  />
+                  <Text sx={{ fontSize: 1, fontWeight: 'semibold', color: 'fg.default' }}>
+                    {STATUS_LABELS[col]}
+                  </Text>
+                  <Box
+                    sx={{
+                      px: '5px',
+                      borderRadius: 10,
+                      backgroundColor: 'neutral.muted',
+                      fontSize: '11px',
+                      color: 'fg.muted',
+                      lineHeight: '18px',
+                      minWidth: 20,
+                      textAlign: 'center',
                     }}
                   >
-                    {COLUMNS.filter((col) => statusCounts[col] > 0).map((col) => (
-                      <Box
-                        key={col}
-                        sx={{
-                          height: '100%',
-                          width: `${(statusCounts[col] / total) * 100}%`,
-                          backgroundColor: statusColorForColumn(col, accent, highlight),
-                        }}
-                      />
-                    ))}
+                    {count}
                   </Box>
-                )}
-              </Box>
+                </Box>
+              );
+            })}
+          </Box>
 
-              {/* Card columns */}
-              {!isCollapsed && (
+          {/* Swimlane rows (vertical scroll) */}
+          <Box sx={{ flex: 1, overflowY: 'auto', scrollbarGutter: 'stable' }}>
+            {/* Swimlane rows */}
+            {groups.map((group) => {
+              const isCollapsed = collapsed.has(group.id);
+              const total = group.tasks.length;
+              const completedCount = group.tasks.filter(
+                (t) => t.status === 'done' || t.status === 'abandoned'
+              ).length;
+              const statusCounts = {
+                done: group.tasks.filter((t) => t.status === 'done').length,
+                review: group.tasks.filter((t) => t.status === 'review').length,
+                'in progress': group.tasks.filter((t) => t.status === 'in progress').length,
+                todo: group.tasks.filter((t) => t.status === 'todo').length,
+                abandoned: group.tasks.filter((t) => t.status === 'abandoned').length,
+              };
+
+              return (
                 <Box
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: `repeat(${COLUMNS.length}, 1fr)`,
-                  }}
+                  key={group.id ?? '__no_project__'}
+                  sx={{ borderBottom: '1px solid', borderColor: 'border.muted' }}
                 >
-                  {COLUMNS.map((col, i) => {
-                    const colTasks = filteredTasks.filter(
-                      (t) => t.project === group.id && t.status === col
-                    );
-                    return (
+                  {/* Swimlane header */}
+                  <Box
+                    onClick={() => toggleCollapse(group.id)}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      px: 3,
+                      py: '10px',
+                      cursor: 'pointer',
+                      backgroundColor: 'transparent',
+                      borderBottom: isCollapsed ? 'none' : '1px solid',
+                      borderColor: 'border.muted',
+                      '&:hover': { backgroundColor: 'canvas.subtle' },
+                    }}
+                  >
+                    <Box sx={{ color: 'fg.muted', display: 'flex', alignItems: 'center' }}>
+                      {isCollapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}
+                    </Box>
+                    <Text sx={{ fontWeight: 'bold', fontSize: 1, color: 'fg.default' }}>
+                      {group.name}
+                    </Text>
+                    {group.id !== null && (
+                      <IconButton
+                        aria-label="Project details"
+                        icon={InfoIcon}
+                        variant="invisible"
+                        size="small"
+                        onClick={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          setSelectedProjectId(group.id);
+                        }}
+                        sx={{ color: 'fg.muted', p: 0, height: 20, width: 20 }}
+                      />
+                    )}
+                    {group.id !== null &&
+                      (() => {
+                        const sc = statusColorForColumn(group.status, accent, highlight);
+                        return (
+                          <Box
+                            sx={{
+                              px: '5px',
+                              py: '1px',
+                              borderRadius: 4,
+                              backgroundColor: `${sc}22`,
+                              border: `1px solid ${sc}44`,
+                              fontSize: '11px',
+                              color: sc,
+                              lineHeight: 1.6,
+                            }}
+                          >
+                            {group.status}
+                          </Box>
+                        );
+                      })()}
+                    <Text sx={{ fontSize: 0, color: 'fg.muted' }}>
+                      {completedCount}/{total}
+                    </Text>
+                    {total > 0 && (
                       <Box
-                        key={col}
                         sx={{
-                          p: 2,
-                          borderRight: i < COLUMNS.length - 1 ? '1px solid' : 'none',
-                          borderColor: 'border.muted',
-                          minHeight: 60,
+                          height: '4px',
+                          borderRadius: 2,
+                          backgroundColor: 'border.muted',
+                          overflow: 'hidden',
+                          width: 80,
+                          display: 'flex',
                         }}
                       >
-                        {colTasks.map((task) => (
-                          <KanbanCard
-                            key={task.id}
-                            task={task}
-                            accent={accent}
-                            highlight={highlight}
-                            onClick={() => setSelectedTaskId(task.id)}
+                        {COLUMNS.filter((col) => statusCounts[col] > 0).map((col) => (
+                          <Box
+                            key={col}
+                            sx={{
+                              height: '100%',
+                              width: `${(statusCounts[col] / total) * 100}%`,
+                              backgroundColor: statusColorForColumn(col, accent, highlight),
+                            }}
                           />
                         ))}
                       </Box>
-                    );
-                  })}
-                </Box>
-              )}
-            </Box>
-          );
-        })}
+                    )}
+                  </Box>
 
-        {/* Empty state */}
-        {groups.length === 0 && (
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: 200,
-              color: 'fg.muted',
-            }}
-          >
-            <Text>No tasks yet.</Text>
+                  {/* Card columns */}
+                  {!isCollapsed && (
+                    <Box
+                      sx={{
+                        display: 'grid',
+                        gridTemplateColumns: `repeat(${visibleColumns.length}, 1fr)`,
+                      }}
+                    >
+                      {visibleColumns.map((col, i) => {
+                        const colTasks = filteredTasks.filter(
+                          (t) => t.project === group.id && t.status === col
+                        );
+                        return (
+                          <Box
+                            key={col}
+                            sx={{
+                              p: 2,
+                              borderRight: i < visibleColumns.length - 1 ? '1px solid' : 'none',
+                              borderColor: 'border.muted',
+                              minHeight: 60,
+                            }}
+                          >
+                            {colTasks.map((task) => (
+                              <KanbanCard
+                                key={task.id}
+                                task={task}
+                                accent={accent}
+                                highlight={highlight}
+                                onClick={() => setSelectedTaskId(task.id)}
+                              />
+                            ))}
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  )}
+                </Box>
+              );
+            })}
+
+            {/* Empty state */}
+            {groups.length === 0 && (
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  height: 200,
+                  color: 'fg.muted',
+                }}
+              >
+                <Text>No tasks yet.</Text>
+              </Box>
+            )}
           </Box>
-        )}
+        </Box>
       </Box>
 
       {selectedTaskId !== null && (
@@ -524,6 +650,14 @@ export function KanbanBoard() {
           onNavigate={handleNavigate}
         />
       )}
+
+      {selectedProjectId !== null &&
+        (() => {
+          const project = data?.projects.find((p) => p.id === selectedProjectId);
+          return project ? (
+            <ProjectDetailModal project={project} onClose={handleCloseProjectModal} />
+          ) : null;
+        })()}
     </Box>
   );
 }

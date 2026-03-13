@@ -23,6 +23,8 @@ src/
 │   ├── ArtifactCatalog.tsx  # Browsable overlay of all registered artifacts
 │   ├── KanbanBoard.tsx    # Live kanban dashboard (swimlane layout, native tab)
 │   ├── TaskDetailModal.tsx # Task detail overlay (comments, links, markdown)
+│   ├── ProjectDetailModal.tsx # Project detail overlay (status, labels, dates)
+│   ├── MultiSelectDropdown.tsx # Reusable multiselect dropdown with checkboxes
 │   └── ParticlesBackground.tsx # Animated particle background (tsparticles)
 ├── hooks/
 │   ├── useWebSocket.ts    # WebSocket connection and message handling
@@ -44,7 +46,8 @@ App (ThemeProvider)
     │   ├── ParticlesBackground (animated background, toggleable)
     │   ├── ArtifactCatalog (overlay panel, toggled from header)
     │   ├── KanbanBoard (native tab, live task dashboard)
-    │   │   └── TaskDetailModal (overlay, on card click)
+    │   │   ├── TaskDetailModal (overlay, on card click)
+    │   │   └── ProjectDetailModal (overlay, on swimlane info icon click)
     │   └── <iframe> (sandboxed, for HTML artifact tabs)
     └── Chat (right panel, 33% default width)
         ├── MessageList (scrollable timeline)
@@ -95,7 +98,7 @@ Configuration: 120 particles in accent + teal colors, linked within 150px distan
 
 ### ArtifactCatalog
 
-Side panel showing all registered artifacts from the database. Polls `GET /api/artifacts` every 2 seconds. Groups artifacts by project (null project shown as "General"). Supports text search and project/tag filtering. Clicking an item opens it as a new tab in ArtifactViewer. Toggled via StackIcon in the activity bar.
+Side panel showing all registered artifacts from the database. Polls `GET /api/artifacts` every 2 seconds. Groups artifacts by project (null project shown as "General"). Supports text search and project/tag filtering via `MultiSelectDropdown` components (same as KanbanBoard filters). Tags dropdown includes a "None" option for untagged artifacts; inline tag badges use a static accent style (not affected by dropdown selection). Clicking an item opens it as a new tab in ArtifactViewer. Toggled via StackIcon in the activity bar.
 
 ### KanbanBoard
 
@@ -103,13 +106,13 @@ Live kanban dashboard showing all tasks grouped by project in a swimlane layout.
 
 Polls `GET /api/kanban` every 2 seconds. On initial load shows a full loading state; subsequent polls update silently without clearing the board.
 
-**Layout:** Four status columns (Todo, In Progress, Review, Done) with sticky headers showing status dot + task count badge. Each project is a collapsible swimlane row showing project name, status badge, done/total count, and a progress bar.
+**Layout:** A shared horizontal scroll container keeps column headers and card grids aligned (minimum 180px per column). Five status columns (Todo, In Progress, Review, Done, Abandoned) with transparent headers (fixed above the vertical scroll area) showing status dot, task count badge, and vertical dividers between columns. Each project is a collapsible swimlane row with transparent header showing project name, info icon button, status badge, completed/total count (done + abandoned = completed), and a segmented progress bar. Done/abandoned projects auto-collapse on first load.
 
 **Cards:** Priority stripe on left edge (coral = high, accent = medium, gray = low), bold title, label chips, and assignee role badge.
 
-**Filters:** Keyword search (title), priority dropdown, and assignee dropdown — applied across all swimlanes simultaneously.
+**Filters:** Keyword search (with SearchIcon, Primer TextInput, wrapping toolbar), plus four multiselect dropdowns (priority, assignee, labels, status) built with `MultiSelectDropdown`. Each supports checkbox toggling with an "All" toggle that selects/deselects all options. Priority, assignee, and labels include a "None" option for tasks without a value. The labels dropdown is derived from task labels. The status dropdown controls which columns are visible (projects always remain visible). Dropdown panels cap at `maxHeight: 250px` with scroll for long option lists. Dynamic filters (assignees, labels) are initialized with explicit full sets on first data load; uses `scrollbarGutter: stable` on both column headers and swimlane scroll area to keep vertical dividers aligned.
 
-Clicking a card opens a `TaskDetailModal` overlay for that task.
+Clicking a card opens a `TaskDetailModal` overlay for that task. Clicking the info icon on a swimlane header opens a `ProjectDetailModal` overlay for that project.
 
 ### TaskDetailModal
 
@@ -118,12 +121,22 @@ Overlay modal showing full task details. Polls `GET /api/tasks/:id` every 2 seco
 **Sections:**
 
 1. Header: task title + close button (X or Escape or backdrop click)
-2. Meta: status badge, priority badge, assignee role tag, project name tag, label chips, start/end dates
+2. Meta: status badge, priority badge, assignee role tag, project name tag, label chips, start/end dates, created/updated timestamps
 3. Description rendered as Markdown
 4. Task links grouped by relationship type (blocked_by, relates_to, duplicates); clicking a linked task navigates to it
 5. Comments timeline: agent role + date header, comment body rendered as Markdown
 
 Scroll position is reset to top whenever the displayed task changes.
+
+### ProjectDetailModal
+
+Overlay modal showing full project details. Receives the project data directly from the kanban state (no additional API call needed, since `GET /api/kanban` already returns all project fields).
+
+**Sections:**
+
+1. Header: project name with ID + close button (X or Escape or backdrop click)
+2. Meta: status badge, label chips, start/end dates, created/updated timestamps
+3. Description rendered as Markdown
 
 ### AgentPane
 
