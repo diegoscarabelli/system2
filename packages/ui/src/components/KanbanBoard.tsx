@@ -8,7 +8,7 @@
 import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { POLL_INTERVAL_MS } from '../constants';
+import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 import { TaskDetailModal } from './TaskDetailModal';
@@ -195,7 +195,7 @@ export function KanbanBoard() {
         .catch((err: unknown) => {
           if ((err as { name?: string }).name !== 'AbortError') {
             setLoading(false);
-            timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+            timeoutId = setTimeout(fetchData, POLL_ERROR_BACKOFF_MS);
           }
         });
     };

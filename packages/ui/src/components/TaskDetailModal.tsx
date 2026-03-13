@@ -9,7 +9,7 @@ import { XIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
-import { POLL_INTERVAL_MS } from '../constants';
+import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
@@ -174,7 +174,7 @@ export function TaskDetailModal({
         .catch((err: unknown) => {
           if ((err as { name?: string }).name !== 'AbortError') {
             setLoading(false);
-            timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+            timeoutId = setTimeout(fetchData, POLL_ERROR_BACKOFF_MS);
           }
         });
     };

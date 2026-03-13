@@ -8,7 +8,7 @@
 import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { POLL_INTERVAL_MS } from '../constants';
+import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { useArtifactStore } from '../stores/artifact';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
@@ -20,6 +20,7 @@ interface AgentInfo {
   project_name: string | null;
   status: string;
   busy: boolean;
+  contextPercent: number | null;
   created_at: string;
 }
 
@@ -81,9 +82,8 @@ export function AgentPane() {
         })
         .catch((err: unknown) => {
           if ((err as { name?: string }).name !== 'AbortError') {
-            console.error('Failed to load agents:', err);
             setLoading(false);
-            timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+            timeoutId = setTimeout(fetchData, POLL_ERROR_BACKOFF_MS);
           }
         });
     };

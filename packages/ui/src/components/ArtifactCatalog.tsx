@@ -14,7 +14,7 @@ import {
 } from '@primer/octicons-react';
 import { ActionList, ActionMenu, Box, IconButton, Text, TextInput } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { POLL_INTERVAL_MS } from '../constants';
+import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { useArtifactStore } from '../stores/artifact';
 import { useAccentColors } from '../theme/useAccentColors';
 
@@ -71,9 +71,8 @@ export function ArtifactCatalog() {
         })
         .catch((err: unknown) => {
           if ((err as { name?: string }).name !== 'AbortError') {
-            console.error('Failed to load artifacts:', err);
             setLoading(false);
-            timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+            timeoutId = setTimeout(fetchData, POLL_ERROR_BACKOFF_MS);
           }
         });
     };
