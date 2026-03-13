@@ -11,6 +11,8 @@ const STORAGE_KEY = 'system2:artifact-tabs';
 
 interface ArtifactTab {
   id: string;
+  type: 'iframe' | 'native';
+  component?: 'kanban';
   url: string;
   filePath: string;
   title: string;
@@ -24,6 +26,7 @@ interface ArtifactState {
   agentsOpen: boolean;
   agentsVersion: number;
   agentContextPercents: Record<number, number | null>;
+  tasksVersion: number;
 
   openArtifact: (url: string, title?: string, filePath?: string) => void;
   closeTab: (tabId: string) => void;
@@ -34,6 +37,9 @@ interface ArtifactState {
   incrementCatalogVersion: () => void;
   incrementAgentsVersion: () => void;
   updateAgentContext: (context: Record<number, number | null>) => void;
+  incrementTasksVersion: () => void;
+  openKanbanTab: () => void;
+  toggleKanbanTab: () => void;
 }
 
 function extractFilePath(url: string): string {
@@ -58,7 +64,11 @@ function loadTabs(): { tabs: ArtifactTab[]; activeTabId: string | null } {
     if (stored) {
       const data = JSON.parse(stored);
       if (Array.isArray(data.tabs) && data.tabs.length > 0) {
-        return { tabs: data.tabs, activeTabId: data.activeTabId || data.tabs[0].id };
+        const tabs = data.tabs.map((t: ArtifactTab) => ({
+          ...t,
+          type: (t.type ?? 'iframe') as 'iframe' | 'native',
+        }));
+        return { tabs, activeTabId: data.activeTabId || tabs[0].id };
       }
     }
   } catch {
@@ -68,8 +78,10 @@ function loadTabs(): { tabs: ArtifactTab[]; activeTabId: string | null } {
 }
 
 function persistTabs(tabs: ArtifactTab[], activeTabId: string | null): void {
+  // Skip native tabs (transient — not persisted across page loads)
+  const toSave = tabs.filter((t) => (t.type ?? 'iframe') !== 'native');
   // Reconstruct clean URLs from filePath (strips cache-bust params while preserving ?path=)
-  const cleaned = tabs.map((t) => ({
+  const cleaned = toSave.map((t) => ({
     ...t,
     url: `/api/artifact?path=${encodeURIComponent(t.filePath)}`,
   }));
@@ -86,6 +98,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   agentsOpen: false,
   agentsVersion: 0,
   agentContextPercents: {},
+  tasksVersion: 0,
 
   openArtifact: (url: string, title?: string, filePath?: string) => {
     const state = get();
@@ -103,6 +116,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     // Create new tab
     const tab: ArtifactTab = {
       id: `tab-${Date.now()}`,
+      type: 'iframe',
       url,
       filePath: fp,
       title: title || extractTitle(url),
@@ -165,5 +179,37 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   updateAgentContext: (context: Record<number, number | null>) => {
     set({ agentContextPercents: context });
+  },
+
+  incrementTasksVersion: () => {
+    set((state) => ({ tasksVersion: state.tasksVersion + 1 }));
+  },
+
+  openKanbanTab: () => {
+    const state = get();
+    const existing = state.tabs.find((t) => t.component === 'kanban');
+    if (existing) {
+      set({ activeTabId: existing.id });
+      return;
+    }
+    const tab: ArtifactTab = {
+      id: 'kanban',
+      type: 'native',
+      component: 'kanban',
+      url: '',
+      filePath: '__kanban__',
+      title: 'Board',
+    };
+    set({ tabs: [tab, ...state.tabs], activeTabId: 'kanban' });
+  },
+
+  toggleKanbanTab: () => {
+    const state = get();
+    const existing = state.tabs.find((t) => t.component === 'kanban');
+    if (existing) {
+      state.closeTab(existing.id);
+    } else {
+      state.openKanbanTab();
+    }
   },
 }));

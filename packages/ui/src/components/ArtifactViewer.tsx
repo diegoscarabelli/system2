@@ -11,6 +11,7 @@ import { useEffect, useRef } from 'react';
 import { useArtifactStore } from '../stores/artifact';
 import { useThemeStore } from '../stores/theme';
 import { useAccentColors } from '../theme/useAccentColors';
+import { KanbanBoard } from './KanbanBoard';
 import { ParticlesBackground } from './ParticlesBackground';
 
 export function ArtifactViewer() {
@@ -169,7 +170,9 @@ export function ArtifactViewer() {
           {/* Active tab content */}
           {activeTab && (
             <Box sx={{ flex: 1, overflow: 'auto', position: 'relative', zIndex: 1 }}>
-              {/\.html?$/i.test(activeTab.filePath) ? (
+              {activeTab.type === 'native' && activeTab.component === 'kanban' ? (
+                <KanbanBoard />
+              ) : /\.html?$/i.test(activeTab.filePath) ? (
                 <iframe
                   ref={iframeRef}
                   src={activeTab.url}

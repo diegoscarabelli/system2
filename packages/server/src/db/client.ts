@@ -465,11 +465,11 @@ export class DatabaseClient {
     return stmt.run(id).changes > 0;
   }
 
-  // Query method for custom queries (used by read_system2_db tool)
-  query(sql: string): unknown[] {
+  // Query method for custom queries (used by read_system2_db tool and REST endpoints)
+  query(sql: string, params: (string | number | null)[] = []): unknown[] {
     try {
       const stmt = this.db.prepare(sql);
-      return stmt.all();
+      return stmt.all(...params);
     } catch (error) {
       throw new Error(`Database query failed: ${(error as Error).message}`);
     }

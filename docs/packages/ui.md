@@ -18,9 +18,11 @@ src/
 │   ├── Chat.tsx           # Chat container (composes MessageList + MessageInput)
 │   ├── MessageList.tsx    # Message timeline with streaming
 │   ├── MessageInput.tsx   # Auto-growing textarea with queue indicator
-│   ├── ArtifactViewer.tsx    # Tabbed artifact display with sandboxed iframes
+│   ├── ArtifactViewer.tsx    # Tabbed artifact display (iframe + native tabs)
 │   ├── AgentPane.tsx          # Active agent list with busy indicators
 │   ├── ArtifactCatalog.tsx  # Browsable overlay of all registered artifacts
+│   ├── KanbanBoard.tsx    # Live kanban dashboard (swimlane layout, native tab)
+│   ├── TaskDetailModal.tsx # Task detail overlay (comments, links, markdown)
 │   └── ParticlesBackground.tsx # Animated particle background (tsparticles)
 ├── hooks/
 │   ├── useWebSocket.ts    # WebSocket connection and message handling
@@ -38,9 +40,12 @@ src/
 ```
 App (ThemeProvider)
 └── Layout (resizable 2-panel)
-    ├── ArtifactViewer (left panel, tabbed iframes)
+    ├── ArtifactViewer (left panel, tabbed artifacts + native components)
     │   ├── ParticlesBackground (animated background, toggleable)
-    │   └── ArtifactCatalog (overlay panel, toggled from header)
+    │   ├── ArtifactCatalog (overlay panel, toggled from header)
+    │   ├── KanbanBoard (native tab, live task dashboard)
+    │   │   └── TaskDetailModal (overlay, on card click)
+    │   └── <iframe> (sandboxed, for HTML artifact tabs)
     └── Chat (right panel, 33% default width)
         ├── MessageList (scrollable timeline)
         └── MessageInput (textarea + send/stop button)
@@ -48,7 +53,7 @@ App (ThemeProvider)
 
 ### Layout
 
-VSCode-style layout with an activity bar on the left edge (48px). The activity bar contains toggle buttons for the artifact catalog and agent pane (top), plus particles and theme toggles (bottom). Opening one side panel closes the other. The artifact viewer fills the center, with the chat panel on the right (20-60% resizable, default 33%). Both the side panel and chat panel have draggable resize handles.
+VSCode-style layout with an activity bar on the left edge (48px). The activity bar contains toggle buttons for the artifact catalog, agent pane, and kanban board (top), plus particles and theme toggles (bottom). Opening the catalog or agents panel closes the other; the kanban board toggles a native tab instead. Opening one side panel closes the other. The artifact viewer fills the center, with the chat panel on the right (20-60% resizable, default 33%). Both the side panel and chat panel have draggable resize handles.
 
 ### MessageList
 
@@ -69,9 +74,11 @@ Auto-growing textarea (1-10 lines, then scrolls). Shows the current LLM provider
 
 ### ArtifactViewer
 
-Tabbed artifact display. Each tab renders an artifact in a sandboxed iframe (`sandbox="allow-scripts allow-same-origin"`). Tab bar at top shows title and close button for each open artifact; clicking a tab activates it. Empty state shown when no tabs are open.
+Tabbed artifact display. Tabs are either **iframe tabs** (sandboxed HTML artifacts) or **native tabs** (React components rendered directly). Tab bar at top shows title and close button for each open artifact; clicking a tab activates it. Empty state shown when no tabs are open.
 
-Supports a `postMessage` bridge for dashboards that need database access:
+Native tabs are not persisted to localStorage across page reloads. Currently the only native tab is the Kanban board.
+
+Supports a `postMessage` bridge for iframe dashboards that need database access:
 
 ```
 Iframe -> postMessage({ type: 'system2:query', requestId, sql })
@@ -89,6 +96,34 @@ Configuration: 120 particles in accent + teal colors, linked within 150px distan
 ### ArtifactCatalog
 
 Side panel showing all registered artifacts from the database. Fetches `GET /api/artifacts` on mount and re-fetches on `catalog_changed` WebSocket events. Groups artifacts by project (null project shown as "General"). Supports text search and project/tag filtering. Clicking an item opens it as a new tab in ArtifactViewer. Toggled via StackIcon in the activity bar.
+
+### KanbanBoard
+
+Live kanban dashboard showing all tasks grouped by project in a swimlane layout. Toggled via the TasklistIcon button in the activity bar: clicking opens a native tab named "Board" at position 0; clicking again closes it.
+
+Fetches `GET /api/kanban` on mount and automatically re-fetches whenever `tasksVersion` increments (triggered by `tasks_changed` WebSocket events). On initial load shows a full loading state; subsequent live updates show a subtle "Refreshing..." indicator in the toolbar without clearing the board.
+
+**Layout:** Four status columns (Todo, In Progress, Review, Done) with sticky headers showing status dot + task count badge. Each project is a collapsible swimlane row showing project name, status badge, done/total count, and a progress bar.
+
+**Cards:** Priority stripe on left edge (coral = high, accent = medium, gray = low), bold title, label chips, and assignee role badge.
+
+**Filters:** Keyword search (title), priority dropdown, and assignee dropdown — applied across all swimlanes simultaneously.
+
+Clicking a card opens a `TaskDetailModal` overlay for that task.
+
+### TaskDetailModal
+
+Overlay modal showing full task details. Fetches `GET /api/tasks/:id` on open and on navigation. Uses `AbortController` to cancel in-flight requests when the task ID changes (e.g., clicking a linked task).
+
+**Sections:**
+
+1. Header: task title + close button (X or Escape or backdrop click)
+2. Meta: status badge, priority badge, assignee role tag, project name tag, label chips, start/end dates
+3. Description rendered as Markdown
+4. Task links grouped by relationship type (blocked_by, relates_to, duplicates); clicking a linked task navigates to it
+5. Comments timeline: agent role + date header, comment body rendered as Markdown
+
+Scroll position is reset to top whenever the displayed task changes.
 
 ### AgentPane
 
@@ -113,20 +148,24 @@ Three [Zustand](https://github.com/pmndrs/zustand) stores with no Redux or Conte
 
 ### `useArtifactStore`
 
-Tab-based artifact state with localStorage persistence (`system2:artifact-tabs`).
+Tab-based artifact state with localStorage persistence (`system2:artifact-tabs`). Each `ArtifactTab` has a `type` discriminant: `'iframe'` for sandboxed HTML artifacts, `'native'` for React components rendered directly. Native tabs are not persisted across page reloads.
 
 | State | Type | Description |
 |-------|------|-------------|
-| `tabs` | `ArtifactTab[]` | Open artifact tabs (id, url, filePath, title) |
+| `tabs` | `ArtifactTab[]` | Open artifact tabs (id, type, url, filePath, title) |
 | `activeTabId` | `string \| null` | Currently active tab |
 | `catalogOpen` | `boolean` | Whether the catalog panel is visible |
 | `agentsOpen` | `boolean` | Whether the agents panel is visible |
+| `tasksVersion` | `number` | Incremented on each `tasks_changed` WebSocket event |
 
 Key behaviors:
 
 - `openArtifact`: if a tab with the same `filePath` exists, activate it and update its URL; otherwise create a new tab
 - `closeTab`: remove tab, activate next/previous/null
 - `reloadTab`: find tab by `filePath`, update URL (for fs.watch cache-bust reloads)
+- `openKanbanTab`: create (or activate existing) native kanban tab at position 0
+- `toggleKanbanTab`: close kanban tab if open, otherwise call `openKanbanTab` (used by activity bar button)
+- `incrementTasksVersion`: called by WebSocket hook on `tasks_changed`, triggers board re-fetch
 - Tab dedup uses `filePath` with cache-bust query params stripped
 
 ### `useThemeStore`

@@ -583,6 +583,99 @@ describe('write_system2_db tool', () => {
     });
   });
 
+  describe('onTaskChange callback', () => {
+    it('is called on createTask', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      addProject(db, 10);
+      let taskChangeCalls = 0;
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, undefined, () => {
+        taskChangeCalls++;
+      });
+
+      await tool.execute('test', {
+        operation: 'createTask',
+        project: 10,
+        title: 'New Task',
+        description: 'Desc',
+        priority: 'medium',
+      } as WriteDbParams);
+
+      expect(taskChangeCalls).toBe(1);
+    });
+
+    it('is called on updateTask', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      addProject(db, 10);
+      addTask(db, 20, 10);
+      let taskChangeCalls = 0;
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, undefined, () => {
+        taskChangeCalls++;
+      });
+
+      await tool.execute('test', {
+        operation: 'updateTask',
+        id: 20,
+        status: 'in progress',
+      } as WriteDbParams);
+
+      expect(taskChangeCalls).toBe(1);
+    });
+
+    it('is called on claimTask', async () => {
+      const db = createMockDb();
+      addAgent(db, 2, 'conductor', 10);
+      addProject(db, 10);
+      addTask(db, 20, 10);
+      let taskChangeCalls = 0;
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2, undefined, () => {
+        taskChangeCalls++;
+      });
+
+      await tool.execute('test', {
+        operation: 'claimTask',
+        id: 20,
+      } as WriteDbParams);
+
+      expect(taskChangeCalls).toBe(1);
+    });
+
+    it('is not called when task operation fails', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      let taskChangeCalls = 0;
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, undefined, () => {
+        taskChangeCalls++;
+      });
+
+      await tool.execute('test', {
+        operation: 'updateTask',
+        id: 999,
+        status: 'done',
+      } as WriteDbParams);
+
+      expect(taskChangeCalls).toBe(0);
+    });
+
+    it('is not called for non-task operations', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      let taskChangeCalls = 0;
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, undefined, () => {
+        taskChangeCalls++;
+      });
+
+      await tool.execute('test', {
+        operation: 'createProject',
+        name: 'Proj',
+        description: 'Desc',
+      } as WriteDbParams);
+
+      expect(taskChangeCalls).toBe(0);
+    });
+  });
+
   it('returns error for unknown operation', async () => {
     const db = createMockDb();
     addAgent(db, 1, 'guide', null);

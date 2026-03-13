@@ -47,7 +47,8 @@ type ServerMessage =
   | { type: 'chat_history'; messages: ChatMessage[] }
   | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number }
   | { type: 'catalog_changed' }
-  | { type: 'agents_changed' };
+  | { type: 'agents_changed' }
+  | { type: 'tasks_changed' };
 ```
 
 | Message | Description |
@@ -65,6 +66,7 @@ type ServerMessage =
 | `user_message_broadcast` | User message from another tab, broadcast to all other connected clients |
 | `catalog_changed` | Artifact catalog entries created/updated/deleted, UI should re-fetch |
 | `agents_changed` | Any agent's busy state changed, agents pane should re-fetch |
+| `tasks_changed` | Any task created, updated, or claimed; kanban board should re-fetch |
 
 ## Message Flow
 

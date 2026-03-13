@@ -36,7 +36,8 @@ function checkProjectScope(
 export function createWriteSystem2DbTool(
   db: DatabaseClient,
   agentId: number,
-  onArtifactChange?: () => void
+  onArtifactChange?: () => void,
+  onTaskChange?: () => void
 ) {
   const params = Type.Object({
     operation: Type.Union(
@@ -240,6 +241,7 @@ export function createWriteSystem2DbTool(
               start_at: params.start_at ?? null,
               end_at: params.end_at ?? null,
             });
+            onTaskChange?.();
             return ok(result);
           }
 
@@ -274,6 +276,7 @@ export function createWriteSystem2DbTool(
               ...(params.end_at !== undefined && { end_at: params.end_at }),
             });
             if (!result) return err(`No task found with id ${params.id}`);
+            onTaskChange?.();
             return ok(result);
           }
 
@@ -292,6 +295,7 @@ export function createWriteSystem2DbTool(
                 details: { claimed: false, error: result.error },
               };
             }
+            onTaskChange?.();
             return ok({ claimed: true, task: result.task });
           }
 

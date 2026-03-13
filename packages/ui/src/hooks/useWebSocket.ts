@@ -143,6 +143,10 @@ export function useWebSocket() {
           useArtifactStore.getState().updateAgentContext(message.context);
           break;
 
+        case 'tasks_changed':
+          useArtifactStore.getState().incrementTasksVersion();
+          break;
+
         case 'error':
           console.error('Server error:', message.message);
           setWaitingForResponse(false);

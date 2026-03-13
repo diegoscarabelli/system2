@@ -4,7 +4,14 @@
  * VSCode-style layout: activity bar, optional drawer, artifact viewer, and chat.
  */
 
-import { MoonIcon, PeopleIcon, StackIcon, SunIcon, ZapIcon } from '@primer/octicons-react';
+import {
+  MoonIcon,
+  PeopleIcon,
+  StackIcon,
+  SunIcon,
+  TasklistIcon,
+  ZapIcon,
+} from '@primer/octicons-react';
 import { Box, IconButton } from '@primer/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useArtifactStore } from '../stores/artifact';
@@ -17,6 +24,33 @@ import { Chat } from './Chat';
 
 const ACTIVITY_BAR_PX = 48;
 
+const tooltipWrapperSx = {
+  position: 'relative',
+  '&::after': {
+    content: 'attr(data-tooltip)',
+    position: 'absolute',
+    left: '100%',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    marginLeft: '8px',
+    padding: '4px 8px',
+    borderRadius: '6px',
+    backgroundColor: 'var(--bgColor-emphasis, #1b1f24)',
+    color: 'var(--fgColor-onEmphasis, #fff)',
+    fontSize: '11px',
+    lineHeight: '1.5',
+    whiteSpace: 'nowrap',
+    pointerEvents: 'none',
+    opacity: 0,
+    transition: 'opacity 0.15s ease-out',
+    zIndex: 1000,
+  },
+  '&:hover::after': {
+    opacity: 1,
+    transition: 'opacity 0.15s ease-in 1s',
+  },
+} as const;
+
 export function Layout() {
   const [chatWidth, setChatWidth] = useState(33); // percentage of container
   const [catalogWidth, setCatalogWidth] = useState(20); // percentage of container
@@ -28,8 +62,11 @@ export function Layout() {
   const { accent } = useAccentColors();
   const catalogOpen = useArtifactStore((s) => s.catalogOpen);
   const agentsOpen = useArtifactStore((s) => s.agentsOpen);
+  const tabs = useArtifactStore((s) => s.tabs);
   const toggleCatalog = useArtifactStore((s) => s.toggleCatalog);
   const toggleAgents = useArtifactStore((s) => s.toggleAgents);
+  const toggleKanbanTab = useArtifactStore((s) => s.toggleKanbanTab);
+  const kanbanOpen = tabs.some((t) => t.component === 'kanban');
   const sideDrawerOpen = catalogOpen || agentsOpen;
 
   const handleMouseDown = useCallback(() => {
@@ -104,73 +141,119 @@ export function Layout() {
           backgroundColor: 'canvas.subtle',
           borderRight: '1px solid',
           borderColor: 'border.default',
+          position: 'relative',
+          zIndex: 10,
         }}
       >
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-          <IconButton
-            aria-label="Artifact catalog"
-            icon={StackIcon}
-            variant="invisible"
-            size="medium"
-            onClick={toggleCatalog}
-            sx={{
-              color: catalogOpen ? 'fg.default' : 'fg.muted',
-              position: 'relative',
-              '&::before': catalogOpen
-                ? {
-                    content: '""',
-                    position: 'absolute',
-                    left: '-8px',
-                    top: '25%',
-                    bottom: '25%',
-                    width: '2px',
-                    backgroundColor: accent,
-                    borderRadius: 1,
-                  }
-                : {},
-            }}
-          />
-          <IconButton
-            aria-label="Active agents"
-            icon={PeopleIcon}
-            variant="invisible"
-            size="medium"
-            onClick={toggleAgents}
-            sx={{
-              color: agentsOpen ? 'fg.default' : 'fg.muted',
-              position: 'relative',
-              '&::before': agentsOpen
-                ? {
-                    content: '""',
-                    position: 'absolute',
-                    left: '-8px',
-                    top: '25%',
-                    bottom: '25%',
-                    width: '2px',
-                    backgroundColor: accent,
-                    borderRadius: 1,
-                  }
-                : {},
-            }}
-          />
+          <Box data-tooltip="Artifact catalog" sx={tooltipWrapperSx}>
+            <IconButton
+              unsafeDisableTooltip
+              aria-label="Artifact catalog"
+              icon={StackIcon}
+              variant="invisible"
+              size="medium"
+              onClick={toggleCatalog}
+              sx={{
+                color: catalogOpen ? 'fg.default' : 'fg.muted',
+                position: 'relative',
+                '&::before': catalogOpen
+                  ? {
+                      content: '""',
+                      position: 'absolute',
+                      left: '-8px',
+                      top: '25%',
+                      bottom: '25%',
+                      width: '2px',
+                      backgroundColor: accent,
+                      borderRadius: 1,
+                    }
+                  : {},
+              }}
+            />
+          </Box>
+          <Box data-tooltip="Active agents" sx={tooltipWrapperSx}>
+            <IconButton
+              unsafeDisableTooltip
+              aria-label="Active agents"
+              icon={PeopleIcon}
+              variant="invisible"
+              size="medium"
+              onClick={toggleAgents}
+              sx={{
+                color: agentsOpen ? 'fg.default' : 'fg.muted',
+                position: 'relative',
+                '&::before': agentsOpen
+                  ? {
+                      content: '""',
+                      position: 'absolute',
+                      left: '-8px',
+                      top: '25%',
+                      bottom: '25%',
+                      width: '2px',
+                      backgroundColor: accent,
+                      borderRadius: 1,
+                    }
+                  : {},
+              }}
+            />
+          </Box>
+          <Box data-tooltip="Kanban board" sx={tooltipWrapperSx}>
+            <IconButton
+              unsafeDisableTooltip
+              aria-label="Kanban board"
+              icon={TasklistIcon}
+              variant="invisible"
+              size="medium"
+              onClick={toggleKanbanTab}
+              sx={{
+                color: kanbanOpen ? 'fg.default' : 'fg.muted',
+                position: 'relative',
+                '&::before': kanbanOpen
+                  ? {
+                      content: '""',
+                      position: 'absolute',
+                      left: '-8px',
+                      top: '25%',
+                      bottom: '25%',
+                      width: '2px',
+                      backgroundColor: accent,
+                      borderRadius: 1,
+                    }
+                  : {},
+              }}
+            />
+          </Box>
         </Box>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-          <IconButton
-            aria-label={particlesEnabled ? 'Disable particles' : 'Enable particles'}
-            icon={ZapIcon}
-            variant="invisible"
-            size="medium"
-            onClick={toggleParticles}
-            sx={{ color: particlesEnabled ? accent : 'fg.muted' }}
-          />
-          <IconButton
-            aria-label={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            icon={colorMode === 'dark' ? SunIcon : MoonIcon}
-            variant="invisible"
-            size="medium"
-            onClick={toggleColorMode}
-            sx={{ color: 'fg.muted' }}
-          />
+          <Box
+            data-tooltip={particlesEnabled ? 'Disable particles' : 'Enable particles'}
+            sx={tooltipWrapperSx}
+          >
+            <IconButton
+              unsafeDisableTooltip
+              aria-label={particlesEnabled ? 'Disable particles' : 'Enable particles'}
+              icon={ZapIcon}
+              variant="invisible"
+              size="medium"
+              onClick={toggleParticles}
+              sx={{ color: particlesEnabled ? accent : 'fg.muted' }}
+            />
+          </Box>
+          <Box
+            data-tooltip={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            sx={tooltipWrapperSx}
+          >
+            <IconButton
+              unsafeDisableTooltip
+              aria-label={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              icon={colorMode === 'dark' ? SunIcon : MoonIcon}
+              variant="invisible"
+              size="medium"
+              onClick={toggleColorMode}
+              sx={{ color: 'fg.muted' }}
+            />
+          </Box>
         </Box>
       </Box>
 

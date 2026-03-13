@@ -71,6 +71,8 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 | `/api/artifact` | GET | Serve artifact file by absolute path (`?path=`) with no-cache headers |
 | `/api/artifacts` | GET | List all registered artifacts with project names (for catalog UI) |
 | `/api/agents` | GET | List all non-archived agents with in-memory busy state (for agents pane) |
+| `/api/kanban` | GET | Kanban board data: all tasks (with project/assignee joins), projects, and active agents |
+| `/api/tasks/:id` | GET | Full task detail: task row, all comments (with author role), and all linked tasks (bidirectional) |
 | `/api/query` | POST | SQL query endpoint for artifact dashboards (SELECT only) |
 | `/*` | GET | UI static files (if `uiDistPath` configured) |
 
