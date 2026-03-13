@@ -7,12 +7,121 @@
 
 import { XIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text } from '@primer/react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import Markdown from 'react-markdown';
 import { useArtifactStore } from '../stores/artifact';
 import { useThemeStore } from '../stores/theme';
 import { useAccentColors } from '../theme/useAccentColors';
 import { KanbanBoard } from './KanbanBoard';
 import { ParticlesBackground } from './ParticlesBackground';
+
+function MarkdownArtifact({ url }: { url: string }) {
+  const [content, setContent] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setContent(null);
+    setError(null);
+    fetch(url, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
+        return res.text();
+      })
+      .then(setContent)
+      .catch((err) => {
+        if (err.name !== 'AbortError') setError(err.message);
+      });
+    return () => controller.abort();
+  }, [url]);
+
+  if (error) {
+    return (
+      <Box sx={{ p: 4, color: 'danger.fg' }}>
+        <Text>{error}</Text>
+      </Box>
+    );
+  }
+
+  if (content === null) {
+    return (
+      <Box sx={{ p: 4, color: 'fg.muted' }}>
+        <Text>Loading…</Text>
+      </Box>
+    );
+  }
+
+  return (
+    <Box
+      sx={{
+        p: 4,
+        fontSize: 1,
+        color: 'fg.default',
+        '& p': { margin: 0, marginBottom: 2 },
+        '& p:last-child': { marginBottom: 0 },
+        '& h1, & h2, & h3, & h4, & h5, & h6': {
+          marginTop: 3,
+          marginBottom: 2,
+          fontWeight: 'bold',
+        },
+        '& h1': { fontSize: 4 },
+        '& h2': { fontSize: 3 },
+        '& h3': { fontSize: 2 },
+        '& ul, & ol': { marginTop: 1, marginBottom: 2, paddingLeft: 3 },
+        '& li': { marginBottom: 1 },
+        '& code': {
+          fontFamily: 'mono',
+          backgroundColor: 'neutral.muted',
+          padding: '2px 4px',
+          borderRadius: 1,
+          fontSize: 0,
+        },
+        '& pre': {
+          backgroundColor: 'neutral.muted',
+          padding: 2,
+          borderRadius: 2,
+          overflow: 'auto',
+          marginTop: 2,
+          marginBottom: 2,
+        },
+        '& pre code': { backgroundColor: 'transparent', padding: 0 },
+        '& strong': { fontWeight: 'bold' },
+        '& em': { fontStyle: 'italic' },
+        '& hr': {
+          border: 'none',
+          borderTop: '1px solid',
+          borderColor: 'border.muted',
+          marginTop: 3,
+          marginBottom: 3,
+        },
+        '& a': { color: 'accent.fg' },
+        '& blockquote': {
+          borderLeft: '3px solid',
+          borderColor: 'border.default',
+          paddingLeft: 2,
+          marginLeft: 0,
+          color: 'fg.muted',
+        },
+        '& table': {
+          borderCollapse: 'collapse',
+          width: '100%',
+          marginTop: 2,
+          marginBottom: 2,
+        },
+        '& th, & td': {
+          border: '1px solid',
+          borderColor: 'border.default',
+          padding: 2,
+          textAlign: 'left',
+        },
+        '& th': { fontWeight: 'bold', backgroundColor: 'neutral.muted' },
+        '& img': { maxWidth: '100%' },
+      }}
+    >
+      <Markdown>{content}</Markdown>
+    </Box>
+  );
+}
 
 export function ArtifactViewer() {
   const tabs = useArtifactStore((s) => s.tabs);
@@ -172,6 +281,8 @@ export function ArtifactViewer() {
             <Box sx={{ flex: 1, overflow: 'auto', position: 'relative', zIndex: 1 }}>
               {activeTab.type === 'native' && activeTab.component === 'kanban' ? (
                 <KanbanBoard />
+              ) : /\.(?:md|markdown)$/i.test(activeTab.filePath) ? (
+                <MarkdownArtifact url={activeTab.url} />
               ) : /\.html?$/i.test(activeTab.filePath) ? (
                 <iframe
                   ref={iframeRef}
