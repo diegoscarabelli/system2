@@ -562,7 +562,7 @@ export function MessageList() {
                 You
               </Text>
               <Text
-                as="pre"
+                as="p"
                 sx={{
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
