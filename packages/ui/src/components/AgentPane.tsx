@@ -244,13 +244,19 @@ export function AgentPane() {
                             borderColor: 'border.muted',
                             whiteSpace: 'nowrap',
                             color:
-                              agentContextPercents[agent.id] != null
-                                ? contextColor(agentContextPercents[agent.id] as number, accent)
+                              (agentContextPercents[agent.id] ?? agent.contextPercent) != null
+                                ? contextColor(
+                                    (agentContextPercents[agent.id] ??
+                                      agent.contextPercent) as number,
+                                    accent
+                                  )
                                 : 'fg.muted',
                           }}
                         >
-                          {agentContextPercents[agent.id] != null
-                            ? Math.round(agentContextPercents[agent.id] as number)
+                          {(agentContextPercents[agent.id] ?? agent.contextPercent) != null
+                            ? Math.round(
+                                (agentContextPercents[agent.id] ?? agent.contextPercent) as number
+                              )
                             : '—'}
                         </Box>
                         <Box
