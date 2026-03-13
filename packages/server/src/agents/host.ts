@@ -74,8 +74,6 @@ export interface AgentHostConfig {
   servicesConfig?: ServicesConfig;
   toolsConfig?: ToolsConfig;
   spawner?: AgentSpawner;
-  onArtifactChange?: () => void;
-  onTaskChange?: () => void;
   onBusyChange?: () => void;
 }
 
@@ -100,8 +98,6 @@ export class AgentHost {
   private agentProjectDirName: string | null = null;
   private sessionDir: string | null = null;
   private resourceLoader: DefaultResourceLoader | null = null;
-  private onArtifactChange?: () => void;
-  private onTaskChange?: () => void;
   private onBusyChange?: () => void;
   private busy = false;
   private compactionCount = 0;
@@ -115,8 +111,6 @@ export class AgentHost {
     this.servicesConfig = config.servicesConfig;
     this.toolsConfig = config.toolsConfig;
     this.spawner = config.spawner;
-    this.onArtifactChange = config.onArtifactChange;
-    this.onTaskChange = config.onTaskChange;
     this.onBusyChange = config.onBusyChange;
 
     // Store LLM config for openai-compatible provider registration
@@ -533,7 +527,7 @@ export class AgentHost {
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous tool collection matches SDK's AgentTool<any>[]
     const tools: AgentTool<any>[] = [
       createReadSystem2DbTool(this.db),
-      createWriteSystem2DbTool(this.db, this.agentId, this.onArtifactChange, this.onTaskChange),
+      createWriteSystem2DbTool(this.db, this.agentId),
       createMessageAgentTool(this.agentId, this.registry, this.db),
       createBashTool((content, details) => {
         this.session?.sendCustomMessage(

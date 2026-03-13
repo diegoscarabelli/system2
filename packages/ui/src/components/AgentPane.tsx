@@ -7,7 +7,8 @@
 
 import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { POLL_INTERVAL_MS } from '../constants';
 import { useArtifactStore } from '../stores/artifact';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
@@ -58,19 +59,41 @@ function contextColor(percent: number, accent: string): string {
 export function AgentPane() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const agentsVersion = useArtifactStore((s) => s.agentsVersion);
   const agentContextPercents = useArtifactStore((s) => s.agentContextPercents);
   const { accent } = useAccentColors();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const initialized = useRef(false);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: agentsVersion is an intentional external trigger to re-fetch
   useEffect(() => {
-    fetch('/api/agents')
-      .then((res) => res.json())
-      .then((data) => setAgents(data.agents || []))
-      .catch((err) => console.error('Failed to load agents:', err))
-      .finally(() => setLoading(false));
-  }, [agentsVersion]);
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const fetchData = () => {
+      if (!initialized.current) setLoading(true);
+
+      fetch('/api/agents', { signal: controller.signal })
+        .then((res) => res.json())
+        .then((data) => {
+          setAgents(data.agents || []);
+          initialized.current = true;
+          setLoading(false);
+          timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+        })
+        .catch((err: unknown) => {
+          if ((err as { name?: string }).name !== 'AbortError') {
+            console.error('Failed to load agents:', err);
+            setLoading(false);
+            timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+          }
+        });
+    };
+
+    fetchData();
+    return () => {
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
+  }, []);
 
   const toggleGroupCollapse = useCallback((group: string) => {
     setCollapsedGroups((prev) => {

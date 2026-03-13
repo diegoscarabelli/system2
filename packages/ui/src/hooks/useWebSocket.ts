@@ -134,17 +134,8 @@ export function useWebSocket() {
           useChatStore.getState().addSystemMessage(`Switched to ${message.provider}`);
           break;
 
-        case 'catalog_changed':
-          useArtifactStore.getState().incrementCatalogVersion();
-          break;
-
         case 'agents_changed':
-          useArtifactStore.getState().incrementAgentsVersion();
           useArtifactStore.getState().updateAgentContext(message.context);
-          break;
-
-        case 'tasks_changed':
-          useArtifactStore.getState().incrementTasksVersion();
           break;
 
         case 'error':

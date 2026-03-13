@@ -9,6 +9,7 @@ import { XIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
+import { POLL_INTERVAL_MS } from '../constants';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
@@ -51,13 +52,13 @@ interface TaskDetailData {
   links: TaskLink[];
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  todo: colors.gray,
-  'in progress': '#58a6ff',
-  review: '#f0883e',
-  done: '#3fb950',
-  abandoned: '#8b949e',
-};
+function statusColor(status: string, accent: string, highlight: string): string {
+  if (status === 'todo') return colors.gray;
+  if (status === 'in progress') return accent;
+  if (status === 'review') return highlight;
+  if (status === 'done') return colors.teal;
+  return colors.gray;
+}
 
 const RELATIONSHIP_LABELS: Record<string, string> = {
   blocked_by: 'Blocked by',
@@ -80,8 +81,16 @@ function formatDate(iso: string | null): string {
   }
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const bg = STATUS_COLORS[status] ?? colors.gray;
+function StatusBadge({
+  status,
+  accent,
+  highlight,
+}: {
+  status: string;
+  accent: string;
+  highlight: string;
+}) {
+  const bg = statusColor(status, accent, highlight);
   return (
     <Box
       sx={{
@@ -104,7 +113,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function PriorityBadge({ priority, accent }: { priority: string; accent: string }) {
-  const c = priority === 'high' ? colors.coral : priority === 'medium' ? accent : colors.gray;
+  const c = priority === 'high' ? colors.coral : priority === 'medium' ? accent : colors.teal;
   return (
     <Box
       sx={{
@@ -135,26 +144,46 @@ export function TaskDetailModal({
   onClose: () => void;
   onNavigate: (id: number) => void;
 }) {
-  const { accent } = useAccentColors();
+  const { accent, highlight } = useAccentColors();
   const [data, setData] = useState<TaskDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const panelRef = useRef<HTMLDivElement>(null);
+  const initialized = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setData(null);
+    let timeoutId: ReturnType<typeof setTimeout>;
+    initialized.current = false;
+
     if (panelRef.current) panelRef.current.scrollTop = 0;
-    fetch(`/api/tasks/${taskId}`, { signal: controller.signal })
-      .then((r) => r.json())
-      .then((d: TaskDetailData) => {
-        setData(d);
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if ((err as { name?: string }).name !== 'AbortError') setLoading(false);
-      });
-    return () => controller.abort();
+
+    const fetchData = () => {
+      if (!initialized.current) {
+        setLoading(true);
+        setData(null);
+      }
+
+      fetch(`/api/tasks/${taskId}`, { signal: controller.signal })
+        .then((r) => r.json())
+        .then((d: TaskDetailData) => {
+          setData(d);
+          initialized.current = true;
+          setLoading(false);
+          timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+        })
+        .catch((err: unknown) => {
+          if ((err as { name?: string }).name !== 'AbortError') {
+            setLoading(false);
+            timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+          }
+        });
+    };
+
+    fetchData();
+    return () => {
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
   }, [taskId]);
 
   // Close on backdrop click
@@ -244,6 +273,9 @@ export function TaskDetailModal({
               <Text sx={{ color: 'fg.muted', fontSize: 1 }}>Loading...</Text>
             ) : (
               <Text sx={{ fontWeight: 'bold', fontSize: 3, color: 'fg.default', lineHeight: 1.3 }}>
+                <Text as="span" sx={{ color: 'fg.muted' }}>
+                  #{task?.id}
+                </Text>{' '}
                 {task?.title ?? 'Task not found'}
               </Text>
             )}
@@ -282,7 +314,7 @@ export function TaskDetailModal({
             >
               <dt>Status:</dt>
               <dd>
-                <StatusBadge status={task.status} />
+                <StatusBadge status={task.status} accent={accent} highlight={highlight} />
               </dd>
               <dt>Priority:</dt>
               <dd>
@@ -402,7 +434,11 @@ export function TaskDetailModal({
                             }}
                             onClick={() => onNavigate(link.linked_task_id)}
                           >
-                            <StatusBadge status={link.linked_task_status} />
+                            <StatusBadge
+                              status={link.linked_task_status}
+                              accent={accent}
+                              highlight={highlight}
+                            />
                             <Text
                               sx={{
                                 fontSize: 0,

@@ -33,12 +33,7 @@ function checkProjectScope(
   return null;
 }
 
-export function createWriteSystem2DbTool(
-  db: DatabaseClient,
-  agentId: number,
-  onArtifactChange?: () => void,
-  onTaskChange?: () => void
-) {
+export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
   const params = Type.Object({
     operation: Type.Union(
       [
@@ -207,6 +202,7 @@ export function createWriteSystem2DbTool(
               ...(params.end_at !== undefined && { end_at: params.end_at }),
             });
             if (!result) return err(`No project found with id ${params.id}`);
+
             return ok(result);
           }
 
@@ -241,7 +237,7 @@ export function createWriteSystem2DbTool(
               start_at: params.start_at ?? null,
               end_at: params.end_at ?? null,
             });
-            onTaskChange?.();
+
             return ok(result);
           }
 
@@ -276,7 +272,7 @@ export function createWriteSystem2DbTool(
               ...(params.end_at !== undefined && { end_at: params.end_at }),
             });
             if (!result) return err(`No task found with id ${params.id}`);
-            onTaskChange?.();
+
             return ok(result);
           }
 
@@ -295,7 +291,7 @@ export function createWriteSystem2DbTool(
                 details: { claimed: false, error: result.error },
               };
             }
-            onTaskChange?.();
+
             return ok({ claimed: true, task: result.task });
           }
 
@@ -317,6 +313,7 @@ export function createWriteSystem2DbTool(
               target: params.target,
               relationship: params.relationship as TaskLinkRelationship,
             });
+
             return ok(result);
           }
 
@@ -331,6 +328,7 @@ export function createWriteSystem2DbTool(
             }
             const deleted = db.deleteTaskLink(params.id);
             if (!deleted) return err(`No task link found with id ${params.id}`);
+
             return ok({ deleted: true, id: params.id });
           }
 
@@ -346,6 +344,7 @@ export function createWriteSystem2DbTool(
               author: agentId,
               content: params.content,
             });
+
             return ok(result);
           }
 
@@ -377,7 +376,7 @@ export function createWriteSystem2DbTool(
               description: params.description ?? null,
               tags: params.tags ?? [],
             });
-            onArtifactChange?.();
+
             return ok(result);
           }
 
@@ -398,7 +397,7 @@ export function createWriteSystem2DbTool(
               ...(params.tags !== undefined && { tags: params.tags }),
             });
             if (!result) return err(`No artifact found with id ${params.id}`);
-            onArtifactChange?.();
+
             return ok(result);
           }
 
@@ -413,7 +412,7 @@ export function createWriteSystem2DbTool(
             if (deleteArtifactScopeErr) return err(deleteArtifactScopeErr);
             const deleted = db.deleteArtifact(params.id);
             if (!deleted) return err(`No artifact found with id ${params.id}`);
-            onArtifactChange?.();
+
             return ok({ deleted: true, id: params.id });
           }
 

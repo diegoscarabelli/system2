@@ -95,13 +95,13 @@ Configuration: 120 particles in accent + teal colors, linked within 150px distan
 
 ### ArtifactCatalog
 
-Side panel showing all registered artifacts from the database. Fetches `GET /api/artifacts` on mount and re-fetches on `catalog_changed` WebSocket events. Groups artifacts by project (null project shown as "General"). Supports text search and project/tag filtering. Clicking an item opens it as a new tab in ArtifactViewer. Toggled via StackIcon in the activity bar.
+Side panel showing all registered artifacts from the database. Polls `GET /api/artifacts` every 2 seconds. Groups artifacts by project (null project shown as "General"). Supports text search and project/tag filtering. Clicking an item opens it as a new tab in ArtifactViewer. Toggled via StackIcon in the activity bar.
 
 ### KanbanBoard
 
 Live kanban dashboard showing all tasks grouped by project in a swimlane layout. Toggled via the TasklistIcon button in the activity bar: clicking opens a native tab named "Board" at position 0; clicking again closes it.
 
-Fetches `GET /api/kanban` on mount and automatically re-fetches whenever `tasksVersion` increments (triggered by `tasks_changed` WebSocket events). On initial load shows a full loading state; subsequent live updates show a subtle "Refreshing..." indicator in the toolbar without clearing the board.
+Polls `GET /api/kanban` every 2 seconds. On initial load shows a full loading state; subsequent polls update silently without clearing the board.
 
 **Layout:** Four status columns (Todo, In Progress, Review, Done) with sticky headers showing status dot + task count badge. Each project is a collapsible swimlane row showing project name, status badge, done/total count, and a progress bar.
 
@@ -113,7 +113,7 @@ Clicking a card opens a `TaskDetailModal` overlay for that task.
 
 ### TaskDetailModal
 
-Overlay modal showing full task details. Fetches `GET /api/tasks/:id` on open and on navigation. Uses `AbortController` to cancel in-flight requests when the task ID changes (e.g., clicking a linked task).
+Overlay modal showing full task details. Polls `GET /api/tasks/:id` every 2 seconds while open, restarting the poll cycle on navigation to a different task. Uses `AbortController` to cancel in-flight requests when the task ID changes (e.g., clicking a linked task).
 
 **Sections:**
 
@@ -127,7 +127,7 @@ Scroll position is reset to top whenever the displayed task changes.
 
 ### AgentPane
 
-Side panel showing all non-archived agents with real-time busy/idle indicators. Fetches `GET /api/agents` on mount and re-fetches on `agents_changed` WebSocket events. Groups agents into "System" (Guide, Narrator) listed first, then by project name. Each agent row shows a teal (`#00aaba`) circle when busy or grey when idle. Toggled via PeopleIcon in the activity bar.
+Side panel showing all non-archived agents with real-time busy/idle indicators. Polls `GET /api/agents` every 2 seconds. Context window percentages update in real time via the `agents_changed` WebSocket message. Groups agents into "System" (Guide, Narrator) listed first, then by project name. Each agent row shows a teal (`#00aaba`) circle when busy or grey when idle. Toggled via PeopleIcon in the activity bar.
 
 ## State Management
 
@@ -156,7 +156,7 @@ Tab-based artifact state with localStorage persistence (`system2:artifact-tabs`)
 | `activeTabId` | `string \| null` | Currently active tab |
 | `catalogOpen` | `boolean` | Whether the catalog panel is visible |
 | `agentsOpen` | `boolean` | Whether the agents panel is visible |
-| `tasksVersion` | `number` | Incremented on each `tasks_changed` WebSocket event |
+| `agentContextPercents` | `Record<number, number \| null>` | Per-agent context window usage (from WebSocket) |
 
 Key behaviors:
 
@@ -165,7 +165,7 @@ Key behaviors:
 - `reloadTab`: find tab by `filePath`, update URL (for fs.watch cache-bust reloads)
 - `openKanbanTab`: create (or activate existing) native kanban tab at position 0
 - `toggleKanbanTab`: close kanban tab if open, otherwise call `openKanbanTab` (used by activity bar button)
-- `incrementTasksVersion`: called by WebSocket hook on `tasks_changed`, triggers board re-fetch
+- `updateAgentContext`: called by WebSocket hook on `agents_changed`, updates context % for each agent
 - Tab dedup uses `filePath` with cache-bust query params stripped
 
 ### `useThemeStore`
@@ -178,7 +178,8 @@ Manages the WebSocket connection to the server:
 
 - Connects to `ws://localhost:3000` (or via Vite proxy in dev)
 - On connect: receives `chat_history` and `provider_info` from server
-- Processes all `ServerMessage` types and updates chat store
+- Processes all `ServerMessage` types and updates chat/artifact stores
+- Handles `agents_changed` to update real-time context % (agent list data is polled separately)
 - Exposes `sendMessage()`, `sendSteering()`, `abort()`
 - On `ready_for_input`: dequeues next message from queue
 - Steering messages are prepended to queue (higher priority)

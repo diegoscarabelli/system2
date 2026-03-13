@@ -90,8 +90,6 @@ export class Server {
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
       spawner: this.makeSpawner(),
-      onArtifactChange: () => this.broadcastCatalogChanged(),
-      onTaskChange: () => this.broadcastTasksChanged(),
       onBusyChange: () => this.broadcastAgentsChanged(),
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
@@ -106,8 +104,6 @@ export class Server {
       llmConfig: config.llmConfig,
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
-      onArtifactChange: () => this.broadcastCatalogChanged(),
-      onTaskChange: () => this.broadcastTasksChanged(),
       onBusyChange: () => this.broadcastAgentsChanged(),
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
@@ -310,8 +306,6 @@ export class Server {
       servicesConfig: this.config.servicesConfig,
       toolsConfig: this.config.toolsConfig,
       spawner: this.makeSpawner(),
-      onArtifactChange: () => this.broadcastCatalogChanged(),
-      onTaskChange: () => this.broadcastTasksChanged(),
       onBusyChange: () => this.broadcastAgentsChanged(),
     });
 
@@ -343,24 +337,6 @@ export class Server {
     };
 
     return spawner;
-  }
-
-  private broadcastCatalogChanged(): void {
-    const data = JSON.stringify({ type: 'catalog_changed' });
-    for (const client of this.wss.clients) {
-      if (client.readyState === client.OPEN) {
-        client.send(data);
-      }
-    }
-  }
-
-  private broadcastTasksChanged(): void {
-    const data = JSON.stringify({ type: 'tasks_changed' });
-    for (const client of this.wss.clients) {
-      if (client.readyState === client.OPEN) {
-        client.send(data);
-      }
-    }
   }
 
   private broadcastAgentsChanged(): void {

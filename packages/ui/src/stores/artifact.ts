@@ -22,11 +22,8 @@ interface ArtifactState {
   tabs: ArtifactTab[];
   activeTabId: string | null;
   catalogOpen: boolean;
-  catalogVersion: number;
   agentsOpen: boolean;
-  agentsVersion: number;
   agentContextPercents: Record<number, number | null>;
-  tasksVersion: number;
 
   openArtifact: (url: string, title?: string, filePath?: string) => void;
   closeTab: (tabId: string) => void;
@@ -34,10 +31,7 @@ interface ArtifactState {
   reloadTab: (filePath: string, newUrl: string) => void;
   toggleCatalog: () => void;
   toggleAgents: () => void;
-  incrementCatalogVersion: () => void;
-  incrementAgentsVersion: () => void;
   updateAgentContext: (context: Record<number, number | null>) => void;
-  incrementTasksVersion: () => void;
   openKanbanTab: () => void;
   toggleKanbanTab: () => void;
 }
@@ -94,11 +88,8 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   tabs: initial.tabs,
   activeTabId: initial.activeTabId,
   catalogOpen: false,
-  catalogVersion: 0,
   agentsOpen: false,
-  agentsVersion: 0,
   agentContextPercents: {},
-  tasksVersion: 0,
 
   openArtifact: (url: string, title?: string, filePath?: string) => {
     const state = get();
@@ -169,20 +160,8 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     set((state) => ({ agentsOpen: !state.agentsOpen, catalogOpen: false }));
   },
 
-  incrementCatalogVersion: () => {
-    set((state) => ({ catalogVersion: state.catalogVersion + 1 }));
-  },
-
-  incrementAgentsVersion: () => {
-    set((state) => ({ agentsVersion: state.agentsVersion + 1 }));
-  },
-
   updateAgentContext: (context: Record<number, number | null>) => {
     set({ agentContextPercents: context });
-  },
-
-  incrementTasksVersion: () => {
-    set((state) => ({ tasksVersion: state.tasksVersion + 1 }));
   },
 
   openKanbanTab: () => {

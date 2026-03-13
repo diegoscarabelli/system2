@@ -13,7 +13,8 @@ import {
   SearchIcon,
 } from '@primer/octicons-react';
 import { ActionList, ActionMenu, Box, IconButton, Text, TextInput } from '@primer/react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { POLL_INTERVAL_MS } from '../constants';
 import { useArtifactStore } from '../stores/artifact';
 import { useAccentColors } from '../theme/useAccentColors';
 
@@ -36,34 +37,53 @@ export function ArtifactCatalog() {
   const [artifacts, setArtifacts] = useState<CatalogArtifact[]>([]);
   const [loading, setLoading] = useState(true);
   const openArtifact = useArtifactStore((s) => s.openArtifact);
-  const catalogVersion = useArtifactStore((s) => s.catalogVersion);
   const { accent, accentSubtle, accentText } = useAccentColors();
   const [query, setQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
+  const initialized = useRef(false);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: catalogVersion is an intentional external trigger to re-fetch
   useEffect(() => {
-    setLoading(true);
-    fetch('/api/artifacts')
-      .then((res) => res.json())
-      .then((data) => {
-        const parsed = (data.artifacts || []).map((a: CatalogArtifactRaw) => {
-          let tags: string[] = [];
-          if (a.tags) {
-            try {
-              tags = JSON.parse(a.tags);
-            } catch {
-              // ignore malformed tags
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const fetchData = () => {
+      if (!initialized.current) setLoading(true);
+
+      fetch('/api/artifacts', { signal: controller.signal })
+        .then((res) => res.json())
+        .then((data) => {
+          const parsed = (data.artifacts || []).map((a: CatalogArtifactRaw) => {
+            let tags: string[] = [];
+            if (a.tags) {
+              try {
+                tags = JSON.parse(a.tags);
+              } catch {
+                // ignore malformed tags
+              }
             }
+            return { ...a, tags };
+          });
+          setArtifacts(parsed);
+          initialized.current = true;
+          setLoading(false);
+          timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+        })
+        .catch((err: unknown) => {
+          if ((err as { name?: string }).name !== 'AbortError') {
+            console.error('Failed to load artifacts:', err);
+            setLoading(false);
+            timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
           }
-          return { ...a, tags };
         });
-        setArtifacts(parsed);
-      })
-      .catch((err) => console.error('Failed to load artifacts:', err))
-      .finally(() => setLoading(false));
-  }, [catalogVersion]);
+    };
+
+    fetchData();
+    return () => {
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
+  }, []);
 
   const handleClick = useCallback(
     (artifact: CatalogArtifact) => {

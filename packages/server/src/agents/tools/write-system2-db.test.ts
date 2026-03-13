@@ -456,13 +456,10 @@ describe('write_system2_db tool', () => {
   });
 
   describe('createArtifact', () => {
-    it('succeeds and calls onArtifactChange', async () => {
+    it('succeeds', async () => {
       const db = createMockDb();
       addAgent(db, 1, 'guide', null);
-      let called = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, () => {
-        called++;
-      });
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
 
       const result: WriteDbResult = await tool.execute('test', {
         operation: 'createArtifact',
@@ -471,28 +468,23 @@ describe('write_system2_db tool', () => {
       } as WriteDbParams);
 
       expect((result.content[0] as { text: string }).text).toContain('report.html');
-      expect(called).toBe(1);
     });
 
-    it('does not call onArtifactChange on error', async () => {
+    it('returns error when file_path is missing', async () => {
       const db = createMockDb();
       addAgent(db, 1, 'guide', null);
-      let called = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, () => {
-        called++;
-      });
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
 
-      await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'createArtifact',
-        // missing file_path and title
       } as WriteDbParams);
 
-      expect(called).toBe(0);
+      expect((result.content[0] as { text: string }).text).toContain('Error');
     });
   });
 
   describe('updateArtifact', () => {
-    it('succeeds and calls onArtifactChange', async () => {
+    it('succeeds', async () => {
       const db = createMockDb();
       addAgent(db, 1, 'guide', null);
       db._artifacts.set(10, {
@@ -505,10 +497,7 @@ describe('write_system2_db tool', () => {
         created_at: 'now',
         updated_at: 'now',
       } as unknown as Artifact);
-      let called = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, () => {
-        called++;
-      });
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
 
       const result: WriteDbResult = await tool.execute('test', {
         operation: 'updateArtifact',
@@ -517,29 +506,25 @@ describe('write_system2_db tool', () => {
       } as WriteDbParams);
 
       expect((result.content[0] as { text: string }).text).toContain('Updated Report');
-      expect(called).toBe(1);
     });
 
-    it('does not call onArtifactChange when artifact not found', async () => {
+    it('returns error when artifact not found', async () => {
       const db = createMockDb();
       addAgent(db, 1, 'guide', null);
-      let called = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, () => {
-        called++;
-      });
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
 
-      await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'updateArtifact',
         id: 999,
         title: 'Ghost',
       } as WriteDbParams);
 
-      expect(called).toBe(0);
+      expect((result.content[0] as { text: string }).text).toContain('Error');
     });
   });
 
   describe('deleteArtifact', () => {
-    it('succeeds and calls onArtifactChange', async () => {
+    it('succeeds', async () => {
       const db = createMockDb();
       addAgent(db, 1, 'guide', null);
       db._artifacts.set(10, {
@@ -552,10 +537,7 @@ describe('write_system2_db tool', () => {
         created_at: 'now',
         updated_at: 'now',
       } as unknown as Artifact);
-      let called = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, () => {
-        called++;
-      });
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
 
       const result: WriteDbResult = await tool.execute('test', {
         operation: 'deleteArtifact',
@@ -563,116 +545,19 @@ describe('write_system2_db tool', () => {
       } as WriteDbParams);
 
       expect((result.content[0] as { text: string }).text).toContain('deleted');
-      expect(called).toBe(1);
     });
 
-    it('does not call onArtifactChange when artifact not found', async () => {
+    it('returns error when artifact not found', async () => {
       const db = createMockDb();
       addAgent(db, 1, 'guide', null);
-      let called = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, () => {
-        called++;
-      });
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
 
-      await tool.execute('test', {
+      const result: WriteDbResult = await tool.execute('test', {
         operation: 'deleteArtifact',
         id: 999,
       } as WriteDbParams);
 
-      expect(called).toBe(0);
-    });
-  });
-
-  describe('onTaskChange callback', () => {
-    it('is called on createTask', async () => {
-      const db = createMockDb();
-      addAgent(db, 1, 'guide', null);
-      addProject(db, 10);
-      let taskChangeCalls = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, undefined, () => {
-        taskChangeCalls++;
-      });
-
-      await tool.execute('test', {
-        operation: 'createTask',
-        project: 10,
-        title: 'New Task',
-        description: 'Desc',
-        priority: 'medium',
-      } as WriteDbParams);
-
-      expect(taskChangeCalls).toBe(1);
-    });
-
-    it('is called on updateTask', async () => {
-      const db = createMockDb();
-      addAgent(db, 1, 'guide', null);
-      addProject(db, 10);
-      addTask(db, 20, 10);
-      let taskChangeCalls = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, undefined, () => {
-        taskChangeCalls++;
-      });
-
-      await tool.execute('test', {
-        operation: 'updateTask',
-        id: 20,
-        status: 'in progress',
-      } as WriteDbParams);
-
-      expect(taskChangeCalls).toBe(1);
-    });
-
-    it('is called on claimTask', async () => {
-      const db = createMockDb();
-      addAgent(db, 2, 'conductor', 10);
-      addProject(db, 10);
-      addTask(db, 20, 10);
-      let taskChangeCalls = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2, undefined, () => {
-        taskChangeCalls++;
-      });
-
-      await tool.execute('test', {
-        operation: 'claimTask',
-        id: 20,
-      } as WriteDbParams);
-
-      expect(taskChangeCalls).toBe(1);
-    });
-
-    it('is not called when task operation fails', async () => {
-      const db = createMockDb();
-      addAgent(db, 1, 'guide', null);
-      let taskChangeCalls = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, undefined, () => {
-        taskChangeCalls++;
-      });
-
-      await tool.execute('test', {
-        operation: 'updateTask',
-        id: 999,
-        status: 'done',
-      } as WriteDbParams);
-
-      expect(taskChangeCalls).toBe(0);
-    });
-
-    it('is not called for non-task operations', async () => {
-      const db = createMockDb();
-      addAgent(db, 1, 'guide', null);
-      let taskChangeCalls = 0;
-      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, undefined, () => {
-        taskChangeCalls++;
-      });
-
-      await tool.execute('test', {
-        operation: 'createProject',
-        name: 'Proj',
-        description: 'Desc',
-      } as WriteDbParams);
-
-      expect(taskChangeCalls).toBe(0);
+      expect((result.content[0] as { text: string }).text).toContain('Error');
     });
   });
 

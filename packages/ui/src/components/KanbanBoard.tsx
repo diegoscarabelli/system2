@@ -2,13 +2,13 @@
  * KanbanBoard Component
  *
  * Live kanban dashboard showing tasks grouped by project in a swimlane layout.
- * Fetches from /api/kanban and auto-refreshes when tasksVersion increments.
+ * Fetches from /api/kanban and polls every 2 seconds for updates.
  */
 
 import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useArtifactStore } from '../stores/artifact';
+import { POLL_INTERVAL_MS } from '../constants';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 import { TaskDetailModal } from './TaskDetailModal';
@@ -23,12 +23,12 @@ const STATUS_LABELS: Record<Column, string> = {
   done: 'Done',
 };
 
-const STATUS_COLORS: Record<Column, string> = {
-  todo: colors.gray,
-  'in progress': '#58a6ff',
-  review: '#f0883e',
-  done: '#3fb950',
-};
+function statusColorForColumn(col: string, accent: string, highlight: string): string {
+  if (col === 'todo') return colors.gray;
+  if (col === 'in progress') return accent;
+  if (col === 'review') return highlight;
+  return colors.teal;
+}
 
 interface KanbanTask {
   id: number;
@@ -75,19 +75,22 @@ interface SwimlaneGroup {
 function priorityColor(priority: string, accent: string): string {
   if (priority === 'high') return colors.coral;
   if (priority === 'medium') return accent;
-  return colors.gray;
+  return colors.teal;
 }
 
 function KanbanCard({
   task,
   accent,
+  highlight,
   onClick,
 }: {
   task: KanbanTask;
   accent: string;
+  highlight: string;
   onClick: () => void;
 }) {
-  const stripeColor = priorityColor(task.priority, accent);
+  const stripeColor = statusColorForColumn(task.status, accent, highlight);
+  const prioColor = priorityColor(task.priority, accent);
   return (
     <Box
       onClick={onClick}
@@ -110,7 +113,10 @@ function KanbanCard({
         mb: 1,
       }}
     >
-      <Text sx={{ fontWeight: 'bold', fontSize: 0, lineHeight: 1.3, color: 'fg.default' }}>
+      <Text sx={{ fontWeight: 'bold', fontSize: 1, lineHeight: 1.3, color: 'fg.default' }}>
+        <Text as="span" sx={{ color: 'fg.muted' }}>
+          #{task.id}
+        </Text>{' '}
         {task.title}
       </Text>
       {task.labels.length > 0 && (
@@ -119,7 +125,7 @@ function KanbanCard({
             <Box
               key={label}
               sx={{
-                fontSize: '10px',
+                fontSize: '11px',
                 px: '5px',
                 py: '1px',
                 borderRadius: 10,
@@ -133,21 +139,24 @@ function KanbanCard({
           ))}
         </Box>
       )}
-      {task.assignee_role && (
-        <Text sx={{ fontSize: '10px', color: 'fg.subtle', textAlign: 'right', mt: '2px' }}>
-          {task.assignee_role}_{task.assignee}
-        </Text>
-      )}
+      <Box
+        sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: '2px' }}
+      >
+        <Text sx={{ fontSize: '11px', color: prioColor }}>{task.priority}</Text>
+        {task.assignee_role && (
+          <Text sx={{ fontSize: '11px', color: 'fg.default' }}>
+            {task.assignee_role}_{task.assignee}
+          </Text>
+        )}
+      </Box>
     </Box>
   );
 }
 
 export function KanbanBoard() {
-  const tasksVersion = useArtifactStore((s) => s.tasksVersion);
-  const { accent } = useAccentColors();
+  const { accent, highlight } = useAccentColors();
   const [data, setData] = useState<KanbanData | null>(null);
-  const [loading, setLoading] = useState(true); // true only on initial load
-  const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const initialized = useRef(false);
   const [filterKeyword, setFilterKeyword] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
@@ -157,41 +166,46 @@ export function KanbanBoard() {
   const handleCloseModal = useCallback(() => setSelectedTaskId(null), []);
   const handleNavigate = useCallback((id: number) => setSelectedTaskId(id), []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: tasksVersion is a refresh trigger, not a value used inside the effect
   useEffect(() => {
     const controller = new AbortController();
-    // Show full loading spinner only on first fetch; show a subtle indicator on subsequent refreshes
-    if (!initialized.current) setLoading(true);
-    else setRefreshing(true);
+    let timeoutId: ReturnType<typeof setTimeout>;
 
-    fetch('/api/kanban', { signal: controller.signal })
-      .then((r) => r.json())
-      .then((raw) => {
-        const tasks: KanbanTask[] = raw.tasks.map((t: KanbanTask & { labels: string }) => ({
-          ...t,
-          labels: (() => {
-            if (typeof t.labels !== 'string') return t.labels;
-            try {
-              return JSON.parse(t.labels) as string[];
-            } catch {
-              return [];
-            }
-          })(),
-        }));
-        setData({ ...raw, tasks });
-        initialized.current = true;
-        setLoading(false);
-        setRefreshing(false);
-      })
-      .catch((err: unknown) => {
-        if ((err as { name?: string }).name !== 'AbortError') {
+    const fetchData = () => {
+      if (!initialized.current) setLoading(true);
+
+      fetch('/api/kanban', { signal: controller.signal })
+        .then((r) => r.json())
+        .then((raw) => {
+          const tasks: KanbanTask[] = raw.tasks.map((t: KanbanTask & { labels: string }) => ({
+            ...t,
+            labels: (() => {
+              if (typeof t.labels !== 'string') return t.labels;
+              try {
+                return JSON.parse(t.labels) as string[];
+              } catch {
+                return [];
+              }
+            })(),
+          }));
+          setData({ ...raw, tasks });
+          initialized.current = true;
           setLoading(false);
-          setRefreshing(false);
-        }
-      });
+          timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+        })
+        .catch((err: unknown) => {
+          if ((err as { name?: string }).name !== 'AbortError') {
+            setLoading(false);
+            timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
+          }
+        });
+    };
 
-    return () => controller.abort();
-  }, [tasksVersion]);
+    fetchData();
+    return () => {
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
+  }, []);
 
   const groups = useMemo<SwimlaneGroup[]>(() => {
     if (!data) return [];
@@ -243,7 +257,7 @@ export function KanbanBoard() {
     border: '1px solid var(--borderColor-default)',
     borderRadius: 6,
     padding: '4px 8px',
-    fontSize: 12,
+    fontSize: 13,
     color: 'var(--fgColor-default)',
     outline: 'none',
   };
@@ -308,9 +322,6 @@ export function KanbanBoard() {
             </option>
           ))}
         </select>
-        {refreshing && (
-          <Text sx={{ fontSize: '11px', color: 'fg.subtle', ml: 1 }}>Refreshing...</Text>
-        )}
       </Box>
 
       {/* Board (scrollable) */}
@@ -337,11 +348,11 @@ export function KanbanBoard() {
                     width: 10,
                     height: 10,
                     borderRadius: '50%',
-                    backgroundColor: STATUS_COLORS[col],
+                    backgroundColor: statusColorForColumn(col, accent, highlight),
                     flexShrink: 0,
                   }}
                 />
-                <Text sx={{ fontSize: 0, fontWeight: 'semibold', color: 'fg.default' }}>
+                <Text sx={{ fontSize: 1, fontWeight: 'semibold', color: 'fg.default' }}>
                   {STATUS_LABELS[col]}
                 </Text>
                 <Box
@@ -349,7 +360,7 @@ export function KanbanBoard() {
                     px: '5px',
                     borderRadius: 10,
                     backgroundColor: 'neutral.muted',
-                    fontSize: '10px',
+                    fontSize: '11px',
                     color: 'fg.muted',
                     lineHeight: '18px',
                     minWidth: 20,
@@ -368,7 +379,12 @@ export function KanbanBoard() {
           const isCollapsed = collapsed.has(group.id);
           const total = group.tasks.length;
           const doneCount = group.tasks.filter((t) => t.status === 'done').length;
-          const pct = total > 0 ? (doneCount / total) * 100 : 0;
+          const statusCounts = {
+            done: doneCount,
+            review: group.tasks.filter((t) => t.status === 'review').length,
+            'in progress': group.tasks.filter((t) => t.status === 'in progress').length,
+            todo: group.tasks.filter((t) => t.status === 'todo').length,
+          };
 
           return (
             <Box
@@ -397,45 +413,50 @@ export function KanbanBoard() {
                 <Text sx={{ fontWeight: 'bold', fontSize: 1, color: 'fg.default' }}>
                   {group.name}
                 </Text>
-                {group.id !== null && (
-                  <Box
-                    sx={{
-                      px: '5px',
-                      py: '1px',
-                      borderRadius: 4,
-                      border: '1px solid',
-                      borderColor: 'border.default',
-                      fontSize: '10px',
-                      color: 'fg.muted',
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    {group.status}
-                  </Box>
-                )}
-                <Text sx={{ fontSize: '11px', color: 'fg.muted' }}>
+                {group.id !== null &&
+                  (() => {
+                    const sc = statusColorForColumn(group.status, accent, highlight);
+                    return (
+                      <Box
+                        sx={{
+                          px: '5px',
+                          py: '1px',
+                          borderRadius: 4,
+                          backgroundColor: `${sc}22`,
+                          border: `1px solid ${sc}44`,
+                          fontSize: '11px',
+                          color: sc,
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        {group.status}
+                      </Box>
+                    );
+                  })()}
+                <Text sx={{ fontSize: 0, color: 'fg.muted' }}>
                   {doneCount}/{total}
                 </Text>
                 {total > 0 && (
-                  <Box sx={{ maxWidth: 100 }}>
-                    <Box
-                      sx={{
-                        height: '4px',
-                        borderRadius: 2,
-                        backgroundColor: 'border.muted',
-                        overflow: 'hidden',
-                        width: 80,
-                      }}
-                    >
+                  <Box
+                    sx={{
+                      height: '4px',
+                      borderRadius: 2,
+                      backgroundColor: 'border.muted',
+                      overflow: 'hidden',
+                      width: 80,
+                      display: 'flex',
+                    }}
+                  >
+                    {COLUMNS.filter((col) => statusCounts[col] > 0).map((col) => (
                       <Box
+                        key={col}
                         sx={{
                           height: '100%',
-                          width: `${pct}%`,
-                          backgroundColor: '#3fb950',
-                          borderRadius: 2,
+                          width: `${(statusCounts[col] / total) * 100}%`,
+                          backgroundColor: statusColorForColumn(col, accent, highlight),
                         }}
                       />
-                    </Box>
+                    ))}
                   </Box>
                 )}
               </Box>
@@ -446,7 +467,6 @@ export function KanbanBoard() {
                   sx={{
                     display: 'grid',
                     gridTemplateColumns: `repeat(${COLUMNS.length}, 1fr)`,
-                    alignItems: 'start',
                   }}
                 >
                   {COLUMNS.map((col, i) => {
@@ -468,6 +488,7 @@ export function KanbanBoard() {
                             key={task.id}
                             task={task}
                             accent={accent}
+                            highlight={highlight}
                             onClick={() => setSelectedTaskId(task.id)}
                           />
                         ))}
