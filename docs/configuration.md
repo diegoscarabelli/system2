@@ -74,7 +74,7 @@ max_archives = 5            # Max rotated log files
 daily_summary_interval_minutes = 30  # Narrator summary frequency
 
 [chat]
-max_history_messages = 100  # Max messages in chat history ring buffer
+max_history_messages = 1000  # Max messages in chat history ring buffer
 ```
 
 ## Sections
@@ -135,7 +135,7 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 ├── .git/                  # Version control for text files
 ├── config.toml            # Settings and credentials (0600)
 ├── app.db                 # SQLite database
-├── chat-history.json      # Chat message ring buffer (max 100)
+├── chat-history.json      # Chat message ring buffer (max 1000)
 ├── server.pid             # PID file when server is running
 ├── knowledge/
 │   ├── infrastructure.md  # Data stack details (Guide)
