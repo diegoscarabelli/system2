@@ -39,6 +39,8 @@ export function ArtifactCatalog() {
   const initialized = useRef(false);
   const tagsInitialized = useRef(false);
   const projectsInitialized = useRef(false);
+  const knownTags = useRef<Set<string>>(new Set());
+  const knownProjects = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -66,38 +68,37 @@ export function ArtifactCatalog() {
           const tagValues = ['', ...tags];
           if (!tagsInitialized.current) {
             tagsInitialized.current = true;
+            knownTags.current = new Set(tagValues);
             setSelectedTags(new Set<string>(tagValues));
           } else {
-            setSelectedTags((prev) => {
-              let changed = false;
-              const next = new Set(prev);
-              for (const t of tagValues) {
-                if (!next.has(t)) {
-                  next.add(t);
-                  changed = true;
-                }
-              }
-              return changed ? next : prev;
-            });
+            const newTags = tagValues.filter((t) => !knownTags.current.has(t));
+            if (newTags.length > 0) {
+              for (const t of newTags) knownTags.current.add(t);
+              setSelectedTags((prev) => {
+                const next = new Set(prev);
+                for (const t of newTags) next.add(t);
+                return next;
+              });
+            }
           }
           const projects = [
-            ...new Set<string>(parsed.map((a: CatalogArtifact) => a.project_name || 'General')),
+            ...new Set<string>(parsed.map((a: CatalogArtifact) => a.project_name || '')),
           ];
+          const projectValues = ['', ...projects.filter((p) => p !== '')];
           if (!projectsInitialized.current) {
             projectsInitialized.current = true;
-            setSelectedProjects(new Set<string>(projects));
+            knownProjects.current = new Set(projectValues);
+            setSelectedProjects(new Set<string>(projectValues));
           } else {
-            setSelectedProjects((prev) => {
-              let changed = false;
-              const next = new Set(prev);
-              for (const p of projects) {
-                if (!next.has(p)) {
-                  next.add(p);
-                  changed = true;
-                }
-              }
-              return changed ? next : prev;
-            });
+            const newProjects = projectValues.filter((p) => !knownProjects.current.has(p));
+            if (newProjects.length > 0) {
+              for (const p of newProjects) knownProjects.current.add(p);
+              setSelectedProjects((prev) => {
+                const next = new Set(prev);
+                for (const p of newProjects) next.add(p);
+                return next;
+              });
+            }
           }
           initialized.current = true;
           setLoading(false);
@@ -149,12 +150,24 @@ export function ArtifactCatalog() {
   const allTags = useMemo(() => [...new Set(artifacts.flatMap((a) => a.tags))].sort(), [artifacts]);
 
   const allProjects = useMemo(
-    () => [...new Set(artifacts.map((a) => a.project_name || 'General'))].sort(),
+    () => [...new Set(artifacts.map((a) => a.project_name || ''))].filter((p) => p !== '').sort(),
     [artifacts]
   );
+  const hasNoProjectArtifacts = artifacts.some((a) => !a.project_name);
 
-  const allTagsSelected = selectedTags.size === allTags.length + 1;
-  const allProjectsSelected = selectedProjects.size === allProjects.length;
+  const tagOptions = useMemo(
+    () => [{ value: '', label: 'None' }, ...allTags.map((t) => ({ value: t, label: t }))],
+    [allTags]
+  );
+  const projectOptions = useMemo(
+    () => [
+      ...(hasNoProjectArtifacts ? [{ value: '', label: 'None' }] : []),
+      ...allProjects.map((p) => ({ value: p, label: p })),
+    ],
+    [allProjects, hasNoProjectArtifacts]
+  );
+  const allTagsSelected = tagOptions.every((o) => selectedTags.has(o.value));
+  const allProjectsSelected = projectOptions.every((o) => selectedProjects.has(o.value));
 
   // Filter artifacts
   const filtered = useMemo(() => {
@@ -165,7 +178,7 @@ export function ArtifactCatalog() {
           if (!selectedTags.has('')) return false;
         } else if (!a.tags.some((t) => selectedTags.has(t))) return false;
       }
-      if (!allProjectsSelected && !selectedProjects.has(a.project_name || 'General')) return false;
+      if (!allProjectsSelected && !selectedProjects.has(a.project_name || '')) return false;
       if (!q) return true;
       return (
         a.title.toLowerCase().includes(q) ||
@@ -179,7 +192,7 @@ export function ArtifactCatalog() {
   // Group filtered artifacts by project
   const grouped = new Map<string, CatalogArtifact[]>();
   for (const a of filtered) {
-    const key = a.project_name || 'General';
+    const key = a.project_name || 'No Project';
     const list = grouped.get(key) || [];
     list.push(a);
     grouped.set(key, list);
@@ -231,20 +244,17 @@ export function ArtifactCatalog() {
           sx={{ fontSize: 0, width: '100%' }}
         />
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          {allProjects.length > 0 && (
+          {projectOptions.length > 0 && (
             <MultiSelectDropdown
               label="projects"
-              options={allProjects.map((p) => ({ value: p, label: p }))}
+              options={projectOptions}
               selected={selectedProjects}
               onChange={setSelectedProjects}
             />
           )}
           <MultiSelectDropdown
             label="tags"
-            options={[
-              { value: '', label: 'None' },
-              ...allTags.map((t) => ({ value: t, label: t })),
-            ]}
+            options={tagOptions}
             selected={selectedTags}
             onChange={setSelectedTags}
           />

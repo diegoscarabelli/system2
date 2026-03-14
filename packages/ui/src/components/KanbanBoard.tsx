@@ -162,7 +162,7 @@ function KanbanCard({
   );
 }
 
-const ALL_PRIORITIES = new Set(['', 'high', 'medium', 'low']);
+const ALL_PRIORITIES = new Set(['high', 'medium', 'low']);
 const ALL_STATUSES = new Set(['todo', 'in progress', 'review', 'done', 'abandoned']);
 
 export function KanbanBoard() {
@@ -179,6 +179,8 @@ export function KanbanBoard() {
   const collapsedInitialized = useRef(false);
   const assigneesInitialized = useRef(false);
   const labelsInitialized = useRef(false);
+  const knownAssignees = useRef<Set<string>>(new Set());
+  const knownLabels = useRef<Set<string>>(new Set());
 
   // Auto-collapse done/abandoned projects on first load
   useEffect(() => {
@@ -223,36 +225,34 @@ export function KanbanBoard() {
           const agentValues = ['', ...raw.agents.map((a: KanbanAgent) => String(a.id))];
           if (!assigneesInitialized.current) {
             assigneesInitialized.current = true;
+            knownAssignees.current = new Set(agentValues);
             setFilterAssignees(new Set(agentValues));
           } else {
-            setFilterAssignees((prev) => {
-              let changed = false;
-              const next = new Set(prev);
-              for (const v of agentValues) {
-                if (!next.has(v)) {
-                  next.add(v);
-                  changed = true;
-                }
-              }
-              return changed ? next : prev;
-            });
+            const newAssignees = agentValues.filter((v) => !knownAssignees.current.has(v));
+            if (newAssignees.length > 0) {
+              for (const v of newAssignees) knownAssignees.current.add(v);
+              setFilterAssignees((prev) => {
+                const next = new Set(prev);
+                for (const v of newAssignees) next.add(v);
+                return next;
+              });
+            }
           }
           const labelValues = ['', ...new Set(tasks.flatMap((t: KanbanTask) => t.labels))];
           if (!labelsInitialized.current) {
             labelsInitialized.current = true;
+            knownLabels.current = new Set(labelValues);
             setFilterLabels(new Set(labelValues));
           } else {
-            setFilterLabels((prev) => {
-              let changed = false;
-              const next = new Set(prev);
-              for (const v of labelValues) {
-                if (!next.has(v)) {
-                  next.add(v);
-                  changed = true;
-                }
-              }
-              return changed ? next : prev;
-            });
+            const newLabels = labelValues.filter((v) => !knownLabels.current.has(v));
+            if (newLabels.length > 0) {
+              for (const v of newLabels) knownLabels.current.add(v);
+              setFilterLabels((prev) => {
+                const next = new Set(prev);
+                for (const v of newLabels) next.add(v);
+                return next;
+              });
+            }
           }
           initialized.current = true;
           setLoading(false);
@@ -308,16 +308,40 @@ export function KanbanBoard() {
     [data]
   );
 
-  const allPrioritiesSelected = filterPriorities.size === ALL_PRIORITIES.size;
-  const allAssigneesSelected = data !== null && filterAssignees.size === data.agents.length + 1;
-  const allLabelsSelected = filterLabels.size === allLabels.length + 1;
+  const priorityOptions = [
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'low', label: 'Low' },
+  ];
+
+  const assigneeOptions = [
+    { value: '', label: 'None' },
+    ...(data ? data.agents.map((a) => ({ value: String(a.id), label: `${a.role}_${a.id}` })) : []),
+  ];
+
+  const labelOptions = [
+    { value: '', label: 'None' },
+    ...allLabels.map((l) => ({ value: l, label: l })),
+  ];
+
+  const statusOptions = [
+    { value: 'todo', label: 'Todo' },
+    { value: 'in progress', label: 'In Progress' },
+    { value: 'review', label: 'Review' },
+    { value: 'done', label: 'Done' },
+    { value: 'abandoned', label: 'Abandoned' },
+  ];
+
+  const allPrioritiesSelected = priorityOptions.every((o) => filterPriorities.has(o.value));
+  const allAssigneesSelected = assigneeOptions.every((o) => filterAssignees.has(o.value));
+  const allLabelsSelected = labelOptions.every((o) => filterLabels.has(o.value));
 
   const filteredTasks = useMemo<KanbanTask[]>(() => {
     if (!data) return [];
     return data.tasks.filter((t) => {
       if (filterKeyword && !t.title.toLowerCase().includes(filterKeyword.toLowerCase()))
         return false;
-      if (!allPrioritiesSelected && !filterPriorities.has(t.priority ?? '')) return false;
+      if (!allPrioritiesSelected && !filterPriorities.has(t.priority)) return false;
       if (!allAssigneesSelected && !filterAssignees.has(String(t.assignee ?? ''))) return false;
       if (!allLabelsSelected) {
         if (t.labels.length === 0) {
@@ -345,31 +369,6 @@ export function KanbanBoard() {
       return next;
     });
   };
-
-  const priorityOptions = [
-    { value: '', label: 'None' },
-    { value: 'high', label: 'High' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'low', label: 'Low' },
-  ];
-
-  const assigneeOptions = [
-    { value: '', label: 'None' },
-    ...(data ? data.agents.map((a) => ({ value: String(a.id), label: `${a.role}_${a.id}` })) : []),
-  ];
-
-  const labelOptions = [
-    { value: '', label: 'None' },
-    ...allLabels.map((l) => ({ value: l, label: l })),
-  ];
-
-  const statusOptions = [
-    { value: 'todo', label: 'Todo' },
-    { value: 'in progress', label: 'In Progress' },
-    { value: 'review', label: 'Review' },
-    { value: 'done', label: 'Done' },
-    { value: 'abandoned', label: 'Abandoned' },
-  ];
 
   if (loading) {
     return (
