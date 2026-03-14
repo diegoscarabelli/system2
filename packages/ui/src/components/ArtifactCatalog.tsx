@@ -81,10 +81,15 @@ export function ArtifactCatalog() {
               });
             }
           }
-          const projects = [
-            ...new Set<string>(parsed.map((a: CatalogArtifact) => a.project_name || '')),
+          const projectNames = [
+            ...new Set<string>(
+              parsed
+                .filter((a: CatalogArtifact) => a.project_name)
+                .map((a: CatalogArtifact) => a.project_name as string)
+            ),
           ];
-          const projectValues = ['', ...projects.filter((p) => p !== '')];
+          const hasNullProject = parsed.some((a: CatalogArtifact) => !a.project_name);
+          const projectValues = [...(hasNullProject ? [''] : []), ...projectNames];
           if (!projectsInitialized.current) {
             projectsInitialized.current = true;
             knownProjects.current = new Set(projectValues);
