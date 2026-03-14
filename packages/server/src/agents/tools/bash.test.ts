@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBashTool } from './bash.js';
+
+const isWindows = platform() === 'win32';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `system2-test-bash-${randomUUID().slice(0, 8)}`);
@@ -61,9 +63,11 @@ describe('bash tool', () => {
 
     it('uses custom cwd', async () => {
       const dir = trackDir(makeTmpDir());
-      const result = await exec({ command: 'pwd', cwd: dir });
+      const marker = `marker-${randomUUID().slice(0, 8)}`;
+      const cmd = isWindows ? `New-Item -Name ${marker} -ItemType File` : `touch ${marker}`;
+      await exec({ command: cmd, cwd: dir });
 
-      expect((result.content[0] as { text: string }).text.trim()).toContain(dir);
+      expect(existsSync(join(dir, marker))).toBe(true);
     });
 
     it('returns error when signal is already aborted', async () => {
