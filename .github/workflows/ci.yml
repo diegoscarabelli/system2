@@ -23,8 +23,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Build shared types
-        run: pnpm --filter @system2/shared build
+      - name: Build
+        run: pnpm build
 
       - name: Lint & format
         run: pnpm check
