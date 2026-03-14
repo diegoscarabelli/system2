@@ -98,7 +98,7 @@ Configuration: 120 particles in accent + teal colors, linked within 150px distan
 
 ### ArtifactCatalog
 
-Side panel showing all registered artifacts from the database. Polls `GET /api/artifacts` every 2 seconds. Groups artifacts by project (null project shown as "General"). Supports text search and project/tag filtering via `MultiSelectDropdown` components (same as KanbanBoard filters). Tags dropdown includes a "None" option for untagged artifacts; inline tag badges use a static accent style (not affected by dropdown selection). Clicking an item opens it as a new tab in ArtifactViewer. Toggled via StackIcon in the activity bar.
+Side panel showing all registered artifacts from the database. Polls `GET /api/artifacts` every 2 seconds. Groups artifacts by project (null project shown as "No Project"). Supports text search and project/tag filtering via `MultiSelectDropdown` components (same as KanbanBoard filters). Both project and tags dropdowns include a "None" option for artifacts without a project or tags respectively; inline tag badges use a static accent style (not affected by dropdown selection). Clicking an item opens it as a new tab in ArtifactViewer. Toggled via StackIcon in the activity bar.
 
 ### KanbanBoard
 
@@ -110,7 +110,7 @@ Polls `GET /api/kanban` every 2 seconds. On initial load shows a full loading st
 
 **Cards:** Priority stripe on left edge (coral = high, accent = medium, gray = low), bold title, label chips, and assignee role badge.
 
-**Filters:** Keyword search (with SearchIcon, Primer TextInput, wrapping toolbar), plus four multiselect dropdowns (priority, assignee, labels, status) built with `MultiSelectDropdown`. Each supports checkbox toggling with an "All" toggle that selects/deselects all options. Priority, assignee, and labels include a "None" option for tasks without a value. The labels dropdown is derived from task labels. The status dropdown controls which columns are visible (projects always remain visible). Dropdown panels cap at `maxHeight: 250px` with scroll for long option lists. Dynamic filters (assignees, labels) are initialized with explicit full sets on first data load; uses `scrollbarGutter: stable` on both column headers and swimlane scroll area to keep vertical dividers aligned.
+**Filters:** Keyword search (with SearchIcon, Primer TextInput, wrapping toolbar), plus four multiselect dropdowns (priority, assignee, labels, status) built with `MultiSelectDropdown`. Each supports checkbox toggling with an "All" toggle that selects/deselects all options. Assignee and labels include a "None" option for tasks without a value; priority does not (all tasks have a priority). The labels dropdown is derived from task labels. The status dropdown controls which columns are visible (projects always remain visible). Dropdown panels cap at `maxHeight: 250px` with scroll for long option lists. Dynamic filters (assignees, labels) are initialized with explicit full sets on first data load; uses `scrollbarGutter: stable` on both column headers and swimlane scroll area to keep vertical dividers aligned.
 
 Clicking a card opens a `TaskDetailModal` overlay for that task. Clicking the info icon on a swimlane header opens a `ProjectDetailModal` overlay for that project.
 
