@@ -220,14 +220,39 @@ export function KanbanBoard() {
             })(),
           }));
           setData({ ...raw, tasks });
+          const agentValues = ['', ...raw.agents.map((a: KanbanAgent) => String(a.id))];
           if (!assigneesInitialized.current) {
             assigneesInitialized.current = true;
-            setFilterAssignees(new Set(['', ...raw.agents.map((a: KanbanAgent) => String(a.id))]));
+            setFilterAssignees(new Set(agentValues));
+          } else {
+            setFilterAssignees((prev) => {
+              let changed = false;
+              const next = new Set(prev);
+              for (const v of agentValues) {
+                if (!next.has(v)) {
+                  next.add(v);
+                  changed = true;
+                }
+              }
+              return changed ? next : prev;
+            });
           }
+          const labelValues = ['', ...new Set(tasks.flatMap((t: KanbanTask) => t.labels))];
           if (!labelsInitialized.current) {
             labelsInitialized.current = true;
-            const labels = [...new Set(tasks.flatMap((t: KanbanTask) => t.labels))];
-            setFilterLabels(new Set(['', ...labels]));
+            setFilterLabels(new Set(labelValues));
+          } else {
+            setFilterLabels((prev) => {
+              let changed = false;
+              const next = new Set(prev);
+              for (const v of labelValues) {
+                if (!next.has(v)) {
+                  next.add(v);
+                  changed = true;
+                }
+              }
+              return changed ? next : prev;
+            });
           }
           initialized.current = true;
           setLoading(false);

@@ -62,17 +62,42 @@ export function ArtifactCatalog() {
             return { ...a, tags };
           });
           setArtifacts(parsed);
+          const tags = [...new Set<string>(parsed.flatMap((a: CatalogArtifact) => a.tags))];
+          const tagValues = ['', ...tags];
           if (!tagsInitialized.current) {
             tagsInitialized.current = true;
-            const tags = [...new Set<string>(parsed.flatMap((a: CatalogArtifact) => a.tags))];
-            setSelectedTags(new Set<string>(['', ...tags]));
+            setSelectedTags(new Set<string>(tagValues));
+          } else {
+            setSelectedTags((prev) => {
+              let changed = false;
+              const next = new Set(prev);
+              for (const t of tagValues) {
+                if (!next.has(t)) {
+                  next.add(t);
+                  changed = true;
+                }
+              }
+              return changed ? next : prev;
+            });
           }
+          const projects = [
+            ...new Set<string>(parsed.map((a: CatalogArtifact) => a.project_name || 'General')),
+          ];
           if (!projectsInitialized.current) {
             projectsInitialized.current = true;
-            const projects = [
-              ...new Set<string>(parsed.map((a: CatalogArtifact) => a.project_name || 'General')),
-            ];
             setSelectedProjects(new Set<string>(projects));
+          } else {
+            setSelectedProjects((prev) => {
+              let changed = false;
+              const next = new Set(prev);
+              for (const p of projects) {
+                if (!next.has(p)) {
+                  next.add(p);
+                  changed = true;
+                }
+              }
+              return changed ? next : prev;
+            });
           }
           initialized.current = true;
           setLoading(false);

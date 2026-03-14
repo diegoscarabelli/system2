@@ -54,19 +54,17 @@ export function MultiSelectDropdown({
   }, [open]);
 
   const toggleAll = () => {
-    if (!allSelected) {
+    if (allSelected) {
+      onChange(new Set());
+    } else {
       onChange(new Set(options.map((o) => o.value)));
     }
   };
 
   const toggleOption = (value: string) => {
     const base = new Set(selected);
-    if (base.has(value)) {
-      if (base.size <= 1) return;
-      base.delete(value);
-    } else {
-      base.add(value);
-    }
+    if (base.has(value)) base.delete(value);
+    else base.add(value);
     onChange(base);
   };
 
@@ -153,7 +151,7 @@ export function MultiSelectDropdown({
               type="checkbox"
               checked={allSelected}
               onChange={toggleAll}
-              style={{ cursor: allSelected ? 'default' : 'pointer' }}
+              style={{ cursor: 'pointer' }}
             />
             <Text sx={{ fontSize: '13px', fontWeight: 'semibold' }}>All</Text>
           </Box>
