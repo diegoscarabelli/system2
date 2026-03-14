@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  check:
-    name: Build, Lint & Test
+  lint-and-format:
+    name: Code Quality Checks
     runs-on: ubuntu-latest
 
     steps:
@@ -30,6 +30,28 @@ jobs:
 
       - name: Type check
         run: pnpm typecheck
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm build
