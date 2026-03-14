@@ -103,6 +103,11 @@ The `/api/agents` endpoint combines DB agent records with in-memory runtime stat
 
 ## Message Delivery
 
+Messages flow through two paths depending on whether the sender is the user or another agent:
+
+- **User → Guide → User**: the UI sends a `user_message` over WebSocket. The `WebSocketHandler` calls `agentHost.prompt()`, which blocks while the agent processes. As the agent thinks, generates text, and executes tools, session events stream back through the WebSocket as typed `ServerMessage` chunks. Chat history is captured in a server-side ring buffer (default 1000 messages) and replayed on reconnect, so the UI is stateless. See [WebSocket Protocol](websocket-protocol.md) for the full message format, queuing, multi-tab broadcast, and history capture.
+- **Agent → Agent**: agents communicate via `deliverMessage()`, which wraps the Pi SDK's `sendCustomMessage()`. Messages appear as `custom_message` entries in the recipient's session. The Guide relays relevant agent updates to the user as part of its normal response stream.
+
 Two methods for sending messages, chosen based on the sender:
 
 | Method | Creates | Used By | Behavior |
