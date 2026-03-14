@@ -433,7 +433,7 @@ function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: 
     <Fragment>
       {/* Turn events in chronological order (thinking blocks and tool calls) */}
       {hasTurnEvents &&
-        message.turnEvents?.map((event) => (
+        message.turnEvents?.map((event: TurnEvent) => (
           <TurnEventItem
             key={event.type === 'thinking' ? event.data.id : event.data.id}
             event={event}
