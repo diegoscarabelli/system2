@@ -68,12 +68,13 @@ export function MultiSelectDropdown({
     onChange(base);
   };
 
+  const capitalizedLabel = label.charAt(0).toUpperCase() + label.slice(1);
   const displayLabel = allSelected
     ? `All ${label}`
     : selected.size === 0
-      ? label
+      ? capitalizedLabel
       : selected.size === 1
-        ? (options.find((o) => selected.has(o.value))?.label ?? label)
+        ? (options.find((o) => selected.has(o.value))?.label ?? capitalizedLabel)
         : `${selected.size} ${label}`;
 
   return (
