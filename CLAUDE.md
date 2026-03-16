@@ -13,7 +13,7 @@ The [`README.md`](README.md) file is the project's public-facing landing page: w
 The [`CONTRIBUTING.md`](CONTRIBUTING.md) file contains development guidelines. Key sections:
 
 - **How to Contribute**: Fork-based workflow, branch naming conventions, PR process.
-- **Development Setup**: Prerequisites (Node.js >= 18, pnpm >= 8) and setup commands.
+- **Development Setup**: Prerequisites (Node.js >= 20, pnpm >= 8) and setup commands.
 - **Building**: Package build order and outputs.
 - **Code Quality**: Biome formatting/linting rules and commands.
 - **Before Committing**: Required quality checks before every commit.

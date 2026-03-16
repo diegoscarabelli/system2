@@ -109,7 +109,7 @@ Before submitting a PR, ensure:
 
 ### Prerequisites
 
-- Node.js >= 18
+- Node.js >= 20
 - pnpm >= 8
 - System2 installed globally (`npm install -g @system2/cli`) and onboarded (`system2 onboard`)
 

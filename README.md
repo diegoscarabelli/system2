@@ -70,7 +70,7 @@ Guide:  Project created. Conductor and Reviewer are spinning up now.
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20+
 - pnpm 8+
 - At least one LLM API key (Anthropic, Google, or OpenAI)
 - macOS, Linux, or Windows
