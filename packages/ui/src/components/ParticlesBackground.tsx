@@ -4,15 +4,23 @@ import { loadSlim } from '@tsparticles/slim';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
+import { MinSpeedUpdater } from './MinSpeedUpdater';
 
 export const ParticlesBackground = memo(function ParticlesBackground() {
   const [engineReady, setEngineReady] = useState(false);
   const { accent } = useAccentColors();
 
   useEffect(() => {
+    let cancelled = false;
     initParticlesEngine(async (engine) => {
       await loadSlim(engine);
-    }).then(() => setEngineReady(true));
+      await engine.addParticleUpdater('minSpeed', async () => new MinSpeedUpdater());
+    }).then(() => {
+      if (!cancelled) setEngineReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // canvas.windowResize() is called by the tsparticles window resize event listener.
