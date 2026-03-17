@@ -53,3 +53,10 @@ export const palettes = {
     accentText: '#ffffff',
   },
 } as const satisfies Record<string, ThemePalette>;
+
+/** Map a context-usage percentage to a severity color. */
+export function contextColor(percent: number, accent: string): string {
+  if (percent >= 70) return colors.coral;
+  if (percent >= 50) return accent;
+  return colors.teal;
+}

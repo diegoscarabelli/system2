@@ -10,7 +10,7 @@ import { ArrowUpIcon, SquareFillIcon } from '@primer/octicons-react';
 import { Box } from '@primer/react';
 import { useRef, useState } from 'react';
 import { useChatStore } from '../stores/chat';
-import { colors } from '../theme/colors';
+import { colors, contextColor } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
 const LINE_HEIGHT = 20; // px per line
@@ -68,7 +68,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
   };
 
-  const contextColor = contextPercent !== null && contextPercent > 80 ? colors.coral : accent;
+  const ctxColor = contextPercent !== null ? contextColor(contextPercent, accent) : colors.teal;
 
   return (
     <Box
@@ -207,7 +207,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
                   cy="8"
                   r="7"
                   fill="none"
-                  stroke={contextColor}
+                  stroke={ctxColor}
                   strokeWidth="2"
                   strokeDasharray={`${(contextPercent / 100) * 44} 44`}
                   strokeLinecap="round"

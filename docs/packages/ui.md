@@ -73,7 +73,7 @@ Each assistant message shows its turn events (thinking -> tool calls -> response
 
 ### MessageInput
 
-Auto-growing textarea (1-10 lines, then scrolls). Shows the current LLM provider name and context window usage percentage (turns red above 80%) in the status bar, plus queued message count. Toggles between Send and Stop buttons based on streaming state. Provider changes on failover trigger a system message in the chat timeline.
+Auto-growing textarea (1-10 lines, then scrolls). Shows the current LLM provider name and context window usage percentage (teal below 50%, accent 50-69%, coral at 70%+) in the status bar, plus queued message count. Toggles between Send and Stop buttons based on streaming state. Provider changes on failover trigger a system message in the chat timeline.
 
 ### ArtifactViewer
 
