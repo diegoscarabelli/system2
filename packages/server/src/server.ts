@@ -23,6 +23,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { AgentHost } from './agents/host.js';
 import { AgentRegistry } from './agents/registry.js';
+import type { AgentResurrector } from './agents/tools/resurrect-agent.js';
 import type { AgentSpawner } from './agents/tools/spawn-agent.js';
 import { MessageHistory } from './chat/history.js';
 import { DatabaseClient } from './db/client.js';
@@ -90,6 +91,7 @@ export class Server {
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
       spawner: this.makeSpawner(),
+      resurrector: this.makeResurrector(),
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
 
@@ -338,6 +340,22 @@ export class Server {
     };
 
     return spawner;
+  }
+
+  /**
+   * Create a resurrector callback that re-initializes archived agents.
+   * Reuses initializeAgentHost which resumes from persisted JSONL sessions.
+   */
+  private makeResurrector(): AgentResurrector {
+    return async (agentId, callerAgentId, message) => {
+      const host = await this.initializeAgentHost(agentId);
+
+      host.deliverMessage(message, {
+        sender: callerAgentId,
+        receiver: agentId,
+        timestamp: Date.now(),
+      });
+    };
   }
 
   /**

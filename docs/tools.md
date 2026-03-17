@@ -9,6 +9,7 @@ Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts
 - Eight tools are always included: `bash`, `read`, `edit`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `web_fetch`
 - `show_artifact` is Guide-only: the Guide is the only agent that interacts with the user via the UI
 - `spawn_agent`, `terminate_agent`, and `trigger_project_story` are conditional: only agents that receive a spawner callback (Guide and Conductors) get these tools
+- `resurrect_agent` is Guide-only: only the Guide receives a resurrector callback
 - `web_search` is conditional on a Brave Search API key being configured
 
 ## Tool Reference
@@ -211,9 +212,27 @@ Archive an active agent: abort its session, unregister from `AgentRegistry`, and
 - Only Guide and Conductor roles may terminate agents
 - Conductors can only terminate agents in their own project
 
+### `resurrect_agent`
+
+Resurrect an archived agent: restore its session from persisted JSONL history, re-register it in `AgentRegistry`, and deliver a context message.
+
+| Parameter  | Type   | Description                                                                                                        |
+|------------|--------|--------------------------------------------------------------------------------------------------------------------|
+| `agent_id` | number | Database ID of the archived agent to resurrect                                                                     |
+| `message`  | string | Context message orienting the agent about the time gap, why it is being resurrected, and what work is now expected |
+
+**Permission model:**
+
+- Only the Guide may resurrect agents
+- Singleton agents (Guide, Narrator) cannot be resurrected
+- Already-active agents cannot be resurrected
+- On failure, the DB status is rolled back to `archived`
+
+**Conditional:** only registered when the `AgentHost` is created with a `resurrector` callback (Guide only).
+
 ## See Also
 
-- [Agents](agents.md): agent roles, lifecycle, spawn/terminate, work management
+- [Agents](agents.md): agent roles, lifecycle, spawn/terminate/resurrect, work management
 - [Database](database.md): schema for `read_system2_db` and `write_system2_db`
 - [Configuration](configuration.md): web search configuration
 - [UI](packages/ui.md): artifact display and postMessage bridge

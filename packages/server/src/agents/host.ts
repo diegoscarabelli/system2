@@ -30,6 +30,7 @@ import { createEditTool } from './tools/edit.js';
 import { createMessageAgentTool } from './tools/message-agent.js';
 import { createReadTool } from './tools/read.js';
 import { createReadSystem2DbTool } from './tools/read-system2-db.js';
+import { type AgentResurrector, createResurrectAgentTool } from './tools/resurrect-agent.js';
 import { createShowArtifactTool } from './tools/show-artifact.js';
 import { type AgentSpawner, createSpawnAgentTool } from './tools/spawn-agent.js';
 import { createTerminateAgentTool } from './tools/terminate-agent.js';
@@ -74,6 +75,7 @@ export interface AgentHostConfig {
   servicesConfig?: ServicesConfig;
   toolsConfig?: ToolsConfig;
   spawner?: AgentSpawner;
+  resurrector?: AgentResurrector;
 }
 
 export class AgentHost {
@@ -84,6 +86,7 @@ export class AgentHost {
   private servicesConfig?: ServicesConfig;
   private toolsConfig?: ToolsConfig;
   private spawner?: AgentSpawner;
+  private resurrector?: AgentResurrector;
   private llmConfig: LlmConfig;
   private authResolver: AuthResolver;
   private modelRegistry: ModelRegistry;
@@ -109,6 +112,7 @@ export class AgentHost {
     this.servicesConfig = config.servicesConfig;
     this.toolsConfig = config.toolsConfig;
     this.spawner = config.spawner;
+    this.resurrector = config.resurrector;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -552,6 +556,11 @@ export class AgentHost {
       tools.push(createSpawnAgentTool(this.db, this.agentId, this.spawner));
       tools.push(createTerminateAgentTool(this.db, this.agentId, this.registry));
       tools.push(createTriggerProjectStoryTool(this.db, this.agentId, this.registry));
+    }
+
+    // resurrect_agent is Guide-only (resurrector callback only provided to Guide)
+    if (this.resurrector) {
+      tools.push(createResurrectAgentTool(this.db, this.agentId, this.resurrector));
     }
 
     return tools;
