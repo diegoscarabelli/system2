@@ -36,7 +36,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
     if (!input.trim()) return;
 
     if (isStreaming) {
-      onQueue(input.trim(), true);
+      onQueue(input.trim());
     } else {
       onSend(input.trim());
     }
