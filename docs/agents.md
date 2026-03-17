@@ -223,7 +223,13 @@ User request → Guide creates project in app.db
              → Guide spawns Conductor (spawn_agent)
              → Guide spawns Reviewer (spawn_agent)
              → Guide messages Conductor with Reviewer's agent ID
-             → Conductor plans tasks in app.db
+             → Conductor researches domain (data sources, APIs, volumes)
+             → Conductor discusses approach with Guide (questions, options, trade-offs)
+             → Guide translates for user, relays answers
+             → Conductor builds task hierarchy in app.db
+             → Conductor presents plan to Guide (prose summary, task IDs, tech decisions)
+             → Guide presents plan to user for approval
+             → User approves → Guide tells Conductor to proceed
              → Conductor executes, spawning data agents as needed
              → Conductor coordinates Reviewer for analytical sign-off
              → Conductor messages Guide: project complete
@@ -291,16 +297,16 @@ Every agent must:
 
 6. **Reference IDs in all inter-agent messages**: include project, task, and comment IDs in every `message_agent` call so the recipient can query app.db for context without asking for it to be repeated.
 
-### Conductor: Primary Planning Responsibility
+### Conductor: Plan-Approve-Execute Cycle
 
-The Conductor is the primary planner for any project it is assigned to. Upon receiving a project:
+The Conductor is the primary planner for any project it is assigned to. Every project follows a mandatory research, discuss, plan, approve, execute cycle:
 
-1. Read the project from app.db to understand scope.
-2. Break the work into a task hierarchy: top-level tasks for major phases, subtasks (via `parent`) for specific work items.
-3. Set `blocked_by` task_links to encode sequencing constraints.
-4. Assign tasks to agents by ID (`assignee`), spawn specialist agents as needed.
-5. Message each agent their task IDs immediately after creating the plan.
-6. Send an initial progress update to Guide: "Plan created for project #N. X tasks across Y phases."
+1. **Research**: Read the project from app.db, consult infrastructure.md (already in its system prompt), inspect the data pipeline code repository for existing patterns, and research the problem domain (data sources, APIs, file formats, volumes).
+2. **Discuss**: Engage the Guide in a detailed technical back-and-forth to resolve unknowns and align on approach. Present implementation options with concrete trade-offs. Ground technology choices in the existing stack; propose new dependencies only with explicit justification.
+3. **Plan**: Build a well-populated task hierarchy in app.db (top-level tasks for phases, subtasks via `parent`, `blocked_by` links for sequencing, `assignee` on every task). Task descriptions must include the technical approach, target infrastructure, and acceptance criteria.
+4. **Present**: Send a prose summary to the Guide referencing task IDs: phases, technology decisions, expected outputs, risks.
+5. **Approve**: Wait for the Guide to relay explicit user approval. Do not execute until approved. Revise the plan if changes are requested.
+6. **Execute**: Work through tasks in dependency order, spawning specialist agents as needed. Message each agent their task IDs after spawning.
 
 **Other agents may adjust the plan** when they discover unexpected complexity. When doing so:
 
@@ -340,13 +346,24 @@ Always include task/project/comment IDs in messages. The recipient can then run 
      status: "in progress"
    spawn_agent: role="conductor", project_id=1
    spawn_agent: role="reviewer", project_id=1
-   message_agent → Conductor: "Project #1. Reviewer is agent #4. Goal: 6-month campaign analysis."
+   message_agent → Conductor: "Project #1. Goal: 6-month LinkedIn campaign analysis. Consult infrastructure.md for your data stack."
    message_agent → Reviewer: "Project #1. Review Conductor's analytical work on request."
+   message_agent → Conductor: "Reviewer is agent #4."
    ```
 
-#### Phase 2: Conductor Plans the Task Hierarchy
+#### Phase 2: Research, Discussion, and Plan Approval
 
-Conductor reads project #1, creates tasks and dependency links:
+Conductor reads project #1, consults infrastructure.md, inspects the pipeline repo, and researches the LinkedIn API.
+
+**Conductor → Guide**: "The LinkedIn API returns campaign data in paginated JSON (max 100 per request). I estimate ~50K rows for 6 months. Two approaches: (A) Pull via API directly into TimescaleDB with a Python script following the openetl 4-step pattern, or (B) Export CSVs from the LinkedIn UI and ingest from flat files. Option A is automatable and repeatable but needs API credentials. Option B is faster for a one-off but manual. Which does the user prefer?"
+
+**Guide → User** (translated): "The Conductor found two paths for getting the LinkedIn data. [simplified explanation]. Do you have LinkedIn API credentials, or would you prefer a CSV export?"
+
+**User → Guide**: "I have API credentials. Let's automate it."
+
+**Guide → Conductor**: "User prefers the API approach. Credentials are available."
+
+After alignment, the Conductor creates tasks in app.db:
 
 | Task | Title                        | Parent | Assignee               | Priority |
 |------|------------------------------|--------|------------------------|----------|
@@ -360,9 +377,13 @@ Conductor reads project #1, creates tasks and dependency links:
 
 Task links: #11 `blocked_by` #10 → #12 `blocked_by` #11 → #15 `blocked_by` #12 → #16 `blocked_by` #15.
 
-**Conductor → Guide**: "Plan created. 7 tasks, 4 phases. DataAgent-Extract (#5) and DataAgent-Analyze (#6) spawned. Starting extraction now."
+**Conductor → Guide**: "Plan created. 7 tasks across 4 phases (tasks #10-#16). Using LinkedIn API → Python ingestion script → TimescaleDB `lens` database → Airflow DAG for scheduling. DataAgent-Extract (#5) and DataAgent-Analyze (#6) will be spawned at execution. No new dependencies needed."
 
-**Guide → User**: "Project underway. Data extraction starts now."
+**Guide → User**: "Here's the plan: [summary with phases and tech choices]. Should I tell the Conductor to proceed?"
+
+**User**: "Yes, go ahead."
+
+**Guide → Conductor**: "Plan approved. Proceed with execution."
 
 #### Phase 3: Parallel Execution and Mid-Flight Adjustment
 
