@@ -223,8 +223,8 @@ ${projectDbChanges}`;
 project_id: ${project.id}
 project_name: ${project.name}
 task_id: ${storyTask.id}
-conductor_id: ${agentId}${existingStoryNote}
-
+conductor_id: ${agentId}
+${existingStoryNote}
 ## Project Record
 
 ${formatMarkdownTable(projectRecord)}
