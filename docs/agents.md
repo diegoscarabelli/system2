@@ -22,7 +22,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 **Conductor and Reviewer** are project-scoped, spawned by Guide for every project and archived when done. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project. On server restart, all non-archived project-scoped agents are restored automatically. If an agent fails to restore, its status remains `active` in the database, the error is logged, and the Guide is notified so it can investigate.
 
-**Agent status** has two values in the database: `active` (alive, should be restored on restart) and `archived` (terminated, will not be restored). Whether an agent is currently processing work is tracked in memory via `AgentHost.isBusy()`, not in the database.
+**Agent status** has two values in the database: `active` (alive, should be restored on restart) and `archived` (terminated, will not be restored). Archived agents can be resurrected by the Guide via the `resurrect_agent` tool, which flips the status back to `active` and resumes the session from persisted JSONL. Whether an agent is currently processing work is tracked in memory via `AgentHost.isBusy()`, not in the database.
 
 ## Agent Identity and System Instructions
 
@@ -216,6 +216,26 @@ The `terminate_agent` tool archives an agent when its work is done:
 
 Permission model mirrors spawning. Singleton agents (Guide, Narrator) cannot be terminated.
 
+### Resurrection
+
+The `resurrect_agent` tool brings back an archived agent. Only the Guide may use it. Internally, the server:
+
+1. Validates the target is archived and not a singleton
+2. Calls `db.updateAgentStatus(id, 'active')`
+3. Creates a new `AgentHost` via `initializeAgentHost()`, which resumes the agent's session from its persisted JSONL history
+4. Registers the agent in `AgentRegistry`
+5. Delivers the Guide's context message via `deliverMessage()`
+
+If initialization fails, the DB status is rolled back to `archived`.
+
+**Session continuity:** since JSONL session files are preserved through termination (only the in-memory `AgentHost` is torn down), a resurrected agent retains its full conversation history. The Guide's context message should orient the agent about the time gap and the new objectives.
+
+**Project record cleanup:** after resurrection, the Guide must update the project record via `write_system2_db`: clear `end_at` and set status back to `in progress`.
+
+**Project log resumption:** the scheduler determines active projects by checking for non-archived conductors. Once a conductor is resurrected, the next scheduled run automatically resumes project log updates.
+
+**Project story on re-completion:** if `trigger_project_story` is called for a project that already has a `project_story.md`, the Narrator receives a note about the existing story and decides whether to edit or rewrite it.
+
 ### Project Lifecycle
 
 ```text
@@ -240,6 +260,15 @@ User request → Guide creates project in app.db
              → Conductor reports to Guide
              → Guide terminates Conductor + Reviewer
              → Guide updates project status to "done"
+
+--- Optional: Project Restart ---
+User request → Guide confirms resurrection is the right approach
+             → Guide queries archived agents for the project (read_system2_db)
+             → Guide resurrects Conductor (resurrect_agent)
+             → Guide resurrects Reviewer (resurrect_agent)
+             → Guide updates project: clear end_at, status → "in progress"
+             → Resurrected agents resume from persisted session history
+             → Normal project lifecycle continues from execution phase
 ```
 
 ---
@@ -409,7 +438,7 @@ DataAgent-Extract, DataAgent-Analyze, and Reviewer work through their tasks in d
 
 ## See Also
 
-- [Tools](tools.md): all tools available to agents, including spawn_agent and terminate_agent
+- [Tools](tools.md): all tools available to agents, including spawn_agent, terminate_agent, and resurrect_agent
 - [Knowledge System](knowledge-system.md): knowledge files injected into system prompts
 - [Database](database.md): app.db schema (projects, tasks, agents, task_links, task_comments)
 - [Scheduler](scheduler.md): how scheduled jobs deliver messages to Narrator

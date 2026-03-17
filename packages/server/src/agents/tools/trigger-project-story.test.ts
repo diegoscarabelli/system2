@@ -1,5 +1,6 @@
+import { existsSync } from 'node:fs';
 import type { Agent, Project, Task } from '@system2/shared';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, type Mock, vi } from 'vitest';
 import type { DatabaseClient } from '../../db/client.js';
 import type { AgentRegistry } from '../registry.js';
 import { createTriggerProjectStoryTool } from './trigger-project-story.js';
@@ -230,5 +231,26 @@ describe('trigger_project_story tool', () => {
 
     // Guide is not a conductor, so the "own project" check doesn't apply
     expect((result.content[0] as { text: string }).text).toContain('Project story triggered');
+  });
+
+  it('includes existing story note when project_story.md exists', async () => {
+    (existsSync as Mock).mockImplementation(
+      (p: string) => typeof p === 'string' && p.endsWith('project_story.md')
+    );
+    try {
+      const conductor = makeAgent(2, 'conductor', 1);
+      const narrator = makeAgent(10, 'narrator', null);
+      const project = makeProject(1, 'test-project');
+      const { tool, deliverMessage } = setup(2, [conductor, narrator], [project], [10]);
+
+      await exec(tool, { project_id: 1 });
+
+      const msg2 = deliverMessage.mock.calls[1][0] as string;
+      expect(msg2).toContain('Existing Project Story');
+      expect(msg2).toContain('project_story.md');
+      expect(msg2).toContain('Read it and decide whether to edit or rewrite');
+    } finally {
+      (existsSync as Mock).mockReturnValue(false);
+    }
   });
 });

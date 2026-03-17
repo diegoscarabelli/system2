@@ -212,13 +212,19 @@ ${projectDbChanges}`;
               ) as Record<string, unknown>[])
             : [];
 
+        // Check for an existing project story (from a previous completion cycle)
+        const storyFile = join(projectDir, 'project_story.md');
+        const existingStoryNote = existsSync(storyFile)
+          ? `\n## Existing Project Story\n\nA previous project story exists at ${storyFile}. Read it and decide whether to edit or rewrite it to incorporate this new phase of work.\n`
+          : '';
+
         const projectStoryMessage = `[Task: project-story]
 
 project_id: ${project.id}
 project_name: ${project.name}
 task_id: ${storyTask.id}
 conductor_id: ${agentId}
-
+${existingStoryNote}
 ## Project Record
 
 ${formatMarkdownTable(projectRecord)}
