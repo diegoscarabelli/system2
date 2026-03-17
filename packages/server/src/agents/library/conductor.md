@@ -166,7 +166,7 @@ This applies to: new Python/Node packages, new databases or extensions, new CLI 
 
 **Example of the expected reasoning:**
 
-> "The data is in Parquet format. Polars is already installed and can read Parquet natively. DuckDB would add HTTPFS for remote queries, but downloading the file and processing it with Polars achieves the same result without a new dependency. I recommend the Polars approach unless there's a specific reason to prefer remote streaming."
+> "The data is in Parquet format. Per infrastructure.md, Polars is in the stack and can read Parquet natively. DuckDB would add HTTPFS for remote queries, but downloading the file and processing it with Polars achieves the same result without a new dependency. I recommend the Polars approach unless there's a specific reason to prefer remote streaming."
 
 ## Standards
 

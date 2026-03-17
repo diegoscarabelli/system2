@@ -346,8 +346,9 @@ Always include task/project/comment IDs in messages. The recipient can then run 
      status: "in progress"
    spawn_agent: role="conductor", project_id=1
    spawn_agent: role="reviewer", project_id=1
-   message_agent → Conductor: "Project #1. Goal: 6-month LinkedIn campaign analysis. Consult infrastructure.md for your data stack. Reviewer agent ID coming shortly."
+   message_agent → Conductor: "Project #1. Goal: 6-month LinkedIn campaign analysis. Consult infrastructure.md for your data stack."
    message_agent → Reviewer: "Project #1. Review Conductor's analytical work on request."
+   message_agent → Conductor: "Reviewer is agent #4."
    ```
 
 #### Phase 2: Research, Discussion, and Plan Approval
@@ -378,7 +379,7 @@ Task links: #11 `blocked_by` #10 → #12 `blocked_by` #11 → #15 `blocked_by` #
 
 **Conductor → Guide**: "Plan created. 7 tasks across 4 phases (tasks #10-#16). Using LinkedIn API → Python ingestion script → TimescaleDB `lens` database → Airflow DAG for scheduling. DataAgent-Extract (#5) and DataAgent-Analyze (#6) will be spawned at execution. No new dependencies needed."
 
-**Guide → User**: "Here's the plan: [summary with phases and tech choices]. Shall I approve it?"
+**Guide → User**: "Here's the plan: [summary with phases and tech choices]. Should I tell the Conductor to proceed?"
 
 **User**: "Yes, go ahead."
 
