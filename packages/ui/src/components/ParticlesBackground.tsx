@@ -1,26 +1,10 @@
-import type { Container, IParticleUpdater, Particle } from '@tsparticles/engine';
+import type { Container } from '@tsparticles/engine';
 import Particles, { initParticlesEngine } from '@tsparticles/react';
 import { loadSlim } from '@tsparticles/slim';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
-
-const MIN_SPEED = 0.5;
-
-class MinSpeedUpdater implements IParticleUpdater {
-  init(_particle: Particle) {}
-
-  isEnabled(_particle: Particle) {
-    return true;
-  }
-
-  update(particle: Particle) {
-    const speed = particle.velocity.length;
-    if (speed > 0 && speed < MIN_SPEED) {
-      particle.velocity.length = MIN_SPEED;
-    }
-  }
-}
+import { MinSpeedUpdater } from './MinSpeedUpdater';
 
 export const ParticlesBackground = memo(function ParticlesBackground() {
   const [engineReady, setEngineReady] = useState(false);
