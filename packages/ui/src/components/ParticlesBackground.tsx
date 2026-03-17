@@ -11,10 +11,16 @@ export const ParticlesBackground = memo(function ParticlesBackground() {
   const { accent } = useAccentColors();
 
   useEffect(() => {
+    let cancelled = false;
     initParticlesEngine(async (engine) => {
       await loadSlim(engine);
       await engine.addParticleUpdater('minSpeed', async () => new MinSpeedUpdater());
-    }).then(() => setEngineReady(true));
+    }).then(() => {
+      if (!cancelled) setEngineReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // canvas.windowResize() is called by the tsparticles window resize event listener.
