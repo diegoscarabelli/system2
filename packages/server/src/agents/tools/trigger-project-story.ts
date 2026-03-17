@@ -215,7 +215,7 @@ ${projectDbChanges}`;
         // Check for an existing project story (from a previous completion cycle)
         const storyFile = join(projectDir, 'project_story.md');
         const existingStoryNote = existsSync(storyFile)
-          ? `\n\n## Existing Project Story\n\nA previous project story exists at ${storyFile}. Read it and decide whether to edit or rewrite it to incorporate this new phase of work.`
+          ? `\n## Existing Project Story\n\nA previous project story exists at ${storyFile}. Read it and decide whether to edit or rewrite it to incorporate this new phase of work.\n`
           : '';
 
         const projectStoryMessage = `[Task: project-story]
