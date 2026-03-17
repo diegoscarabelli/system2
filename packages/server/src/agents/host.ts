@@ -586,8 +586,13 @@ export class AgentHost {
     // Store for potential retry on failover
     this.pendingPrompt = content;
 
-    // Use streamingBehavior to queue steering messages properly
-    const promptOptions = options?.isSteering ? { streamingBehavior: 'steer' as const } : undefined;
+    // Use streamingBehavior to queue messages properly if the session is already streaming.
+    // Defaulting non-steering messages to 'followUp' prevents silent drops when a background
+    // sendCustomMessage turn is in flight — session.prompt() throws if streamingBehavior is
+    // undefined and isStreaming is true. 'followUp' is a no-op when the session is idle.
+    const promptOptions = options?.isSteering
+      ? { streamingBehavior: 'steer' as const }
+      : { streamingBehavior: 'followUp' as const };
 
     // Reload resource loader to pick up knowledge file changes
     await this.resourceLoader?.reload();
