@@ -9,7 +9,7 @@ import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
-import { colors } from '../theme/colors';
+import { colors, contextColor } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
 interface AgentInfo {
@@ -48,12 +48,6 @@ function TableHeaders() {
       ))}
     </Box>
   );
-}
-
-function contextColor(percent: number, accent: string): string {
-  if (percent >= 90) return colors.coral;
-  if (percent >= 60) return accent;
-  return colors.teal;
 }
 
 export function AgentPane() {
