@@ -55,7 +55,7 @@ function loadPanelState(): { agentsOpen: boolean } {
     const stored = localStorage.getItem(PANEL_STATE_KEY);
     if (stored) {
       const data = JSON.parse(stored);
-      return { agentsOpen: Boolean(data.agentsOpen) };
+      return { agentsOpen: typeof data.agentsOpen === 'boolean' && data.agentsOpen };
     }
   } catch {
     // ignore
@@ -64,7 +64,11 @@ function loadPanelState(): { agentsOpen: boolean } {
 }
 
 function persistPanelState(agentsOpen: boolean): void {
-  localStorage.setItem(PANEL_STATE_KEY, JSON.stringify({ agentsOpen }));
+  try {
+    localStorage.setItem(PANEL_STATE_KEY, JSON.stringify({ agentsOpen }));
+  } catch {
+    // ignore — persistence is best-effort
+  }
 }
 
 function loadTabs(): { tabs: ArtifactTab[]; activeTabId: string | null } {

@@ -28,8 +28,8 @@ function loadActiveAgent(): {
       if (typeof data.id === 'number') {
         return {
           activeAgentId: data.id,
-          activeAgentLabel: data.label ?? null,
-          activeAgentRole: data.role ?? null,
+          activeAgentLabel: typeof data.label === 'string' ? data.label : null,
+          activeAgentRole: typeof data.role === 'string' ? data.role : null,
         };
       }
     }
@@ -40,7 +40,11 @@ function loadActiveAgent(): {
 }
 
 function persistActiveAgent(id: number, label: string, role: string): void {
-  localStorage.setItem(ACTIVE_AGENT_KEY, JSON.stringify({ id, label, role }));
+  try {
+    localStorage.setItem(ACTIVE_AGENT_KEY, JSON.stringify({ id, label, role }));
+  } catch {
+    // ignore — persistence is best-effort
+  }
 }
 
 // Re-export shared types under the names UI components expect

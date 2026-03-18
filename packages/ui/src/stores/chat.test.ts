@@ -4,7 +4,7 @@
  * Tests for per-agent state isolation, dequeue routing, and loadHistory resets.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from './chat';
 
 function resetStore() {
@@ -143,6 +143,37 @@ describe('useChatStore', () => {
       expect(state?.activeThinkingId).toBeNull();
       expect(state?.currentAssistantMessage).toBeNull();
       expect(state?.currentTurnEvents).toHaveLength(0);
+    });
+  });
+
+  describe('localStorage persistence', () => {
+    it('setActiveAgent writes id, label, and role to localStorage', () => {
+      const spy = vi.spyOn(localStorage, 'setItem');
+      useChatStore.getState().setActiveAgent(1, 'guide');
+      expect(spy).toHaveBeenCalledWith(
+        'system2:active-agent',
+        JSON.stringify({ id: 1, label: 'guide_1', role: 'Guide' })
+      );
+      spy.mockRestore();
+    });
+
+    it('setActiveAgent overwrites a previously persisted agent', () => {
+      const spy = vi.spyOn(localStorage, 'setItem');
+      useChatStore.getState().setActiveAgent(1, 'guide');
+      useChatStore.getState().setActiveAgent(5, 'conductor');
+      expect(spy).toHaveBeenLastCalledWith(
+        'system2:active-agent',
+        JSON.stringify({ id: 5, label: 'conductor_5', role: 'Conductor' })
+      );
+      spy.mockRestore();
+    });
+
+    it('setActiveAgent does not throw when localStorage write fails', () => {
+      const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+        throw new Error('QuotaExceededError');
+      });
+      expect(() => useChatStore.getState().setActiveAgent(1, 'guide')).not.toThrow();
+      spy.mockRestore();
     });
   });
 
