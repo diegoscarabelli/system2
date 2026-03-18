@@ -102,7 +102,7 @@ export class DatabaseClient {
 
     if (fields.length === 0) return this.getProject(id);
 
-    fields.push('updated_at = datetime("now")');
+    fields.push("updated_at = datetime('now')");
     values.push(id);
 
     const stmt = this.db.prepare(`
@@ -206,7 +206,7 @@ export class DatabaseClient {
 
     if (fields.length === 0) return this.getTask(id);
 
-    fields.push('updated_at = datetime("now")');
+    fields.push("updated_at = datetime('now')");
     values.push(id);
 
     const stmt = this.db.prepare(`
@@ -447,7 +447,7 @@ export class DatabaseClient {
       return (stmt.get(id) as Artifact) || null;
     }
 
-    fields.push('updated_at = datetime("now")');
+    fields.push("updated_at = datetime('now')");
     values.push(id);
 
     const stmt = this.db.prepare(`
