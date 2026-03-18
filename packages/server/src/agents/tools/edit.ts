@@ -13,7 +13,7 @@
  * newline separator if the existing content does not end with one.
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -69,25 +69,44 @@ export function createEditTool() {
         if (params.append) {
           await mkdir(dirname(filePath), { recursive: true });
 
-          let existingContent = '';
-          try {
-            existingContent = await readFile(filePath, 'utf-8');
-          } catch (err) {
-            const e = err as { code?: string };
-            if (e.code !== 'ENOENT') throw err;
+          // Determine separator by reading only the last byte — avoids loading the
+          // entire file and also prevents a double newline when new_string already
+          // starts with one.
+          let separator = '';
+          if (!params.new_string.startsWith('\n')) {
+            try {
+              const fileStat = await stat(filePath);
+              if (fileStat.size > 0) {
+                const fh = await open(filePath, 'r');
+                try {
+                  const buf = Buffer.alloc(1);
+                  await fh.read(buf, 0, 1, fileStat.size - 1);
+                  if (buf[0] !== 0x0a) separator = '\n';
+                } finally {
+                  await fh.close();
+                }
+              }
+            } catch (err) {
+              const e = err as { code?: string };
+              if (e.code !== 'ENOENT') throw err;
+            }
           }
 
-          const separator =
-            existingContent.length > 0 && !existingContent.endsWith('\n') ? '\n' : '';
-          const newContent = existingContent + separator + params.new_string;
+          if (signal?.aborted) {
+            return {
+              content: [{ type: 'text', text: 'Edit aborted.' }],
+              details: { error: 'aborted' },
+            };
+          }
 
-          await writeFile(filePath, newContent, 'utf-8');
+          await appendFile(filePath, separator + params.new_string, 'utf-8');
 
           if (params.commit_message) {
             commitIfStateDir(filePath, params.commit_message);
           }
 
-          const linesAppended = params.new_string.split('\n').length;
+          const linesAppended =
+            params.new_string.split('\n').length - (params.new_string.endsWith('\n') ? 1 : 0);
           return {
             content: [
               {

@@ -165,5 +165,25 @@ describe('edit tool', () => {
       expect((result.content[0] as { text: string }).text).toContain('Appended');
       expect(readFileSync(file, 'utf-8')).toBe('hello');
     });
+
+    it('does not double newline when new_string starts with newline', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, 'existing content');
+
+      await exec({ path: file, new_string: '\nnew line', append: true });
+
+      expect(readFileSync(file, 'utf-8')).toBe('existing content\nnew line');
+    });
+
+    it('reports correct line count when new_string has trailing newline', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, '');
+
+      const result = await exec({ path: file, new_string: 'line one\nline two\n', append: true });
+
+      expect((result.content[0] as { text: string }).text).toContain('2 line(s)');
+    });
   });
 });
