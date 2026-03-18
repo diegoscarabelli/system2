@@ -134,7 +134,7 @@ export class ConversationSummarizer {
 
       // Deliver summary to Guide
       this.guideHost.deliverMessage(
-        `[Summary of user interaction with ${buffer.agentRole} agent (id=${agentId})]\n\n${summary}`,
+        `[Conversation summary: ${buffer.agentRole} (id=${agentId})]\n\n${summary}`,
         {
           sender: agentId,
           receiver: this.guideAgentId,

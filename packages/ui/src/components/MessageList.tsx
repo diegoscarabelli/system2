@@ -253,6 +253,20 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
   const { highlight } = useAccentColors();
   const hasContent = tc.input || tc.result;
 
+  // For message_agent: extract target as "role_id" from result, or "agent_id" when running
+  let agentTarget: string | null = null;
+  if (tc.name === 'message_agent') {
+    if (tc.result) {
+      const m = tc.result.match(/delivered to (\w+_\d+)/);
+      agentTarget = m ? m[1] : null;
+    } else if (tc.input) {
+      try {
+        const inp = JSON.parse(tc.input) as { agent_id?: number };
+        if (inp.agent_id !== undefined) agentTarget = `agent_${inp.agent_id}`;
+      } catch {}
+    }
+  }
+
   return (
     <Box>
       <Box
@@ -275,6 +289,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
           {isRunning ? '⚙️ ' : '✓ '}
           {tc.name}
         </Text>
+        {agentTarget && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{agentTarget}</Text>}
         {toolSummary(tc.name, tc.input) && (
           <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{toolSummary(tc.name, tc.input)}</Text>
         )}

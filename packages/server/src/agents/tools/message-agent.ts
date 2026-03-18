@@ -81,7 +81,7 @@ export function createMessageAgentTool(
       // Build LLM-visible content with sender prefix
       const senderAgent = db.getAgent(selfId);
       const senderRole = senderAgent?.role ?? 'unknown';
-      const content = `[Message from ${senderRole} agent (id=${selfId})]\n\n${message}`;
+      const content = `[${senderRole}_${selfId} message]\n\n${message}`;
 
       const timestamp = Date.now();
 
@@ -96,7 +96,7 @@ export function createMessageAgentTool(
           content: [
             {
               type: 'text',
-              text: `Message delivered to ${receiverAgent.role} agent (id=${agent_id}).`,
+              text: `Message delivered to ${receiverAgent.role}_${agent_id}.`,
             },
           ],
           details: { delivered: true, agent_id, timestamp },

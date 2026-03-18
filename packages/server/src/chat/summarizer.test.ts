@@ -122,7 +122,7 @@ describe('ConversationSummarizer', () => {
 
       const [content, details] = (guideHost.deliverMessage as ReturnType<typeof vi.fn>).mock
         .calls[0];
-      expect(content).toContain('[Summary of user interaction with conductor agent (id=2)]');
+      expect(content).toContain('[Conversation summary: conductor (id=2)]');
       expect(content).toContain('mocked summary');
       expect(details.receiver).toBe(1);
       expect(details.sender).toBe(2);

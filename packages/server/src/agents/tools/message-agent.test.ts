@@ -47,7 +47,7 @@ describe('message_agent tool', () => {
     expect((result.content[0] as { text: string }).text).toContain('delivered');
     expect(deliverMessage).toHaveBeenCalledTimes(1);
     const [content] = deliverMessage.mock.calls[0];
-    expect(content).toContain('[Message from guide agent (id=1)]');
+    expect(content).toContain('[guide_1 message]');
     expect(content).toContain('Hello conductor');
   });
 
