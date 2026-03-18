@@ -67,7 +67,13 @@ describe('useArtifactStore', () => {
       useArtifactStore.setState({
         tabs: [
           ...useArtifactStore.getState().tabs,
-          { id: 'tab-1', type: 'iframe', url: '/api/artifact?path=foo', filePath: 'foo', title: 'Foo' },
+          {
+            id: 'tab-1',
+            type: 'iframe',
+            url: '/api/artifact?path=foo',
+            filePath: 'foo',
+            title: 'Foo',
+          },
         ],
       });
 
