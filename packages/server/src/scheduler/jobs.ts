@@ -157,14 +157,23 @@ export function stripSessionEntry(entry: Record<string, unknown>): Record<string
         if (!block || typeof block !== 'object' || Array.isArray(block)) return block;
         const b = block as Record<string, unknown>;
         if (b.type !== 'toolCall') return b;
-        const { thoughtSignature: _ts, id: _id, arguments: args, ...rest } = b;
-        const truncatedArgs: Record<string, unknown> = {};
-        if (args && typeof args === 'object' && !Array.isArray(args)) {
-          for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
-            truncatedArgs[k] = typeof v === 'string' && v.length > 100 ? v.slice(0, 100) : v;
+        const { thoughtSignature: _ts, arguments: args, ...rest } = b;
+        if (args !== undefined) {
+          let processedArgs: unknown;
+          if (args && typeof args === 'object' && !Array.isArray(args)) {
+            const truncatedArgs: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
+              truncatedArgs[k] = typeof v === 'string' && v.length > 100 ? v.slice(0, 100) : v;
+            }
+            processedArgs = truncatedArgs;
+          } else if (typeof args === 'string' && args.length > 100) {
+            processedArgs = args.slice(0, 100);
+          } else {
+            processedArgs = args;
           }
+          return { ...rest, arguments: processedArgs };
         }
-        return args ? { ...rest, arguments: truncatedArgs } : rest;
+        return rest;
       });
     }
     return { ...entry, message: strippedMsg };

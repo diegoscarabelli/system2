@@ -321,7 +321,7 @@ describe('stripSessionEntry', () => {
       expect(result.message).not.toHaveProperty('usage');
     });
 
-    it('drops thoughtSignature and id from toolCall blocks', () => {
+    it('drops thoughtSignature but preserves id in toolCall blocks', () => {
       const entry = {
         type: 'message',
         message: {
@@ -340,7 +340,7 @@ describe('stripSessionEntry', () => {
       const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
       const block = (result.message.content as Record<string, unknown>[])[0];
       expect(block).not.toHaveProperty('thoughtSignature');
-      expect(block).not.toHaveProperty('id');
+      expect(block.id).toBe('call-123');
       expect(block.name).toBe('bash');
     });
 
@@ -389,6 +389,35 @@ describe('stripSessionEntry', () => {
       const args = block.arguments as Record<string, unknown>;
       expect(args.limit).toBe(10);
       expect(args.dry).toBe(true);
+    });
+
+    it('truncates string-form arguments to 100 chars', () => {
+      const longJson = 'x'.repeat(300);
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', name: 'bash', arguments: longJson }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(typeof block.arguments).toBe('string');
+      expect((block.arguments as string).length).toBe(100);
+    });
+
+    it('preserves array arguments as-is', () => {
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', name: 'bash', arguments: ['arg1', 'arg2'] }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(Array.isArray(block.arguments)).toBe(true);
+      expect(block.arguments).toEqual(['arg1', 'arg2']);
     });
 
     it('does not add arguments key when absent on toolCall', () => {
