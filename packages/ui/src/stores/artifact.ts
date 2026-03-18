@@ -8,6 +8,7 @@
 import { create } from 'zustand';
 
 const STORAGE_KEY = 'system2:artifact-tabs';
+const PANEL_STATE_KEY = 'system2:panel-state';
 
 interface ArtifactTab {
   id: string;
@@ -49,6 +50,23 @@ function extractTitle(url: string): string {
   return parts[parts.length - 1] || 'Untitled';
 }
 
+function loadPanelState(): { agentsOpen: boolean } {
+  try {
+    const stored = localStorage.getItem(PANEL_STATE_KEY);
+    if (stored) {
+      const data = JSON.parse(stored);
+      return { agentsOpen: Boolean(data.agentsOpen) };
+    }
+  } catch {
+    // ignore
+  }
+  return { agentsOpen: false };
+}
+
+function persistPanelState(agentsOpen: boolean): void {
+  localStorage.setItem(PANEL_STATE_KEY, JSON.stringify({ agentsOpen }));
+}
+
 function loadTabs(): { tabs: ArtifactTab[]; activeTabId: string | null } {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -80,12 +98,13 @@ function persistTabs(tabs: ArtifactTab[], activeTabId: string | null): void {
 }
 
 const initial = loadTabs();
+const initialPanel = loadPanelState();
 
 export const useArtifactStore = create<ArtifactState>((set, get) => ({
   tabs: initial.tabs,
   activeTabId: initial.activeTabId,
   catalogOpen: false,
-  agentsOpen: false,
+  agentsOpen: initialPanel.agentsOpen,
 
   openArtifact: (url: string, title?: string, filePath?: string) => {
     const state = get();
@@ -149,11 +168,18 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   },
 
   toggleCatalog: () => {
-    set((state) => ({ catalogOpen: !state.catalogOpen, agentsOpen: false }));
+    set((state) => {
+      persistPanelState(false);
+      return { catalogOpen: !state.catalogOpen, agentsOpen: false };
+    });
   },
 
   toggleAgents: () => {
-    set((state) => ({ agentsOpen: !state.agentsOpen, catalogOpen: false }));
+    set((state) => {
+      const agentsOpen = !state.agentsOpen;
+      persistPanelState(agentsOpen);
+      return { agentsOpen, catalogOpen: false };
+    });
   },
 
   openKanbanTab: () => {

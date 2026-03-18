@@ -8,11 +8,40 @@
  *
  * The server is the source of truth for message history.
  * On WebSocket connect, the server sends chat_history with recent messages.
- * No localStorage persistence — the UI state is ephemeral.
+ * Active agent selection is persisted to localStorage so it survives refreshes.
  */
 
 import type { ChatMessage, ChatThinkingBlock, ChatToolCall, ChatTurnEvent } from '@system2/shared';
 import { create } from 'zustand';
+
+const ACTIVE_AGENT_KEY = 'system2:active-agent';
+
+function loadActiveAgent(): {
+  activeAgentId: number | null;
+  activeAgentLabel: string | null;
+  activeAgentRole: string | null;
+} {
+  try {
+    const stored = localStorage.getItem(ACTIVE_AGENT_KEY);
+    if (stored) {
+      const data = JSON.parse(stored);
+      if (typeof data.id === 'number') {
+        return {
+          activeAgentId: data.id,
+          activeAgentLabel: data.label ?? null,
+          activeAgentRole: data.role ?? null,
+        };
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return { activeAgentId: null, activeAgentLabel: null, activeAgentRole: null };
+}
+
+function persistActiveAgent(id: number, label: string, role: string): void {
+  localStorage.setItem(ACTIVE_AGENT_KEY, JSON.stringify({ id, label, role }));
+}
 
 // Re-export shared types under the names UI components expect
 export type Message = ChatMessage;
@@ -111,20 +140,25 @@ function updateAgentState(
   return next;
 }
 
+const savedAgent = loadActiveAgent();
+
 export const useChatStore = create<ChatState>()((set, get) => ({
   agentStates: new Map(),
-  activeAgentId: null,
-  activeAgentLabel: null,
-  activeAgentRole: null,
+  activeAgentId: savedAgent.activeAgentId,
+  activeAgentLabel: savedAgent.activeAgentLabel,
+  activeAgentRole: savedAgent.activeAgentRole,
   guideAgentId: null,
   isConnected: false,
   provider: null,
 
   setActiveAgent: (agentId: number, role: string) => {
+    const label = `${role}_${agentId}`;
+    const displayRole = role.charAt(0).toUpperCase() + role.slice(1);
+    persistActiveAgent(agentId, label, displayRole);
     set({
       activeAgentId: agentId,
-      activeAgentLabel: `${role}_${agentId}`,
-      activeAgentRole: role.charAt(0).toUpperCase() + role.slice(1),
+      activeAgentLabel: label,
+      activeAgentRole: displayRole,
     });
   },
 
