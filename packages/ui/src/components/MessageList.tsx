@@ -564,8 +564,9 @@ export function MessageList() {
     currentTurnEvents,
     isWaitingForResponse,
     isStreaming,
+    compactionStatus,
   } = activeState;
-  const activeAgentRole = useChatStore((s) => s.activeAgentRole) ?? 'Agent';
+  const activeAgentRole = useChatStore((s) => s.activeAgentLabel ?? s.activeAgentRole) ?? 'Agent';
   const { accent } = useAccentColors();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -628,19 +629,6 @@ export function MessageList() {
         padding: 3,
       }}
     >
-      {messages.length === 0 && !hasCurrentActivity && (
-        <Box
-          sx={{
-            textAlign: 'center',
-            color: 'fg.muted',
-            paddingTop: 4,
-            fontSize: 0,
-          }}
-        >
-          Ask the Guide to help configure your data infrastructure.
-        </Box>
-      )}
-
       {/* Message history */}
       {messages.map((message, idx) => {
         const isLastMessage = idx === messages.length - 1 && !hasCurrentActivity;
@@ -688,21 +676,28 @@ export function MessageList() {
           key={event.type === 'thinking' ? event.data.id : event.data.id}
           event={event}
           isLast={
-            idx === currentTurnEvents.length - 1 && !currentAssistantMessage && !showBrainLoader
+            idx === currentTurnEvents.length - 1 &&
+            !currentAssistantMessage &&
+            !showBrainLoader &&
+            compactionStatus === 'idle'
           }
         />
       ))}
 
       {/* Working indicator: waiting for first event, or between completed blocks */}
       {showBrainLoader && (
-        <TimelineItem dotColor={accent} pulse isLast>
+        <TimelineItem
+          dotColor={accent}
+          pulse
+          isLast={!currentAssistantMessage && compactionStatus === 'idle'}
+        >
           <BrainLoader />
         </TimelineItem>
       )}
 
       {/* Current streaming: response */}
       {currentAssistantMessage && (
-        <TimelineItem dotColor={accent} pulse isLast>
+        <TimelineItem dotColor={accent} pulse isLast={compactionStatus === 'idle'}>
           <Text
             sx={{
               fontWeight: 'semibold',
@@ -714,6 +709,15 @@ export function MessageList() {
             {activeAgentRole}
           </Text>
           <MarkdownContent content={currentAssistantMessage} />
+        </TimelineItem>
+      )}
+
+      {/* Compaction status indicator */}
+      {compactionStatus !== 'idle' && (
+        <TimelineItem dotColor={colors.gray} pulse={compactionStatus === 'compacting'} isLast>
+          <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: 'fg.muted' }}>
+            {compactionStatus === 'compacting' ? 'Compacting...' : 'Compacted'}
+          </Text>
         </TimelineItem>
       )}
 
