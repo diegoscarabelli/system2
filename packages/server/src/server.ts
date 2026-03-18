@@ -71,6 +71,7 @@ export class Server {
   private narratorId: number;
   private guideAgentId: number;
   private conversationSummarizer?: ConversationSummarizer;
+  private authResolver: AuthResolver;
 
   constructor(config: ServerConfig) {
     this.config = config;
@@ -84,6 +85,9 @@ export class Server {
 
     // Initialize agent registry
     this.agentRegistry = new AgentRegistry();
+
+    // Shared AuthResolver: all agents see the same cooldown/failover state
+    this.authResolver = new AuthResolver(config.llmConfig);
 
     // Initialize Guide agent (singleton) — receives the spawner so it can create Conductors/Reviewers
     const chatMaxMessages = config.chatConfig?.max_history_messages ?? 1000;
@@ -100,6 +104,7 @@ export class Server {
       spawner: this.makeSpawner(),
       resurrector: this.makeResurrector(),
       chatMaxMessages,
+      authResolver: this.authResolver,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
 
@@ -114,6 +119,7 @@ export class Server {
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
       chatMaxMessages,
+      authResolver: this.authResolver,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
 
@@ -325,6 +331,7 @@ export class Server {
       spawner: this.makeSpawner(),
       resurrector: this.makeResurrector(),
       chatMaxMessages,
+      authResolver: this.authResolver,
     });
 
     // Subscribe for chat cache capture before initialize() so no events are missed
@@ -655,10 +662,9 @@ export class Server {
     const models = meta.models as Record<string, string> | undefined;
     if (!models) return null;
 
-    const authResolver = new AuthResolver(this.config.llmConfig);
-    const modelRegistry = new ModelRegistry(authResolver.createAuthStorage());
+    const modelRegistry = new ModelRegistry(this.authResolver.createAuthStorage());
 
-    for (const provider of authResolver.providerOrder) {
+    for (const provider of this.authResolver.providerOrder) {
       const modelId = models[provider];
       if (modelId) {
         const model = modelRegistry.find(provider, modelId);

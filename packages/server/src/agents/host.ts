@@ -90,6 +90,8 @@ export interface AgentHostConfig {
   spawner?: AgentSpawner;
   resurrector?: AgentResurrector;
   chatMaxMessages?: number;
+  /** Shared AuthResolver for cross-agent rate limit awareness. Falls back to creating a local instance. */
+  authResolver?: AuthResolver;
 }
 
 export class AgentHost {
@@ -136,8 +138,8 @@ export class AgentHost {
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
 
-    // Initialize AuthResolver with failover support
-    this.authResolver = new AuthResolver(config.llmConfig);
+    // Use shared AuthResolver if provided, otherwise create a local one
+    this.authResolver = config.authResolver ?? new AuthResolver(config.llmConfig);
     const authStorage = this.authResolver.createAuthStorage();
     this.modelRegistry = new ModelRegistry(authStorage);
     this.currentProvider = this.authResolver.primaryProvider;
@@ -403,6 +405,21 @@ export class AgentHost {
 
     // Capture before any await — agent_end may clear it before this async handler resumes
     const promptToRetry = this.pendingPrompt;
+
+    // If another agent already put this provider's key in cooldown, skip retries and fail over
+    if (!this.authResolver.getActiveKey(this.currentProvider)) {
+      const nextProvider = this.authResolver.getNextProvider();
+      if (nextProvider && nextProvider !== this.currentProvider) {
+        console.log(
+          `[AgentHost] Provider ${this.currentProvider} already in cooldown, failing over to ${nextProvider}`
+        );
+        this.pushSystemMessage(
+          `${this.currentProvider} in cooldown (another agent hit rate limit), switching to ${nextProvider}`
+        );
+        await this.reinitializeWithProvider(nextProvider, promptToRetry);
+        return;
+      }
+    }
 
     // Check if we should retry
     if (shouldRetry(category, currentAttempts)) {
