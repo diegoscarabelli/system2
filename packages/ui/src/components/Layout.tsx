@@ -62,11 +62,10 @@ export function Layout() {
   const { accent } = useAccentColors();
   const catalogOpen = useArtifactStore((s) => s.catalogOpen);
   const agentsOpen = useArtifactStore((s) => s.agentsOpen);
-  const tabs = useArtifactStore((s) => s.tabs);
+  const kanbanOpen = useArtifactStore((s) => s.kanbanOpen);
   const toggleCatalog = useArtifactStore((s) => s.toggleCatalog);
   const toggleAgents = useArtifactStore((s) => s.toggleAgents);
   const toggleKanbanTab = useArtifactStore((s) => s.toggleKanbanTab);
-  const kanbanOpen = tabs.some((t) => t.component === 'kanban');
   const sideDrawerOpen = catalogOpen || agentsOpen;
 
   const handleMouseDown = useCallback(() => {
