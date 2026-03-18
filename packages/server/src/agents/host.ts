@@ -62,19 +62,6 @@ const AGENT_LIBRARY_DIR = join(AGENT_DIR, 'library');
 /** Roles that can spawn, manage, and resurrect agents. Single source of truth for tool access. */
 const ORCHESTRATOR_ROLES = new Set(['guide', 'conductor']);
 
-/**
- * Returns true if the error message indicates the input exceeded the model's context window.
- * Provider-agnostic: matches Gemini, OpenAI, Anthropic, and generic patterns.
- */
-function isContextOverflowError(message: string): boolean {
-  const m = message.toLowerCase();
-  const sizeWords = ['exceed', 'maximum', 'limit', 'too long', 'too large', 'too many'];
-  return (
-    sizeWords.some((w) => m.includes(w)) &&
-    (m.includes('token') || m.includes('context') || m.includes('input') || m.includes('prompt'))
-  );
-}
-
 interface AgentDefinition {
   name: string;
   description: string;
@@ -466,13 +453,10 @@ export class AgentHost {
 
     // Context overflow: truncate JSONL, compact, restore tail, reinitialize.
     // The guard prevents re-entry during recovery; it re-arms after recovery completes.
-    // Gated on category === 'client' to avoid false positives on rate-limit errors whose
-    // messages may also contain size/token keywords (e.g. "token per minute limit exceeded").
-    if (
-      category === 'client' &&
-      isContextOverflowError(errorMessage) &&
-      !this.contextOverflowHandled
-    ) {
+    // Uses the context_overflow category from categorizeError() which detects token limit
+    // errors before status code classification, avoiding false positives on rate-limit
+    // errors whose messages may also contain size/token keywords.
+    if (category === 'context_overflow' && !this.contextOverflowHandled) {
       this.contextOverflowHandled = true;
       const recovered = await this.handleContextOverflow();
       if (recovered) {

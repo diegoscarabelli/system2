@@ -153,28 +153,34 @@ export function stripSessionEntry(entry: Record<string, unknown>): Record<string
     const { usage: _u, api: _a, provider: _p, model: _m, ...strippedMsg } = message;
     const content = message.content;
     if (Array.isArray(content)) {
-      strippedMsg.content = content.map((block) => {
-        if (!block || typeof block !== 'object' || Array.isArray(block)) return block;
-        const b = block as Record<string, unknown>;
-        if (b.type !== 'toolCall') return b;
-        const { thoughtSignature: _ts, arguments: args, ...rest } = b;
-        if (args !== undefined) {
-          let processedArgs: unknown;
-          if (args && typeof args === 'object' && !Array.isArray(args)) {
-            const truncatedArgs: Record<string, unknown> = {};
-            for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
-              truncatedArgs[k] = typeof v === 'string' && v.length > 100 ? v.slice(0, 100) : v;
+      strippedMsg.content = content
+        .filter((block) => {
+          if (!block || typeof block !== 'object' || Array.isArray(block)) return true;
+          // Drop thinking blocks entirely (internal LLM reasoning, no narrative value)
+          return (block as Record<string, unknown>).type !== 'thinking';
+        })
+        .map((block) => {
+          if (!block || typeof block !== 'object' || Array.isArray(block)) return block;
+          const b = block as Record<string, unknown>;
+          if (b.type !== 'toolCall') return b;
+          const { thoughtSignature: _ts, arguments: args, ...rest } = b;
+          if (args !== undefined) {
+            let processedArgs: unknown;
+            if (args && typeof args === 'object' && !Array.isArray(args)) {
+              const truncatedArgs: Record<string, unknown> = {};
+              for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
+                truncatedArgs[k] = typeof v === 'string' && v.length > 100 ? v.slice(0, 100) : v;
+              }
+              processedArgs = truncatedArgs;
+            } else if (typeof args === 'string' && args.length > 100) {
+              processedArgs = args.slice(0, 100);
+            } else {
+              processedArgs = args;
             }
-            processedArgs = truncatedArgs;
-          } else if (typeof args === 'string' && args.length > 100) {
-            processedArgs = args.slice(0, 100);
-          } else {
-            processedArgs = args;
+            return { ...rest, arguments: processedArgs };
           }
-          return { ...rest, arguments: processedArgs };
-        }
-        return rest;
-      });
+          return rest;
+        });
     }
     return { ...entry, message: strippedMsg };
   }

@@ -173,9 +173,18 @@ Exponential backoff with jitter: `min(baseDelay * 2^attempt + jitter, maxDelay)`
 | `auth` (401/403) | Never | Immediate |
 | `rate_limit` (429) | Up to 3x | After retries exhausted |
 | `transient` (500/503/timeout) | Up to 2x | After retries exhausted |
+| `context_overflow` (400 with token limit message) | Never | Never (compact and recover) |
 | `client` (400) | Never | Never (surface error) |
 
-**Context overflow recovery:** a `client` (400) error whose message contains both a size keyword (`exceed`, `maximum`, `limit`, `too long`, `too large`, `too many`) and a context/token keyword (`token`, `context`, `input`, `prompt`) is treated as a context overflow. This detection is provider-agnostic (covers Anthropic, OpenAI, Gemini, and others) and is gated on the `client` error category to avoid false positives on rate-limit errors. This can happen when a single large delivery (e.g., a scheduled Narrator job) causes the context to jump past the auto-compaction threshold in one step. Recovery is one-shot: the guard is armed on the first overflow and re-arms only after recovery completes (successfully or as a no-op). It does not reset on provider failover or re-initialization, so the guard stays active throughout the entire recovery sequence:
+**Context overflow detection:** `categorizeError()` in `retry.ts` checks the error message _before_ status code classification, so a 400 error that matches a context overflow pattern is categorized as `context_overflow` rather than `client`. Detection uses provider-specific regex patterns:
+
+- Google: `input token count.*exceeds.*maximum` ("The input token count (N) exceeds the maximum number of tokens allowed (N)")
+- OpenAI: `maximum context length` ("maximum context length is N tokens, you requested N")
+- Anthropic: `prompt is too long.*tokens` ("prompt is too long: N tokens > N maximum")
+
+These patterns are intentionally narrow to avoid false positives on rate-limit errors that also mention "token" or "limit" (e.g., "token per minute limit exceeded"). New providers can be supported by adding a regex to `isContextOverflow()` in `retry.ts`.
+
+**Context overflow recovery:** this can happen when a single large delivery (e.g., a scheduled Narrator job) causes the context to jump past the auto-compaction threshold in one step. Recovery is one-shot: the guard is armed on the first overflow and re-arms only after recovery completes (successfully or as a no-op). It does not reset on provider failover or re-initialization, so the guard stays active throughout the entire recovery sequence:
 
 1. Find the last JSONL message entry where `entry.message.usage.input < contextWindow * 0.90` (message entries store token usage under `entry.message.usage`)
 2. Truncate the active session file at that point, saving the remainder as a "tail"
