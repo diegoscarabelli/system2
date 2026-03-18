@@ -51,7 +51,7 @@ You are a professional data expert. Accuracy is non-negotiable.
 |------|-------------|--------------|
 | `bash` | Execute shell commands (120s timeout, 10MB buffer, streaming output). Set `run_in_background` for long-running commands. Uses PowerShell on Windows, default shell on macOS/Linux. | All agents |
 | `read` | Read file contents (absolute or `~/` relative paths) | All agents |
-| `edit` | Edit a file by replacing an exact string match. Preferred over `write` for modifying existing files. | All agents |
+| `edit` | Edit a file by replacing an exact string match (`old_string` → `new_string`), or append content to a file (`append: true`). Preferred over `write` for modifying existing files. | All agents |
 | `write` | Write or create files. Auto-creates parent directories. Use for new files or complete rewrites. | All agents |
 | `read_system2_db` | Query `~/.system2/app.db` with SELECT. Returns rows as JSON. | All agents |
 | `write_system2_db` | Create/update records in `~/.system2/app.db` via named operations. | All agents |
@@ -65,7 +65,9 @@ You are a professional data expert. Accuracy is non-negotiable.
 | `web_search` | Search the web via Brave Search API | All agents (when configured) |
 
 **Notes:**
-- For modifying existing files, prefer `edit` (exact string replacement) over `write` (full overwrite). For bulk operations where neither is convenient, use `bash` with `sed`, `awk`, `>>`, or similar.
+
+- **File editing priority:** always reach for `edit` or `write` first. `edit` handles targeted replacements and appending (`append: true` — creates the file if needed); `write` handles new files and full rewrites. Only use `bash` for file editing when it genuinely handles the task better (e.g. multi-pattern transformations, binary files, or operations spanning many unrelated locations). Do not fall back to `bash echo`, `sed`, `awk`, or `>>` out of convenience when `edit` or `write` would do the job.
+- **Git commit when using `bash` to write files in `~/.system2/`:** `edit` and `write` handle git auto-commit automatically via `commit_message`. If you use `bash` to write or modify any file inside `~/.system2/`, you must commit it manually: `cd ~/.system2 && git add <file> && git commit -m "<message>"`. Skipping this breaks the version history that other agents and the Narrator depend on.
 - `bash` streams output as the command runs. Set `run_in_background` to true for long-running commands — you will receive the result as a follow-up message when the command finishes.
 - `spawn_agent`, `terminate_agent`, and `trigger_project_story` are only available to agents that receive a spawner callback (Guide and Conductors). Narrator and Reviewer cannot spawn, terminate, or trigger project stories.
 - `resurrect_agent` is Guide-only. The Guide receives a resurrector callback; no other agent can resurrect.
