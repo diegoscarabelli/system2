@@ -17,7 +17,7 @@ src/
 │   ├── Layout.tsx         # 2-panel layout (artifact + chat) with catalog toggle
 │   ├── Chat.tsx           # Chat container (composes MessageList + MessageInput)
 │   ├── MessageList.tsx    # Message timeline with streaming
-│   ├── MessageInput.tsx   # Auto-growing textarea with queue indicator
+│   ├── MessageInput.tsx   # Auto-growing textarea with steering support
 │   ├── ArtifactViewer.tsx    # Tabbed artifact display (iframe + native tabs)
 │   ├── AgentPane.tsx          # Active agent list with busy indicators
 │   ├── ArtifactCatalog.tsx  # Browsable overlay of all registered artifacts
@@ -73,7 +73,7 @@ Each assistant message shows its turn events (thinking -> tool calls -> response
 
 ### MessageInput
 
-Auto-growing textarea (1-10 lines, then scrolls). Shows the current LLM provider name and context window usage percentage (teal below 50%, accent 50-69%, coral at 70%+) in the status bar, plus queued message count. Toggles between Send and Stop buttons based on streaming state. Provider changes on failover trigger a system message in the chat timeline.
+Auto-growing textarea (1-10 lines, then scrolls). Shows the current LLM provider name and context window usage percentage (teal below 50%, accent 50-69%, coral at 70%+) in the status bar. Messages sent while the agent is streaming are delivered immediately as steering messages. Toggles between Send and Stop buttons based on streaming state. Provider changes on failover trigger a system message in the chat timeline.
 
 ### ArtifactViewer
 
@@ -150,7 +150,7 @@ Three [Zustand](https://github.com/pmndrs/zustand) stores with no Redux or Conte
 
 ### `useChatStore` (Primary)
 
-Supports multi-agent chat via per-agent state. Each agent has its own message history, streaming state, and message queue stored in a `Map<number, PerAgentState>`. The `activeAgentId` determines which agent's state is displayed in the UI. `activeAgentId`, `activeAgentLabel`, and `activeAgentRole` are persisted via the Zustand `persist` middleware (key: `system2:chat-store`) so the selected agent survives page refreshes.
+Supports multi-agent chat via per-agent state. Each agent has its own message history and streaming state stored in a `Map<number, PerAgentState>`. The `activeAgentId` determines which agent's state is displayed in the UI. `activeAgentId`, `activeAgentLabel`, and `activeAgentRole` are persisted via the Zustand `persist` middleware (key: `system2:chat-store`) so the selected agent survives page refreshes.
 
 **Global state:**
 
@@ -173,7 +173,6 @@ Supports multi-agent chat via per-agent state. Each agent has its own message hi
 | `currentTurnEvents` | `ChatTurnEvent[]` | Thinking + tool calls for current turn |
 | `isStreaming` | `boolean` | Currently receiving chunks |
 | `isWaitingForResponse` | `boolean` | Sent message, no response yet |
-| `messageQueue` | `Array` | FIFO queue (steering messages prepended) |
 | `contextPercent` | `number \| null` | Context window usage % |
 
 Components read the active agent's state via selectors (e.g., `useChatStore(s => s.agentStates.get(s.activeAgentId))`). An exported `EMPTY_AGENT_STATE` constant provides a stable default for selectors when no agent state exists yet.
@@ -213,8 +212,7 @@ Manages the WebSocket connection to the server with multi-agent routing:
 - Exposes `sendMessage()`, `sendSteering()`, `abort()` (all include `activeAgentId`)
 - Watches `activeAgentId` changes and sends `switch_agent` to the server when the user switches agents
 - On reconnect: re-sends `switch_agent` if the user was viewing a non-Guide agent
-- On `ready_for_input`: dequeues next message from that specific agent's queue
-- Steering messages are prepended to queue (higher priority)
+- On `ready_for_input`: clears `isStreaming` and `isWaitingForResponse` for that agent
 
 See [WebSocket Protocol](../websocket-protocol.md) for the full message specification.
 

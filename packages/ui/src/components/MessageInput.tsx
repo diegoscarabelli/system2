@@ -3,7 +3,7 @@
  *
  * Text input for sending messages to the agent.
  * Auto-growing textarea that expands up to 10 lines, then scrolls.
- * Supports queueing messages while the agent is working.
+ * Messages sent while the agent is working steer it immediately.
  */
 
 import { ArrowUpIcon, SquareFillIcon } from '@primer/octicons-react';
@@ -20,11 +20,11 @@ const PADDING_Y = 16; // vertical padding inside textarea
 
 interface MessageInputProps {
   onSend: (message: string) => void;
-  onQueue: (message: string, isSteering?: boolean) => void;
+  onSteer: (message: string) => void;
   onAbort: () => void;
 }
 
-export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
+export function MessageInput({ onSend, onSteer, onAbort }: MessageInputProps) {
   const [input, setInput] = useState('');
   const isConnected = useChatStore((s) => s.isConnected);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
@@ -33,8 +33,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
     if (s.activeAgentId === null) return EMPTY_AGENT_STATE;
     return s.agentStates.get(s.activeAgentId) ?? EMPTY_AGENT_STATE;
   });
-  const provider = useChatStore((s) => s.provider);
-  const { isStreaming, isWaitingForResponse, messageQueue, contextPercent } = activeState;
+  const { isStreaming, isWaitingForResponse, contextPercent, provider } = activeState;
   const { accent, accentHover } = useAccentColors();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -43,7 +42,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
     if (!input.trim() || !isConnected || activeAgentId === null) return;
 
     if (isStreaming) {
-      onQueue(input.trim());
+      onSteer(input.trim());
     } else {
       onSend(input.trim());
     }
@@ -101,7 +100,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
             !isConnected
               ? 'Connecting to server...'
               : isStreaming
-                ? 'Type to queue a message...'
+                ? 'Type to steer the agent...'
                 : `Message ${activeAgentRole ?? 'Agent'}...`
           }
           disabled={!isConnected || activeAgentId === null}
@@ -153,7 +152,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
               as="button"
               type="submit"
               disabled={!isConnected || !input.trim() || activeAgentId === null}
-              aria-label={isStreaming ? 'Queue message' : 'Send message'}
+              aria-label={isStreaming ? 'Steer agent' : 'Send message'}
               sx={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -174,11 +173,6 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
               }}
             >
               <ArrowUpIcon size={16} />
-            </Box>
-          )}
-          {messageQueue.length > 0 && (
-            <Box sx={{ fontSize: 0, color: 'fg.muted' }}>
-              {messageQueue.length} message{messageQueue.length > 1 ? 's' : ''} queued
             </Box>
           )}
           {provider && <Box sx={{ fontSize: 0, color: 'fg.muted', ml: 'auto' }}>{provider}</Box>}

@@ -2,7 +2,8 @@
  * Chat Component
  *
  * Main chat interface combining message list and input.
- * Supports message queueing while the agent is working.
+ * Messages sent while the agent is working are delivered as steering
+ * messages, which interrupt the current turn immediately.
  */
 
 import { Box } from '@primer/react';
@@ -12,9 +13,8 @@ import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
 
 export function Chat() {
-  const { sendMessage, abort } = useWebSocket();
+  const { sendMessage, sendSteeringMessage, abort } = useWebSocket();
   const addUserMessage = useChatStore((s) => s.addUserMessage);
-  const queueMessage = useChatStore((s) => s.queueMessage);
   const activeAgentLabel = useChatStore((s) => s.activeAgentLabel);
 
   const handleSend = (content: string) => {
@@ -22,8 +22,9 @@ export function Chat() {
     sendMessage(content);
   };
 
-  const handleQueue = (content: string, isSteering = false) => {
-    queueMessage(content, isSteering);
+  const handleSteer = (content: string) => {
+    addUserMessage(content);
+    sendSteeringMessage(content);
   };
 
   return (
@@ -48,7 +49,7 @@ export function Chat() {
       </Box>
 
       <MessageList />
-      <MessageInput onSend={handleSend} onQueue={handleQueue} onAbort={abort} />
+      <MessageInput onSend={handleSend} onSteer={handleSteer} onAbort={abort} />
     </Box>
   );
 }

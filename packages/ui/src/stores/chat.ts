@@ -2,8 +2,8 @@
  * Chat Store
  *
  * Zustand store for managing chat messages and connection state.
- * Supports per-agent state: each agent has its own message history,
- * streaming state, and message queue. The active agent determines
+ * Supports per-agent state: each agent has its own message history
+ * and streaming state. The active agent determines
  * which state is displayed in the UI.
  *
  * The server is the source of truth for message history.
@@ -21,14 +21,6 @@ export type ToolCall = ChatToolCall;
 export type ThinkingBlock = ChatThinkingBlock;
 export type TurnEvent = ChatTurnEvent;
 
-// Queued message for sending when agent is ready
-export interface QueuedMessage {
-  id: string;
-  content: string;
-  isSteering: boolean; // Steering messages are inserted ASAP into the agent loop
-  timestamp: number;
-}
-
 /** Per-agent streaming and message state. */
 export interface PerAgentState {
   messages: Message[];
@@ -37,8 +29,8 @@ export interface PerAgentState {
   activeThinkingId: string | null;
   isStreaming: boolean;
   isWaitingForResponse: boolean;
-  messageQueue: QueuedMessage[];
   contextPercent: number | null;
+  provider: string | null;
 }
 
 function createDefaultAgentState(): PerAgentState {
@@ -49,8 +41,8 @@ function createDefaultAgentState(): PerAgentState {
     activeThinkingId: null,
     isStreaming: false,
     isWaitingForResponse: false,
-    messageQueue: [],
     contextPercent: null,
+    provider: null,
   };
 }
 
@@ -66,9 +58,8 @@ interface ChatState {
   activeAgentRole: string | null; // e.g., "Guide"
   // Guide agent ID (set on first connect)
   guideAgentId: number | null;
-  // Global connection and provider state
+  // Global connection state
   isConnected: boolean;
-  provider: string | null;
 
   // Agent management
   setActiveAgent: (agentId: number, role: string) => void;
@@ -80,9 +71,6 @@ interface ChatState {
   addUserMessage: (content: string, id?: string, timestamp?: number, agentId?: number) => void;
   addSystemMessage: (content: string) => void;
   loadHistory: (messages: Message[], agentId: number) => void;
-  queueMessage: (content: string, isSteering?: boolean) => void;
-  dequeueMessage: (agentId?: number) => QueuedMessage | undefined;
-  clearQueue: () => void;
   startAssistantMessage: (agentId?: number) => void;
   appendAssistantChunk: (chunk: string, agentId?: number) => void;
   finishAssistantMessage: (agentId?: number) => void;
@@ -96,7 +84,7 @@ interface ChatState {
   setStreaming: (streaming: boolean, agentId?: number) => void;
   setWaitingForResponse: (waiting: boolean, agentId?: number) => void;
   setContextPercent: (percent: number | null, agentId?: number) => void;
-  setProvider: (provider: string) => void;
+  setProvider: (provider: string, agentId: number) => void;
 }
 
 /** Immutably update a specific agent's state within the Map. */
@@ -121,7 +109,6 @@ export const useChatStore = create<ChatState>()(
       activeAgentRole: null,
       guideAgentId: null,
       isConnected: false,
-      provider: null,
 
       setActiveAgent: (agentId: number, role: string) => {
         const label = `${role}_${agentId}`;
@@ -193,51 +180,6 @@ export const useChatStore = create<ChatState>()(
             activeThinkingId: null,
             isStreaming: false,
             isWaitingForResponse: false,
-          })),
-        }));
-      },
-
-      queueMessage: (content: string, isSteering = false) => {
-        const targetId = get().activeAgentId;
-        if (targetId === null) return;
-
-        const queuedMsg: QueuedMessage = {
-          id: `queued-${Date.now()}`,
-          content,
-          isSteering,
-          timestamp: Date.now(),
-        };
-        set((state) => ({
-          agentStates: updateAgentState(state.agentStates, targetId, (s) => ({
-            messageQueue: isSteering
-              ? [queuedMsg, ...s.messageQueue]
-              : [...s.messageQueue, queuedMsg],
-          })),
-        }));
-      },
-
-      dequeueMessage: (agentId?: number) => {
-        const targetId = agentId ?? get().activeAgentId;
-        if (targetId === null) return undefined;
-
-        const agentState = get().agentStates.get(targetId);
-        if (!agentState || agentState.messageQueue.length === 0) return undefined;
-
-        const [next, ...rest] = agentState.messageQueue;
-        set((state) => ({
-          agentStates: updateAgentState(state.agentStates, targetId, () => ({
-            messageQueue: rest,
-          })),
-        }));
-        return next;
-      },
-
-      clearQueue: () => {
-        const targetId = get().activeAgentId;
-        if (targetId === null) return;
-        set((state) => ({
-          agentStates: updateAgentState(state.agentStates, targetId, () => ({
-            messageQueue: [],
           })),
         }));
       },
@@ -454,8 +396,10 @@ export const useChatStore = create<ChatState>()(
         }));
       },
 
-      setProvider: (provider: string) => {
-        set({ provider });
+      setProvider: (provider: string, agentId: number) => {
+        set((state) => ({
+          agentStates: updateAgentState(state.agentStates, agentId, () => ({ provider })),
+        }));
       },
     }),
     {

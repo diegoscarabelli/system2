@@ -1,7 +1,7 @@
 /**
  * Chat Store Tests
  *
- * Tests for per-agent state isolation, dequeue routing, and loadHistory resets.
+ * Tests for per-agent state isolation and loadHistory resets.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -15,7 +15,6 @@ function resetStore() {
     activeAgentRole: null,
     guideAgentId: null,
     isConnected: false,
-    provider: null,
   });
 }
 
@@ -65,45 +64,6 @@ describe('useChatStore', () => {
     });
   });
 
-  describe('dequeueMessage', () => {
-    it('dequeues from the correct agent when agentId is provided explicitly', () => {
-      // Set active agent to 1
-      useChatStore.setState({ activeAgentId: 1 });
-
-      // Initialize both agents
-      useChatStore.getState().loadHistory([], 1);
-      useChatStore.getState().loadHistory([], 2);
-      const { agentStates } = useChatStore.getState();
-      const existingState = agentStates.get(2);
-      if (!existingState) throw new Error('agent 2 state not found');
-      const stateForTwo = { ...existingState };
-      stateForTwo.messageQueue = [
-        { id: 'q1', content: 'for agent 2', isSteering: false, timestamp: 1 },
-      ];
-      const next = new Map(agentStates);
-      next.set(2, stateForTwo);
-      useChatStore.setState({ agentStates: next });
-
-      // Dequeue explicitly from agent 2
-      const msg = useChatStore.getState().dequeueMessage(2);
-
-      expect(msg?.content).toBe('for agent 2');
-      // Active agent 1's queue is untouched
-      expect(useChatStore.getState().agentStates.get(1)?.messageQueue).toHaveLength(0);
-    });
-
-    it('returns undefined when queue is empty', () => {
-      useChatStore.setState({ activeAgentId: 1 });
-      useChatStore.getState().loadHistory([], 1);
-
-      expect(useChatStore.getState().dequeueMessage(1)).toBeUndefined();
-    });
-
-    it('returns undefined when agentId is null and no active agent', () => {
-      expect(useChatStore.getState().dequeueMessage()).toBeUndefined();
-    });
-  });
-
   describe('loadHistory', () => {
     it('sets messages and resets streaming state', () => {
       useChatStore.setState({ activeAgentId: 1 });
@@ -146,19 +106,15 @@ describe('useChatStore', () => {
     });
   });
 
-  describe('provider (global state)', () => {
-    it('setProvider updates global provider, not per-agent', () => {
-      useChatStore.setState({ activeAgentId: 1 });
+  describe('provider (per-agent state)', () => {
+    it('setProvider updates only the specified agent', () => {
       useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().loadHistory([], 2);
 
-      useChatStore.getState().setProvider('openai');
+      useChatStore.getState().setProvider('openai', 1);
 
-      // Global provider is set
-      expect(useChatStore.getState().provider).toBe('openai');
-
-      // Switching activeAgentId does not affect provider
-      useChatStore.setState({ activeAgentId: 2 });
-      expect(useChatStore.getState().provider).toBe('openai');
+      expect(useChatStore.getState().getAgentState(1).provider).toBe('openai');
+      expect(useChatStore.getState().getAgentState(2).provider).toBeNull();
     });
   });
 });

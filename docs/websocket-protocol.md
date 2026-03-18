@@ -31,7 +31,7 @@ type ClientMessage =
 
 | Message | Description |
 |---------|-------------|
-| `user_message` | Standard user input. Queued if agent is busy. `agentId` targets a specific agent (defaults to active). |
+| `user_message` | Standard user input. `agentId` targets a specific agent (defaults to active). |
 | `steering_message` | Priority message inserted ASAP into the agent loop (interrupts current work). |
 | `abort` | Cancel current agent execution for the specified (or active) agent. |
 | `switch_agent` | Switch the active chat to a different agent. Server responds with that agent's `chat_history`, `context_usage`, and `ready_for_input` (if idle). |
@@ -117,12 +117,9 @@ User clicks agent in AgentPane
        6. Sends ready_for_input (if agent is idle)
 ```
 
-### Message Queuing
+### Steering
 
-The UI maintains a per-agent FIFO message queue (`PerAgentState.messageQueue`). When the agent is busy:
-1. New user messages are appended to the queue
-2. Steering messages are prepended (higher priority)
-3. On `ready_for_input`, the next queued message for that agent is sent automatically
+Messages sent while an agent is streaming are delivered immediately as `steering_message`, which uses `streamingBehavior: 'steer'` to interrupt the current turn. The message appears in the chat instantly via `addUserMessage()` and is sent to the server in the same call.
 
 ## Conversation Summarization
 

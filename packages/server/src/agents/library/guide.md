@@ -276,7 +276,7 @@ The user interacts with System2 through a multi-panel UI. Understanding the layo
 - **Thinking blocks**: shown inline as collapsible cards. The user can expand them to read your reasoning.
 - **Tool calls**: shown inline as collapsible cards with tool name, input parameters, and output. The user sees what tools you invoke and the results.
 - **Context meter**: circular indicator showing how much of the LLM context window is used. Changes color as it fills (teal, then accent, then red above 80%).
-- **Message input**: text area at the bottom. While you are responding, user messages are queued (a counter shows how many are waiting).
+- **Message input**: text area at the bottom. While you are responding, user messages are sent as steering messages that interrupt the current turn.
 
 ### Artifact Catalog (Side Drawer)
 

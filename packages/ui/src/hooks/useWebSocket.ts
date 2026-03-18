@@ -2,7 +2,8 @@
  * WebSocket Hook
  *
  * Manages WebSocket connection to the server.
- * Supports message queueing with steering message priority.
+ * Messages sent while an agent is streaming are delivered as steering
+ * messages that interrupt the current turn immediately.
  * Routes messages to/from per-agent state via agentId.
  */
 
@@ -32,21 +33,6 @@ export function useWebSocket() {
     }
     prevAgentRef.current = activeAgentId;
   }, [activeAgentId]);
-
-  // Process the next queued message for a specific agent
-  const processNextQueuedMessage = useCallback((agentId: number) => {
-    const state = useChatStore.getState();
-    const nextMsg = state.dequeueMessage(agentId);
-    if (nextMsg && wsRef.current?.readyState === WebSocket.OPEN) {
-      state.addUserMessage(nextMsg.content, undefined, undefined, agentId);
-      const msg: ClientMessage = {
-        type: nextMsg.isSteering ? 'steering_message' : 'user_message',
-        content: nextMsg.content,
-        agentId,
-      };
-      wsRef.current.send(JSON.stringify(msg));
-    }
-  }, []);
 
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
@@ -127,7 +113,6 @@ export function useWebSocket() {
           if (aid !== null) {
             state.setStreaming(false, aid);
             state.setWaitingForResponse(false, aid);
-            processNextQueuedMessage(aid);
           }
           break;
         }
@@ -184,11 +169,11 @@ export function useWebSocket() {
         }
 
         case 'provider_info':
-          state.setProvider(message.provider);
+          state.setProvider(message.provider, message.agentId);
           break;
 
         case 'provider_change':
-          state.setProvider(message.provider);
+          state.setProvider(message.provider, message.agentId);
           state.addSystemMessage(`Switched to ${message.provider}`);
           break;
 
@@ -221,7 +206,7 @@ export function useWebSocket() {
     return () => {
       ws.close();
     };
-  }, [processNextQueuedMessage]);
+  }, []);
 
   const sendMessage = useCallback((content: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
