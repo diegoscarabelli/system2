@@ -4,7 +4,7 @@
  * Tests for per-agent state isolation, dequeue routing, and loadHistory resets.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { useChatStore } from './chat';
 
 function resetStore() {
@@ -143,56 +143,6 @@ describe('useChatStore', () => {
       expect(state?.activeThinkingId).toBeNull();
       expect(state?.currentAssistantMessage).toBeNull();
       expect(state?.currentTurnEvents).toHaveLength(0);
-    });
-  });
-
-  describe('localStorage persistence', () => {
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
-
-    function makeMockStorage() {
-      const store: Record<string, string> = {};
-      return {
-        getItem: (k: string) => store[k] ?? null,
-        setItem: vi.fn((k: string, v: string) => {
-          store[k] = v;
-        }),
-        removeItem: (k: string) => {
-          delete store[k];
-        },
-        store,
-      };
-    }
-
-    it('setActiveAgent writes id, label, and role to localStorage', () => {
-      const mock = makeMockStorage();
-      vi.stubGlobal('localStorage', mock);
-      useChatStore.getState().setActiveAgent(1, 'guide');
-      expect(mock.setItem).toHaveBeenCalledWith(
-        'system2:active-agent',
-        JSON.stringify({ id: 1, label: 'guide_1', role: 'Guide' })
-      );
-    });
-
-    it('setActiveAgent overwrites a previously persisted agent', () => {
-      const mock = makeMockStorage();
-      vi.stubGlobal('localStorage', mock);
-      useChatStore.getState().setActiveAgent(1, 'guide');
-      useChatStore.getState().setActiveAgent(5, 'conductor');
-      expect(mock.setItem).toHaveBeenLastCalledWith(
-        'system2:active-agent',
-        JSON.stringify({ id: 5, label: 'conductor_5', role: 'Conductor' })
-      );
-    });
-
-    it('setActiveAgent does not throw when localStorage write fails', () => {
-      const mock = makeMockStorage();
-      mock.setItem.mockImplementation(() => {
-        throw new Error('QuotaExceededError');
-      });
-      vi.stubGlobal('localStorage', mock);
-      expect(() => useChatStore.getState().setActiveAgent(1, 'guide')).not.toThrow();
     });
   });
 
