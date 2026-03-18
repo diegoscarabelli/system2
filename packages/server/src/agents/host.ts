@@ -296,31 +296,46 @@ export class AgentHost {
 
     // Subscribe to session events and forward to listeners
     session.subscribe((event) => {
-      // Check for API errors that need failover handling
-      this.handlePotentialError(event);
-
-      // Track busy state from agent activity
-      if (event.type === 'message_update' || event.type === 'tool_execution_start') {
-        if (!this.busy) {
-          this.busy = true;
-        }
-      } else if (event.type === 'agent_end') {
-        if (this.busy) {
-          this.busy = false;
-        }
-      }
-
-      // Track compaction for pruning
-      this.handleCompactionTracking(event);
-
-      // Forward to external listeners
-      this.listeners.forEach((listener) => {
-        listener(event);
-      });
+      this.handleSessionEvent(event);
     });
 
     console.log(`[AgentHost] ${agentRecord.role} agent session initialized with JSONL persistence`);
     console.log('[AgentHost] Using provider:', this.currentProvider);
+  }
+
+  /**
+   * Handle a session event: error detection, busy/pendingPrompt tracking,
+   * compaction, and external listener forwarding.
+   *
+   * Extracted from the initialize() subscribe callback so tests can invoke it directly.
+   */
+  private handleSessionEvent(event: AgentSessionEvent): void {
+    // Check for API errors that need failover handling
+    this.handlePotentialError(event);
+
+    // Track busy state from agent activity
+    if (event.type === 'message_update' || event.type === 'tool_execution_start') {
+      if (!this.busy) {
+        this.busy = true;
+      }
+    } else if (event.type === 'agent_end') {
+      if (this.busy) {
+        this.busy = false;
+      }
+      // Clear pendingPrompt here — not in prompt() after session.prompt() returns.
+      // When streamingBehavior is 'followUp' or 'steer', session.prompt() queues
+      // the message and returns immediately, so clearing it there would be too early.
+      // Waiting for agent_end ensures the message stays retryable until the turn runs.
+      this.pendingPrompt = null;
+    }
+
+    // Track compaction for pruning
+    this.handleCompactionTracking(event);
+
+    // Forward to external listeners
+    this.listeners.forEach((listener) => {
+      listener(event);
+    });
   }
 
   /**
@@ -350,7 +365,7 @@ export class AgentHost {
     const retryKey = `${this.currentProvider}:${category}`;
     const currentAttempts = this.retryAttempts.get(retryKey) ?? 0;
 
-    // Capture before any await — prompt() may clear it after session.prompt() resolves
+    // Capture before any await — agent_end may clear it before this async handler resumes
     const promptToRetry = this.pendingPrompt;
 
     // Check if we should retry
@@ -368,6 +383,7 @@ export class AgentHost {
       // Retry the pending prompt if there is one
       if (promptToRetry && this.session) {
         console.log('[AgentHost] Retrying prompt...');
+        this.pendingPrompt = promptToRetry; // restore so the retry turn is also retryable
         await this.resourceLoader?.reload();
         await this.session.prompt(promptToRetry);
       }
@@ -453,6 +469,7 @@ export class AgentHost {
       // Retry the pending prompt with the new provider
       if (promptToRetry && this.session) {
         console.log('[AgentHost] Retrying prompt with new provider...');
+        this.pendingPrompt = promptToRetry; // restore so the retry turn is also retryable
         await this.session.prompt(promptToRetry);
       }
     } catch (error) {
@@ -597,8 +614,9 @@ export class AgentHost {
     // Reload resource loader to pick up knowledge file changes
     await this.resourceLoader?.reload();
     await this.session.prompt(content, promptOptions);
-    // Clear on successful completion (no error triggered failover)
-    this.pendingPrompt = null;
+    // pendingPrompt is cleared by handleSessionEvent() on agent_end.
+    // Do NOT clear here: for queued turns (streamingBehavior 'followUp'/'steer'),
+    // session.prompt() returns immediately and the turn hasn't run yet.
   }
 
   /**
@@ -661,10 +679,11 @@ export class AgentHost {
   abort(): void {
     if (this.session) {
       this.session.abort();
-      // abort() may not trigger agent_end, so clear busy explicitly
+      // abort() may not trigger agent_end, so clear busy and pendingPrompt explicitly
       if (this.busy) {
         this.busy = false;
       }
+      this.pendingPrompt = null;
     }
   }
 

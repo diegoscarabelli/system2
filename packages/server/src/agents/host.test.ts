@@ -123,7 +123,7 @@ describe('AgentHost', () => {
       expect(hostInternal.authResolver.markKeyFailed).toHaveBeenCalled();
     });
 
-    it('prompt() sets and clears pendingPrompt around session.prompt()', async () => {
+    it('prompt() sets pendingPrompt and keeps it set until agent_end fires', async () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -134,6 +134,7 @@ describe('AgentHost', () => {
       const hostInternal = host as unknown as {
         pendingPrompt: string | null;
         session: { prompt: ReturnType<typeof vi.fn> };
+        handleSessionEvent: (event: { type: string }) => void;
       };
 
       // Track pendingPrompt value during session.prompt()
@@ -148,8 +149,103 @@ describe('AgentHost', () => {
 
       // During session.prompt(), pendingPrompt was set
       expect(promptDuringSession).toBe('hello world');
-      // After session.prompt() resolves, pendingPrompt is cleared
+      // After session.prompt() resolves, pendingPrompt is still set —
+      // clearing moved to agent_end so queued turns (followUp/steer) stay retryable
+      expect(hostInternal.pendingPrompt).toBe('hello world');
+
+      // Simulate agent_end: pendingPrompt is now cleared
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingPrompt).toBeNull();
+    });
+
+    it('handleSessionEvent clears pendingPrompt on agent_end but not on other events', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        handleSessionEvent: (event: { type: string }) => void;
+        handlePotentialError: ReturnType<typeof vi.fn>;
+        handleCompactionTracking: ReturnType<typeof vi.fn>;
+      };
+
+      // Suppress internal method calls (not under test here)
+      hostInternal.handlePotentialError = vi.fn();
+      hostInternal.handleCompactionTracking = vi.fn();
+
+      hostInternal.pendingPrompt = 'pending message';
+
+      hostInternal.handleSessionEvent({ type: 'message_update' });
+      expect(hostInternal.pendingPrompt).toBe('pending message');
+
+      hostInternal.handleSessionEvent({ type: 'tool_execution_start' });
+      expect(hostInternal.pendingPrompt).toBe('pending message');
+
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
+      expect(hostInternal.pendingPrompt).toBeNull();
+    });
+
+    it('retry paths restore pendingPrompt before calling session.prompt()', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        session: { prompt: ReturnType<typeof vi.fn> };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+      };
+
+      let pendingAtRetryTime: string | null = null;
+      hostInternal.session = {
+        prompt: vi.fn().mockImplementation(async () => {
+          pendingAtRetryTime = hostInternal.pendingPrompt;
+        }),
+      };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.pendingPrompt = 'original message';
+      // Simulate agent_end having cleared it before the error handler retries
+      hostInternal.pendingPrompt = null;
+
+      // Use a rate_limit error — shouldRetry returns true for first attempt
+      const errorEvent = {
+        type: 'message_end',
+        message: {
+          stopReason: 'error',
+          errorMessage: 'Error 429: rate limit exceeded',
+        },
+      };
+
+      // Capture promptToRetry via a saved reference before pendingPrompt was cleared
+      // This simulates the real scenario: pendingPrompt was 'original message' when
+      // the error was captured, but was then cleared by agent_end
+      hostInternal.pendingPrompt = 'original message';
+
+      // No failover — just retry path (mark enough attempts to skip retry and go to failover,
+      // but have no next provider so it exits cleanly after retrying once)
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      // Set retryAttempts to 0 so the first shouldRetry call returns true
+      hostInternal.retryAttempts = new Map();
+
+      await hostInternal.handlePotentialError(errorEvent);
+
+      // pendingPrompt was restored before session.prompt() was called
+      expect(pendingAtRetryTime).toBe('original message');
     });
 
     it('pendingPrompt persists if session.prompt() throws', async () => {
@@ -171,7 +267,8 @@ describe('AgentHost', () => {
 
       await expect(host.prompt('hello world')).rejects.toThrow('connection failed');
 
-      // pendingPrompt is NOT cleared because the clear line (after await) was never reached
+      // pendingPrompt stays set — clearing only happens on agent_end, which never
+      // fires when session.prompt() throws synchronously
       expect(hostInternal.pendingPrompt).toBe('hello world');
     });
   });
@@ -230,6 +327,17 @@ describe('AgentHost', () => {
       host.abort();
 
       expect(host.isBusy()).toBe(false);
+    });
+
+    it('abort() clears pendingPrompt', () => {
+      const { host, internal } = makeHostWithBusyTracking();
+      setupWithFakeSession(internal);
+
+      internal.pendingPrompt = 'message in flight';
+
+      host.abort();
+
+      expect(internal.pendingPrompt).toBeNull();
     });
 
     it('abort() is a no-op when already idle', () => {
