@@ -175,7 +175,7 @@ Consolidated knowledge about the system, user, and project history.
 Agents write important facts here for the Narrator to incorporate.
 ```
 
-The **## Latest Learnings** section is a scratchpad: any agent can append notes. During the daily memory-update job (11 AM), the Narrator reads all recent daily summaries, incorporates new information into the memory document, and clears processed notes.
+The **## Latest Learnings** section captures durable, cross-project insights: any agent can append important facts here. During the daily memory-update job (11 AM), the Narrator reads all recent daily summaries, incorporates new information into the memory document, and consolidates entries from this section.
 
 ## Project Logs
 
