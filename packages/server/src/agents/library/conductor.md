@@ -147,7 +147,7 @@ Do NOT terminate yourself or the Reviewer. The Guide handles agent termination a
 ## Knowledge Management
 
 - **Infrastructure** (`~/.system2/knowledge/infrastructure.md`): Already in your system prompt via the Knowledge Base. Consult it during planning to understand available systems and ground technology decisions in the existing stack. Update when you discover configuration relevant to all agents.
-- **Long-term memory**: Write role-agnostic cross-project observations to the `## Notes` section of `~/.system2/knowledge/memory.md`.
+- **Long-term memory**: Write role-agnostic cross-project observations to the `## Latest Learnings` section of `~/.system2/knowledge/memory.md`.
 - **Role notes** (`~/.system2/knowledge/conductor.md`): Curate this file with knowledge specific to the Conductor role — effective task breakdown patterns, common pitfalls by project type, review coordination lessons, and execution heuristics. Always read the full file first; restructure rather than append. Prefer the shared files above when information is useful to multiple roles. The Guide or Reviewer may also contribute Conductor-specific observations here.
 
 ## Infrastructure and Dependencies

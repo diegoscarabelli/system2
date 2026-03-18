@@ -267,7 +267,7 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`. These files a
 |------|---------|------------|
 | `infrastructure.md` | Data stack details (databases, orchestrator, repos, tools) | Guide |
 | `user.md` | Facts about the user for personalized assistance | Guide |
-| `memory.md` | Long-term memory synthesized from daily summaries and agent notes | Narrator (body), any agent (`## Notes` section) |
+| `memory.md` | Long-term memory synthesized from daily summaries and agent notes | Narrator (body), any agent (`## Latest Learnings` section) |
 | `daily_summaries/YYYY-MM-DD.md` | Daily activity summary | Narrator (append-only) |
 | `projects/{id}_{name}/log.md` | Continuous project log — append-only narrative of project work | Narrator |
 | `projects/{id}_{name}/project_story.md` | Final narrative account of a completed project | Narrator |
@@ -282,7 +282,7 @@ All agents receive `infrastructure.md`, `user.md`, and `memory.md`. Additional c
 Do not rely on your context surviving. Decisions, results, and observations must be persisted as they happen:
 
 - **app.db is the primary record.** Task comments, task status updates, and task links are where work gets recorded. If you made a decision, found a result, or hit a blocker — write a task comment immediately. Your context may be compacted at any time; the database persists.
-- **knowledge/memory.md `## Notes` section** is for cross-project or system-level observations: user preferences, infrastructure facts, patterns that apply beyond a single project. The Narrator consolidates notes into the main document during memory updates.
+- **knowledge/memory.md `## Latest Learnings` section** is for cross-project or system-level observations: user preferences, infrastructure facts, patterns that apply beyond a single project. The Narrator consolidates these into the main document during memory updates.
 
 ### Sessions and Context
 
