@@ -5,7 +5,15 @@
  * Includes automatic failover when API errors occur.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +25,7 @@ import {
   DefaultResourceLoader,
   ModelRegistry,
   SessionManager,
+  SettingsManager,
 } from '@mariozechner/pi-coding-agent';
 import type { LlmConfig, LlmProvider, ServicesConfig, ToolsConfig } from '@system2/shared';
 import matter from 'gray-matter';
@@ -52,6 +61,19 @@ const AGENT_LIBRARY_DIR = join(AGENT_DIR, 'library');
 
 /** Roles that can spawn, manage, and resurrect agents. Single source of truth for tool access. */
 const ORCHESTRATOR_ROLES = new Set(['guide', 'conductor']);
+
+/**
+ * Returns true if the error message indicates the input exceeded the model's context window.
+ * Provider-agnostic: matches Gemini, OpenAI, Anthropic, and generic patterns.
+ */
+function isContextOverflowError(message: string): boolean {
+  const m = message.toLowerCase();
+  const sizeWords = ['exceed', 'maximum', 'limit', 'too long', 'too large', 'too many'];
+  return (
+    sizeWords.some((w) => m.includes(w)) &&
+    (m.includes('token') || m.includes('context') || m.includes('input') || m.includes('prompt'))
+  );
+}
 
 interface AgentDefinition {
   name: string;
@@ -111,6 +133,8 @@ export class AgentHost {
   private compactionCount = 0;
   private compactionDepth = 0;
   private isPruning = false;
+  private contextWindow = 0;
+  private contextOverflowHandled = false;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -268,6 +292,14 @@ export class AgentHost {
 
     console.log('[AgentHost] Model found:', model ? 'YES' : 'NO');
 
+    // Store context window size for overflow recovery
+    this.contextWindow = model.contextWindow;
+
+    // Configure auto-compaction to fire at 90% of context window instead of default ~98%
+    const settingsManager = SettingsManager.inMemory({
+      compaction: { reserveTokens: Math.floor(model.contextWindow * 0.1) },
+    });
+
     // Create resource loader with custom system prompt
     this.resourceLoader = new DefaultResourceLoader({
       cwd: SYSTEM2_DIR,
@@ -295,6 +327,7 @@ export class AgentHost {
       model,
       customTools: this.buildTools(),
       thinkingLevel: agentConfig.thinking_level ?? 'high',
+      settingsManager,
     });
 
     this.session = session;
@@ -429,6 +462,26 @@ export class AgentHost {
       }
 
       console.log('[AgentHost] No fallback providers available, error will be surfaced to user');
+    }
+
+    // Context overflow: truncate JSONL, compact, restore tail, reinitialize.
+    // The guard prevents re-entry during recovery; it re-arms after recovery completes.
+    // Gated on category === 'client' to avoid false positives on rate-limit errors whose
+    // messages may also contain size/token keywords (e.g. "token per minute limit exceeded").
+    if (
+      category === 'client' &&
+      isContextOverflowError(errorMessage) &&
+      !this.contextOverflowHandled
+    ) {
+      this.contextOverflowHandled = true;
+      const recovered = await this.handleContextOverflow();
+      if (recovered) {
+        // Clear the overflow-causing prompt so a future failover doesn't retry it
+        this.pendingPrompt = null;
+        return;
+      }
+      // Recovery was a no-op — reset guard so a future overflow can try again
+      this.contextOverflowHandled = false;
     }
 
     // All recovery paths exhausted; ensure busy is cleared
@@ -919,5 +972,127 @@ export class AgentHost {
     }
 
     return summaries;
+  }
+
+  /**
+   * Emergency recovery for context overflow errors.
+   *
+   * When the context window is exceeded and no API call can succeed, this method:
+   * 1. Splits the active JSONL at the last message entry below 90% of context window
+   * 2. Truncates the file to that safe point, reinitializes, and compacts
+   * 3. Appends the tail (post-split entries) back and reinitializes again
+   *
+   * The result is a session with a compact summary of the safe history plus the
+   * recent tail, consuming a fraction of the context window.
+   */
+  private async handleContextOverflow(): Promise<boolean> {
+    const sessionDir = this.sessionDir;
+    if (!this.session || !sessionDir) {
+      console.log('[AgentHost] Context overflow: no session or sessionDir, cannot recover');
+      return false;
+    }
+
+    console.log('[AgentHost] Starting context overflow recovery...');
+
+    // Hoisted so the catch block can restore the tail if recovery fails mid-way
+    let activeFile: string | undefined;
+    let tailLines: string[] = [];
+    let fileTruncated = false;
+    let tailAppended = false; // set after tail is written; prevents double-append on failure
+
+    try {
+      // Step 1: Find the active JSONL file (most recently modified)
+      const jsonlFiles = readdirSync(sessionDir)
+        .filter((f) => f.endsWith('.jsonl'))
+        .map((f) => {
+          const fullPath = join(sessionDir, f);
+          return { path: fullPath, mtime: statSync(fullPath).mtime.getTime() };
+        })
+        .sort((a, b) => b.mtime - a.mtime);
+
+      if (jsonlFiles.length === 0) {
+        console.log('[AgentHost] Context overflow: no JSONL files found');
+        return false;
+      }
+
+      activeFile = jsonlFiles[0].path;
+      const lines = readFileSync(activeFile, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim());
+
+      // Step 2: Find last message entry below 90% of context window
+      const threshold = this.contextWindow * 0.9;
+      let splitIndex = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const entry = JSON.parse(lines[i]);
+          // JSONL message entries store usage under entry.message.usage (not top-level entry.usage)
+          const usage = entry.type === 'message' ? entry.message?.usage : undefined;
+          if (typeof usage?.input === 'number' && usage.input < threshold) {
+            splitIndex = i;
+            break;
+          }
+        } catch {
+          // skip malformed lines
+        }
+      }
+
+      if (splitIndex === -1) {
+        console.log('[AgentHost] Context overflow: no safe split point found');
+        return false;
+      }
+
+      // Step 3: Split into head and tail
+      const headLines = lines.slice(0, splitIndex + 1);
+      tailLines = lines.slice(splitIndex + 1);
+      console.log(
+        `[AgentHost] Context overflow: split at line ${splitIndex + 1}, tail has ${tailLines.length} entries`
+      );
+
+      // Step 4: Truncate file to head
+      writeFileSync(activeFile, `${headLines.join('\n')}\n`, 'utf-8');
+      fileTruncated = true;
+
+      // Step 5: Reinitialize from truncated file
+      await this.reinitializeWithProvider(this.currentProvider, null);
+
+      // Step 6: Compact to reduce head context to ~5%
+      if (this.session) {
+        console.log('[AgentHost] Context overflow: compacting...');
+        await this.session.compact();
+        // Synthesize auto_compaction_end so the pruning counter stays accurate
+        this.handleCompactionTracking({
+          type: 'auto_compaction_end',
+        } as AgentSessionEvent);
+        console.log('[AgentHost] Context overflow: compaction complete');
+      }
+
+      // Step 7: Append tail and reinitialize — session loads compact summary + tail
+      if (tailLines.length > 0) {
+        appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
+        tailAppended = true;
+        console.log('[AgentHost] Context overflow: tail restored, reinitializing...');
+        await this.reinitializeWithProvider(this.currentProvider, null);
+      }
+
+      console.log('[AgentHost] Context overflow recovery complete');
+      // Re-arm guard so future overflows on this session can recover again
+      this.contextOverflowHandled = false;
+      return true;
+    } catch (error) {
+      console.error('[AgentHost] Context overflow recovery failed:', error);
+      // Best-effort: if the file was truncated but the tail was not yet appended,
+      // restore the tail so no history is permanently lost. Skip if tail was
+      // already written to avoid duplicating entries.
+      if (fileTruncated && !tailAppended && tailLines.length > 0 && activeFile) {
+        try {
+          appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
+          console.log('[AgentHost] Context overflow: tail restored after recovery failure');
+        } catch {
+          // Ignore — best-effort only
+        }
+      }
+      return false;
+    }
   }
 }
