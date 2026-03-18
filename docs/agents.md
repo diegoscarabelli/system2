@@ -14,7 +14,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 | Agent | Role | Lifecycle | Models |
 | --- | --- | --- | --- |
 | **Guide** | Primary user-facing agent. Helps brainstorm and plan, starts projects, interfaces with the multi-agent system, and relays updates. Users may also interact directly with other active agents; Guide mediation is preferred in most cases. | Singleton, persistent | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
-| **Narrator** | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. Schedule-driven. | Singleton, persistent | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
+| **Narrator** | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. [Schedule-driven](scheduler.md). | Singleton, persistent | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
 | **Conductor** | Orchestrates and executes work within a project: breaks it into tasks, spawns specialist agents or executes directly, and coordinates with the Reviewer before reporting completion. | Per-project, ephemeral | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
 | **Reviewer** | Critically assesses work before it is considered complete. | Per-project, ephemeral | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
 
@@ -60,7 +60,7 @@ The static layers are concatenated into `staticPrompt`. The dynamic layers are l
 
 Empty files are skipped.
 
-Prompt caching (where supported by the provider) optimizes the static prefix: only the refreshed knowledge portion is reprocessed on each call.
+Prompt caching (where supported by the provider) optimizes the static prefix: only the refreshed knowledge portion is reprocessed on each call. See [Knowledge System](knowledge-system.md) for the structure and update semantics of each knowledge file.
 
 ## AgentHost (`host.ts`)
 
@@ -132,7 +132,7 @@ A simple `Map<number, AgentHost>` that maps agent database IDs to active AgentHo
 
 ## AuthResolver (`auth-resolver.ts`)
 
-Manages API key rotation and multi-provider failover:
+Manages API key rotation and multi-provider failover. Providers and API keys are defined in [Configuration](configuration.md):
 
 ### Key Rotation
 
@@ -454,13 +454,3 @@ DataAgent-Extract, DataAgent-Analyze, and Reviewer work through their tasks in d
 8. Guide terminates Conductor (#2) and Reviewer (#4), sets project #1 to `done`.
 9. Guide informs user with final summary, artifact location, and story path (`~/.system2/projects/1_linkedin-campaign/project_story.md`).
 
----
-
-## See Also
-
-- [Tools](tools.md): all tools available to agents, including spawn_agent, terminate_agent, and resurrect_agent
-- [Knowledge System](knowledge-system.md): knowledge files injected into system prompts
-- [Database](database.md): app.db schema (projects, tasks, agents, task_links, task_comments)
-- [Scheduler](scheduler.md): how scheduled jobs deliver messages to Narrator
-- [Configuration](configuration.md): LLM provider and failover configuration
-- [WebSocket Protocol](websocket-protocol.md): how agent events stream to the UI
