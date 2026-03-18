@@ -24,7 +24,7 @@ interface AgentBuffer {
   agentRole: string;
   events: BufferedEvent[];
   timer: ReturnType<typeof setTimeout> | null;
-  startTimestamp: number;
+  timerStartEventCount: number; // number of events when the timer was started
 }
 
 export class ConversationSummarizer {
@@ -58,7 +58,7 @@ export class ConversationSummarizer {
 
     // Start timer on first message (non-resetting)
     if (buffer.timer === null) {
-      buffer.startTimestamp = Date.now();
+      buffer.timerStartEventCount = buffer.events.length;
       buffer.timer = setTimeout(
         () => this.onTimerExpiry(agentId),
         ConversationSummarizer.TIMER_DURATION_MS
@@ -84,7 +84,7 @@ export class ConversationSummarizer {
         agentRole,
         events: [],
         timer: null,
-        startTimestamp: 0,
+        timerStartEventCount: 0,
       };
       this.buffers.set(agentId, buffer);
     }
@@ -116,12 +116,13 @@ export class ConversationSummarizer {
       })
       .join('\n');
 
-    // Check for new user messages before clearing (used to decide whether to restart timer)
-    const hasNewUserMessages = buffer.events.some(
-      (e) => e.type === 'user_message' && e.timestamp > buffer.startTimestamp
-    );
+    // Check for user messages that arrived after the timer was started (before clearing).
+    // Uses event count to avoid same-millisecond timestamp edge cases.
+    const hasNewUserMessages = buffer.events
+      .slice(buffer.timerStartEventCount)
+      .some((e) => e.type === 'user_message');
 
-    // Clear events and timer
+    // Clear events and timer before the async work
     buffer.events = [];
     buffer.timer = null;
 
@@ -144,9 +145,10 @@ export class ConversationSummarizer {
       console.error('[ConversationSummarizer] Failed to generate summary:', err);
     }
 
-    // Start new timer if user messages arrived during the timer period
-    if (hasNewUserMessages) {
-      buffer.startTimestamp = Date.now();
+    // Start new timer only if: additional messages existed in the window AND no timer was
+    // already started by a concurrent recordUserMessage call during the await above.
+    if (hasNewUserMessages && buffer.timer === null) {
+      buffer.timerStartEventCount = buffer.events.length;
       buffer.timer = setTimeout(
         () => this.onTimerExpiry(agentId),
         ConversationSummarizer.TIMER_DURATION_MS

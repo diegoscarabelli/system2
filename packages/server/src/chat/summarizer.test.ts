@@ -177,7 +177,7 @@ describe('ConversationSummarizer', () => {
       summarizer.recordUserMessage(2, 'conductor', 'first message');
       // Advance time within the window (timer hasn't fired yet)
       vi.advanceTimersByTime(1000);
-      // Second message arrives after startTimestamp
+      // Second message arrives during the timer window (after the first)
       summarizer.recordUserMessage(2, 'conductor', 'second message');
 
       expect(setTimeoutSpy).toHaveBeenCalledTimes(1);

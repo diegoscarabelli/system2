@@ -195,12 +195,16 @@ export function useWebSocket() {
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      useChatStore.getState().setConnected(false);
+      const state = useChatStore.getState();
+      state.setConnected(false);
+      state.clearAllStreamingState();
     };
 
     ws.onclose = () => {
       console.log('WebSocket disconnected');
-      useChatStore.getState().setConnected(false);
+      const state = useChatStore.getState();
+      state.setConnected(false);
+      state.clearAllStreamingState();
     };
 
     return () => {

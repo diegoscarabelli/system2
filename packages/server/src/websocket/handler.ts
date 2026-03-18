@@ -45,6 +45,7 @@ export class WebSocketHandler {
     const guideHost = this.agentRegistry.get(guideAgentId);
     if (!guideHost) {
       this.sendError('Guide agent not found');
+      ws.close();
       return;
     }
 

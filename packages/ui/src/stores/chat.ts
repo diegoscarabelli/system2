@@ -91,6 +91,7 @@ interface ChatState {
   startToolCall: (name: string, input?: string, agentId?: number) => void;
   finishToolCall: (name: string, result: string, agentId?: number) => void;
   setConnected: (connected: boolean) => void;
+  clearAllStreamingState: () => void;
   setStreaming: (streaming: boolean, agentId?: number) => void;
   setWaitingForResponse: (waiting: boolean, agentId?: number) => void;
   setContextPercent: (percent: number | null, agentId?: number) => void;
@@ -132,13 +133,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   getAgentState: (agentId: number) => {
-    return get().agentStates.get(agentId) ?? createDefaultAgentState();
+    return get().agentStates.get(agentId) ?? EMPTY_AGENT_STATE;
   },
 
   getActiveState: () => {
     const { activeAgentId, agentStates } = get();
-    if (activeAgentId === null) return createDefaultAgentState();
-    return agentStates.get(activeAgentId) ?? createDefaultAgentState();
+    if (activeAgentId === null) return EMPTY_AGENT_STATE;
+    return agentStates.get(activeAgentId) ?? EMPTY_AGENT_STATE;
   },
 
   addUserMessage: (content: string, id?: string, timestamp?: number, agentId?: number) => {
@@ -386,6 +387,29 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
   setConnected: (connected: boolean) => {
     set({ isConnected: connected });
+  },
+
+  clearAllStreamingState: () => {
+    set((state) => {
+      const next = new Map(state.agentStates);
+      for (const [id, s] of next) {
+        if (
+          s.isStreaming ||
+          s.isWaitingForResponse ||
+          s.activeThinkingId ||
+          s.currentAssistantMessage
+        ) {
+          next.set(id, {
+            ...s,
+            isStreaming: false,
+            isWaitingForResponse: false,
+            activeThinkingId: null,
+            currentAssistantMessage: null,
+          });
+        }
+      }
+      return { agentStates: next };
+    });
   },
 
   setStreaming: (streaming: boolean, agentId?: number) => {
