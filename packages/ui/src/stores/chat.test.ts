@@ -147,33 +147,51 @@ describe('useChatStore', () => {
   });
 
   describe('localStorage persistence', () => {
+    function makeMockStorage() {
+      const store: Record<string, string> = {};
+      return {
+        getItem: (k: string) => store[k] ?? null,
+        setItem: vi.fn((k: string, v: string) => {
+          store[k] = v;
+        }),
+        removeItem: (k: string) => {
+          delete store[k];
+        },
+        store,
+      };
+    }
+
     it('setActiveAgent writes id, label, and role to localStorage', () => {
-      const spy = vi.spyOn(localStorage, 'setItem');
+      const mock = makeMockStorage();
+      vi.stubGlobal('localStorage', mock);
       useChatStore.getState().setActiveAgent(1, 'guide');
-      expect(spy).toHaveBeenCalledWith(
+      expect(mock.setItem).toHaveBeenCalledWith(
         'system2:active-agent',
         JSON.stringify({ id: 1, label: 'guide_1', role: 'Guide' })
       );
-      spy.mockRestore();
+      vi.unstubAllGlobals();
     });
 
     it('setActiveAgent overwrites a previously persisted agent', () => {
-      const spy = vi.spyOn(localStorage, 'setItem');
+      const mock = makeMockStorage();
+      vi.stubGlobal('localStorage', mock);
       useChatStore.getState().setActiveAgent(1, 'guide');
       useChatStore.getState().setActiveAgent(5, 'conductor');
-      expect(spy).toHaveBeenLastCalledWith(
+      expect(mock.setItem).toHaveBeenLastCalledWith(
         'system2:active-agent',
         JSON.stringify({ id: 5, label: 'conductor_5', role: 'Conductor' })
       );
-      spy.mockRestore();
+      vi.unstubAllGlobals();
     });
 
     it('setActiveAgent does not throw when localStorage write fails', () => {
-      const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      const mock = makeMockStorage();
+      mock.setItem.mockImplementation(() => {
         throw new Error('QuotaExceededError');
       });
+      vi.stubGlobal('localStorage', mock);
       expect(() => useChatStore.getState().setActiveAgent(1, 'guide')).not.toThrow();
-      spy.mockRestore();
+      vi.unstubAllGlobals();
     });
   });
 
