@@ -89,10 +89,26 @@ describe('resurrect_agent tool', () => {
     expect((result.content[0] as { text: string }).text).toContain('Cannot resurrect singleton');
   });
 
-  it('Conductor cannot resurrect', async () => {
-    const { tool } = setup(3, [
+  it('Conductor resurrects archived agent within own project', async () => {
+    const { tool, resurrector, updateAgentStatus } = setup(3, [
       makeAgent(3, 'conductor', 10),
       makeAgent(5, 'reviewer', 10, 'archived'),
+    ]);
+
+    const result = await exec(tool, {
+      agent_id: 5,
+      message: 'Resume work on code review.',
+    });
+
+    expect((result.content[0] as { text: string }).text).toContain('has been resurrected');
+    expect(updateAgentStatus).toHaveBeenCalledWith(5, 'active');
+    expect(resurrector).toHaveBeenCalledWith(5, 3, 'Resume work on code review.');
+  });
+
+  it('Conductor cannot resurrect agent in a different project', async () => {
+    const { tool } = setup(3, [
+      makeAgent(3, 'conductor', 10),
+      makeAgent(5, 'reviewer', 99, 'archived'),
     ]);
 
     const result = await exec(tool, {
@@ -100,7 +116,7 @@ describe('resurrect_agent tool', () => {
       message: 'Resume.',
     });
 
-    expect((result.content[0] as { text: string }).text).toContain('Only the Guide');
+    expect((result.content[0] as { text: string }).text).toContain('own project');
   });
 
   it('Reviewer cannot resurrect', async () => {
@@ -114,7 +130,7 @@ describe('resurrect_agent tool', () => {
       message: 'Resume.',
     });
 
-    expect((result.content[0] as { text: string }).text).toContain('Only the Guide');
+    expect((result.content[0] as { text: string }).text).toContain('Only Guide and Conductor');
   });
 
   it('errors when agent not found', async () => {

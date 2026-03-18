@@ -22,7 +22,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 **Conductor and Reviewer** are project-scoped, spawned by Guide for every project and archived when done. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project. On server restart, all non-archived project-scoped agents are restored automatically. If an agent fails to restore, its status remains `active` in the database, the error is logged, and the Guide is notified so it can investigate.
 
-**Agent status** has two values in the database: `active` (alive, should be restored on restart) and `archived` (terminated, will not be restored). Archived agents can be resurrected by the Guide via the `resurrect_agent` tool, which flips the status back to `active` and resumes the session from persisted JSONL. Whether an agent is currently processing work is tracked in memory via `AgentHost.isBusy()`, not in the database.
+**Agent status** has two values in the database: `active` (alive, should be restored on restart) and `archived` (terminated, will not be restored). Archived agents can be resurrected by the Guide (any non-singleton) or by a Conductor (agents within their own project) via the `resurrect_agent` tool, which flips the status back to `active` and resumes the session from persisted JSONL. Whether an agent is currently processing work is tracked in memory via `AgentHost.isBusy()`, not in the database.
 
 ## Agent Identity and System Instructions
 

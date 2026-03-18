@@ -593,10 +593,7 @@ export class AgentHost {
       tools.push(createTriggerProjectStoryTool(this.db, this.agentId, this.registry));
     }
 
-    // resurrect_agent is Guide-only: resurrection requires user confirmation and is a
-    // user-facing decision. The tool itself enforces this; restricting here keeps the
-    // tool list consistent with what the agent can actually do.
-    if (this.agentRole === 'guide' && this.resurrector) {
+    if (canOrchestrate && this.resurrector) {
       tools.push(createResurrectAgentTool(this.db, this.agentId, this.resurrector));
     }
 

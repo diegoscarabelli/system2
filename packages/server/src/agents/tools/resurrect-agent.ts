@@ -6,7 +6,8 @@
  * registers it in the AgentRegistry, and delivers a context message.
  *
  * Permission model:
- *   - Only the Guide may resurrect agents.
+ *   - Guide may resurrect any archived non-singleton agent.
+ *   - Conductors may resurrect archived agents within their own project.
  *   - Singleton agents (guide, narrator) cannot be resurrected.
  *   - Already-active agents cannot be resurrected.
  */
@@ -42,9 +43,10 @@ export function createResurrectAgentTool(
     label: 'Resurrect Agent',
     description:
       'Resurrect an archived agent: restore its session from persisted history, re-register it, and deliver a context message. ' +
-      'IMPORTANT: Resurrection is a significant decision. Before using this tool, confirm with the user that resurrection (rather than starting a new project or carrying out a bespoke task) is the right approach. ' +
-      'Help the user think through the tradeoffs: the resurrected agent retains its full conversation history and context, but that context may be stale. ' +
-      'Only the Guide may resurrect agents. After resurrection, update the project record via write_system2_db: clear end_at and set status to "in progress".',
+      'IMPORTANT: Resurrection is a significant decision. Before using this tool, confirm that resurrection (rather than starting a new project or carrying out a bespoke task) is the right approach. ' +
+      'The resurrected agent retains its full conversation history and context, but that context may be stale. ' +
+      'Guide may resurrect any archived non-singleton. Conductors may only resurrect agents within their own project. ' +
+      'After resurrection, update the project record via write_system2_db: clear end_at and set status to "in progress".',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       const caller = db.getAgent(agentId);
@@ -55,13 +57,13 @@ export function createResurrectAgentTool(
         };
       }
 
-      // Only the Guide may resurrect agents
-      if (caller.role !== 'guide') {
+      // Only Guide and Conductors may resurrect agents
+      if (caller.role !== 'guide' && caller.role !== 'conductor') {
         return {
           content: [
             {
               type: 'text' as const,
-              text: `Error: Only the Guide may resurrect agents. Your role is "${caller.role}".`,
+              text: `Error: Only Guide and Conductor agents may resurrect agents. Your role is "${caller.role}".`,
             },
           ],
           details: { error: 'unauthorized_role' },
@@ -79,6 +81,21 @@ export function createResurrectAgentTool(
           ],
           details: { error: 'target_not_found' },
         };
+      }
+
+      // Conductors can only resurrect agents within their own project
+      if (caller.role === 'conductor') {
+        if (target.project !== caller.project) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Error: Conductors can only resurrect agents in their own project (project ${caller.project}). Target agent belongs to project ${target.project}.`,
+              },
+            ],
+            details: { error: 'wrong_project' },
+          };
+        }
       }
 
       // Singleton agents cannot be resurrected (they are never archived)
