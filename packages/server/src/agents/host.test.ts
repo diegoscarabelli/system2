@@ -123,7 +123,7 @@ describe('AgentHost', () => {
       expect(hostInternal.authResolver.markKeyFailed).toHaveBeenCalled();
     });
 
-    it('prompt() sets and clears pendingPrompt around session.prompt()', async () => {
+    it('prompt() sets pendingPrompt and keeps it set until agent_end fires', async () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -134,6 +134,7 @@ describe('AgentHost', () => {
       const hostInternal = host as unknown as {
         pendingPrompt: string | null;
         session: { prompt: ReturnType<typeof vi.fn> };
+        handleSessionEvent: (event: { type: string }) => void;
       };
 
       // Track pendingPrompt value during session.prompt()
@@ -148,8 +149,112 @@ describe('AgentHost', () => {
 
       // During session.prompt(), pendingPrompt was set
       expect(promptDuringSession).toBe('hello world');
-      // After session.prompt() resolves, pendingPrompt is cleared
+      // After session.prompt() resolves, pendingPrompt is still set —
+      // clearing moved to agent_end so queued turns (followUp/steer) stay retryable
+      expect(hostInternal.pendingPrompt).toBe('hello world');
+      // Non-steering: streamingBehavior must be 'followUp' (not undefined) to prevent
+      // silent drops when a background sendCustomMessage turn is in flight
+      expect(hostInternal.session.prompt).toHaveBeenCalledWith('hello world', {
+        streamingBehavior: 'followUp',
+      });
+
+      // Simulate agent_end: pendingPrompt is now cleared
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingPrompt).toBeNull();
+
+      // Steering: streamingBehavior must be 'steer'
+      await host.prompt('steer message', { isSteering: true });
+      expect(hostInternal.session.prompt).toHaveBeenLastCalledWith('steer message', {
+        streamingBehavior: 'steer',
+      });
+    });
+
+    it('handleSessionEvent clears pendingPrompt on agent_end but not on other events', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        handleSessionEvent: (event: { type: string }) => void;
+        handlePotentialError: ReturnType<typeof vi.fn>;
+        handleCompactionTracking: ReturnType<typeof vi.fn>;
+      };
+
+      // Suppress internal method calls (not under test here)
+      // handlePotentialError must return a Promise since handleSessionEvent calls .catch() on it
+      hostInternal.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+      hostInternal.handleCompactionTracking = vi.fn();
+
+      hostInternal.pendingPrompt = 'pending message';
+
+      hostInternal.handleSessionEvent({ type: 'message_update' });
+      expect(hostInternal.pendingPrompt).toBe('pending message');
+
+      hostInternal.handleSessionEvent({ type: 'tool_execution_start' });
+      expect(hostInternal.pendingPrompt).toBe('pending message');
+
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
+      expect(hostInternal.pendingPrompt).toBeNull();
+    });
+
+    it('retry paths restore pendingPrompt and pass streamingBehavior before calling session.prompt()', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        session: { prompt: ReturnType<typeof vi.fn> };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+      };
+
+      let pendingAtRetryTime: string | null = null;
+      hostInternal.session = {
+        prompt: vi.fn().mockImplementation(async () => {
+          pendingAtRetryTime = hostInternal.pendingPrompt;
+        }),
+      };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.pendingPrompt = 'original message';
+
+      // Use a rate_limit error — shouldRetry returns true for first attempt
+      const errorEvent = {
+        type: 'message_end',
+        message: {
+          stopReason: 'error',
+          errorMessage: 'Error 429: rate limit exceeded',
+        },
+      };
+
+      // retryAttempts=0 means shouldRetry returns true → handlePotentialError takes the
+      // retry path, calls session.prompt(), then returns early. The failover mocks are
+      // set up defensively but are not exercised in this scenario.
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+      hostInternal.retryAttempts = new Map();
+
+      await hostInternal.handlePotentialError(errorEvent);
+
+      // pendingPrompt was restored before session.prompt() was called
+      expect(pendingAtRetryTime).toBe('original message');
+      // streamingBehavior: 'followUp' prevents a throw if a deliverMessage turn
+      // happens to start during the retry delay
+      expect(hostInternal.session.prompt).toHaveBeenCalledWith('original message', {
+        streamingBehavior: 'followUp',
+      });
     });
 
     it('pendingPrompt persists if session.prompt() throws', async () => {
@@ -171,7 +276,8 @@ describe('AgentHost', () => {
 
       await expect(host.prompt('hello world')).rejects.toThrow('connection failed');
 
-      // pendingPrompt is NOT cleared because the clear line (after await) was never reached
+      // pendingPrompt stays set — clearing only happens on agent_end, which never
+      // fires when session.prompt() throws synchronously
       expect(hostInternal.pendingPrompt).toBe('hello world');
     });
   });
@@ -230,6 +336,17 @@ describe('AgentHost', () => {
       host.abort();
 
       expect(host.isBusy()).toBe(false);
+    });
+
+    it('abort() clears pendingPrompt', () => {
+      const { host, internal } = makeHostWithBusyTracking();
+      setupWithFakeSession(internal);
+
+      internal.pendingPrompt = 'message in flight';
+
+      host.abort();
+
+      expect(internal.pendingPrompt).toBeNull();
     });
 
     it('abort() is a no-op when already idle', () => {

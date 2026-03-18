@@ -310,31 +310,48 @@ export class AgentHost {
 
     // Subscribe to session events and forward to listeners
     session.subscribe((event) => {
-      // Check for API errors that need failover handling
-      this.handlePotentialError(event);
-
-      // Track busy state from agent activity
-      if (event.type === 'message_update' || event.type === 'tool_execution_start') {
-        if (!this.busy) {
-          this.busy = true;
-        }
-      } else if (event.type === 'agent_end') {
-        if (this.busy) {
-          this.busy = false;
-        }
-      }
-
-      // Track compaction for pruning
-      this.handleCompactionTracking(event);
-
-      // Forward to external listeners
-      this.listeners.forEach((listener) => {
-        listener(event);
-      });
+      this.handleSessionEvent(event);
     });
 
     console.log(`[AgentHost] ${agentRecord.role} agent session initialized with JSONL persistence`);
     console.log('[AgentHost] Using provider:', this.currentProvider);
+  }
+
+  /**
+   * Handle a session event: error detection, busy/pendingPrompt tracking,
+   * compaction, and external listener forwarding.
+   *
+   * Extracted from the initialize() subscribe callback so tests can invoke it directly.
+   */
+  private handleSessionEvent(event: AgentSessionEvent): void {
+    // Check for API errors that need failover handling (async, errors logged internally)
+    void this.handlePotentialError(event).catch((err) => {
+      console.error('[AgentHost] handlePotentialError threw unexpectedly:', err);
+    });
+
+    // Track busy state from agent activity
+    if (event.type === 'message_update' || event.type === 'tool_execution_start') {
+      if (!this.busy) {
+        this.busy = true;
+      }
+    } else if (event.type === 'agent_end') {
+      if (this.busy) {
+        this.busy = false;
+      }
+      // Clear pendingPrompt here — not in prompt() after session.prompt() returns.
+      // When streamingBehavior is 'followUp' or 'steer', session.prompt() queues
+      // the message and returns immediately, so clearing it there would be too early.
+      // Waiting for agent_end ensures the message stays retryable until the turn runs.
+      this.pendingPrompt = null;
+    }
+
+    // Track compaction for pruning
+    this.handleCompactionTracking(event);
+
+    // Forward to external listeners
+    this.listeners.forEach((listener) => {
+      listener(event);
+    });
   }
 
   /**
@@ -364,7 +381,7 @@ export class AgentHost {
     const retryKey = `${this.currentProvider}:${category}`;
     const currentAttempts = this.retryAttempts.get(retryKey) ?? 0;
 
-    // Capture before any await — prompt() may clear it after session.prompt() resolves
+    // Capture before any await — agent_end may clear it before this async handler resumes
     const promptToRetry = this.pendingPrompt;
 
     // Check if we should retry
@@ -382,8 +399,11 @@ export class AgentHost {
       // Retry the pending prompt if there is one
       if (promptToRetry && this.session) {
         console.log('[AgentHost] Retrying prompt...');
+        // Restore only if nothing newer arrived during sleep — a new prompt() call during the
+        // delay would have set pendingPrompt to the newer message; don't overwrite it.
+        this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
         await this.resourceLoader?.reload();
-        await this.session.prompt(promptToRetry);
+        await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
       }
       return;
     }
@@ -467,7 +487,9 @@ export class AgentHost {
       // Retry the pending prompt with the new provider
       if (promptToRetry && this.session) {
         console.log('[AgentHost] Retrying prompt with new provider...');
-        await this.session.prompt(promptToRetry);
+        // Restore only if nothing newer arrived during reinitialization.
+        this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
+        await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
       }
     } catch (error) {
       console.error('[AgentHost] Failed to reinitialize:', error);
@@ -598,14 +620,20 @@ export class AgentHost {
     // Store for potential retry on failover
     this.pendingPrompt = content;
 
-    // Use streamingBehavior to queue steering messages properly
-    const promptOptions = options?.isSteering ? { streamingBehavior: 'steer' as const } : undefined;
+    // Use streamingBehavior to queue messages properly if the session is already streaming.
+    // Defaulting non-steering messages to 'followUp' prevents silent drops when a background
+    // sendCustomMessage turn is in flight — session.prompt() throws if streamingBehavior is
+    // undefined and isStreaming is true. 'followUp' is a no-op when the session is idle.
+    const promptOptions = options?.isSteering
+      ? { streamingBehavior: 'steer' as const }
+      : { streamingBehavior: 'followUp' as const };
 
     // Reload resource loader to pick up knowledge file changes
     await this.resourceLoader?.reload();
     await this.session.prompt(content, promptOptions);
-    // Clear on successful completion (no error triggered failover)
-    this.pendingPrompt = null;
+    // pendingPrompt is cleared by handleSessionEvent() on agent_end.
+    // Do NOT clear here: for queued turns (streamingBehavior 'followUp'/'steer'),
+    // session.prompt() returns immediately and the turn hasn't run yet.
   }
 
   /**
@@ -678,10 +706,11 @@ export class AgentHost {
   abort(): void {
     if (this.session) {
       this.session.abort();
-      // abort() may not trigger agent_end, so clear busy explicitly
+      // abort() may not trigger agent_end, so clear busy and pendingPrompt explicitly
       if (this.busy) {
         this.busy = false;
       }
+      this.pendingPrompt = null;
     }
   }
 
