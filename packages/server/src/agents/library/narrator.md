@@ -116,11 +116,11 @@ The message contains the memory file path, timestamps, and a list of daily summa
 
 1. **Parse metadata:** Extract `memory_file`, `last_narrator_update_ts`, `new_run_ts`, and the list of daily summary file paths.
 
-2. **Read memory.md:** Read the full document including any items in the `## Notes` section that other agents may have written.
+2. **Read memory.md:** Read the full document including any items in the `## Latest Learnings` section that other agents may have written.
 
 3. **Read daily summaries:** Read each listed daily summary file.
 
-4. **Restructure:** Blend new insights from daily summaries into the document body. Consolidate items from the `## Notes` section into appropriate sections. Remove consolidated items from Notes. Maintain a coherent, well-organized document that reads naturally.
+4. **Restructure:** Blend new insights from daily summaries into the document body. Consolidate items from the `## Latest Learnings` section into appropriate sections. Remove consolidated items from Latest Learnings. Maintain a coherent, well-organized document that reads naturally.
 
 5. **Write updated memory.md:** Use `write` with `commit_message: "memory update"` to overwrite with the restructured content. Set `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) in the frontmatter.
 

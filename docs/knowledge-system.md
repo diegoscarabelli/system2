@@ -63,7 +63,7 @@ Project-scoped files live outside `knowledge/`:
 | `infrastructure.md` | Guide | During onboarding and as infrastructure evolves |
 | `user.md` | Guide | During onboarding and ongoing interactions |
 | `memory.md` | Narrator | Daily at 11 AM (memory-update job) |
-| `memory.md ## Notes` | Any agent | Anytime: agents write important facts here |
+| `memory.md ## Latest Learnings` | Any agent | Anytime: agents write important facts here |
 | `{role}.md` | Agent of that role (any agent may contribute) | As role-specific lessons and patterns accumulate |
 | `daily_summaries/*.md` | Narrator | Every 30 minutes (configurable) |
 | `projects/{id}_{name}/log.md` | Narrator | Every 30 minutes (same cron as daily summary) |
@@ -170,12 +170,12 @@ last_narrator_update_ts: 2024-01-16T04:00:00.000Z
 
 Consolidated knowledge about the system, user, and project history.
 
-## Notes
+## Latest Learnings
 
 Agents write important facts here for the Narrator to incorporate.
 ```
 
-The **## Notes** section is a scratchpad: any agent can append notes. During the daily memory-update job (11 AM), the Narrator reads all recent daily summaries, incorporates new information into the memory document, and clears processed notes.
+The **## Latest Learnings** section is a scratchpad: any agent can append notes. During the daily memory-update job (11 AM), the Narrator reads all recent daily summaries, incorporates new information into the memory document, and clears processed notes.
 
 ## Project Logs
 

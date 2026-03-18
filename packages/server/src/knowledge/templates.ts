@@ -103,7 +103,7 @@ last_narrator_update_ts: ${now}
 > Long-term memory of System2. Synthesized from daily logs, project narrations, and important notes.
 > Periodically restructured by the Narrator for coherence.
 
-## Notes
+## Latest Learnings
 
 > Other agents write important facts here during work. The Narrator consolidates these into the document during restructuring and removes them from this section.
 
