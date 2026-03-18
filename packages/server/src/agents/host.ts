@@ -464,7 +464,8 @@ export class AgentHost {
       console.log('[AgentHost] No fallback providers available, error will be surfaced to user');
     }
 
-    // Context overflow: truncate JSONL, compact, restore tail, reinitialize (one-shot).
+    // Context overflow: truncate JSONL, compact, restore tail, reinitialize.
+    // The guard prevents re-entry during recovery; it re-arms after recovery completes.
     // Gated on category === 'client' to avoid false positives on rate-limit errors whose
     // messages may also contain size/token keywords (e.g. "token per minute limit exceeded").
     if (
@@ -997,6 +998,7 @@ export class AgentHost {
     let activeFile: string | undefined;
     let tailLines: string[] = [];
     let fileTruncated = false;
+    let tailAppended = false; // set after tail is written; prevents double-append on failure
 
     try {
       // Step 1: Find the active JSONL file (most recently modified)
@@ -1068,6 +1070,7 @@ export class AgentHost {
       // Step 7: Append tail and reinitialize — session loads compact summary + tail
       if (tailLines.length > 0) {
         appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
+        tailAppended = true;
         console.log('[AgentHost] Context overflow: tail restored, reinitializing...');
         await this.reinitializeWithProvider(this.currentProvider, null);
       }
@@ -1078,9 +1081,10 @@ export class AgentHost {
       return true;
     } catch (error) {
       console.error('[AgentHost] Context overflow recovery failed:', error);
-      // Best-effort: if the file was already truncated, restore the tail so no
-      // history is permanently lost should recovery fail partway through.
-      if (fileTruncated && tailLines.length > 0 && activeFile) {
+      // Best-effort: if the file was truncated but the tail was not yet appended,
+      // restore the tail so no history is permanently lost. Skip if tail was
+      // already written to avoid duplicating entries.
+      if (fileTruncated && !tailAppended && tailLines.length > 0 && activeFile) {
         try {
           appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
           console.log('[AgentHost] Context overflow: tail restored after recovery failure');

@@ -1130,7 +1130,7 @@ describe('AgentHost', () => {
 
       await internal.handleContextOverflow();
 
-      // Read truncated file — should contain first 3 entries (up to index 2 = last <90%)
+      // Read file after full recovery (head was compacted, tail was re-appended)
       const remaining = readFileSync(filePath, 'utf-8')
         .split('\n')
         .filter((l) => l.trim())
@@ -1240,6 +1240,37 @@ describe('AgentHost', () => {
         .filter((l) => l.trim())
         .map((l) => JSON.parse(l) as { type: string });
       expect(restored.some((e) => e.type === 'tool_call')).toBe(true);
+    });
+
+    it('does not double-append tail when second reinit fails after tail was already written', async () => {
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
+        { type: 'tool_call', name: 'bash' }, // becomes the tail
+      ];
+      writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      // First reinit succeeds (compact works); second reinit (after tail append) throws
+      let callCount = 0;
+      internal.reinitializeWithProvider = vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          internal.session = { compact: vi.fn().mockResolvedValue(undefined) };
+        } else {
+          throw new Error('second reinit failed');
+        }
+      });
+
+      await internal.handleContextOverflow();
+
+      // File should contain exactly one tool_call (not duplicated)
+      const finalEntries = readFileSync(join(testDir, 'session.jsonl'), 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l) as { type: string });
+      const toolCallCount = finalEntries.filter((e) => e.type === 'tool_call').length;
+      expect(toolCallCount).toBe(1);
     });
 
     it('guard resets after successful recovery, allowing a second recovery on the same session', async () => {
