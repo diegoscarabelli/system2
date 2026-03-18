@@ -6,7 +6,7 @@
  * session.prompt() resolves.
  */
 
-import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LlmConfig } from '@system2/shared';
@@ -946,6 +946,238 @@ describe('AgentHost', () => {
         expect(instructions).not.toContain('[pruned]');
         expect(internal.compactionCount).toBe(0);
       });
+    });
+  });
+
+  describe('isContextOverflowError', () => {
+    // Access via the module-level function through the internal escape hatch
+    // by testing it indirectly via handlePotentialError, or we can expose it
+    // by importing the module and casting. Easiest: re-implement the same
+    // logic inline and test the real behavior via handlePotentialError.
+    //
+    // Since isContextOverflowError is module-private, we test it through
+    // handlePotentialError triggering handleContextOverflow.
+
+    type OverflowInternal = {
+      handlePotentialError: (event: unknown) => Promise<void>;
+      handleContextOverflow: ReturnType<typeof vi.fn>;
+      contextOverflowHandled: boolean;
+      isReinitializing: boolean;
+      currentProvider: string;
+      retryAttempts: Map<string, number>;
+      authResolver: {
+        markKeyFailed: ReturnType<typeof vi.fn>;
+        getNextProvider: ReturnType<typeof vi.fn>;
+      };
+    };
+
+    function makeHostForOverflow() {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const internal = host as unknown as OverflowInternal;
+      internal.currentProvider = 'google';
+      internal.retryAttempts = new Map();
+      internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      internal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+      // Replace handleContextOverflow so we can assert it was called
+      internal.handleContextOverflow = vi.fn().mockResolvedValue(undefined);
+      return { host, internal };
+    }
+
+    function makeOverflowEvent(errorMessage: string) {
+      return {
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage },
+      };
+    }
+
+    it('triggers handleContextOverflow for Gemini overflow message', async () => {
+      const { internal } = makeHostForOverflow();
+      await internal.handlePotentialError(
+        makeOverflowEvent('400 Bad Request: input token count (1050000) exceeds the maximum')
+      );
+      expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
+    });
+
+    it('triggers handleContextOverflow for OpenAI overflow message', async () => {
+      const { internal } = makeHostForOverflow();
+      await internal.handlePotentialError(
+        makeOverflowEvent('400 Bad Request: maximum context length is 128000 tokens')
+      );
+      expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
+    });
+
+    it('triggers handleContextOverflow for Anthropic overflow message', async () => {
+      const { internal } = makeHostForOverflow();
+      await internal.handlePotentialError(
+        makeOverflowEvent('400 Bad Request: prompt is too long: 200000 tokens > 100000 maximum')
+      );
+      expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
+    });
+
+    it('does NOT trigger handleContextOverflow for unrelated 400 errors', async () => {
+      const { internal } = makeHostForOverflow();
+      await internal.handlePotentialError(makeOverflowEvent('400 Bad Request: invalid api key'));
+      expect(internal.handleContextOverflow).not.toHaveBeenCalled();
+    });
+
+    it('does NOT trigger handleContextOverflow twice (one-shot guard)', async () => {
+      const { internal } = makeHostForOverflow();
+      const event = makeOverflowEvent('400: input token count exceeds maximum');
+      await internal.handlePotentialError(event);
+      await internal.handlePotentialError(event);
+      expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('handleContextOverflow', () => {
+    let testDir: string;
+
+    beforeEach(() => {
+      testDir = join(
+        tmpdir(),
+        `system2-overflow-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      );
+      mkdirSync(testDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    type OverflowRecoveryInternal = {
+      session: {
+        compact: ReturnType<typeof vi.fn>;
+      } | null;
+      _sessionDir: string | null;
+      contextWindow: number;
+      contextOverflowHandled: boolean;
+      compactionCount: number;
+      compactionDepth: number;
+      currentProvider: string;
+      handleContextOverflow: () => Promise<void>;
+      handleCompactionTracking: ReturnType<typeof vi.fn>;
+      reinitializeWithProvider: ReturnType<typeof vi.fn>;
+      writeCompactionCount: ReturnType<typeof vi.fn>;
+    };
+
+    function makeHostForRecovery() {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const internal = host as unknown as OverflowRecoveryInternal;
+      internal._sessionDir = testDir;
+      internal.contextWindow = 1_000_000;
+      internal.currentProvider = 'google';
+      internal.compactionDepth = 1;
+      internal.compactionCount = 0;
+      internal.writeCompactionCount = vi.fn();
+      internal.reinitializeWithProvider = vi.fn().mockImplementation(async () => {
+        // After reinit, session is set to a new mock
+        internal.session = { compact: vi.fn().mockResolvedValue(undefined) };
+      });
+      internal.handleCompactionTracking = vi.fn();
+      internal.session = { compact: vi.fn().mockResolvedValue(undefined) };
+      return { host, internal };
+    }
+
+    function writeJsonlFile(filename: string, entries: object[], mtime: Date) {
+      const filePath = join(testDir, filename);
+      const content = `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`;
+      writeFileSync(filePath, content);
+      utimesSync(filePath, mtime, mtime);
+      return filePath;
+    }
+
+    it('truncates JSONL at split point, reinitializes, compacts, appends tail, reinitializes again', async () => {
+      // 3 messages: first two below 90% threshold, third above
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', usage: { input: 800_000, output: 100 } }, // below 90% (900K)
+        { type: 'message', usage: { input: 850_000, output: 100 } }, // below 90%
+        { type: 'message', usage: { input: 1_100_000, output: 100 } }, // above 100%
+      ];
+      const filePath = writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      await internal.handleContextOverflow();
+
+      // Read truncated file — should contain first 3 entries (up to index 2 = last <90%)
+      const remaining = readFileSync(filePath, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+
+      // After compact+tail-append the file has head+tail; reinitialize was called twice
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
+      // compact() was called once (on the session after first reinit)
+      // handleCompactionTracking was called with auto_compaction_end
+      expect(internal.handleCompactionTracking).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'auto_compaction_end' })
+      );
+      // The overflow entry (index 3) should be in the tail and appended back
+      expect(remaining.at(-1)).toMatchObject({ type: 'message', usage: { input: 1_100_000 } });
+    });
+
+    it('splits at the last message below 90% when multiple candidates exist', async () => {
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', usage: { input: 500_000, output: 100 } },
+        { type: 'message', usage: { input: 800_000, output: 100 } }, // last below 90% → split here
+        { type: 'message', usage: { input: 950_000, output: 100 } }, // above 90%
+        { type: 'message', usage: { input: 1_050_000, output: 100 } }, // above 100%
+      ];
+      writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      await internal.handleContextOverflow();
+
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns early without reinitializing when no split point exists', async () => {
+      // All messages are above 90%
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', usage: { input: 950_000, output: 100 } },
+      ];
+      writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      await internal.handleContextOverflow();
+
+      expect(internal.reinitializeWithProvider).not.toHaveBeenCalled();
+    });
+
+    it('returns early when sessionDir is null', async () => {
+      const { internal } = makeHostForRecovery();
+      internal._sessionDir = null;
+
+      await internal.handleContextOverflow();
+
+      expect(internal.reinitializeWithProvider).not.toHaveBeenCalled();
+    });
+
+    it('skips tail append and second reinit when tail is empty', async () => {
+      // Only entries below threshold — no tail
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', usage: { input: 800_000, output: 100 } },
+      ];
+      writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      await internal.handleContextOverflow();
+
+      // Only one reinit (before compact), no tail to append
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
     });
   });
 });
