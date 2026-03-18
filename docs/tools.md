@@ -79,7 +79,7 @@ Write or create files on the filesystem. Overwrites the entire file.
 | `content` | string | File content to write |
 | `commit_message` | string? | If provided and path is inside `~/.system2/`, git-commits the file with this message |
 
-Auto-creates parent directories if they don't exist. Use for creating new files or complete rewrites. For modifying specific parts of an existing file, prefer `edit`. For operations where neither is convenient, use `bash`.
+Auto-creates parent directories if they don't exist. Use for creating new files or complete rewrites. For modifying specific parts of an existing file, prefer `edit`. For appending content, use `edit` with `append: true`. For operations where none of the above fit, use `bash`.
 
 **Auto-commit (`edit` and `write`):** When `commit_message` is provided, the tool runs `git add <file> && git commit -m <message>` in `~/.system2/` after the file operation. Git failure is non-fatal: the file change still succeeds. This is the primary mechanism for version-tracking knowledge and project files.
 

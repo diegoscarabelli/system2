@@ -71,9 +71,9 @@ export function createEditTool() {
 
           // Determine separator by reading only the last byte — avoids loading the
           // entire file and also prevents a double newline when new_string already
-          // starts with one.
+          // starts with one (LF or CRLF).
           let separator = '';
-          if (!params.new_string.startsWith('\n')) {
+          if (!params.new_string.startsWith('\n') && !params.new_string.startsWith('\r')) {
             try {
               const fileStat = await stat(filePath);
               if (fileStat.size > 0) {
@@ -106,7 +106,9 @@ export function createEditTool() {
           }
 
           const linesAppended =
-            params.new_string.split('\n').length - (params.new_string.endsWith('\n') ? 1 : 0);
+            params.new_string === ''
+              ? 0
+              : params.new_string.split('\n').length - (params.new_string.endsWith('\n') ? 1 : 0);
           return {
             content: [
               {

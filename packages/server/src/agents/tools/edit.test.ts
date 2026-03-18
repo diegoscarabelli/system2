@@ -185,5 +185,25 @@ describe('edit tool', () => {
 
       expect((result.content[0] as { text: string }).text).toContain('2 line(s)');
     });
+
+    it('does not double newline when new_string starts with CRLF', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, 'existing content');
+
+      await exec({ path: file, new_string: '\r\nnew line', append: true });
+
+      expect(readFileSync(file, 'utf-8')).toBe('existing content\r\nnew line');
+    });
+
+    it('reports 0 lines appended when new_string is empty', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, 'existing content');
+
+      const result = await exec({ path: file, new_string: '', append: true });
+
+      expect((result.content[0] as { text: string }).text).toContain('0 line(s)');
+    });
   });
 });
