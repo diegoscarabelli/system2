@@ -451,14 +451,18 @@ describe('stripSessionEntry', () => {
       expect(blocks[0].type).toBe('text');
     });
 
-    it('preserves text blocks unchanged', () => {
+    it('preserves text blocks, stripping textSignature', () => {
       const entry = {
         type: 'message',
-        message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Done.', textSignature: 'abc123==' }],
+        },
       };
       const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
       const block = (result.message.content as Record<string, unknown>[])[0];
       expect(block.text).toBe('Done.');
+      expect(block.textSignature).toBeUndefined();
     });
 
     it('does not crash when content is not an array', () => {

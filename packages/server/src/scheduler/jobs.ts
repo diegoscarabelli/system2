@@ -129,8 +129,8 @@ export function collectAgentActivity(
 /**
  * Strip verbose fields from a parsed JSONL session entry before injecting into
  * the Narrator's context. Removes fields that are useless for narrative synthesis
- * (crypto signatures, token usage, provider metadata, raw tool outputs) and
- * truncates large argument/result values to 100 chars.
+ * (textSignature/thoughtSignature crypto signatures, token usage, provider metadata,
+ * raw tool outputs) and truncates large argument/result values to 100 chars.
  *
  * Operates on plain objects — never mutates the input.
  */
@@ -162,6 +162,10 @@ export function stripSessionEntry(entry: Record<string, unknown>): Record<string
         .map((block) => {
           if (!block || typeof block !== 'object' || Array.isArray(block)) return block;
           const b = block as Record<string, unknown>;
+          if (b.type === 'text') {
+            const { textSignature: _ts, ...rest } = b;
+            return rest;
+          }
           if (b.type !== 'toolCall') return b;
           const { thoughtSignature: _ts, arguments: args, ...rest } = b;
           if (args !== undefined) {
