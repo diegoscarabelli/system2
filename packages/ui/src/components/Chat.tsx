@@ -13,7 +13,9 @@ import { MessageList } from './MessageList';
 
 export function Chat() {
   const { sendMessage, abort } = useWebSocket();
-  const { addUserMessage, queueMessage } = useChatStore();
+  const addUserMessage = useChatStore((s) => s.addUserMessage);
+  const queueMessage = useChatStore((s) => s.queueMessage);
+  const activeAgentLabel = useChatStore((s) => s.activeAgentLabel);
 
   const handleSend = (content: string) => {
     addUserMessage(content);
@@ -41,7 +43,7 @@ export function Chat() {
         }}
       >
         <Box as="h2" sx={{ fontSize: 2, fontWeight: 'bold', margin: 0 }}>
-          System2
+          {activeAgentLabel ?? 'System2'}
         </Box>
       </Box>
 

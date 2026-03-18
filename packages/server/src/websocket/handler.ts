@@ -2,7 +2,8 @@
  * WebSocket Handler
  *
  * Bridges Pi Agent events to WebSocket clients for real-time chat UI updates.
- * User messages are captured here and broadcast to other connected tabs.
+ * Supports multi-agent routing: the user can switch the active chat to any agent.
+ * User messages are captured in the agent's chat cache and broadcast to other tabs.
  * Assistant message history capture is handled centrally by Server.
  */
 
@@ -11,31 +12,53 @@ import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { ClientMessage, ServerMessage } from '@system2/shared';
 import type { WebSocket, WebSocketServer } from 'ws';
 import type { AgentHost } from '../agents/host.js';
-import type { MessageHistory } from '../chat/history.js';
+import type { AgentRegistry } from '../agents/registry.js';
+import type { ConversationSummarizer } from '../chat/summarizer.js';
 
 export class WebSocketHandler {
   private ws: WebSocket;
-  private agentHost: AgentHost;
-  private history: MessageHistory;
+  private agentRegistry: AgentRegistry;
+  private guideAgentId: number;
   private wss: WebSocketServer;
-  private unsubscribe?: () => void;
+  private activeAgentId: number;
+  private activeSubscription?: () => void;
   private artifactWatcher?: FSWatcher;
   private artifactUrl?: string;
+  private summarizer?: ConversationSummarizer;
+  private isThinking = false;
 
-  constructor(ws: WebSocket, agentHost: AgentHost, history: MessageHistory, wss: WebSocketServer) {
+  constructor(
+    ws: WebSocket,
+    agentRegistry: AgentRegistry,
+    guideAgentId: number,
+    wss: WebSocketServer,
+    summarizer?: ConversationSummarizer
+  ) {
     this.ws = ws;
-    this.agentHost = agentHost;
-    this.history = history;
+    this.agentRegistry = agentRegistry;
+    this.guideAgentId = guideAgentId;
     this.wss = wss;
+    this.activeAgentId = guideAgentId;
+    this.summarizer = summarizer;
 
-    // Send chat history and provider info on connect — server is the source of truth
-    this.send({ type: 'chat_history', messages: history.getMessages() });
-    this.send({ type: 'provider_info', provider: agentHost.getProvider() });
+    // Get Guide's host
+    const guideHost = this.agentRegistry.get(guideAgentId);
+    if (!guideHost) {
+      this.sendError('Guide agent not found');
+      ws.close();
+      return;
+    }
 
-    // Subscribe to agent events for streaming to this client
-    this.unsubscribe = agentHost.subscribe((event) => {
-      this.handleAgentEvent(event);
+    // Send Guide's chat cache and provider info on connect
+    this.send({
+      type: 'chat_history',
+      messages: guideHost.chatCache.getMessages(),
+      agentId: guideAgentId,
     });
+    this.send({ type: 'provider_info', provider: guideHost.getProvider() });
+
+    // Subscribe to Guide's events for streaming to this client
+    this.subscribeToAgent(guideAgentId, guideHost);
 
     // Handle incoming messages from client
     ws.on('message', (data) => {
@@ -59,66 +82,121 @@ export class WebSocketHandler {
     });
   }
 
+  /**
+   * Subscribe to an agent's events for streaming to this WebSocket client.
+   * Replaces any existing subscription (one active agent at a time).
+   */
+  private subscribeToAgent(agentId: number, host: AgentHost): void {
+    // Unsubscribe from previous agent
+    if (this.activeSubscription) {
+      this.activeSubscription();
+      this.activeSubscription = undefined;
+    }
+
+    this.isThinking = false;
+    this.activeSubscription = host.subscribe((event) => {
+      this.handleAgentEvent(event, agentId, host);
+    });
+  }
+
   private handleClientMessage(message: ClientMessage): void {
     switch (message.type) {
-      case 'user_message': {
-        // Capture user message in history and broadcast to other tabs
+      case 'user_message':
+      case 'steering_message': {
+        // Resolve target agent (default to active agent)
+        const targetId = message.agentId ?? this.activeAgentId;
+        const host = this.agentRegistry.get(targetId);
+        if (!host) {
+          this.sendError(`Agent ${targetId} not found`);
+          return;
+        }
+
+        // Capture user message in agent's chat cache
         const userMsg = {
           id: `msg-${Date.now()}`,
           role: 'user' as const,
           content: message.content,
           timestamp: Date.now(),
         };
-        this.history.push(userMsg);
+        host.chatCache.push(userMsg);
+
+        // Broadcast to other tabs
         this.broadcast({
           type: 'user_message_broadcast',
           id: userMsg.id,
           content: userMsg.content,
           timestamp: userMsg.timestamp,
+          agentId: targetId,
         });
 
-        // Send user message to agent
-        this.agentHost.prompt(message.content).catch((error) => {
-          console.error('Agent prompt failed:', error);
-          this.sendError('Failed to process message');
-        });
+        // Record for summarization (non-Guide agents only)
+        if (this.summarizer && targetId !== this.guideAgentId) {
+          this.summarizer.recordUserMessage(targetId, host.role ?? 'unknown', message.content);
+        }
+
+        // Send to agent
+        const isSteering = message.type === 'steering_message';
+        host
+          .prompt(message.content, isSteering ? { isSteering: true } : undefined)
+          .catch((error) => {
+            console.error('Agent prompt failed:', error);
+            this.sendError('Failed to process message');
+          });
         break;
       }
 
-      case 'steering_message': {
-        // Capture steering message in history (still a user message) and broadcast
-        const steerMsg = {
-          id: `msg-${Date.now()}`,
-          role: 'user' as const,
-          content: message.content,
-          timestamp: Date.now(),
-        };
-        this.history.push(steerMsg);
-        this.broadcast({
-          type: 'user_message_broadcast',
-          id: steerMsg.id,
-          content: steerMsg.content,
-          timestamp: steerMsg.timestamp,
-        });
-
-        // Send steering message (inserted ASAP into the agent loop)
-        this.agentHost.prompt(message.content, { isSteering: true }).catch((error) => {
-          console.error('Agent steering prompt failed:', error);
-          this.sendError('Failed to process steering message');
-        });
+      case 'abort': {
+        const targetId = message.agentId ?? this.activeAgentId;
+        const host = this.agentRegistry.get(targetId);
+        if (host) host.abort();
         break;
       }
 
-      case 'abort':
-        this.agentHost.abort();
+      case 'switch_agent': {
+        const newAgentId = message.agentId;
+        const host = this.agentRegistry.get(newAgentId);
+        if (!host) {
+          this.sendError(`Agent ${newAgentId} not found or terminated`);
+          return;
+        }
+
+        // Update active agent and subscribe to its events
+        this.activeAgentId = newAgentId;
+        this.subscribeToAgent(newAgentId, host);
+
+        // Send new agent's chat cache
+        this.send({
+          type: 'chat_history',
+          messages: host.chatCache.getMessages(),
+          agentId: newAgentId,
+        });
+
+        // Send context usage for the new agent
+        const usage = host.getContextUsage();
+        if (usage) {
+          this.send({
+            type: 'context_usage',
+            percent: usage.percent,
+            tokens: usage.tokens,
+            contextWindow: usage.contextWindow,
+            agentId: newAgentId,
+          });
+        }
+
+        // Send ready_for_input if the agent is idle
+        if (!host.isBusy()) {
+          this.send({ type: 'ready_for_input', agentId: newAgentId });
+        }
+
         break;
+      }
 
       default:
         this.sendError(`Unknown message type: ${(message as Record<string, unknown>).type}`);
     }
   }
 
-  private handleAgentEvent(event: AgentSessionEvent): void {
+  private handleAgentEvent(event: AgentSessionEvent, agentId: number, host: AgentHost): void {
     // Handle synthetic events (not part of AgentSessionEvent type)
     const eventType = event.type as string;
     if (eventType === 'status') {
@@ -133,25 +211,40 @@ export class WebSocketHandler {
       case 'message_update':
         // Stream text as it's generated
         if (event.assistantMessageEvent.type === 'text_delta') {
+          if (this.isThinking) {
+            this.send({ type: 'thinking_end', agentId });
+            this.isThinking = false;
+          }
           this.send({
             type: 'assistant_chunk',
             content: event.assistantMessageEvent.delta,
+            agentId,
           });
         }
         // Stream thinking blocks
         else if (event.assistantMessageEvent.type === 'thinking_delta') {
+          this.isThinking = true;
           this.send({
             type: 'thinking_chunk',
             content: event.assistantMessageEvent.delta,
+            agentId,
           });
         }
         break;
 
       case 'message_end':
-        this.send({ type: 'assistant_end' });
+        if (this.isThinking) {
+          this.send({ type: 'thinking_end', agentId });
+          this.isThinking = false;
+        }
+        this.send({ type: 'assistant_end', agentId });
         break;
 
       case 'tool_execution_start': {
+        if (this.isThinking) {
+          this.send({ type: 'thinking_end', agentId });
+          this.isThinking = false;
+        }
         // Format tool input for display
         let inputText = '';
         const rawInput = event.args;
@@ -167,6 +260,7 @@ export class WebSocketHandler {
           type: 'tool_call_start',
           name: event.toolName,
           input: inputText,
+          agentId,
         });
         break;
       }
@@ -185,9 +279,10 @@ export class WebSocketHandler {
           type: 'tool_call_end',
           name: event.toolName,
           result: finalResult,
+          agentId,
         });
 
-        // If show_artifact completed successfully, emit artifact message and watch for changes
+        // If show_artifact completed successfully, emit artifact message and watch
         if (event.toolName === 'show_artifact' && !event.isError) {
           const details = event.result?.details as
             | { url?: string; absolutePath?: string; title?: string }
@@ -212,22 +307,23 @@ export class WebSocketHandler {
         // Agent finished processing
         console.log(
           'Agent finished. Stop reason:',
-          (this.agentHost.state as unknown as Record<string, unknown>).stopReason
+          (host.state as unknown as Record<string, unknown>).stopReason
         );
 
         // Send context usage update
-        const usage = this.agentHost.getContextUsage();
+        const usage = host.getContextUsage();
         if (usage) {
           this.send({
             type: 'context_usage',
             percent: usage.percent,
             tokens: usage.tokens,
             contextWindow: usage.contextWindow,
+            agentId,
           });
         }
 
         // Signal that the agent is ready for the next message
-        this.send({ type: 'ready_for_input' });
+        this.send({ type: 'ready_for_input', agentId });
         break;
       }
 
@@ -292,9 +388,9 @@ export class WebSocketHandler {
       this.artifactWatcher.close();
       this.artifactWatcher = undefined;
     }
-    if (this.unsubscribe) {
-      this.unsubscribe();
-      this.unsubscribe = undefined;
+    if (this.activeSubscription) {
+      this.activeSubscription();
+      this.activeSubscription = undefined;
     }
   }
 }

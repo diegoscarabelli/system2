@@ -4,12 +4,13 @@
  * HTTP + WebSocket server that hosts the Guide and Narrator agents and serves the UI.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import type { Api, Model } from '@mariozechner/pi-ai';
+import { type AgentSessionEvent, ModelRegistry } from '@mariozechner/pi-coding-agent';
 import type {
   ChatConfig,
   ChatMessage,
@@ -20,12 +21,14 @@ import type {
   ToolsConfig,
 } from '@system2/shared';
 import express from 'express';
+import matter from 'gray-matter';
 import { WebSocketServer } from 'ws';
+import { AuthResolver } from './agents/auth-resolver.js';
 import { AgentHost } from './agents/host.js';
 import { AgentRegistry } from './agents/registry.js';
 import type { AgentResurrector } from './agents/tools/resurrect-agent.js';
 import type { AgentSpawner } from './agents/tools/spawn-agent.js';
-import { MessageHistory } from './chat/history.js';
+import { ConversationSummarizer } from './chat/summarizer.js';
 import { DatabaseClient } from './db/client.js';
 import { initializeGitRepo } from './knowledge/git.js';
 import { initializeKnowledge } from './knowledge/init.js';
@@ -66,7 +69,8 @@ export class Server {
   private scheduler: Scheduler;
   private config: ServerConfig;
   private narratorId: number;
-  private messageHistory: MessageHistory;
+  private guideAgentId: number;
+  private conversationSummarizer?: ConversationSummarizer;
 
   constructor(config: ServerConfig) {
     this.config = config;
@@ -82,7 +86,10 @@ export class Server {
     this.agentRegistry = new AgentRegistry();
 
     // Initialize Guide agent (singleton) — receives the spawner so it can create Conductors/Reviewers
+    const chatMaxMessages = config.chatConfig?.max_history_messages ?? 1000;
+
     const guideAgent = this.db.getOrCreateGuideAgent();
+    this.guideAgentId = guideAgent.id;
     this.agentHost = new AgentHost({
       db: this.db,
       agentId: guideAgent.id,
@@ -92,6 +99,7 @@ export class Server {
       toolsConfig: config.toolsConfig,
       spawner: this.makeSpawner(),
       resurrector: this.makeResurrector(),
+      chatMaxMessages,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
 
@@ -105,17 +113,15 @@ export class Server {
       llmConfig: config.llmConfig,
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
+      chatMaxMessages,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
 
-    // Initialize chat history (server-side, persisted to disk)
-    const maxMessages = config.chatConfig?.max_history_messages ?? 1000;
-    this.messageHistory = new MessageHistory(join(SYSTEM2_DIR, 'chat-history.json'), maxMessages);
-
-    // Single subscriber for capturing assistant messages into history.
-    // This runs once regardless of how many WebSocket clients are connected,
-    // preventing duplicate entries when multiple tabs are open.
+    // Subscribe singleton agents for chat cache capture.
+    // Each agent's chatCache (created during initialize()) persists messages to disk.
+    // Subscription is set up before initialize() so no events are missed.
     this.subscribeForHistoryCapture(this.agentHost);
+    this.subscribeForHistoryCapture(this.narratorHost);
 
     // Initialize scheduler
     this.scheduler = new Scheduler();
@@ -293,7 +299,13 @@ export class Server {
     // Handle WebSocket connections
     this.wss.on('connection', (ws) => {
       console.log('Client connected');
-      new WebSocketHandler(ws, this.agentHost, this.messageHistory, this.wss);
+      new WebSocketHandler(
+        ws,
+        this.agentRegistry,
+        this.guideAgentId,
+        this.wss,
+        this.conversationSummarizer
+      );
     });
   }
 
@@ -302,6 +314,7 @@ export class Server {
    * Single path for all non-singleton agent initialization (spawn + restore).
    */
   private async initializeAgentHost(agentId: number): Promise<AgentHost> {
+    const chatMaxMessages = this.config.chatConfig?.max_history_messages ?? 1000;
     const host = new AgentHost({
       db: this.db,
       agentId,
@@ -310,10 +323,18 @@ export class Server {
       servicesConfig: this.config.servicesConfig,
       toolsConfig: this.config.toolsConfig,
       spawner: this.makeSpawner(),
+      resurrector: this.makeResurrector(),
+      chatMaxMessages,
     });
 
+    // Subscribe for chat cache capture before initialize() so no events are missed
+    this.subscribeForHistoryCapture(host);
     await host.initialize();
     this.agentRegistry.register(agentId, host);
+
+    // Subscribe spawned agents for summarizer capture (non-Guide only)
+    this.subscribeForSummarizerCapture(host);
+
     return host;
   }
 
@@ -402,7 +423,7 @@ export class Server {
               timestamp: Date.now(),
               turnEvents: currentTurnEvents.length > 0 ? [...currentTurnEvents] : undefined,
             };
-            this.messageHistory.push(assistantMsg);
+            agentHost.chatCache.push(assistantMsg);
             currentAssistantText = '';
             currentTurnEvents = [];
           }
@@ -486,6 +507,24 @@ export class Server {
     // Initialize agent sessions
     await this.agentHost.initialize();
     await this.narratorHost.initialize();
+
+    // Initialize conversation summarizer (uses narrator's model for cheap summarization)
+    try {
+      const narratorModel = this.resolveNarratorModel();
+      if (narratorModel) {
+        this.conversationSummarizer = new ConversationSummarizer(
+          this.agentHost,
+          this.guideAgentId,
+          narratorModel.registry,
+          narratorModel.model
+        );
+        // Subscribe non-Guide agents for summarizer event capture
+        this.subscribeForSummarizerCapture(this.narratorHost);
+        console.log('[Server] Conversation summarizer initialized');
+      }
+    } catch (err) {
+      console.warn('[Server] Failed to initialize conversation summarizer:', err);
+    }
 
     // Restore previously active spawned agents (conductors, reviewers, etc.)
     await this.restoreActiveAgents();
@@ -598,7 +637,112 @@ export class Server {
     }
   }
 
+  /**
+   * Resolve the Narrator's model from its frontmatter for use by the ConversationSummarizer.
+   * Returns the model and a ModelRegistry, or null if resolution fails.
+   */
+  private resolveNarratorModel(): { model: Model<Api>; registry: ModelRegistry } | null {
+    // Agent definition files are co-located with AgentHost (dist/agents/library/)
+    const agentDir = join(dirname(fileURLToPath(import.meta.url)), 'agents');
+    const narratorPath = join(agentDir, 'library', 'narrator.md');
+
+    if (!existsSync(narratorPath)) {
+      console.warn('[Server] Narrator definition not found at', narratorPath);
+      return null;
+    }
+
+    const { data: meta } = matter(readFileSync(narratorPath, 'utf-8'));
+    const models = meta.models as Record<string, string> | undefined;
+    if (!models) return null;
+
+    const authResolver = new AuthResolver(this.config.llmConfig);
+    const modelRegistry = new ModelRegistry(authResolver.createAuthStorage());
+
+    for (const provider of authResolver.providerOrder) {
+      const modelId = models[provider];
+      if (modelId) {
+        const model = modelRegistry.find(provider, modelId);
+        if (model) return { model, registry: modelRegistry };
+      }
+    }
+
+    console.warn('[Server] No narrator model found for any configured provider');
+    return null;
+  }
+
+  /**
+   * Subscribe an agent's events to the ConversationSummarizer for thinking/tool/reply capture.
+   * Only subscribes non-Guide agents (Guide interactions don't need summarization).
+   */
+  private subscribeForSummarizerCapture(agentHost: AgentHost): void {
+    if (!this.conversationSummarizer) return;
+    if (agentHost.agentId === this.guideAgentId) return;
+
+    const summarizer = this.conversationSummarizer;
+    const agentId = agentHost.agentId;
+
+    let thinkingBuffer = '';
+    let replyBuffer = '';
+
+    agentHost.subscribe((event: AgentSessionEvent) => {
+      switch (event.type) {
+        case 'message_update':
+          if (event.assistantMessageEvent.type === 'thinking_delta') {
+            thinkingBuffer += event.assistantMessageEvent.delta;
+          } else if (event.assistantMessageEvent.type === 'text_delta') {
+            replyBuffer += event.assistantMessageEvent.delta;
+          }
+          break;
+
+        case 'message_end':
+          if (thinkingBuffer) {
+            summarizer.recordAgentEvent(agentId, {
+              type: 'thinking',
+              content: thinkingBuffer,
+              timestamp: Date.now(),
+            });
+            thinkingBuffer = '';
+          }
+          if (replyBuffer) {
+            summarizer.recordAgentEvent(agentId, {
+              type: 'assistant_reply',
+              content: replyBuffer,
+              timestamp: Date.now(),
+            });
+            replyBuffer = '';
+          }
+          break;
+
+        case 'tool_execution_start': {
+          if (thinkingBuffer) {
+            summarizer.recordAgentEvent(agentId, {
+              type: 'thinking',
+              content: thinkingBuffer,
+              timestamp: Date.now(),
+            });
+            thinkingBuffer = '';
+          }
+          let inputText = '';
+          try {
+            inputText = typeof event.args === 'string' ? event.args : JSON.stringify(event.args);
+          } catch {
+            inputText = String(event.args);
+          }
+          summarizer.recordAgentEvent(agentId, {
+            type: 'tool_call',
+            content: `${event.toolName}: ${inputText}`,
+            timestamp: Date.now(),
+          });
+          break;
+        }
+      }
+    });
+  }
+
   async stop(): Promise<void> {
+    // Clean up conversation summarizer
+    this.conversationSummarizer?.cleanup();
+
     // Stop scheduled jobs first
     this.scheduler.stop();
 

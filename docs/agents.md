@@ -13,7 +13,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 | Agent | Role | Lifecycle | Models |
 | --- | --- | --- | --- |
-| **Guide** | The only agent the user talks to. Helps brainstorm and plan, starts projects, interfaces with the multi-agent system, and relays updates. | Singleton, persistent | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
+| **Guide** | Primary user-facing agent. Helps brainstorm and plan, starts projects, interfaces with the multi-agent system, and relays updates. Users may also interact directly with other active agents; Guide mediation is preferred in most cases. | Singleton, persistent | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
 | **Narrator** | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. Schedule-driven. | Singleton, persistent | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
 | **Conductor** | Orchestrates and executes work within a project: breaks it into tasks, spawns specialist agents or executes directly, and coordinates with the Reviewer before reporting completion. | Per-project, ephemeral | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
 | **Reviewer** | Critically assesses work before it is considered complete. | Per-project, ephemeral | claude-opus-4-6, gpt-4o, gemini-3.1-pro |
@@ -22,7 +22,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 **Conductor and Reviewer** are project-scoped, spawned by Guide for every project and archived when done. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project. On server restart, all non-archived project-scoped agents are restored automatically. If an agent fails to restore, its status remains `active` in the database, the error is logged, and the Guide is notified so it can investigate.
 
-**Agent status** has two values in the database: `active` (alive, should be restored on restart) and `archived` (terminated, will not be restored). Archived agents can be resurrected by the Guide via the `resurrect_agent` tool, which flips the status back to `active` and resumes the session from persisted JSONL. Whether an agent is currently processing work is tracked in memory via `AgentHost.isBusy()`, not in the database.
+**Agent status** has two values in the database: `active` (alive, should be restored on restart) and `archived` (terminated, will not be restored). Archived agents can be resurrected by the Guide (any non-singleton) or by a Conductor (agents within their own project) via the `resurrect_agent` tool, which flips the status back to `active` and resumes the session from persisted JSONL. Whether an agent is currently processing work is tracked in memory via `AgentHost.isBusy()`, not in the database.
 
 ## Agent Identity and System Instructions
 

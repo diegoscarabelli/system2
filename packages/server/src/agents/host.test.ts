@@ -438,13 +438,117 @@ describe('AgentHost', () => {
     });
   });
 
+  describe('chatCache', () => {
+    it('throws before initialize()', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      expect(() => host.chatCache).toThrow('AgentHost not initialized');
+    });
+
+    it('returns the MessageHistory once _chatCache is set', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as { _chatCache: object };
+      const mockCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._chatCache = mockCache;
+
+      expect(host.chatCache).toBe(mockCache);
+    });
+  });
+
+  describe('deliverMessage', () => {
+    it('throws if session is not initialized', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      expect(() =>
+        host.deliverMessage('hello', { sender: 2, receiver: 1, timestamp: Date.now() })
+      ).toThrow('AgentHost not initialized');
+    });
+
+    it('pushes to chatCache before fire-and-forget', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+      };
+
+      internal.session = {
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      const ts = 1_700_000_000_000;
+      host.deliverMessage('[From Guide (id=1)]: do the thing', {
+        sender: 1,
+        receiver: 2,
+        timestamp: ts,
+      });
+
+      expect(internal._chatCache.push).toHaveBeenCalledOnce();
+      expect(internal._chatCache.push).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: 'system',
+          content: '[From Guide (id=1)]: do the thing',
+          timestamp: ts,
+        })
+      );
+    });
+
+    it('does not push to chatCache when _chatCache is null', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      // Should not throw
+      expect(() =>
+        host.deliverMessage('hi', { sender: 1, receiver: 2, timestamp: Date.now() })
+      ).not.toThrow();
+    });
+  });
+
   describe('compaction pruning', () => {
     /** Internal type escape hatch for compaction pruning tests */
     type PruningInternal = {
       compactionCount: number;
       compactionDepth: number;
       isPruning: boolean;
-      sessionDir: string | null;
+      _sessionDir: string | null;
       session: {
         sessionManager: { getBranch: ReturnType<typeof vi.fn> };
         compact: ReturnType<typeof vi.fn>;
@@ -487,7 +591,7 @@ describe('AgentHost', () => {
         const { internal } = makeHostForPruning(3);
         const session = mockSession(['baseline', 'second', 'third']);
         internal.session = session;
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
         internal.writeCompactionCount = vi.fn();
 
@@ -503,7 +607,7 @@ describe('AgentHost', () => {
       it('resets compactionCount to 0 and persists after pruning', async () => {
         const { internal } = makeHostForPruning(3);
         internal.session = mockSession(['baseline', 'second', 'third']);
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
         internal.writeCompactionCount = vi.fn();
 
@@ -517,7 +621,7 @@ describe('AgentHost', () => {
         const { internal } = makeHostForPruning(5);
         const session = mockSession(['only one']);
         internal.session = session;
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 5;
 
         await internal.triggerPruningCompaction();
@@ -538,7 +642,7 @@ describe('AgentHost', () => {
       it('skips pruning when sessionDir is null', async () => {
         const { internal } = makeHostForPruning(3);
         internal.session = mockSession(['a', 'b', 'c']);
-        internal.sessionDir = null;
+        internal._sessionDir = null;
 
         await internal.triggerPruningCompaction();
 
@@ -555,7 +659,7 @@ describe('AgentHost', () => {
           'middle',
           'end of window',
         ]);
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
 
         // 4 summaries, compactionCount=3: baseline at index 4-3=1
@@ -566,7 +670,7 @@ describe('AgentHost', () => {
       it('returns null when not enough compactions exist', () => {
         const { internal } = makeHostForPruning(5);
         internal.session = mockSession(['only one']);
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 5;
 
         const baseline = internal.findBaselineSummary();
@@ -576,7 +680,7 @@ describe('AgentHost', () => {
       it('returns null when session is null', () => {
         const { internal } = makeHostForPruning(3);
         internal.session = null;
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
 
         const baseline = internal.findBaselineSummary();
         expect(baseline).toBeNull();
@@ -585,7 +689,7 @@ describe('AgentHost', () => {
       it('handles exact match (summaries.length === compactionCount)', () => {
         const { internal } = makeHostForPruning(2);
         internal.session = mockSession(['baseline', 'latest']);
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 2;
 
         // 2 summaries, compactionCount=2: baseline at index 2-2=0
@@ -619,7 +723,7 @@ describe('AgentHost', () => {
         const { internal } = makeHostForPruning(3);
         const session = mockSession(['baseline', 'second', 'third']);
         internal.session = session;
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
         internal.writeCompactionCount = vi.fn();
         internal.getContextUsage = vi.fn().mockReturnValue({ percent: 30 });
@@ -633,7 +737,7 @@ describe('AgentHost', () => {
         const { internal } = makeHostForPruning(3);
         const session = mockSession(['baseline', 'second', 'third']);
         internal.session = session;
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
         internal.getContextUsage = vi.fn().mockReturnValue({ percent: 29 });
 
@@ -645,7 +749,7 @@ describe('AgentHost', () => {
       it('does not trigger pruning when counter is below depth', () => {
         const { internal } = makeHostForPruning(3);
         internal.session = mockSession(['a', 'b']);
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 2;
         internal.getContextUsage = vi.fn().mockReturnValue({ percent: 50 });
 
@@ -658,7 +762,7 @@ describe('AgentHost', () => {
         const { internal } = makeHostForPruning(3);
         const session = mockSession(['baseline', 'second', 'third']);
         internal.session = session;
-        internal.sessionDir = '/tmp/test-session';
+        internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
         internal.isPruning = true;
         internal.writeCompactionCount = vi.fn();
@@ -706,14 +810,14 @@ describe('AgentHost', () => {
 
       it('readCompactionCount returns 0 when file does not exist', () => {
         const { internal } = makeHostForPruning(3);
-        internal.sessionDir = testDir;
+        internal._sessionDir = testDir;
 
         expect(internal.readCompactionCount()).toBe(0);
       });
 
       it('writeCompactionCount persists and readCompactionCount recovers the value', () => {
         const { internal } = makeHostForPruning(3);
-        internal.sessionDir = testDir;
+        internal._sessionDir = testDir;
 
         internal.writeCompactionCount(7);
         expect(internal.readCompactionCount()).toBe(7);
@@ -744,7 +848,7 @@ describe('AgentHost', () => {
           new Date('2025-01-02')
         );
 
-        internal.sessionDir = testDir;
+        internal._sessionDir = testDir;
         internal.compactionCount = 3;
         internal.session = {
           sessionManager: {
@@ -783,7 +887,7 @@ describe('AgentHost', () => {
           new Date('2025-01-02')
         );
 
-        internal.sessionDir = testDir;
+        internal._sessionDir = testDir;
         internal.compactionCount = 5;
         internal.session = {
           sessionManager: {
@@ -831,7 +935,7 @@ describe('AgentHost', () => {
           getContextUsage: vi.fn(),
         };
         internal.session = session;
-        internal.sessionDir = testDir;
+        internal._sessionDir = testDir;
         internal.compactionCount = 2;
 
         await internal.triggerPruningCompaction();
