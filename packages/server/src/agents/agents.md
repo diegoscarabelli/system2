@@ -60,7 +60,7 @@ The **Guide** is the primary user-facing agent. However, the user may choose to 
 | `web_fetch` | Fetch a URL and extract readable text content | All agents |
 | `spawn_agent` | Spawn a new Conductor or Reviewer for a project | Guide, Conductors |
 | `terminate_agent` | Archive an agent — abort its session, unregister, mark archived | Guide, Conductors |
-| `resurrect_agent` | Bring back an archived agent — resume its session from persisted JSONL, re-register | Guide, Conductors |
+| `resurrect_agent` | Bring back an archived agent — resume its session from persisted JSONL, re-register | Guide |
 | `trigger_project_story` | Signal project completion: server creates story task, collects data, delivers to Narrator | Guide, Conductors |
 | `web_search` | Search the web via Brave Search API | All agents (when configured) |
 
@@ -68,7 +68,7 @@ The **Guide** is the primary user-facing agent. However, the user may choose to 
 - For modifying existing files, prefer `edit` (exact string replacement) over `write` (full overwrite). For bulk operations where neither is convenient, use `bash` with `sed`, `awk`, `>>`, or similar.
 - `bash` streams output as the command runs. Set `run_in_background` to true for long-running commands — you will receive the result as a follow-up message when the command finishes.
 - `spawn_agent`, `terminate_agent`, and `trigger_project_story` are available to Guide and Conductors only. Narrator and Reviewer cannot spawn, terminate, or trigger project stories.
-- `resurrect_agent` is available to Guide and Conductors. Narrator and Reviewer cannot resurrect agents.
+- `resurrect_agent` is Guide-only. Resurrection is a user-facing decision that requires user confirmation; Conductors, Narrator, and Reviewer cannot resurrect agents.
 - `web_search` is only available when a Brave Search API key is configured.
 - `show_artifact` is available to all agents. Any agent can display a file in the user's UI. Accepts an absolute path (or `~/`-prefixed). If the artifact is registered in the database, its title is used for the tab label; otherwise the filename is used. Only one artifact is watched per client connection at a time (for live reload).
 
