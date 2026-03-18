@@ -511,13 +511,13 @@ describe('AgentHost', () => {
       expect(internal._chatCache.push).toHaveBeenCalledWith(
         expect.objectContaining({
           role: 'system',
-          content: 'From Guide (id=1): do the thing',
+          content: 'From Guide (id=1)',
           timestamp: ts,
         })
       );
     });
 
-    it('truncates scheduled task content to tag + 100 chars', () => {
+    it('shows only the tag for scheduled task messages', () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -535,15 +535,17 @@ describe('AgentHost', () => {
       internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
       internal._sessionDir = null;
 
-      const longBody = 'x'.repeat(200);
-      host.deliverMessage(`[Scheduled task: daily-summary]\n\n${longBody}`, {
-        sender: 0,
-        receiver: 2,
-        timestamp: 1_700_000_000_000,
-      });
+      host.deliverMessage(
+        `[Scheduled task: daily-summary]\n\nfile: /path\nlast_run_ts: 2026-01-01`,
+        {
+          sender: 0,
+          receiver: 2,
+          timestamp: 1_700_000_000_000,
+        }
+      );
 
       const pushed = internal._chatCache.push.mock.calls[0][0];
-      expect(pushed.content).toBe(`Scheduled task: daily-summary: ${'x'.repeat(100)}...`);
+      expect(pushed.content).toBe('Scheduled task: daily-summary');
     });
 
     it('does not push to chatCache when _chatCache is null', () => {

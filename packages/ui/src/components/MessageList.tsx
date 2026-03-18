@@ -19,6 +19,16 @@ import {
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
+/** Format a millisecond timestamp as local HH:MM, or "Mar 18, HH:MM" if not today */
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return time;
+  const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `${date}, ${time}`;
+}
+
 // Brain loader - rotating brain with sequential dots
 function BrainLoader() {
   const { accent } = useAccentColors();
@@ -451,16 +461,10 @@ function AssistantMessageBlock({
 
       {/* Response */}
       <TimelineItem dotColor={accent} isLast={isLast}>
-        <Text
-          sx={{
-            fontWeight: 'semibold',
-            fontSize: 0,
-            color: accent,
-            marginBottom: 1,
-          }}
-        >
-          {agentRole}
-        </Text>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', marginBottom: 1 }}>
+          <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: accent }}>{agentRole}</Text>
+          <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
+        </Box>
         <MarkdownContent content={message.content} />
       </TimelineItem>
     </Fragment>
@@ -548,16 +552,12 @@ export function MessageList() {
         if (message.role === 'system') {
           return (
             <TimelineItem key={message.id} dotColor={colors.gray} isLast={isLastMessage}>
-              <Text
-                sx={{
-                  fontWeight: 'semibold',
-                  fontSize: 0,
-                  color: colors.gray,
-                  marginBottom: 1,
-                }}
-              >
-                System2
-              </Text>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', marginBottom: 1 }}>
+                <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: colors.gray }}>
+                  System2
+                </Text>
+                <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
+              </Box>
               <Text
                 as="p"
                 sx={{
@@ -577,16 +577,10 @@ export function MessageList() {
         if (message.role === 'user') {
           return (
             <TimelineItem key={message.id} dotColor={colors.teal} isLast={isLastMessage}>
-              <Text
-                sx={{
-                  fontWeight: 'semibold',
-                  fontSize: 0,
-                  color: colors.teal,
-                  marginBottom: 1,
-                }}
-              >
-                You
-              </Text>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', marginBottom: 1 }}>
+                <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: colors.teal }}>You</Text>
+                <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
+              </Box>
               <Text
                 as="p"
                 sx={{

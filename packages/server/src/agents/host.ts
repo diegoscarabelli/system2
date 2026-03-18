@@ -696,19 +696,13 @@ export class AgentHost {
     }
 
     // Capture delivered message in chat cache for UI history.
-    // Extract the job/message tag and truncate body to keep the UI clean.
+    // Show only the tag (e.g., "Scheduled task: daily-summary", "From Guide (id=1)").
     if (this._chatCache) {
       const tagMatch = content.match(/^\[([^\]]+)\]/);
-      const tag = tagMatch ? tagMatch[1] : 'System message';
-      const body = content
-        .slice(tagMatch ? tagMatch[0].length : 0)
-        .replace(/^[:\s]+/, '')
-        .trim();
-      const truncated = body.length > 100 ? `${body.slice(0, 100)}...` : body;
       this._chatCache.push({
         id: `msg-${Date.now()}`,
         role: 'system',
-        content: `${tag}: ${truncated}`,
+        content: tagMatch ? tagMatch[1] : content.slice(0, 100),
         timestamp: details.timestamp,
       });
     }
