@@ -7,7 +7,7 @@
 
 import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { useChatStore } from '../stores/chat';
 import { colors, contextColor } from '../theme/colors';
@@ -168,7 +168,7 @@ export function AgentPane() {
                     tabIndex={0}
                     aria-expanded={!isCollapsed}
                     onClick={() => toggleGroupCollapse(group)}
-                    onKeyDown={(event) => {
+                    onKeyDown={(event: React.KeyboardEvent) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
                         toggleGroupCollapse(group);
@@ -214,7 +214,7 @@ export function AgentPane() {
                           onClick={() =>
                             useChatStore.getState().setActiveAgent(agent.id, agent.role)
                           }
-                          onKeyDown={(event) => {
+                          onKeyDown={(event: React.KeyboardEvent) => {
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault();
                               useChatStore.getState().setActiveAgent(agent.id, agent.role);
