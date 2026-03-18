@@ -1192,6 +1192,15 @@ describe('AgentHost', () => {
       expect(internal.reinitializeWithProvider).not.toHaveBeenCalled();
     });
 
+    it('returns early when session dir has no JSONL files', async () => {
+      // testDir exists but contains no .jsonl files
+      const { internal } = makeHostForRecovery();
+
+      await internal.handleContextOverflow();
+
+      expect(internal.reinitializeWithProvider).not.toHaveBeenCalled();
+    });
+
     it('skips tail append and second reinit when tail is empty', async () => {
       // Only entries below threshold — no tail
       const entries = [
