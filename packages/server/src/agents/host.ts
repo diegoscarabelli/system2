@@ -162,9 +162,6 @@ export class AgentHost {
    * Initialize the agent session (must be called before use)
    */
   async initialize(): Promise<void> {
-    // Reset one-shot overflow guard so re-initialized sessions can recover again
-    this.contextOverflowHandled = false;
-
     // Look up the agent record from the database
     const agentRecord = this.db.getAgent(this.agentId);
     if (!agentRecord) {
@@ -478,6 +475,8 @@ export class AgentHost {
       this.contextOverflowHandled = true;
       const recovered = await this.handleContextOverflow();
       if (recovered) {
+        // Clear the overflow-causing prompt so a future failover doesn't retry it
+        this.pendingPrompt = undefined;
         return;
       }
       // Recovery was a no-op — reset guard so a future overflow can try again
@@ -1074,6 +1073,8 @@ export class AgentHost {
       }
 
       console.log('[AgentHost] Context overflow recovery complete');
+      // Re-arm guard so future overflows on this session can recover again
+      this.contextOverflowHandled = false;
       return true;
     } catch (error) {
       console.error('[AgentHost] Context overflow recovery failed:', error);

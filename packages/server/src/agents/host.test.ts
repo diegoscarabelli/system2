@@ -950,18 +950,15 @@ describe('AgentHost', () => {
   });
 
   describe('isContextOverflowError', () => {
-    // Access via the module-level function through the internal escape hatch
-    // by testing it indirectly via handlePotentialError, or we can expose it
-    // by importing the module and casting. Easiest: re-implement the same
-    // logic inline and test the real behavior via handlePotentialError.
-    //
-    // Since isContextOverflowError is module-private, we test it through
-    // handlePotentialError triggering handleContextOverflow.
+    // isContextOverflowError is module-private, so it is tested indirectly:
+    // we drive handlePotentialError with crafted error messages and assert
+    // whether handleContextOverflow was called (mocked on the instance).
 
     type OverflowInternal = {
       handlePotentialError: (event: unknown) => Promise<void>;
       handleContextOverflow: ReturnType<typeof vi.fn>;
       contextOverflowHandled: boolean;
+      pendingPrompt: string | undefined;
       isReinitializing: boolean;
       currentProvider: string;
       retryAttempts: Map<string, number>;
@@ -1043,6 +1040,16 @@ describe('AgentHost', () => {
       );
       expect(internal.handleContextOverflow).not.toHaveBeenCalled();
     });
+
+    it('clears pendingPrompt on successful recovery so it is not retried on a later failover', async () => {
+      const { internal } = makeHostForOverflow();
+      internal.pendingPrompt = 'overflow-causing prompt';
+      await internal.handlePotentialError(
+        makeOverflowEvent('400: input token count exceeds maximum context length')
+      );
+      expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
+      expect(internal.pendingPrompt).toBeUndefined();
+    });
   });
 
   describe('handleContextOverflow', () => {
@@ -1070,7 +1077,7 @@ describe('AgentHost', () => {
       compactionCount: number;
       compactionDepth: number;
       currentProvider: string;
-      handleContextOverflow: () => Promise<void>;
+      handleContextOverflow: () => Promise<boolean>;
       handleCompactionTracking: ReturnType<typeof vi.fn>;
       reinitializeWithProvider: ReturnType<typeof vi.fn>;
       writeCompactionCount: ReturnType<typeof vi.fn>;
@@ -1226,7 +1233,7 @@ describe('AgentHost', () => {
       expect(restored.some((e) => e.type === 'tool_call')).toBe(true);
     });
 
-    it('does not retry overflow after reset — guard is re-armed after re-initialization', async () => {
+    it('guard resets after successful recovery, allowing a second recovery on the same session', async () => {
       const entries = [
         { type: 'session', version: 3 },
         { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
@@ -1234,14 +1241,12 @@ describe('AgentHost', () => {
       writeJsonlFile('session.jsonl', entries, new Date());
       const { internal } = makeHostForRecovery();
 
-      // First recovery
+      // First recovery — guard auto-resets at the end of handleContextOverflow()
       await internal.handleContextOverflow();
       expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      expect(internal.contextOverflowHandled).toBe(false);
 
-      // Simulate initialize() resetting the guard (the fix)
-      internal.contextOverflowHandled = false;
-
-      // Second recovery is now possible (guard re-armed)
+      // Second recovery is possible without any manual guard reset
       writeJsonlFile('session.jsonl', entries, new Date());
       await internal.handleContextOverflow();
       expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
