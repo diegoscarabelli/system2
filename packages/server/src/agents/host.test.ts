@@ -958,7 +958,7 @@ describe('AgentHost', () => {
       handlePotentialError: (event: unknown) => Promise<void>;
       handleContextOverflow: ReturnType<typeof vi.fn>;
       contextOverflowHandled: boolean;
-      pendingPrompt: string | undefined;
+      pendingPrompt: string | null;
       isReinitializing: boolean;
       currentProvider: string;
       retryAttempts: Map<string, number>;
@@ -1048,7 +1048,7 @@ describe('AgentHost', () => {
         makeOverflowEvent('400: input token count exceeds maximum context length')
       );
       expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
-      expect(internal.pendingPrompt).toBeUndefined();
+      expect(internal.pendingPrompt).toBeNull();
     });
   });
 

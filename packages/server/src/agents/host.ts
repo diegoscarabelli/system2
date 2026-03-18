@@ -476,7 +476,7 @@ export class AgentHost {
       const recovered = await this.handleContextOverflow();
       if (recovered) {
         // Clear the overflow-causing prompt so a future failover doesn't retry it
-        this.pendingPrompt = undefined;
+        this.pendingPrompt = null;
         return;
       }
       // Recovery was a no-op — reset guard so a future overflow can try again
