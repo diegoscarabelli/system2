@@ -112,4 +112,58 @@ describe('edit tool', () => {
     expect((result.content[0] as { text: string }).text).toBe('Edit aborted.');
     expect(result.details).toHaveProperty('error', 'aborted');
   });
+
+  it('errors when old_string is missing and append is not set', async () => {
+    const dir = trackDir(makeTmpDir());
+    const file = join(dir, 'test.txt');
+    writeFileSync(file, 'content');
+
+    const result = await exec({ path: file, new_string: 'x' });
+
+    expect((result.content[0] as { text: string }).text).toContain('old_string');
+    expect(result.details).toHaveProperty('error', 'missing_old_string');
+  });
+
+  describe('append mode', () => {
+    it('appends to an existing file with trailing newline', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, 'existing content\n');
+
+      const result = await exec({ path: file, new_string: 'new line\n', append: true });
+
+      expect((result.content[0] as { text: string }).text).toContain('Appended');
+      expect(readFileSync(file, 'utf-8')).toBe('existing content\nnew line\n');
+    });
+
+    it('adds newline separator when existing content lacks trailing newline', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, 'existing content');
+
+      await exec({ path: file, new_string: 'new line', append: true });
+
+      expect(readFileSync(file, 'utf-8')).toBe('existing content\nnew line');
+    });
+
+    it('appends to an empty file without adding a separator', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, '');
+
+      await exec({ path: file, new_string: 'content', append: true });
+
+      expect(readFileSync(file, 'utf-8')).toBe('content');
+    });
+
+    it('creates file and parent directories if they do not exist', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'subdir', 'nested', 'test.txt');
+
+      const result = await exec({ path: file, new_string: 'hello', append: true });
+
+      expect((result.content[0] as { text: string }).text).toContain('Appended');
+      expect(readFileSync(file, 'utf-8')).toBe('hello');
+    });
+  });
 });

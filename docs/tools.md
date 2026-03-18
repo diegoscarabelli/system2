@@ -45,19 +45,29 @@ Returns the file contents as a string.
 
 ### `edit`
 
-Edit a file by replacing an exact string match. The `old_string` must appear exactly once in the file.
+Edit a file by replacing an exact string match, or append content to a file.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `path` | string | Absolute path or `~/` relative path |
-| `old_string` | string | Exact text to find (must be unique in the file) |
-| `new_string` | string | Replacement text |
+| `old_string` | string? | Exact text to find (must be unique in the file). Required unless `append` is true. |
+| `new_string` | string | Replacement text (replace mode) or content to append (append mode) |
+| `append` | boolean? | If true, append `new_string` to the end of the file instead of replacing `old_string` |
 | `commit_message` | string? | If provided and path is inside `~/.system2/`, git-commits the file with this message |
+
+**Replace mode** (default, `append` not set):
 
 - **Uniqueness check:** if `old_string` appears 0 or >1 times, the edit fails with an error instructing the agent to add more context
 - **Insertions:** use surrounding context as `old_string` and embed new content in `new_string`
 - **Preferred over `write`** for modifying existing files: only changes what is specified
-- For bulk operations where `edit` is inconvenient, use `bash` with `sed`, `awk`, `>>`, etc.
+- For bulk operations (e.g., find-and-replace across many lines), use `bash` with `sed`, `awk`, or similar
+
+**Append mode** (`append: true`):
+
+- Appends `new_string` to the end of the file
+- Creates the file (and parent directories) if it does not exist
+- Adds a newline separator if the existing content does not end with one
+- Preferred for adding entries to logs, memory files, and similar append-only patterns
 
 ### `write`
 

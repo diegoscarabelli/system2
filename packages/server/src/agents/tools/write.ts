@@ -31,7 +31,7 @@ export function createWriteTool() {
     name: 'write',
     label: 'Write File',
     description:
-      'Write content to a file. Creates parent directories if needed. Overwrites the entire file. Use this for creating new files or complete rewrites. For modifying specific parts of an existing file, prefer the `edit` tool. For operations where neither `edit` nor `write` is convenient (bulk replacements, appending, etc.), use `bash` with `sed`, `awk`, or `>>`.',
+      'Write content to a file. Creates parent directories if needed. Overwrites the entire file. Use this for creating new files or complete rewrites. For modifying specific parts of an existing file, prefer the `edit` tool. For appending content, use `edit` with `append: true`. For bulk replacements and similar operations, use `bash` with `sed`, `awk`, or similar.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {

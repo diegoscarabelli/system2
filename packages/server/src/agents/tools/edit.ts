@@ -1,13 +1,20 @@
 /**
  * Edit Tool
  *
- * Performs exact string replacement in files. Finds `old_string` in the file,
- * verifies it appears exactly once (uniqueness check), and replaces it with
- * `new_string`. For insertions, use surrounding context as `old_string` and
- * embed the new content in `new_string`.
+ * Performs exact string replacement in files, or appends content to a file.
+ *
+ * Replace mode (default): finds `old_string` in the file, verifies it appears
+ * exactly once (uniqueness check), and replaces it with `new_string`. For
+ * insertions, use surrounding context as `old_string` and embed the new content
+ * in `new_string`.
+ *
+ * Append mode (`append: true`): appends `new_string` to the end of the file.
+ * Creates the file (and parent directories) if it does not exist. Adds a
+ * newline separator if the existing content does not end with one.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { commitIfStateDir } from './git-commit.js';
@@ -18,14 +25,22 @@ export function createEditTool() {
     path: Type.String({
       description: 'Path to the file to edit (absolute or relative to home directory)',
     }),
-    old_string: Type.String({
-      description:
-        'The exact text to find in the file. Must appear exactly once. Include enough surrounding context to make it unique.',
-    }),
+    old_string: Type.Optional(
+      Type.String({
+        description:
+          'The exact text to find in the file. Must appear exactly once. Include enough surrounding context to make it unique. Required unless append is true.',
+      })
+    ),
     new_string: Type.String({
       description:
-        'The replacement text. For insertions, include the original context with new content added in the right position.',
+        'The replacement text (replace mode) or content to append (append mode). For insertions in replace mode, include the original context with new content added in the right position.',
     }),
+    append: Type.Optional(
+      Type.Boolean({
+        description:
+          'If true, append new_string to the end of the file instead of replacing old_string. Creates the file (and parent directories) if it does not exist.',
+      })
+    ),
     commit_message: Type.Optional(
       Type.String({
         description:
@@ -38,7 +53,7 @@ export function createEditTool() {
     name: 'edit',
     label: 'Edit File',
     description:
-      'Edit a file by replacing an exact string match. The old_string must appear exactly once in the file (include more context if not unique). Prefer this over `write` for modifying existing files — it only changes what you specify. Use `write` for creating new files or complete rewrites. For bulk operations where `edit` is inconvenient (e.g., find-and-replace across many lines, appending), use `bash` with `sed`, `awk`, `>>`, or similar.',
+      'Edit a file by replacing an exact string match, or append content to a file. When append is true, appends new_string to the end of the file (creating it if needed) — use this for adding entries to logs, memory files, and similar. When append is not set, old_string must appear exactly once in the file (include more context if not unique). Prefer this over `write` for modifying existing files. Use `write` for creating new files or complete rewrites. For bulk operations (e.g., find-and-replace across many lines), use `bash` with `sed`, `awk`, or similar.',
     parameters: params,
     execute: async (_toolCallId, params, signal, _onUpdate) => {
       try {
@@ -50,6 +65,49 @@ export function createEditTool() {
         }
 
         const filePath = resolvePath(params.path);
+
+        if (params.append) {
+          await mkdir(dirname(filePath), { recursive: true });
+
+          let existingContent = '';
+          try {
+            existingContent = await readFile(filePath, 'utf-8');
+          } catch (err) {
+            const e = err as { code?: string };
+            if (e.code !== 'ENOENT') throw err;
+          }
+
+          const separator =
+            existingContent.length > 0 && !existingContent.endsWith('\n') ? '\n' : '';
+          const newContent = existingContent + separator + params.new_string;
+
+          await writeFile(filePath, newContent, 'utf-8');
+
+          if (params.commit_message) {
+            commitIfStateDir(filePath, params.commit_message);
+          }
+
+          const linesAppended = params.new_string.split('\n').length;
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Appended ${linesAppended} line(s) to ${params.path}.`,
+              },
+            ],
+            details: { path: filePath, linesAppended },
+          };
+        }
+
+        // Replace mode: old_string is required
+        if (params.old_string === undefined) {
+          return {
+            content: [
+              { type: 'text', text: 'Error: old_string is required when append is not true.' },
+            ],
+            details: { error: 'missing_old_string' },
+          };
+        }
 
         const content = await readFile(filePath, 'utf-8');
 
