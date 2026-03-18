@@ -91,14 +91,11 @@ export function categorizeError(error: unknown): ErrorCategory {
 function isContextOverflow(message: string): boolean {
   return (
     // Google: "The input token count (N) exceeds the maximum number of tokens allowed (N)"
-    /input token count.*exceeds.*maximum.*tokens/.test(message) ||
+    /input token count.*exceeds.*maximum/.test(message) ||
     // OpenAI: "maximum context length is N tokens"
     /maximum context length/.test(message) ||
     // Anthropic: "prompt is too long: N tokens > N maximum"
-    /prompt is too long.*tokens/.test(message) ||
-    // Generic patterns
-    /token.*limit.*exceeded/.test(message) ||
-    /context.*length.*exceeded/.test(message)
+    /prompt is too long.*tokens/.test(message)
   );
 }
 

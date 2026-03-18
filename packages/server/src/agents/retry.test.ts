@@ -101,6 +101,12 @@ describe('categorizeError', () => {
   it('returns "client" for non-overflow 400 errors', () => {
     expect(categorizeError({ status: 400, message: 'Invalid request body' })).toBe('client');
   });
+
+  it('returns "rate_limit" for token-per-minute limit errors (not context_overflow)', () => {
+    expect(categorizeError({ status: 429, message: 'token per minute limit exceeded' })).toBe(
+      'rate_limit'
+    );
+  });
 });
 
 describe('extractErrorMessage', () => {

@@ -175,6 +175,17 @@ Exponential backoff with jitter: `min(baseDelay * 2^attempt + jitter, maxDelay)`
 | `transient` (500/503/timeout) | Up to 2x | After retries exhausted |
 | `client` (400) | Never | Never (surface error) |
 
+**Context overflow recovery:** a `client` (400) error whose message contains both a size keyword (`exceed`, `maximum`, `limit`, `too long`, `too large`, `too many`) and a context/token keyword (`token`, `context`, `input`, `prompt`) is treated as a context overflow. This detection is provider-agnostic (covers Anthropic, OpenAI, Gemini, and others) and is gated on the `client` error category to avoid false positives on rate-limit errors. This can happen when a single large delivery (e.g., a scheduled Narrator job) causes the context to jump past the auto-compaction threshold in one step. Recovery is one-shot: the guard is armed on the first overflow and re-arms only after recovery completes (successfully or as a no-op). It does not reset on provider failover or re-initialization, so the guard stays active throughout the entire recovery sequence:
+
+1. Find the last JSONL message entry where `entry.message.usage.input < contextWindow * 0.90` (message entries store token usage under `entry.message.usage`)
+2. Truncate the active session file at that point, saving the remainder as a "tail"
+3. Reinitialize the session from the truncated file and run `compact()` to reduce context to ~5%
+4. Append the tail back and reinitialize again
+
+The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. If no split point below 90% is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
+
+Auto-compaction is also configured to fire earlier (at 90% of the context window instead of the SDK default of ~98%) to reduce the chance of overflow in the first place.
+
 ## Session Persistence
 
 Agent sessions are persisted as JSONL files in `~/.system2/sessions/{role}_{id}/`. The pi-coding-agent SDK manages:
