@@ -5,9 +5,9 @@ version: 1.0.0
 thinking_level: high
 compaction_depth: 10
 models:
-  anthropic: claude-opus-4-6
+  anthropic: claude-sonnet-4-6
   cerebras: zai-glm-4.7
-  google: gemini-3.1-pro-preview
+  google: gemini-2.5-flash
   groq: llama-3.3-70b-versatile
   mistral: mistral-large-latest
   openai: gpt-4o
