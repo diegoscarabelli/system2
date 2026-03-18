@@ -79,7 +79,7 @@ Auto-growing textarea (1-10 lines, then scrolls). Shows the current LLM provider
 
 Tabbed artifact display. Tabs are either **iframe tabs** (sandboxed HTML artifacts) or **native tabs** (React components rendered directly). Tab bar at top shows title and close button for each open artifact; clicking a tab activates it. Empty state shown when no tabs are open.
 
-Native tabs are not persisted to localStorage across page reloads. Currently the only native tab is the Kanban board.
+The only native tab is the Kanban board. Its open/closed state is persisted via `kanbanOpen` in the artifact store, so the board reopens automatically after a page refresh. Only the visibility flag is stored — the tab content is re-rendered fresh on mount.
 
 Supports a `postMessage` bridge for iframe dashboards that need database access:
 
@@ -150,7 +150,7 @@ Three [Zustand](https://github.com/pmndrs/zustand) stores with no Redux or Conte
 
 ### `useChatStore` (Primary)
 
-Supports multi-agent chat via per-agent state. Each agent has its own message history, streaming state, and message queue stored in a `Map<number, PerAgentState>`. The `activeAgentId` determines which agent's state is displayed in the UI.
+Supports multi-agent chat via per-agent state. Each agent has its own message history, streaming state, and message queue stored in a `Map<number, PerAgentState>`. The `activeAgentId` determines which agent's state is displayed in the UI. `activeAgentId`, `activeAgentLabel`, and `activeAgentRole` are persisted via the Zustand `persist` middleware (key: `system2:chat-store`) so the selected agent survives page refreshes.
 
 **Global state:**
 
@@ -180,14 +180,15 @@ Components read the active agent's state via selectors (e.g., `useChatStore(s =>
 
 ### `useArtifactStore`
 
-Tab-based artifact state with localStorage persistence (`system2:artifact-tabs`). Each `ArtifactTab` has a `type` discriminant: `'iframe'` for sandboxed HTML artifacts, `'native'` for React components rendered directly. Native tabs are not persisted across page reloads.
+Tab-based artifact state persisted via the Zustand `persist` middleware (key: `system2:artifact-store`). Each `ArtifactTab` has a `type` discriminant: `'iframe'` for sandboxed HTML artifacts, `'native'` for React components rendered directly.
 
 | State | Type | Description |
 |-------|------|-------------|
 | `tabs` | `ArtifactTab[]` | Open artifact tabs (id, type, url, filePath, title) |
 | `activeTabId` | `string \| null` | Currently active tab |
-| `catalogOpen` | `boolean` | Whether the catalog panel is visible |
-| `agentsOpen` | `boolean` | Whether the agents panel is visible |
+| `catalogOpen` | `boolean` | Whether the catalog panel is visible (not persisted) |
+| `agentsOpen` | `boolean` | Whether the agents panel is visible (persisted) |
+| `kanbanOpen` | `boolean` | Whether the kanban board tab is open (persisted) |
 
 Key behaviors:
 
