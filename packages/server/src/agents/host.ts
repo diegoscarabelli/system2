@@ -658,11 +658,12 @@ export class AgentHost {
       throw new Error('AgentHost not initialized. Call initialize() first.');
     }
 
-    // Capture delivered message in chat cache for UI history
+    // Capture delivered message in chat cache for UI history.
+    // Use role: 'system' so it renders as a muted notice rather than as "You".
     if (this._chatCache) {
       this._chatCache.push({
         id: `msg-${Date.now()}`,
-        role: 'user',
+        role: 'system',
         content,
         timestamp: details.timestamp,
       });

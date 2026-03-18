@@ -126,6 +126,26 @@ describe('useChatStore', () => {
     });
   });
 
+  describe('clearAllStreamingState', () => {
+    it('resets streaming flags, thinking, currentAssistantMessage, and currentTurnEvents', () => {
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().startThinking(1);
+      useChatStore.getState().startToolCall('bash', '{}', 1);
+      useChatStore.getState().startAssistantMessage(1);
+      useChatStore.getState().setStreaming(true, 1);
+      useChatStore.getState().setWaitingForResponse(true, 1);
+
+      useChatStore.getState().clearAllStreamingState();
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.isStreaming).toBe(false);
+      expect(state?.isWaitingForResponse).toBe(false);
+      expect(state?.activeThinkingId).toBeNull();
+      expect(state?.currentAssistantMessage).toBeNull();
+      expect(state?.currentTurnEvents).toHaveLength(0);
+    });
+  });
+
   describe('provider (global state)', () => {
     it('setProvider updates global provider, not per-agent', () => {
       useChatStore.setState({ activeAgentId: 1 });

@@ -510,7 +510,7 @@ describe('AgentHost', () => {
       expect(internal._chatCache.push).toHaveBeenCalledOnce();
       expect(internal._chatCache.push).toHaveBeenCalledWith(
         expect.objectContaining({
-          role: 'user',
+          role: 'system',
           content: '[From Guide (id=1)]: do the thing',
           timestamp: ts,
         })

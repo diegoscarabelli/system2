@@ -405,6 +405,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             isWaitingForResponse: false,
             activeThinkingId: null,
             currentAssistantMessage: null,
+            currentTurnEvents: [],
           });
         }
       }
