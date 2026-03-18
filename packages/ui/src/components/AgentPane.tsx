@@ -7,7 +7,7 @@
 
 import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { useChatStore } from '../stores/chat';
 import { colors, contextColor } from '../theme/colors';
@@ -162,32 +162,34 @@ export function AgentPane() {
               >
                 <Box as="thead">
                   {/* Group header row */}
-                  <Box
-                    as="tr"
-                    role="button"
-                    tabIndex={0}
-                    aria-expanded={!isCollapsed}
-                    onClick={() => toggleGroupCollapse(group)}
-                    onKeyDown={(event: React.KeyboardEvent) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        toggleGroupCollapse(group);
-                      }
-                    }}
-                    sx={{ cursor: 'pointer', '&:hover td': { color: 'fg.default' } }}
-                  >
+                  <Box as="tr">
                     <Box
                       as="td"
                       colSpan={4}
                       sx={{
-                        px: 2,
-                        py: 1,
-                        color: 'fg.muted',
                         borderBottom: '1px solid',
                         borderColor: 'border.muted',
+                        padding: 0,
                       }}
                     >
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box
+                        as="button"
+                        onClick={() => toggleGroupCollapse(group)}
+                        aria-expanded={!isCollapsed}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1,
+                          width: '100%',
+                          px: 2,
+                          py: 1,
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: 'fg.muted',
+                          '&:hover': { color: 'fg.default' },
+                        }}
+                      >
                         {isCollapsed ? (
                           <ChevronRightIcon size={12} />
                         ) : (
@@ -209,13 +211,12 @@ export function AgentPane() {
                         <Box
                           key={agent.id}
                           as="tr"
-                          role="button"
                           tabIndex={0}
                           onClick={() =>
                             useChatStore.getState().setActiveAgent(agent.id, agent.role)
                           }
-                          onKeyDown={(event: React.KeyboardEvent) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
+                          onKeyDown={(event: KeyboardEvent) => {
+                            if (!event.repeat && (event.key === 'Enter' || event.key === ' ')) {
                               event.preventDefault();
                               useChatStore.getState().setActiveAgent(agent.id, agent.role);
                             }
