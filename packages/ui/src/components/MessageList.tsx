@@ -547,18 +547,30 @@ export function MessageList() {
 
         if (message.role === 'system') {
           return (
-            <Box
-              key={message.id}
-              sx={{
-                textAlign: 'center',
-                py: 2,
-                fontSize: 0,
-                color: 'fg.muted',
-                fontStyle: 'italic',
-              }}
-            >
-              {message.content}
-            </Box>
+            <TimelineItem key={message.id} dotColor={colors.gray} isLast={isLastMessage}>
+              <Text
+                sx={{
+                  fontWeight: 'semibold',
+                  fontSize: 0,
+                  color: colors.gray,
+                  marginBottom: 1,
+                }}
+              >
+                System2
+              </Text>
+              <Text
+                as="p"
+                sx={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontSize: 1,
+                  margin: 0,
+                  color: 'fg.muted',
+                }}
+              >
+                {message.content}
+              </Text>
+            </TimelineItem>
           );
         }
 
