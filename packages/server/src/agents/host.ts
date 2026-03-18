@@ -122,8 +122,6 @@ export class AgentHost {
   private isPruning = false;
   private contextWindow = 0;
   private contextOverflowHandled = false;
-  private lastContextUsage: { percent: number; tokens: number; contextWindow: number } | null =
-    null;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -769,15 +767,7 @@ export class AgentHost {
    * Get current context window usage
    */
   getContextUsage() {
-    const current = this.session?.getContextUsage();
-    if (current?.percent != null) {
-      this.lastContextUsage = {
-        percent: current.percent,
-        tokens: current.tokens ?? 0,
-        contextWindow: current.contextWindow,
-      };
-    }
-    return current ?? this.lastContextUsage;
+    return this.session?.getContextUsage();
   }
 
   /** Get the agent's role (available after initialize()). */
