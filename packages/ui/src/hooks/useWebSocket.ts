@@ -3,6 +3,7 @@
  *
  * Manages WebSocket connection to the server.
  * Supports message queueing with steering message priority.
+ * Routes messages to/from per-agent state via agentId.
  */
 
 import type { ClientMessage, ServerMessage } from '@system2/shared';
@@ -14,35 +15,38 @@ const WS_URL = `ws://${window.location.hostname}:3000`;
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
-  const {
-    startAssistantMessage,
-    appendAssistantChunk,
-    finishAssistantMessage,
-    startThinking,
-    appendThinkingChunk,
-    finishThinking,
-    startToolCall,
-    finishToolCall,
-    setConnected,
-    setWaitingForResponse,
-    addUserMessage,
-    dequeueMessage,
-  } = useChatStore();
+  const activeAgentId = useChatStore((s) => s.activeAgentId);
+  const prevAgentRef = useRef<number | null>(null);
 
-  // Process the next queued message
-  const processNextQueuedMessage = useCallback(() => {
-    const nextMsg = dequeueMessage();
+  // Send switch_agent when activeAgentId changes (user-initiated switch via AgentPane)
+  useEffect(() => {
+    if (
+      activeAgentId !== null &&
+      prevAgentRef.current !== null &&
+      activeAgentId !== prevAgentRef.current
+    ) {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        const msg: ClientMessage = { type: 'switch_agent', agentId: activeAgentId };
+        wsRef.current.send(JSON.stringify(msg));
+      }
+    }
+    prevAgentRef.current = activeAgentId;
+  }, [activeAgentId]);
+
+  // Process the next queued message for a specific agent
+  const processNextQueuedMessage = useCallback((agentId: number) => {
+    const state = useChatStore.getState();
+    const nextMsg = state.dequeueMessage(agentId);
     if (nextMsg && wsRef.current?.readyState === WebSocket.OPEN) {
-      // Add the queued message to the UI
-      addUserMessage(nextMsg.content);
-
-      const message: ClientMessage = {
+      state.addUserMessage(nextMsg.content, undefined, undefined, agentId);
+      const msg: ClientMessage = {
         type: nextMsg.isSteering ? 'steering_message' : 'user_message',
         content: nextMsg.content,
+        agentId,
       };
-      wsRef.current.send(JSON.stringify(message));
+      wsRef.current.send(JSON.stringify(msg));
     }
-  }, [dequeueMessage, addUserMessage]);
+  }, []);
 
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
@@ -50,94 +54,139 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       console.log('WebSocket connected');
-      setConnected(true);
+      const state = useChatStore.getState();
+      state.setConnected(true);
+      // On reconnect, re-subscribe to the active agent if it's not the Guide
+      if (
+        state.activeAgentId !== null &&
+        state.guideAgentId !== null &&
+        state.activeAgentId !== state.guideAgentId
+      ) {
+        const msg: ClientMessage = { type: 'switch_agent', agentId: state.activeAgentId };
+        ws.send(JSON.stringify(msg));
+      }
     };
 
     ws.onmessage = (event) => {
       const message = JSON.parse(event.data) as ServerMessage;
+      const state = useChatStore.getState();
 
       switch (message.type) {
-        case 'thinking_chunk':
-          // Start new thinking block if none is active
-          if (!useChatStore.getState().activeThinkingId && message.content) {
-            startThinking();
+        case 'thinking_chunk': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid === null) break;
+          const agentState = state.agentStates.get(aid);
+          if (!agentState?.activeThinkingId && message.content) {
+            state.startThinking(aid);
           }
-          appendThinkingChunk(message.content);
+          state.appendThinkingChunk(message.content, aid);
           break;
+        }
 
-        case 'thinking_end':
-          finishThinking();
+        case 'thinking_end': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid !== null) state.finishThinking(aid);
           break;
+        }
 
-        case 'assistant_chunk':
-          // First chunk starts the message
-          if (!useChatStore.getState().currentAssistantMessage && message.content) {
-            finishThinking(); // Finish any active thinking
-            startAssistantMessage();
+        case 'assistant_chunk': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid === null) break;
+          const agentState = state.agentStates.get(aid);
+          if (!agentState?.currentAssistantMessage && message.content) {
+            state.finishThinking(aid);
+            state.startAssistantMessage(aid);
           }
-          appendAssistantChunk(message.content);
+          state.appendAssistantChunk(message.content, aid);
           break;
+        }
 
-        case 'assistant_end':
-          finishAssistantMessage();
+        case 'assistant_end': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid !== null) {
+            state.finishThinking(aid);
+            state.finishAssistantMessage(aid);
+          }
           break;
+        }
 
-        case 'tool_call_start':
-          startToolCall(message.name, message.input);
+        case 'tool_call_start': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid !== null) state.startToolCall(message.name, message.input, aid);
           break;
+        }
 
-        case 'tool_call_end':
-          finishToolCall(message.name, message.result);
+        case 'tool_call_end': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid !== null) state.finishToolCall(message.name, message.result, aid);
           break;
+        }
 
-        case 'ready_for_input':
-          // Agent turn is fully complete - reset streaming state and process queue
-          useChatStore.getState().setStreaming(false);
-          setWaitingForResponse(false);
-          processNextQueuedMessage();
+        case 'ready_for_input': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid !== null) {
+            state.setStreaming(false, aid);
+            state.setWaitingForResponse(false, aid);
+            processNextQueuedMessage(aid);
+          }
           break;
+        }
 
-        case 'chat_history':
-          useChatStore.getState().loadHistory(message.messages);
+        case 'chat_history': {
+          const aid = message.agentId;
+          // First chat_history is for the Guide (on initial connect)
+          if (state.guideAgentId === null) {
+            state.setGuideAgentId(aid);
+            state.setActiveAgent(aid, 'guide');
+          }
+          state.loadHistory(message.messages, aid);
           break;
+        }
 
-        case 'user_message_broadcast':
-          // User message sent from another tab — use server's ID and timestamp
-          addUserMessage(message.content, message.id, message.timestamp);
+        case 'user_message_broadcast': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid !== null) {
+            state.addUserMessage(message.content, message.id, message.timestamp, aid);
+          }
           break;
+        }
 
-        case 'context_usage':
-          useChatStore.getState().setContextPercent(message.percent);
+        case 'context_usage': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid !== null) state.setContextPercent(message.percent, aid);
           break;
+        }
 
         case 'artifact': {
-          const store = useArtifactStore.getState();
+          const artifactStore = useArtifactStore.getState();
           if (message.filePath) {
-            const existingTab = store.tabs.find((t) => t.filePath === message.filePath);
+            const existingTab = artifactStore.tabs.find((t) => t.filePath === message.filePath);
             if (existingTab) {
-              store.reloadTab(message.filePath, message.url);
+              artifactStore.reloadTab(message.filePath, message.url);
             } else {
-              store.openArtifact(message.url, message.title, message.filePath);
+              artifactStore.openArtifact(message.url, message.title, message.filePath);
             }
           } else {
-            store.openArtifact(message.url, message.title);
+            artifactStore.openArtifact(message.url, message.title);
           }
           break;
         }
 
         case 'provider_info':
-          useChatStore.getState().setProvider(message.provider);
+          state.setProvider(message.provider);
           break;
 
         case 'provider_change':
-          useChatStore.getState().setProvider(message.provider);
-          useChatStore.getState().addSystemMessage(`Switched to ${message.provider}`);
+          state.setProvider(message.provider);
+          state.addSystemMessage(`Switched to ${message.provider}`);
           break;
 
-        case 'error':
+        case 'error': {
           console.error('Server error:', message.message);
-          setWaitingForResponse(false);
+          const aid = message.agentId ?? state.activeAgentId;
+          if (aid !== null) state.setWaitingForResponse(false, aid);
           break;
+        }
 
         default:
           console.log('Unknown message type:', message);
@@ -146,60 +195,51 @@ export function useWebSocket() {
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      setConnected(false);
-      setWaitingForResponse(false);
+      useChatStore.getState().setConnected(false);
     };
 
     ws.onclose = () => {
       console.log('WebSocket disconnected');
-      setConnected(false);
-      setWaitingForResponse(false);
+      useChatStore.getState().setConnected(false);
     };
 
     return () => {
       ws.close();
     };
-  }, [
-    addUserMessage,
-    appendAssistantChunk,
-    appendThinkingChunk,
-    finishAssistantMessage,
-    finishThinking,
-    finishToolCall,
-    processNextQueuedMessage,
-    setConnected,
-    setWaitingForResponse,
-    startAssistantMessage,
-    startThinking,
-    startToolCall,
-  ]);
+  }, [processNextQueuedMessage]);
 
   const sendMessage = useCallback((content: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      const message: ClientMessage = {
+      const agentId = useChatStore.getState().activeAgentId;
+      const msg: ClientMessage = {
         type: 'user_message',
         content,
+        agentId: agentId ?? undefined,
       };
-      wsRef.current.send(JSON.stringify(message));
+      wsRef.current.send(JSON.stringify(msg));
     }
   }, []);
 
   const sendSteeringMessage = useCallback((content: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      const message: ClientMessage = {
+      const agentId = useChatStore.getState().activeAgentId;
+      const msg: ClientMessage = {
         type: 'steering_message',
         content,
+        agentId: agentId ?? undefined,
       };
-      wsRef.current.send(JSON.stringify(message));
+      wsRef.current.send(JSON.stringify(msg));
     }
   }, []);
 
   const abort = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      const message: ClientMessage = {
+      const agentId = useChatStore.getState().activeAgentId;
+      const msg: ClientMessage = {
         type: 'abort',
+        agentId: agentId ?? undefined,
       };
-      wsRef.current.send(JSON.stringify(message));
+      wsRef.current.send(JSON.stringify(msg));
     }
   }, []);
 

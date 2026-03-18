@@ -7,24 +7,39 @@
 import type { ChatMessage } from './chat.js';
 
 // Client -> Server messages
+// agentId is optional on user/steering/abort: when absent, defaults to the Guide agent.
 export type ClientMessage =
-  | { type: 'user_message'; content: string }
-  | { type: 'steering_message'; content: string } // Steering messages are inserted ASAP into the agent loop
-  | { type: 'abort' };
+  | { type: 'user_message'; content: string; agentId?: number }
+  | { type: 'steering_message'; content: string; agentId?: number } // Steering messages are inserted ASAP into the agent loop
+  | { type: 'abort'; agentId?: number }
+  | { type: 'switch_agent'; agentId: number }; // Switch the active chat to a different agent
 
 // Server -> Client messages
+// agentId is optional on streaming messages: when absent, implies the Guide agent.
 export type ServerMessage =
-  | { type: 'assistant_chunk'; content: string }
-  | { type: 'assistant_end' }
-  | { type: 'thinking_chunk'; content: string }
-  | { type: 'thinking_end' }
-  | { type: 'tool_call_start'; name: string; input?: string }
-  | { type: 'tool_call_end'; name: string; result: string }
+  | { type: 'assistant_chunk'; content: string; agentId?: number }
+  | { type: 'assistant_end'; agentId?: number }
+  | { type: 'thinking_chunk'; content: string; agentId?: number }
+  | { type: 'thinking_end'; agentId?: number }
+  | { type: 'tool_call_start'; name: string; input?: string; agentId?: number }
+  | { type: 'tool_call_end'; name: string; result: string; agentId?: number }
   | { type: 'artifact'; url: string; title?: string; filePath?: string }
-  | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number }
-  | { type: 'error'; message: string }
-  | { type: 'ready_for_input' } // Signals that the agent is ready for the next message
-  | { type: 'chat_history'; messages: ChatMessage[] } // Sent on connect — recent message history from server
-  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number } // Broadcast to other tabs
+  | {
+      type: 'context_usage';
+      percent: number | null;
+      tokens: number | null;
+      contextWindow: number;
+      agentId?: number;
+    }
+  | { type: 'error'; message: string; agentId?: number }
+  | { type: 'ready_for_input'; agentId?: number } // Signals that the agent is ready for the next message
+  | { type: 'chat_history'; messages: ChatMessage[]; agentId: number } // Sent on connect and agent switch
+  | {
+      type: 'user_message_broadcast';
+      id: string;
+      content: string;
+      timestamp: number;
+      agentId?: number;
+    }
   | { type: 'provider_info'; provider: string } // Sent on connect — current LLM provider
   | { type: 'provider_change'; provider: string }; // Sent on failover — provider switched

@@ -11,41 +11,49 @@ The UI communicates with the server over a single WebSocket connection. The serv
 
 WebSocket connects to the server port (default 3000). In development, Vite proxies `ws://localhost:3001/ws` to the backend.
 
-On connect, the server sends a `chat_history` message with recent messages from `MessageHistory` (ring buffer, default 1000 messages). The server is the single source of truth for chat history: the UI does not persist messages.
+On connect, the server sends a `chat_history` message with the Guide agent's recent messages from its per-agent `MessageHistory` (ring buffer, default 1000 messages). The server is the single source of truth for chat history: the UI does not persist messages.
+
+## Multi-Agent Routing
+
+The protocol supports multi-agent chat. Each streaming message includes an optional `agentId` field that identifies which agent the message pertains to. When absent, the Guide agent is implied (backward compatibility).
+
+The client tracks an `activeAgentId` (the agent currently displayed in the chat panel). Sending `switch_agent` tells the server to subscribe to a different agent's events and return that agent's chat history.
 
 ## Client -> Server
 
 ```typescript
 type ClientMessage =
-  | { type: 'user_message'; content: string }
-  | { type: 'steering_message'; content: string }
-  | { type: 'abort' };
+  | { type: 'user_message'; content: string; agentId?: number }
+  | { type: 'steering_message'; content: string; agentId?: number }
+  | { type: 'abort'; agentId?: number }
+  | { type: 'switch_agent'; agentId: number };
 ```
 
 | Message | Description |
 |---------|-------------|
-| `user_message` | Standard user input. Queued if agent is busy. |
+| `user_message` | Standard user input. Queued if agent is busy. `agentId` targets a specific agent (defaults to active). |
 | `steering_message` | Priority message inserted ASAP into the agent loop (interrupts current work). |
-| `abort` | Cancel current agent execution. |
+| `abort` | Cancel current agent execution for the specified (or active) agent. |
+| `switch_agent` | Switch the active chat to a different agent. Server responds with that agent's `chat_history`, `context_usage`, and `ready_for_input` (if idle). |
 
 ## Server -> Client
 
 ```typescript
 type ServerMessage =
-  | { type: 'thinking_chunk'; content: string }
-  | { type: 'thinking_end' }
-  | { type: 'assistant_chunk'; content: string }
-  | { type: 'assistant_end' }
-  | { type: 'tool_call_start'; name: string; input?: string }
-  | { type: 'tool_call_end'; name: string; result: string }
+  | { type: 'thinking_chunk'; content: string; agentId?: number }
+  | { type: 'thinking_end'; agentId?: number }
+  | { type: 'assistant_chunk'; content: string; agentId?: number }
+  | { type: 'assistant_end'; agentId?: number }
+  | { type: 'tool_call_start'; name: string; input?: string; agentId?: number }
+  | { type: 'tool_call_end'; name: string; result: string; agentId?: number }
   | { type: 'artifact'; url: string; title?: string; filePath?: string }
-  | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number }
+  | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number; agentId?: number }
   | { type: 'provider_info'; provider: string }
   | { type: 'provider_change'; provider: string }
-  | { type: 'error'; message: string }
-  | { type: 'ready_for_input' }
-  | { type: 'chat_history'; messages: ChatMessage[] }
-  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number };
+  | { type: 'error'; message: string; agentId?: number }
+  | { type: 'ready_for_input'; agentId?: number }
+  | { type: 'chat_history'; messages: ChatMessage[]; agentId: number }
+  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number; agentId?: number };
 ```
 
 | Message | Description |
@@ -59,7 +67,7 @@ type ServerMessage =
 | `provider_change` | Sent on failover: provider switched due to API issues |
 | `error` | Error message |
 | `ready_for_input` | Agent finished, ready for next message |
-| `chat_history` | Sent on connect: recent messages from server |
+| `chat_history` | Sent on connect (Guide) and on `switch_agent`: recent messages for the specified agent |
 | `user_message_broadcast` | User message from another tab, broadcast to all other connected clients |
 
 Note: the Board, Catalog, and Agent Pane poll their REST endpoints every 2 seconds rather than relying on push notifications. This ensures the UI reflects database changes regardless of how they were made (tool callbacks, direct sqlite3 access, etc.).
@@ -70,33 +78,55 @@ Note: the Board, Catalog, and Agent Pane poll their REST endpoints every 2 secon
 
 ```
 User types message
-  -> UI sends { type: 'user_message', content }
-    -> WebSocketHandler calls agentHost.prompt(content)
-      -> Agent processes (may use tools, think, generate text)
-        -> Events stream back:
-           thinking_chunk* -> thinking_end
-           tool_call_start -> tool_call_end (repeated per tool)
-           assistant_chunk* -> assistant_end
-           context_usage
-           ready_for_input
+  -> UI sends { type: 'user_message', content, agentId }
+    -> WebSocketHandler resolves target agent via agentId (default: active)
+      -> Captures user message in agent's chatCache
+      -> Broadcasts user_message_broadcast (with agentId) to other tabs
+      -> Calls agentHost.prompt(content)
+        -> Agent processes (may use tools, think, generate text)
+          -> Events stream back (all tagged with agentId):
+             thinking_chunk* -> thinking_end
+             tool_call_start -> tool_call_end (repeated per tool)
+             assistant_chunk* -> assistant_end
+             context_usage
+             ready_for_input
 ```
 
 ### Steering Message
 
 ```
 User sends steering while agent is working
-  -> UI sends { type: 'steering_message', content }
+  -> UI sends { type: 'steering_message', content, agentId }
     -> WebSocketHandler calls agentHost.prompt(content, { isSteering: true })
       -> Pi SDK inserts message ASAP into agent loop
       -> Agent responds, streaming continues
 ```
 
+### Agent Switching
+
+```
+User clicks agent in AgentPane
+  -> UI updates activeAgentId in chat store (immediate UI switch)
+  -> UI sends { type: 'switch_agent', agentId }
+    -> WebSocketHandler:
+       1. Updates activeAgentId
+       2. Unsubscribes from previous agent's events
+       3. Subscribes to new agent's events
+       4. Sends chat_history (from agent's chatCache)
+       5. Sends context_usage (if available)
+       6. Sends ready_for_input (if agent is idle)
+```
+
 ### Message Queuing
 
-The UI maintains a FIFO message queue (`useChatStore.messageQueue`). When the agent is busy:
+The UI maintains a per-agent FIFO message queue (`PerAgentState.messageQueue`). When the agent is busy:
 1. New user messages are appended to the queue
 2. Steering messages are prepended (higher priority)
-3. On `ready_for_input`, the next queued message is sent automatically
+3. On `ready_for_input`, the next queued message for that agent is sent automatically
+
+## Conversation Summarization
+
+When a user directly messages a non-Guide agent, the `ConversationSummarizer` buffers the interaction. After a 1-minute non-resetting timer expires, it generates a concise summary via a one-shot LLM call (using the Narrator's model) and delivers it to the Guide as a follow-up message. This keeps the Guide informed of user-agent interactions without requiring the user to relay information.
 
 ## Server Shutdown
 
@@ -106,26 +136,30 @@ On shutdown, the server sends a WebSocket close frame with code `1001` ("Going A
 
 Multiple browser tabs each open their own WebSocket connection. All tabs receive the same agent events (thinking, text, tool calls) because each handler subscribes independently to the agent.
 
-User messages are broadcast to other tabs: when tab A sends a message, the handler sends `user_message_broadcast` to all other connected clients so they display the message immediately. The sending tab adds the message locally (optimistic UI). On reconnect, all tabs receive the full history via `chat_history`.
+User messages are broadcast to other tabs: when tab A sends a message, the handler sends `user_message_broadcast` (with `agentId`) to all other connected clients so they display the message immediately. The sending tab adds the message locally (optimistic UI). On reconnect, all tabs receive the full history via `chat_history`.
 
 ## History Capture
 
-Assistant message history is captured by a **single subscriber** registered in `Server` (not per-handler), preventing duplicate entries when multiple tabs are open. User messages are captured by the handler that receives them (one per user action). Both write to the shared `MessageHistory` ring buffer.
+Each `AgentHost` owns its own `MessageHistory` (chat cache) stored at `~/.system2/sessions/{role}_{id}/chat-cache.json`. Assistant message history is captured by a **single subscriber** registered in `Server` per agent (not per-handler), preventing duplicate entries when multiple tabs are open. User messages are captured by the handler that receives them (one per user action).
 
 ## WebSocketHandler (`handler.ts`)
 
 Each WebSocket connection gets its own `WebSocketHandler` instance. It:
 
-1. Sends chat history and current provider info on connect
-2. Subscribes to agent session events for streaming to its client
-3. Converts Pi SDK events to `ServerMessage` types:
-   - `message_update` (with thinking) -> `thinking_chunk`
+1. Receives `AgentRegistry` and `guideAgentId` in its constructor
+2. Sends Guide's chat history and provider info on connect
+3. Subscribes to the active agent's events (one subscription at a time)
+4. Converts Pi SDK events to `ServerMessage` types (all tagged with `agentId`):
+   - `message_update` (with thinking) -> `thinking_chunk`; transition to text/tool/end -> `thinking_end`
    - `message_update` (with text) -> `assistant_chunk`
-   - `tool_execution_started` -> `tool_call_start`
-   - `tool_execution_ended` -> `tool_call_end`
+   - `message_end` -> `assistant_end`
+   - `tool_execution_start` -> `tool_call_start`
+   - `tool_execution_end` -> `tool_call_end`
    - `agent_end` -> `context_usage` + `ready_for_input`
-4. Captures user messages in `MessageHistory` and broadcasts to other tabs
-5. Watches artifact files for live reload (`fs.watch`)
+5. Captures user messages in the target agent's chat cache and broadcasts to other tabs
+6. Handles `switch_agent` by re-subscribing and sending the new agent's state
+7. Records non-Guide user messages in the `ConversationSummarizer` for Guide notification
+8. Watches artifact files for live reload (`fs.watch`)
 
 ## See Also
 

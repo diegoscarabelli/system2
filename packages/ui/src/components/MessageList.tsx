@@ -9,6 +9,7 @@ import { Box, Text } from '@primer/react';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import {
+  EMPTY_AGENT_STATE,
   type Message,
   type ThinkingBlock as ThinkingBlockType,
   type ToolCall,
@@ -425,7 +426,15 @@ function TurnEventItem({ event, isLast }: { event: TurnEvent; isLast?: boolean }
 }
 
 // Render an assistant message with its turn events in chronological order
-function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: boolean }) {
+function AssistantMessageBlock({
+  message,
+  isLast,
+  agentRole,
+}: {
+  message: Message;
+  isLast: boolean;
+  agentRole: string;
+}) {
   const { accent } = useAccentColors();
   const hasTurnEvents = message.turnEvents && message.turnEvents.length > 0;
 
@@ -450,7 +459,7 @@ function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: 
             marginBottom: 1,
           }}
         >
-          Guide
+          {agentRole}
         </Text>
         <MarkdownContent content={message.content} />
       </TimelineItem>
@@ -459,8 +468,13 @@ function AssistantMessageBlock({ message, isLast }: { message: Message; isLast: 
 }
 
 export function MessageList() {
+  const activeState = useChatStore((s) => {
+    if (s.activeAgentId === null) return EMPTY_AGENT_STATE;
+    return s.agentStates.get(s.activeAgentId) ?? EMPTY_AGENT_STATE;
+  });
   const { messages, currentAssistantMessage, currentTurnEvents, isWaitingForResponse } =
-    useChatStore();
+    activeState;
+  const activeAgentRole = useChatStore((s) => s.activeAgentRole) ?? 'Agent';
   const { accent } = useAccentColors();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -577,7 +591,14 @@ export function MessageList() {
         }
 
         // Assistant message with embedded turn events
-        return <AssistantMessageBlock key={message.id} message={message} isLast={isLastMessage} />;
+        return (
+          <AssistantMessageBlock
+            key={message.id}
+            message={message}
+            isLast={isLastMessage}
+            agentRole={activeAgentRole}
+          />
+        );
       })}
 
       {/* Waiting for response indicator */}
@@ -607,7 +628,7 @@ export function MessageList() {
               marginBottom: 1,
             }}
           >
-            Guide
+            {activeAgentRole}
           </Text>
           <MarkdownContent content={currentAssistantMessage} />
         </TimelineItem>

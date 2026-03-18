@@ -9,7 +9,7 @@
 import { ArrowUpIcon, SquareFillIcon } from '@primer/octicons-react';
 import { Box } from '@primer/react';
 import { useRef, useState } from 'react';
-import { useChatStore } from '../stores/chat';
+import { EMPTY_AGENT_STATE, useChatStore } from '../stores/chat';
 import { colors, contextColor } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
@@ -26,8 +26,14 @@ interface MessageInputProps {
 
 export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
   const [input, setInput] = useState('');
-  const { isStreaming, isWaitingForResponse, isConnected, messageQueue, contextPercent, provider } =
-    useChatStore();
+  const isConnected = useChatStore((s) => s.isConnected);
+  const activeAgentRole = useChatStore((s) => s.activeAgentRole);
+  const activeState = useChatStore((s) => {
+    if (s.activeAgentId === null) return EMPTY_AGENT_STATE;
+    return s.agentStates.get(s.activeAgentId) ?? EMPTY_AGENT_STATE;
+  });
+  const provider = useChatStore((s) => s.provider);
+  const { isStreaming, isWaitingForResponse, messageQueue, contextPercent } = activeState;
   const { accent, accentHover } = useAccentColors();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -95,7 +101,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
               ? 'Connecting to server...'
               : isStreaming
                 ? 'Type to queue a message...'
-                : 'Ask the Guide a question...'
+                : `Message ${activeAgentRole ?? 'Agent'}...`
           }
           disabled={!isConnected}
           rows={1}

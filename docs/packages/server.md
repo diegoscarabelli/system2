@@ -26,7 +26,10 @@ src/
 │   ├── schema.sql         # SQLite schema
 │   └── client.ts          # DatabaseClient class
 ├── chat/
-│   └── history.ts         # MessageHistory (JSON ring buffer)
+│   ├── history.ts         # MessageHistory (JSON ring buffer)
+│   └── summarizer.ts      # ConversationSummarizer (timer-based LLM summaries)
+├── llm/
+│   └── oneshot.ts         # One-shot LLM utility (completeSimple wrapper)
 ├── knowledge/
 │   ├── init.ts            # Knowledge directory initialization
 │   ├── templates.ts       # Default file templates
@@ -49,8 +52,8 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 3. Create `AgentRegistry`
 4. Create Guide agent (singleton via `db.getOrCreateGuideAgent()`)
 5. Create Narrator agent (singleton via `db.getOrCreateNarratorAgent()`)
-6. Create `MessageHistory` (ring buffer, default 1000 messages)
-7. Subscribe once to Guide agent events for assistant message history capture (prevents duplicates with multiple tabs)
+6. Subscribe to each agent's events for assistant message history capture into per-agent chat caches (prevents duplicates with multiple tabs)
+7. Resolve Narrator model and create `ConversationSummarizer` (summarizes user-agent interactions for Guide notification)
 8. Create `Scheduler`
 9. Set up Express routes
 10. Create HTTP server and WebSocket server
@@ -78,7 +81,7 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 
 ### Graceful Shutdown
 
-`stop()` tears down in order: scheduler -> WebSocket clients -> WebSocket server -> HTTP server -> database.
+`stop()` tears down in order: summarizer -> scheduler -> WebSocket clients -> WebSocket server -> HTTP server -> database.
 
 1. Stop all scheduled cron jobs
 2. Send `close(1001, "server shutting down")` to every connected WebSocket client (clean close handshake)

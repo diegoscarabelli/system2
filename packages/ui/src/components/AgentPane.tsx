@@ -9,6 +9,7 @@ import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
+import { useChatStore } from '../stores/chat';
 import { colors, contextColor } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
@@ -56,6 +57,7 @@ export function AgentPane() {
   const { accent } = useAccentColors();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const initialized = useRef(false);
+  const activeAgentId = useChatStore((s) => s.activeAgentId);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -192,79 +194,89 @@ export function AgentPane() {
                 </Box>
                 {!isCollapsed && (
                   <Box as="tbody">
-                    {items.map((agent) => (
-                      <Box
-                        key={agent.id}
-                        as="tr"
-                        sx={{
-                          '&:hover': { backgroundColor: 'canvas.subtle' },
-                          '&:last-child td': { borderBottom: 'none' },
-                        }}
-                      >
+                    {items.map((agent) => {
+                      const isActive = agent.id === activeAgentId;
+                      return (
                         <Box
-                          as="td"
+                          key={agent.id}
+                          as="tr"
+                          onClick={() =>
+                            useChatStore.getState().setActiveAgent(agent.id, agent.role)
+                          }
                           sx={{
-                            px: 2,
-                            py: 1,
-                            borderBottom: '1px solid',
-                            borderColor: 'border.muted',
-                            whiteSpace: 'nowrap',
-                            fontFamily: 'mono',
-                          }}
-                        >
-                          {agent.id}
-                        </Box>
-                        <Box
-                          as="td"
-                          sx={{
-                            px: 2,
-                            py: 1,
-                            borderBottom: '1px solid',
-                            borderColor: 'border.muted',
-                            textTransform: 'capitalize',
-                            width: '100%',
-                          }}
-                        >
-                          {agent.role}
-                        </Box>
-                        <Box
-                          as="td"
-                          sx={{
-                            px: 2,
-                            py: 1,
-                            borderBottom: '1px solid',
-                            borderColor: 'border.muted',
-                            whiteSpace: 'nowrap',
-                            color:
-                              agent.contextPercent != null
-                                ? contextColor(agent.contextPercent, accent)
-                                : 'fg.muted',
-                          }}
-                        >
-                          {agent.contextPercent != null ? Math.round(agent.contextPercent) : '—'}
-                        </Box>
-                        <Box
-                          as="td"
-                          sx={{
-                            px: 2,
-                            py: 1,
-                            textAlign: 'center',
-                            borderBottom: '1px solid',
-                            borderColor: 'border.muted',
+                            cursor: 'pointer',
+                            '&:hover': { backgroundColor: 'canvas.subtle' },
+                            '&:last-child td': { borderBottom: 'none' },
                           }}
                         >
                           <Box
+                            as="td"
                             sx={{
-                              width: 8,
-                              height: 8,
-                              borderRadius: '50%',
-                              backgroundColor: agent.busy ? colors.teal : colors.gray,
-                              display: 'inline-block',
+                              px: 2,
+                              py: 1,
+                              borderBottom: '1px solid',
+                              borderColor: 'border.muted',
+                              whiteSpace: 'nowrap',
+                              fontFamily: 'mono',
+                              borderLeft: isActive
+                                ? `2px solid ${accent}`
+                                : '2px solid transparent',
                             }}
-                          />
+                          >
+                            {agent.id}
+                          </Box>
+                          <Box
+                            as="td"
+                            sx={{
+                              px: 2,
+                              py: 1,
+                              borderBottom: '1px solid',
+                              borderColor: 'border.muted',
+                              textTransform: 'capitalize',
+                              width: '100%',
+                            }}
+                          >
+                            {agent.role}
+                          </Box>
+                          <Box
+                            as="td"
+                            sx={{
+                              px: 2,
+                              py: 1,
+                              borderBottom: '1px solid',
+                              borderColor: 'border.muted',
+                              whiteSpace: 'nowrap',
+                              color:
+                                agent.contextPercent != null
+                                  ? contextColor(agent.contextPercent, accent)
+                                  : 'fg.muted',
+                            }}
+                          >
+                            {agent.contextPercent != null ? Math.round(agent.contextPercent) : '—'}
+                          </Box>
+                          <Box
+                            as="td"
+                            sx={{
+                              px: 2,
+                              py: 1,
+                              textAlign: 'center',
+                              borderBottom: '1px solid',
+                              borderColor: 'border.muted',
+                            }}
+                          >
+                            <Box
+                              sx={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: '50%',
+                                backgroundColor: agent.busy ? colors.teal : colors.gray,
+                                display: 'inline-block',
+                              }}
+                            />
+                          </Box>
                         </Box>
-                      </Box>
-                    ))}
+                      );
+                    })}
                   </Box>
                 )}
               </Box>

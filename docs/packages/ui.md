@@ -142,22 +142,41 @@ Overlay modal showing full project details. Receives the project data directly f
 
 Side panel showing all non-archived agents with busy/idle indicators. Polls `GET /api/agents` every 2 seconds for agent list, busy state, and context window percentages. Groups agents into "System" (Guide, Narrator) listed first, then by project name. Each agent row shows a teal (`#00aaba`) circle when busy or grey when idle. Toggled via PeopleIcon in the activity bar.
 
+Clicking an agent row switches the chat panel to that agent. The active agent is highlighted with an accent-colored left border on its ID cell. Switching updates `activeAgentId` in the chat store, which triggers the WebSocket hook to send `switch_agent` to the server. The server responds with the agent's chat history and streaming state.
+
 ## State Management
 
 Three [Zustand](https://github.com/pmndrs/zustand) stores with no Redux or Context:
 
 ### `useChatStore` (Primary)
 
+Supports multi-agent chat via per-agent state. Each agent has its own message history, streaming state, and message queue stored in a `Map<number, PerAgentState>`. The `activeAgentId` determines which agent's state is displayed in the UI.
+
+**Global state:**
+
 | State | Type | Description |
 |-------|------|-------------|
-| `messages` | `ChatMessage[]` | Full chat history |
+| `agentStates` | `Map<number, PerAgentState>` | Per-agent chat state keyed by agent DB ID |
+| `activeAgentId` | `number \| null` | Currently viewed agent |
+| `activeAgentLabel` | `string \| null` | Display label (e.g., `guide_1`, `conductor_3`) |
+| `activeAgentRole` | `string \| null` | Capitalized role (e.g., `Guide`, `Conductor`) |
+| `guideAgentId` | `number \| null` | Guide agent ID (set on first connect) |
+| `isConnected` | `boolean` | WebSocket connection state |
+| `provider` | `string \| null` | Current LLM provider (server-global, shared across all agents) |
+
+**Per-agent state (`PerAgentState`):**
+
+| State | Type | Description |
+|-------|------|-------------|
+| `messages` | `ChatMessage[]` | Full chat history for this agent |
 | `currentAssistantMessage` | `string` | In-progress streaming text |
 | `currentTurnEvents` | `ChatTurnEvent[]` | Thinking + tool calls for current turn |
 | `isStreaming` | `boolean` | Currently receiving chunks |
 | `isWaitingForResponse` | `boolean` | Sent message, no response yet |
 | `messageQueue` | `Array` | FIFO queue (steering messages prepended) |
 | `contextPercent` | `number \| null` | Context window usage % |
-| `provider` | `string \| null` | Current LLM provider name |
+
+Components read the active agent's state via selectors (e.g., `useChatStore(s => s.agentStates.get(s.activeAgentId))`). An exported `EMPTY_AGENT_STATE` constant provides a stable default for selectors when no agent state exists yet.
 
 ### `useArtifactStore`
 
@@ -185,13 +204,15 @@ Tracks `colorMode` (light/dark) and `particlesEnabled` (boolean) with localStora
 
 ## WebSocket Hook (`useWebSocket.ts`)
 
-Manages the WebSocket connection to the server:
+Manages the WebSocket connection to the server with multi-agent routing:
 
 - Connects to `ws://localhost:3000` (or via Vite proxy in dev)
-- On connect: receives `chat_history` and `provider_info` from server
-- Processes all `ServerMessage` types and updates chat/artifact stores
-- Exposes `sendMessage()`, `sendSteering()`, `abort()`
-- On `ready_for_input`: dequeues next message from queue
+- On connect: receives `chat_history` and `provider_info` for Guide; sets `guideAgentId` and `activeAgentId`
+- Routes all incoming `ServerMessage` types to the correct agent's state via `message.agentId` (falls back to `guideAgentId`)
+- Exposes `sendMessage()`, `sendSteering()`, `abort()` (all include `activeAgentId`)
+- Watches `activeAgentId` changes and sends `switch_agent` to the server when the user switches agents
+- On reconnect: re-sends `switch_agent` if the user was viewing a non-Guide agent
+- On `ready_for_input`: dequeues next message from that specific agent's queue
 - Steering messages are prepended to queue (higher priority)
 
 See [WebSocket Protocol](../websocket-protocol.md) for the full message specification.

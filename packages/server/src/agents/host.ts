@@ -20,6 +20,7 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import type { LlmConfig, LlmProvider, ServicesConfig, ToolsConfig } from '@system2/shared';
 import matter from 'gray-matter';
+import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
 import { AuthResolver } from './auth-resolver.js';
 import type { AgentRegistry } from './registry.js';
@@ -49,6 +50,9 @@ const SYSTEM2_DIR = join(homedir(), '.system2');
 const AGENT_DIR = join(__dirname, 'agents');
 const AGENT_LIBRARY_DIR = join(AGENT_DIR, 'library');
 
+/** Roles that can spawn, manage, and resurrect agents. Single source of truth for tool access. */
+const ORCHESTRATOR_ROLES = new Set(['guide', 'conductor']);
+
 interface AgentDefinition {
   name: string;
   description: string;
@@ -76,6 +80,7 @@ export interface AgentHostConfig {
   toolsConfig?: ToolsConfig;
   spawner?: AgentSpawner;
   resurrector?: AgentResurrector;
+  chatMaxMessages?: number;
 }
 
 export class AgentHost {
@@ -98,7 +103,9 @@ export class AgentHost {
   private agentRole: string | null = null;
   private agentProject: number | null = null;
   private agentProjectDirName: string | null = null;
-  private sessionDir: string | null = null;
+  private _sessionDir: string | null = null;
+  private _chatCache: MessageHistory | null = null;
+  private chatMaxMessages: number;
   private resourceLoader: DefaultResourceLoader | null = null;
   private busy = false;
   private compactionCount = 0;
@@ -113,6 +120,7 @@ export class AgentHost {
     this.toolsConfig = config.toolsConfig;
     this.spawner = config.spawner;
     this.resurrector = config.resurrector;
+    this.chatMaxMessages = config.chatMaxMessages ?? 1000;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -158,7 +166,13 @@ export class AgentHost {
     }
 
     // Store session dir for rotation checks
-    this.sessionDir = agentSessionDir;
+    this._sessionDir = agentSessionDir;
+
+    // Initialize per-agent chat cache (ring buffer persisted to JSON)
+    this._chatCache = new MessageHistory(
+      join(agentSessionDir, 'chat-cache.json'),
+      this.chatMaxMessages
+    );
 
     // Rotate session file if it exceeds size threshold (10MB)
     const rotated = rotateSessionIfNeeded(agentSessionDir, SYSTEM2_DIR);
@@ -545,21 +559,19 @@ export class AgentHost {
       console.log('[AgentHost] web_search tool enabled');
     }
 
-    // show_artifact is Guide-only — the Guide is the only agent that interacts with the user via the UI
-    if (this.agentRole === 'guide') {
-      tools.push(createShowArtifactTool(this.db));
-    }
+    // All agents can show artifacts — any agent can now interact with the user directly
+    tools.push(createShowArtifactTool(this.db));
 
-    // spawn_agent, terminate_agent, and trigger_project_story require a spawner callback
-    // (provided to Guide and Conductors, not Narrator)
-    if (this.spawner) {
+    // Guide and Conductor only: spawn, manage, and resurrect agents
+    const canOrchestrate = this.agentRole !== null && ORCHESTRATOR_ROLES.has(this.agentRole);
+
+    if (canOrchestrate && this.spawner) {
       tools.push(createSpawnAgentTool(this.db, this.agentId, this.spawner));
       tools.push(createTerminateAgentTool(this.db, this.agentId, this.registry));
       tools.push(createTriggerProjectStoryTool(this.db, this.agentId, this.registry));
     }
 
-    // resurrect_agent is Guide-only (resurrector callback only provided to Guide)
-    if (this.resurrector) {
+    if (canOrchestrate && this.resurrector) {
       tools.push(createResurrectAgentTool(this.db, this.agentId, this.resurrector));
     }
 
@@ -618,9 +630,19 @@ export class AgentHost {
       throw new Error('AgentHost not initialized. Call initialize() first.');
     }
 
+    // Capture delivered message in chat cache for UI history
+    if (this._chatCache) {
+      this._chatCache.push({
+        id: `msg-${Date.now()}`,
+        role: 'user',
+        content,
+        timestamp: details.timestamp,
+      });
+    }
+
     // Rotate session file if needed (catches growth between server restarts)
-    if (this.sessionDir) {
-      rotateSessionIfNeeded(this.sessionDir, SYSTEM2_DIR);
+    if (this._sessionDir) {
+      rotateSessionIfNeeded(this._sessionDir, SYSTEM2_DIR);
     }
 
     // Reload resource loader to pick up knowledge file changes, then deliver.
@@ -680,12 +702,30 @@ export class AgentHost {
     return this.session?.getContextUsage();
   }
 
+  /** Get the agent's role (available after initialize()). */
+  get role(): string | null {
+    return this.agentRole;
+  }
+
   getProvider(): string {
     return this.currentProvider;
   }
 
   isBusy(): boolean {
     return this.busy;
+  }
+
+  /** Session directory path (available after initialize()). */
+  get sessionDir(): string | null {
+    return this._sessionDir;
+  }
+
+  /** Per-agent chat cache for UI message history. */
+  get chatCache(): MessageHistory {
+    if (!this._chatCache) {
+      throw new Error('AgentHost not initialized. Call initialize() first.');
+    }
+    return this._chatCache;
   }
 
   /**
@@ -724,8 +764,8 @@ export class AgentHost {
    * Returns 0 if the file doesn't exist (first run or deleted).
    */
   private readCompactionCount(): number {
-    if (!this.sessionDir) return 0;
-    const countFile = join(this.sessionDir, '.compaction-count');
+    if (!this._sessionDir) return 0;
+    const countFile = join(this._sessionDir, '.compaction-count');
     try {
       return parseInt(readFileSync(countFile, 'utf-8').trim(), 10) || 0;
     } catch {
@@ -737,8 +777,8 @@ export class AgentHost {
    * Persist the compaction count to the session directory.
    */
   private writeCompactionCount(count: number): void {
-    if (!this.sessionDir) return;
-    const countFile = join(this.sessionDir, '.compaction-count');
+    if (!this._sessionDir) return;
+    const countFile = join(this._sessionDir, '.compaction-count');
     writeFileSync(countFile, String(count), 'utf-8');
   }
 
@@ -748,7 +788,7 @@ export class AgentHost {
    * to remove information that already existed in the baseline.
    */
   private async triggerPruningCompaction(): Promise<void> {
-    if (!this.session || !this.sessionDir) return;
+    if (!this.session || !this._sessionDir) return;
 
     const baseline = this.findBaselineSummary();
     if (!baseline) {
@@ -779,7 +819,7 @@ export class AgentHost {
    * May need to scan older JSONL files if session rotation moved entries.
    */
   private findBaselineSummary(): string | null {
-    if (!this.session || !this.sessionDir) return null;
+    if (!this.session || !this._sessionDir) return null;
 
     // Collect compaction summaries from current session entries (chronological order)
     const entries = this.session.sessionManager.getBranch();
@@ -812,7 +852,7 @@ export class AgentHost {
    * Returns up to `needed` summaries in chronological order.
    */
   private scanOlderSessionFiles(needed: number): string[] {
-    const sessionDir = this.sessionDir;
+    const sessionDir = this._sessionDir;
     if (!sessionDir) return [];
 
     let files: string[];
