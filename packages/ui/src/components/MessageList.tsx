@@ -447,26 +447,30 @@ function AssistantMessageBlock({
 }) {
   const { accent } = useAccentColors();
   const hasTurnEvents = message.turnEvents && message.turnEvents.length > 0;
+  const hasContent = message.content.trim().length > 0;
 
   return (
     <Fragment>
       {/* Turn events in chronological order (thinking blocks and tool calls) */}
       {hasTurnEvents &&
-        message.turnEvents?.map((event: TurnEvent) => (
+        message.turnEvents?.map((event: TurnEvent, idx: number) => (
           <TurnEventItem
             key={event.type === 'thinking' ? event.data.id : event.data.id}
             event={event}
+            isLast={!hasContent && isLast && idx === (message.turnEvents?.length ?? 0) - 1}
           />
         ))}
 
-      {/* Response */}
-      <TimelineItem dotColor={accent} isLast={isLast}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', marginBottom: 1 }}>
-          <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: accent }}>{agentRole}</Text>
-          <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
-        </Box>
-        <MarkdownContent content={message.content} />
-      </TimelineItem>
+      {/* Response (skipped for interrupted turns with no text) */}
+      {hasContent && (
+        <TimelineItem dotColor={accent} isLast={isLast}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', marginBottom: 1 }}>
+            <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: accent }}>{agentRole}</Text>
+            <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
+          </Box>
+          <MarkdownContent content={message.content} />
+        </TimelineItem>
+      )}
     </Fragment>
   );
 }
@@ -476,8 +480,13 @@ export function MessageList() {
     if (s.activeAgentId === null) return EMPTY_AGENT_STATE;
     return s.agentStates.get(s.activeAgentId) ?? EMPTY_AGENT_STATE;
   });
-  const { messages, currentAssistantMessage, currentTurnEvents, isWaitingForResponse } =
-    activeState;
+  const {
+    messages,
+    currentAssistantMessage,
+    currentTurnEvents,
+    isWaitingForResponse,
+    isStreaming,
+  } = activeState;
   const activeAgentRole = useChatStore((s) => s.activeAgentRole) ?? 'Agent';
   const { accent } = useAccentColors();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -485,7 +494,16 @@ export function MessageList() {
   const isNearBottomRef = useRef(true);
 
   const hasCurrentActivity =
-    currentAssistantMessage || currentTurnEvents.length > 0 || isWaitingForResponse;
+    currentAssistantMessage || currentTurnEvents.length > 0 || isWaitingForResponse || isStreaming;
+
+  // Show brain loader when agent is working but no active block is displayed
+  const hasActiveInProgress = currentTurnEvents.some(
+    (e) =>
+      (e.type === 'tool_call' && e.data.status === 'running') ||
+      (e.type === 'thinking' && e.data.isStreaming)
+  );
+  const showBrainLoader =
+    (isWaitingForResponse || (isStreaming && !hasActiveInProgress)) && !currentAssistantMessage;
 
   // Track whether user is near the bottom of the scroll container
   useEffect(() => {
@@ -607,21 +625,23 @@ export function MessageList() {
         );
       })}
 
-      {/* Waiting for response indicator */}
-      {isWaitingForResponse && currentTurnEvents.length === 0 && !currentAssistantMessage && (
-        <TimelineItem dotColor={accent} pulse isLast>
-          <BrainLoader />
-        </TimelineItem>
-      )}
-
       {/* Current streaming: turn events in chronological order */}
       {currentTurnEvents.map((event, idx) => (
         <TurnEventItem
           key={event.type === 'thinking' ? event.data.id : event.data.id}
           event={event}
-          isLast={idx === currentTurnEvents.length - 1 && !currentAssistantMessage}
+          isLast={
+            idx === currentTurnEvents.length - 1 && !currentAssistantMessage && !showBrainLoader
+          }
         />
       ))}
+
+      {/* Working indicator: waiting for first event, or between completed blocks */}
+      {showBrainLoader && (
+        <TimelineItem dotColor={accent} pulse isLast>
+          <BrainLoader />
+        </TimelineItem>
+      )}
 
       {/* Current streaming: response */}
       {currentAssistantMessage && (

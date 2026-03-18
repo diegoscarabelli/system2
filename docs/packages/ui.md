@@ -69,7 +69,7 @@ Displays messages as a vertical timeline with color-coded indicators:
 | Tool calls | `#fd2ef5` (magenta) | Collapsible tool execution details |
 | Thinking blocks | `#8b949e` (gray) | Collapsible extended thinking |
 
-Each assistant message shows its turn events (thinking -> tool calls -> response text) in chronological order. An animated "brain loader" appears while waiting for a response.
+Each assistant message shows its turn events (thinking -> tool calls -> response text) in chronological order. An animated "brain loader" appears while waiting for a response and between completed blocks (e.g., after a tool finishes, before the next starts) to indicate the agent is still working.
 
 ### MessageInput
 

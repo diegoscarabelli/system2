@@ -119,7 +119,7 @@ User clicks agent in AgentPane
 
 ### Steering
 
-Messages sent while an agent is streaming are delivered immediately as `steering_message`, which uses `streamingBehavior: 'steer'` to interrupt the current turn. The message appears in the chat instantly via `addUserMessage()` and is sent to the server in the same call.
+Messages sent while an agent is streaming are delivered immediately as `steering_message`, which uses `streamingBehavior: 'steer'` to interrupt the current turn. The UI commits any in-progress turn events (thinking blocks, tool calls, partial text) as a snapshot message so they remain visible, then adds the user's message below them.
 
 ## Conversation Summarization
 
