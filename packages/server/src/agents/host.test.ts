@@ -480,7 +480,7 @@ describe('AgentHost', () => {
       ).toThrow('AgentHost not initialized');
     });
 
-    it('pushes to chatCache before fire-and-forget', () => {
+    it('stores full content for inter-agent messages', () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -501,20 +501,47 @@ describe('AgentHost', () => {
       internal._sessionDir = null;
 
       const ts = 1_700_000_000_000;
-      host.deliverMessage('[From Guide (id=1)]: do the thing', {
-        sender: 1,
-        receiver: 2,
-        timestamp: ts,
-      });
+      host.deliverMessage(
+        '[Message from guide agent (id=1)]\n\nPlease review the latest changes.',
+        { sender: 1, receiver: 2, timestamp: ts }
+      );
 
       expect(internal._chatCache.push).toHaveBeenCalledOnce();
       expect(internal._chatCache.push).toHaveBeenCalledWith(
         expect.objectContaining({
           role: 'system',
-          content: 'From Guide (id=1)',
+          content: 'Message from guide agent (id=1)\n\nPlease review the latest changes.',
           timestamp: ts,
         })
       );
+    });
+
+    it('stores only the tag when inter-agent message has no body', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      host.deliverMessage('[Message from conductor agent (id=5)]', {
+        sender: 5,
+        receiver: 1,
+        timestamp: 1_700_000_000_000,
+      });
+
+      const pushed = internal._chatCache.push.mock.calls[0][0];
+      expect(pushed.content).toBe('Message from conductor agent (id=5)');
     });
 
     it('shows only the tag for scheduled task messages', () => {
@@ -546,6 +573,63 @@ describe('AgentHost', () => {
 
       const pushed = internal._chatCache.push.mock.calls[0][0];
       expect(pushed.content).toBe('Scheduled task: daily-summary');
+    });
+
+    it('shows only the tag for triggered task messages', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      host.deliverMessage('[Task: project-story]\n\n## Context\nLong structured data...', {
+        sender: 0,
+        receiver: 2,
+        timestamp: 1_700_000_000_000,
+      });
+
+      const pushed = internal._chatCache.push.mock.calls[0][0];
+      expect(pushed.content).toBe('Task: project-story');
+    });
+
+    it('truncates untagged content to 100 characters', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      const longContent = 'a'.repeat(200);
+      host.deliverMessage(longContent, {
+        sender: 1,
+        receiver: 2,
+        timestamp: 1_700_000_000_000,
+      });
+
+      const pushed = internal._chatCache.push.mock.calls[0][0];
+      expect(pushed.content).toBe('a'.repeat(100));
     });
 
     it('does not push to chatCache when _chatCache is null', () => {

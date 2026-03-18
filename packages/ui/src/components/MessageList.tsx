@@ -568,26 +568,35 @@ export function MessageList() {
         const isLastMessage = idx === messages.length - 1 && !hasCurrentActivity;
 
         if (message.role === 'system') {
+          const splitIdx = message.content.indexOf('\n\n');
+          const isFullContent = splitIdx > 0;
+          const tag = isFullContent ? message.content.slice(0, splitIdx) : null;
+          const body = isFullContent ? message.content.slice(splitIdx + 2) : null;
+
           return (
             <TimelineItem key={message.id} dotColor={colors.gray} isLast={isLastMessage}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', marginBottom: 1 }}>
                 <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: colors.gray }}>
-                  System2
+                  {tag ?? 'System2'}
                 </Text>
                 <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
               </Box>
-              <Text
-                as="p"
-                sx={{
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  fontSize: 1,
-                  margin: 0,
-                  color: 'fg.muted',
-                }}
-              >
-                {message.content}
-              </Text>
+              {body ? (
+                <MarkdownContent content={body} />
+              ) : (
+                <Text
+                  as="p"
+                  sx={{
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontSize: 1,
+                    margin: 0,
+                    color: 'fg.muted',
+                  }}
+                >
+                  {message.content}
+                </Text>
+              )}
             </TimelineItem>
           );
         }

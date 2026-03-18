@@ -696,13 +696,29 @@ export class AgentHost {
     }
 
     // Capture delivered message in chat cache for UI history.
-    // Show only the tag (e.g., "Scheduled task: daily-summary", "From Guide (id=1)").
+    // Inter-agent messages and summaries store full content (tag + body).
+    // Scheduled/triggered tasks store only the tag. Untagged content is truncated.
     if (this._chatCache) {
       const tagMatch = content.match(/^\[([^\]]+)\]/);
+      let cacheContent: string;
+
+      if (!tagMatch) {
+        cacheContent = content.slice(0, 100);
+      } else {
+        const tag = tagMatch[1];
+        const body = content.slice(tagMatch[0].length).replace(/^\n+/, '');
+
+        if (tag.startsWith('Scheduled task:') || tag.startsWith('Task:')) {
+          cacheContent = tag;
+        } else {
+          cacheContent = body ? `${tag}\n\n${body}` : tag;
+        }
+      }
+
       this._chatCache.push({
         id: `msg-${Date.now()}`,
         role: 'system',
-        content: tagMatch ? tagMatch[1] : content.slice(0, 100),
+        content: cacheContent,
         timestamp: details.timestamp,
       });
     }
