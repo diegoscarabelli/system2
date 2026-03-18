@@ -13,7 +13,9 @@ import { MessageList } from './MessageList';
 
 export function Chat() {
   const { sendMessage, abort } = useWebSocket();
-  const { addUserMessage, queueMessage, activeAgentLabel } = useChatStore();
+  const addUserMessage = useChatStore((s) => s.addUserMessage);
+  const queueMessage = useChatStore((s) => s.queueMessage);
+  const activeAgentLabel = useChatStore((s) => s.activeAgentLabel);
 
   const handleSend = (content: string) => {
     addUserMessage(content);

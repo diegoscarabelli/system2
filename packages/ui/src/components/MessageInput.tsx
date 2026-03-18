@@ -27,6 +27,7 @@ interface MessageInputProps {
 export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
   const [input, setInput] = useState('');
   const isConnected = useChatStore((s) => s.isConnected);
+  const activeAgentId = useChatStore((s) => s.activeAgentId);
   const activeAgentRole = useChatStore((s) => s.activeAgentRole);
   const activeState = useChatStore((s) => {
     if (s.activeAgentId === null) return EMPTY_AGENT_STATE;
@@ -103,7 +104,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
                 ? 'Type to queue a message...'
                 : `Message ${activeAgentRole ?? 'Agent'}...`
           }
-          disabled={!isConnected}
+          disabled={!isConnected || activeAgentId === null}
           rows={1}
           style={{
             width: '100%',

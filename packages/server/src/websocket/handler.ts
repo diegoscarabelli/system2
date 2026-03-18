@@ -282,7 +282,7 @@ export class WebSocketHandler {
           agentId,
         });
 
-        // If show_artifact completed successfully (Guide only), emit artifact message and watch
+        // If show_artifact completed successfully, emit artifact message and watch
         if (event.toolName === 'show_artifact' && !event.isError) {
           const details = event.result?.details as
             | { url?: string; absolutePath?: string; title?: string }

@@ -137,7 +137,18 @@ export function useWebSocket() {
           // First chat_history is for the Guide (on initial connect)
           if (state.guideAgentId === null) {
             state.setGuideAgentId(aid);
-            state.setActiveAgent(aid, 'guide');
+            if (state.activeAgentId === null) {
+              // No agent selected yet — default to Guide
+              state.setActiveAgent(aid, 'guide');
+            } else if (state.activeAgentId !== aid) {
+              // User pre-selected a different agent before history arrived —
+              // re-subscribe the server to the correct agent
+              const switchMsg: ClientMessage = {
+                type: 'switch_agent',
+                agentId: state.activeAgentId,
+              };
+              ws.send(JSON.stringify(switchMsg));
+            }
           }
           state.loadHistory(message.messages, aid);
           break;
