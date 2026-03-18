@@ -174,6 +174,7 @@ export function AgentPane() {
                     >
                       <Box
                         as="button"
+                        type="button"
                         onClick={() => toggleGroupCollapse(group)}
                         aria-expanded={!isCollapsed}
                         sx={{
@@ -212,6 +213,7 @@ export function AgentPane() {
                           key={agent.id}
                           as="tr"
                           tabIndex={0}
+                          aria-current={isActive ? true : undefined}
                           onClick={() =>
                             useChatStore.getState().setActiveAgent(agent.id, agent.role)
                           }

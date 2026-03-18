@@ -40,7 +40,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || !isConnected || activeAgentId === null) return;
 
     if (isStreaming) {
       onQueue(input.trim());
