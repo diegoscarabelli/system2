@@ -189,7 +189,7 @@ describe('AgentHost', () => {
       expect(hostInternal.pendingPrompt).toBeNull();
     });
 
-    it('retry paths restore pendingPrompt before calling session.prompt()', async () => {
+    it('retry paths restore pendingPrompt and pass streamingBehavior before calling session.prompt()', async () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -239,6 +239,11 @@ describe('AgentHost', () => {
 
       // pendingPrompt was restored before session.prompt() was called
       expect(pendingAtRetryTime).toBe('original message');
+      // streamingBehavior: 'followUp' prevents a throw if a deliverMessage turn
+      // happens to start during the retry delay
+      expect(hostInternal.session.prompt).toHaveBeenCalledWith('original message', {
+        streamingBehavior: 'followUp',
+      });
     });
 
     it('pendingPrompt persists if session.prompt() throws', async () => {

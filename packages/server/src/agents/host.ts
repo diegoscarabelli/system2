@@ -385,7 +385,7 @@ export class AgentHost {
         console.log('[AgentHost] Retrying prompt...');
         this.pendingPrompt = promptToRetry; // restore so the retry turn is also retryable
         await this.resourceLoader?.reload();
-        await this.session.prompt(promptToRetry);
+        await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
       }
       return;
     }
@@ -470,7 +470,7 @@ export class AgentHost {
       if (promptToRetry && this.session) {
         console.log('[AgentHost] Retrying prompt with new provider...');
         this.pendingPrompt = promptToRetry; // restore so the retry turn is also retryable
-        await this.session.prompt(promptToRetry);
+        await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
       }
     } catch (error) {
       console.error('[AgentHost] Failed to reinitialize:', error);
