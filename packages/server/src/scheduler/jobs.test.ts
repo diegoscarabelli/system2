@@ -11,6 +11,7 @@ import {
   readFrontmatterField,
   readTailChars,
   resolveDailySummaryTimestamp,
+  stripSessionEntry,
 } from './jobs.js';
 
 function makeTmpDir(): string {
@@ -259,5 +260,299 @@ describe('buildAndDeliverMemoryUpdate', () => {
     buildAndDeliverMemoryUpdate(host, 2, dir);
     expect(host.calls).toHaveLength(1);
     expect(host.calls[0].content).toContain('2026-03-10.md');
+  });
+});
+
+describe('stripSessionEntry', () => {
+  it('passes through unknown entry types unchanged', () => {
+    const entry = { type: 'session', version: 3, id: 'abc' };
+    expect(stripSessionEntry(entry)).toEqual(entry);
+  });
+
+  it('passes through message with user role unchanged', () => {
+    const entry = {
+      type: 'message',
+      timestamp: '2026-01-01T00:00:00Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+    };
+    expect(stripSessionEntry(entry)).toEqual(entry);
+  });
+
+  it('passes through message with missing message field unchanged', () => {
+    const entry = { type: 'message', timestamp: '2026-01-01T00:00:00Z' };
+    expect(stripSessionEntry(entry)).toEqual(entry);
+  });
+
+  describe('custom_message', () => {
+    it('drops details', () => {
+      const entry = {
+        type: 'custom_message',
+        content: 'hello',
+        details: { sender: 1, receiver: 2, timestamp: 0 },
+      };
+      const result = stripSessionEntry(entry);
+      expect(result).not.toHaveProperty('details');
+      expect(result.content).toBe('hello');
+    });
+
+    it('does not crash when details is absent', () => {
+      const entry = { type: 'custom_message', content: 'hello' };
+      expect(stripSessionEntry(entry)).toEqual({ type: 'custom_message', content: 'hello' });
+    });
+  });
+
+  describe('assistant message', () => {
+    it('drops usage, api, provider, model', () => {
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          api: 'google-generative-ai',
+          provider: 'google',
+          model: 'gemini-2.0-flash',
+          usage: { input: 1000, output: 50, totalTokens: 1050 },
+          content: [],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      expect(result.message).not.toHaveProperty('api');
+      expect(result.message).not.toHaveProperty('provider');
+      expect(result.message).not.toHaveProperty('model');
+      expect(result.message).not.toHaveProperty('usage');
+    });
+
+    it('drops thoughtSignature but preserves id in toolCall blocks', () => {
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'call-123',
+              name: 'bash',
+              thoughtSignature: 'a'.repeat(500),
+              arguments: { command: 'echo hi' },
+            },
+          ],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(block).not.toHaveProperty('thoughtSignature');
+      expect(block.id).toBe('call-123');
+      expect(block.name).toBe('bash');
+    });
+
+    it('truncates long string argument values to 100 chars', () => {
+      const longCmd = 'x'.repeat(300);
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', name: 'bash', arguments: { command: longCmd } }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      const args = block.arguments as Record<string, unknown>;
+      expect(typeof args.command).toBe('string');
+      expect((args.command as string).length).toBe(100);
+    });
+
+    it('does not truncate argument values already under 100 chars', () => {
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', name: 'bash', arguments: { command: 'echo hi' } }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      const args = block.arguments as Record<string, unknown>;
+      expect(args.command).toBe('echo hi');
+    });
+
+    it('passes non-string argument values through unchanged', () => {
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', name: 'read_system2_db', arguments: { limit: 10, dry: true } },
+          ],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      const args = block.arguments as Record<string, unknown>;
+      expect(args.limit).toBe(10);
+      expect(args.dry).toBe(true);
+    });
+
+    it('truncates string-form arguments to 100 chars', () => {
+      const longJson = 'x'.repeat(300);
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', name: 'bash', arguments: longJson }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(typeof block.arguments).toBe('string');
+      expect((block.arguments as string).length).toBe(100);
+    });
+
+    it('preserves array arguments as-is', () => {
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', name: 'bash', arguments: ['arg1', 'arg2'] }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(Array.isArray(block.arguments)).toBe(true);
+      expect(block.arguments).toEqual(['arg1', 'arg2']);
+    });
+
+    it('does not add arguments key when absent on toolCall', () => {
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', name: 'bash' }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(block).not.toHaveProperty('arguments');
+    });
+
+    it('preserves thinking blocks unchanged', () => {
+      const thinking = 'deep thought '.repeat(20);
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking, thinkingSignature: 'sig' }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(block.thinking).toBe(thinking);
+      expect(block.thinkingSignature).toBe('sig');
+    });
+
+    it('preserves text blocks unchanged', () => {
+      const entry = {
+        type: 'message',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(block.text).toBe('Done.');
+    });
+
+    it('does not crash when content is not an array', () => {
+      const entry = {
+        type: 'message',
+        message: { role: 'assistant', content: null },
+      };
+      expect(() => stripSessionEntry(entry)).not.toThrow();
+    });
+  });
+
+  describe('toolResult message', () => {
+    it('drops details', () => {
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'bash',
+          details: { exitCode: 0, stdout: 'hello' },
+          content: [{ type: 'text', text: 'hello' }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      expect(result.message).not.toHaveProperty('details');
+      expect(result.message.toolName).toBe('bash');
+    });
+
+    it('truncates long text content to 100 chars', () => {
+      const longText = 'a'.repeat(300);
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'read',
+          content: [{ type: 'text', text: longText }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(typeof block.text).toBe('string');
+      expect((block.text as string).length).toBe(100);
+    });
+
+    it('does not truncate text content already under 100 chars', () => {
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'read',
+          content: [{ type: 'text', text: 'short result' }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(block.text).toBe('short result');
+    });
+
+    it('passes through non-text content blocks unchanged', () => {
+      const entry = {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'read',
+          content: [{ type: 'image', data: 'base64...' }],
+        },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      const block = (result.message.content as Record<string, unknown>[])[0];
+      expect(block.type).toBe('image');
+      expect(block.data).toBe('base64...');
+    });
+
+    it('does not crash with empty content array', () => {
+      const entry = {
+        type: 'message',
+        message: { role: 'toolResult', toolName: 'bash', content: [] },
+      };
+      expect(() => stripSessionEntry(entry)).not.toThrow();
+    });
+
+    it('truncates string-form content to 100 chars', () => {
+      const entry = {
+        type: 'message',
+        message: { role: 'toolResult', toolName: 'bash', content: 'x'.repeat(300) },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      expect(typeof result.message.content).toBe('string');
+      expect((result.message.content as string).length).toBe(100);
+    });
+
+    it('does not truncate string-form content already under 100 chars', () => {
+      const entry = {
+        type: 'message',
+        message: { role: 'toolResult', toolName: 'bash', content: 'short' },
+      };
+      const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
+      expect(result.message.content).toBe('short');
+    });
   });
 });
