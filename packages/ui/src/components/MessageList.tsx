@@ -435,6 +435,69 @@ function TurnEventItem({ event, isLast }: { event: TurnEvent; isLast?: boolean }
   );
 }
 
+function SystemMessageBlock({ message, isLast }: { message: Message; isLast: boolean }) {
+  const splitIdx = message.content.indexOf('\n\n');
+  const hasTaggedBody = splitIdx > 0;
+  const tag = hasTaggedBody ? message.content.slice(0, splitIdx) : null;
+  const body = hasTaggedBody ? message.content.slice(splitIdx + 2) : null;
+  const [collapsed, setCollapsed] = useState(true);
+
+  return (
+    <TimelineItem dotColor={colors.gray} isLast={isLast}>
+      <Box
+        onClick={body ? () => setCollapsed(!collapsed) : undefined}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: body && !collapsed ? 1 : 0,
+          ...(body ? { cursor: 'pointer', '&:hover': { opacity: 0.8 } } : {}),
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: 'fg.muted' }}>
+            {tag ?? 'System2'}
+          </Text>
+          {body && (
+            <Text
+              sx={{
+                fontSize: 0,
+                color: 'fg.muted',
+                transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.15s ease',
+                lineHeight: 1,
+              }}
+            >
+              ^
+            </Text>
+          )}
+        </Box>
+        <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
+      </Box>
+      {body ? (
+        !collapsed && (
+          <Box sx={{ marginTop: 1 }}>
+            <MarkdownContent content={body} muted />
+          </Box>
+        )
+      ) : (
+        <Text
+          as="p"
+          sx={{
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontSize: 1,
+            margin: 0,
+            color: 'fg.muted',
+          }}
+        >
+          {message.content}
+        </Text>
+      )}
+    </TimelineItem>
+  );
+}
+
 // Render an assistant message with its turn events in chronological order
 function AssistantMessageBlock({
   message,
@@ -568,37 +631,7 @@ export function MessageList() {
         const isLastMessage = idx === messages.length - 1 && !hasCurrentActivity;
 
         if (message.role === 'system') {
-          const splitIdx = message.content.indexOf('\n\n');
-          const isFullContent = splitIdx > 0;
-          const tag = isFullContent ? message.content.slice(0, splitIdx) : null;
-          const body = isFullContent ? message.content.slice(splitIdx + 2) : null;
-
-          return (
-            <TimelineItem key={message.id} dotColor={colors.gray} isLast={isLastMessage}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', marginBottom: 1 }}>
-                <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: colors.gray }}>
-                  {tag ?? 'System2'}
-                </Text>
-                <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
-              </Box>
-              {body ? (
-                <MarkdownContent content={body} />
-              ) : (
-                <Text
-                  as="p"
-                  sx={{
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    fontSize: 1,
-                    margin: 0,
-                    color: 'fg.muted',
-                  }}
-                >
-                  {message.content}
-                </Text>
-              )}
-            </TimelineItem>
-          );
+          return <SystemMessageBlock key={message.id} message={message} isLast={isLastMessage} />;
         }
 
         if (message.role === 'user') {
