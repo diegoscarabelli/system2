@@ -162,6 +162,9 @@ export class AgentHost {
    * Initialize the agent session (must be called before use)
    */
   async initialize(): Promise<void> {
+    // Reset one-shot overflow guard so re-initialized sessions can recover again
+    this.contextOverflowHandled = false;
+
     // Look up the agent record from the database
     const agentRecord = this.db.getAgent(this.agentId);
     if (!agentRecord) {
@@ -981,6 +984,11 @@ export class AgentHost {
 
     console.log('[AgentHost] Starting context overflow recovery...');
 
+    // Hoisted so the catch block can restore the tail if recovery fails mid-way
+    let activeFile: string | undefined;
+    let tailLines: string[] = [];
+    let fileTruncated = false;
+
     try {
       // Step 1: Find the active JSONL file (most recently modified)
       const jsonlFiles = readdirSync(sessionDir)
@@ -996,7 +1004,7 @@ export class AgentHost {
         return;
       }
 
-      const activeFile = jsonlFiles[0].path;
+      activeFile = jsonlFiles[0].path;
       const lines = readFileSync(activeFile, 'utf-8')
         .split('\n')
         .filter((l) => l.trim());
@@ -1027,13 +1035,14 @@ export class AgentHost {
 
       // Step 3: Split into head and tail
       const headLines = lines.slice(0, splitIndex + 1);
-      const tailLines = lines.slice(splitIndex + 1);
+      tailLines = lines.slice(splitIndex + 1);
       console.log(
         `[AgentHost] Context overflow: split at line ${splitIndex + 1}, tail has ${tailLines.length} entries`
       );
 
       // Step 4: Truncate file to head
       writeFileSync(activeFile, `${headLines.join('\n')}\n`, 'utf-8');
+      fileTruncated = true;
 
       // Step 5: Reinitialize from truncated file
       await this.reinitializeWithProvider(this.currentProvider, null);
@@ -1059,6 +1068,16 @@ export class AgentHost {
       console.log('[AgentHost] Context overflow recovery complete');
     } catch (error) {
       console.error('[AgentHost] Context overflow recovery failed:', error);
+      // Best-effort: if the file was already truncated, restore the tail so no
+      // history is permanently lost should recovery fail partway through.
+      if (fileTruncated && tailLines.length > 0 && activeFile) {
+        try {
+          appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
+          console.log('[AgentHost] Context overflow: tail restored after recovery failure');
+        } catch {
+          // Ignore — best-effort only
+        }
+      }
     }
   }
 }

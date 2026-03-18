@@ -1179,5 +1179,52 @@ describe('AgentHost', () => {
       // Only one reinit (before compact), no tail to append
       expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
     });
+
+    it('restores tail to file when compact throws mid-recovery', async () => {
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', usage: { input: 500_000, output: 100 } },
+        { type: 'tool_call', name: 'bash' }, // becomes the tail
+      ];
+      writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      // Override: after first reinit, make compact() reject
+      internal.reinitializeWithProvider = vi.fn().mockImplementationOnce(async () => {
+        internal.session = {
+          compact: vi.fn().mockRejectedValue(new Error('compact failed')),
+        };
+      });
+
+      await internal.handleContextOverflow();
+
+      // The tail entry must be restored — tool_call should be back in the file
+      const restored = readFileSync(join(testDir, 'session.jsonl'), 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l) as { type: string });
+      expect(restored.some((e) => e.type === 'tool_call')).toBe(true);
+    });
+
+    it('does not retry overflow after reset — guard is re-armed after re-initialization', async () => {
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', usage: { input: 500_000, output: 100 } },
+      ];
+      writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      // First recovery
+      await internal.handleContextOverflow();
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+
+      // Simulate initialize() resetting the guard (the fix)
+      internal.contextOverflowHandled = false;
+
+      // Second recovery is now possible (guard re-armed)
+      writeJsonlFile('session.jsonl', entries, new Date());
+      await internal.handleContextOverflow();
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
+    });
   });
 });

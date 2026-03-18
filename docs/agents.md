@@ -175,14 +175,14 @@ Exponential backoff with jitter: `min(baseDelay * 2^attempt + jitter, maxDelay)`
 | `transient` (500/503/timeout) | Up to 2x | After retries exhausted |
 | `client` (400) | Never | Never (surface error) |
 
-**Context overflow recovery:** a 400 error whose message contains both a size keyword (`exceed`, `maximum`, `limit`, `too long`, `too large`, `too many`) and a context/token keyword is treated as a context overflow rather than a generic client error. This can happen when a single large delivery (e.g., a scheduled Narrator job) causes the context to jump past the auto-compaction threshold in one step. Recovery is attempted once per `AgentHost` lifetime:
+**Context overflow recovery:** an error whose message contains both a size keyword (`exceed`, `maximum`, `limit`, `too long`, `too large`, `too many`) and a context/token keyword (`token`, `context`, `input`, `prompt`) is treated as a context overflow rather than a generic client error. This detection is provider-agnostic (covers Anthropic, OpenAI, Gemini, and others). This can happen when a single large delivery (e.g., a scheduled Narrator job) causes the context to jump past the auto-compaction threshold in one step. Recovery is attempted at most once per `AgentHost` initialization (the guard resets on re-initialization, e.g., after a provider failover):
 
 1. Find the last JSONL entry where `usage.input < contextWindow * 0.90`
 2. Truncate the active session file at that point, saving the remainder as a "tail"
 3. Reinitialize the session from the truncated file and run `compact()` to reduce context to ~5%
 4. Append the tail back and reinitialize again
 
-The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction.
+The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. If no split point below 90% is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
 
 Auto-compaction is also configured to fire earlier (at 90% of the context window instead of the SDK default of ~98%) to reduce the chance of overflow in the first place.
 
