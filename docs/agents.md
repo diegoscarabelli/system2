@@ -175,9 +175,9 @@ Exponential backoff with jitter: `min(baseDelay * 2^attempt + jitter, maxDelay)`
 | `transient` (500/503/timeout) | Up to 2x | After retries exhausted |
 | `client` (400) | Never | Never (surface error) |
 
-**Context overflow recovery:** an error whose message contains both a size keyword (`exceed`, `maximum`, `limit`, `too long`, `too large`, `too many`) and a context/token keyword (`token`, `context`, `input`, `prompt`) is treated as a context overflow rather than a generic client error. This detection is provider-agnostic (covers Anthropic, OpenAI, Gemini, and others). This can happen when a single large delivery (e.g., a scheduled Narrator job) causes the context to jump past the auto-compaction threshold in one step. Recovery is attempted at most once per `AgentHost` initialization (the guard resets on re-initialization, e.g., after a provider failover):
+**Context overflow recovery:** a `client` (400) error whose message contains both a size keyword (`exceed`, `maximum`, `limit`, `too long`, `too large`, `too many`) and a context/token keyword (`token`, `context`, `input`, `prompt`) is treated as a context overflow. This detection is provider-agnostic (covers Anthropic, OpenAI, Gemini, and others) and is gated on the `client` error category to avoid false positives on rate-limit errors. This can happen when a single large delivery (e.g., a scheduled Narrator job) causes the context to jump past the auto-compaction threshold in one step. Recovery is attempted at most once per `AgentHost` initialization (the guard resets on re-initialization, e.g., after a provider failover; it also resets if recovery turns out to be a no-op):
 
-1. Find the last JSONL entry where `usage.input < contextWindow * 0.90`
+1. Find the last JSONL message entry where `entry.message.usage.input < contextWindow * 0.90` (message entries store token usage under `entry.message.usage`)
 2. Truncate the active session file at that point, saving the remainder as a "tail"
 3. Reinitialize the session from the truncated file and run `compact()` to reduce context to ~5%
 4. Append the tail back and reinitialize again

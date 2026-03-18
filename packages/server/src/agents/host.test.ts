@@ -984,7 +984,7 @@ describe('AgentHost', () => {
       internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
       internal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
       // Replace handleContextOverflow so we can assert it was called
-      internal.handleContextOverflow = vi.fn().mockResolvedValue(undefined);
+      internal.handleContextOverflow = vi.fn().mockResolvedValue(true);
       return { host, internal };
     }
 
@@ -1031,6 +1031,17 @@ describe('AgentHost', () => {
       await internal.handlePotentialError(event);
       await internal.handlePotentialError(event);
       expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
+    });
+
+    it('does NOT trigger handleContextOverflow for rate-limit errors that match overflow heuristic', async () => {
+      const { internal } = makeHostForOverflow();
+      // Exhaust retries so we reach the overflow check
+      internal.retryAttempts.set('google:rate_limit', 99);
+      // This message matches size+token keywords but is a rate-limit error, not a context overflow
+      await internal.handlePotentialError(
+        makeOverflowEvent('429: token per minute limit exceeded for model')
+      );
+      expect(internal.handleContextOverflow).not.toHaveBeenCalled();
     });
   });
 
@@ -1100,9 +1111,12 @@ describe('AgentHost', () => {
       // 3 messages: first two below 90% threshold, third above
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', usage: { input: 800_000, output: 100 } }, // below 90% (900K)
-        { type: 'message', usage: { input: 850_000, output: 100 } }, // below 90%
-        { type: 'message', usage: { input: 1_100_000, output: 100 } }, // above 100%
+        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } }, // below 90% (900K)
+        { type: 'message', message: { role: 'assistant', usage: { input: 850_000, output: 100 } } }, // below 90%
+        {
+          type: 'message',
+          message: { role: 'assistant', usage: { input: 1_100_000, output: 100 } },
+        }, // above 100%
       ];
       const filePath = writeJsonlFile('session.jsonl', entries, new Date());
       const { internal } = makeHostForRecovery();
@@ -1123,16 +1137,22 @@ describe('AgentHost', () => {
         expect.objectContaining({ type: 'auto_compaction_end' })
       );
       // The overflow entry (index 3) should be in the tail and appended back
-      expect(remaining.at(-1)).toMatchObject({ type: 'message', usage: { input: 1_100_000 } });
+      expect(remaining.at(-1)).toMatchObject({
+        type: 'message',
+        message: { usage: { input: 1_100_000 } },
+      });
     });
 
     it('splits at the last message below 90% when multiple candidates exist', async () => {
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', usage: { input: 500_000, output: 100 } },
-        { type: 'message', usage: { input: 800_000, output: 100 } }, // last below 90% → split here
-        { type: 'message', usage: { input: 950_000, output: 100 } }, // above 90%
-        { type: 'message', usage: { input: 1_050_000, output: 100 } }, // above 100%
+        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } }, // last below 90% → split here
+        { type: 'message', message: { role: 'assistant', usage: { input: 950_000, output: 100 } } }, // above 90%
+        {
+          type: 'message',
+          message: { role: 'assistant', usage: { input: 1_050_000, output: 100 } },
+        }, // above 100%
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
       const { internal } = makeHostForRecovery();
@@ -1146,7 +1166,7 @@ describe('AgentHost', () => {
       // All messages are above 90%
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', usage: { input: 950_000, output: 100 } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 950_000, output: 100 } } },
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
       const { internal } = makeHostForRecovery();
@@ -1169,7 +1189,7 @@ describe('AgentHost', () => {
       // Only entries below threshold — no tail
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', usage: { input: 800_000, output: 100 } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } },
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
       const { internal } = makeHostForRecovery();
@@ -1183,7 +1203,7 @@ describe('AgentHost', () => {
     it('restores tail to file when compact throws mid-recovery', async () => {
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', usage: { input: 500_000, output: 100 } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
         { type: 'tool_call', name: 'bash' }, // becomes the tail
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
@@ -1209,7 +1229,7 @@ describe('AgentHost', () => {
     it('does not retry overflow after reset — guard is re-armed after re-initialization', async () => {
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', usage: { input: 500_000, output: 100 } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
       const { internal } = makeHostForRecovery();

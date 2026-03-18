@@ -467,11 +467,21 @@ export class AgentHost {
       console.log('[AgentHost] No fallback providers available, error will be surfaced to user');
     }
 
-    // Context overflow: truncate JSONL, compact, restore tail, reinitialize (one-shot)
-    if (isContextOverflowError(errorMessage) && !this.contextOverflowHandled) {
+    // Context overflow: truncate JSONL, compact, restore tail, reinitialize (one-shot).
+    // Gated on category === 'client' to avoid false positives on rate-limit errors whose
+    // messages may also contain size/token keywords (e.g. "token per minute limit exceeded").
+    if (
+      category === 'client' &&
+      isContextOverflowError(errorMessage) &&
+      !this.contextOverflowHandled
+    ) {
       this.contextOverflowHandled = true;
-      await this.handleContextOverflow();
-      return;
+      const recovered = await this.handleContextOverflow();
+      if (recovered) {
+        return;
+      }
+      // Recovery was a no-op — reset guard so a future overflow can try again
+      this.contextOverflowHandled = false;
     }
 
     // All recovery paths exhausted; ensure busy is cleared
@@ -975,11 +985,11 @@ export class AgentHost {
    * The result is a session with a compact summary of the safe history plus the
    * recent tail, consuming a fraction of the context window.
    */
-  private async handleContextOverflow(): Promise<void> {
+  private async handleContextOverflow(): Promise<boolean> {
     const sessionDir = this.sessionDir;
     if (!this.session || !sessionDir) {
       console.log('[AgentHost] Context overflow: no session or sessionDir, cannot recover');
-      return;
+      return false;
     }
 
     console.log('[AgentHost] Starting context overflow recovery...');
@@ -1001,7 +1011,7 @@ export class AgentHost {
 
       if (jsonlFiles.length === 0) {
         console.log('[AgentHost] Context overflow: no JSONL files found');
-        return;
+        return false;
       }
 
       activeFile = jsonlFiles[0].path;
@@ -1015,11 +1025,9 @@ export class AgentHost {
       for (let i = lines.length - 1; i >= 0; i--) {
         try {
           const entry = JSON.parse(lines[i]);
-          if (
-            entry.type === 'message' &&
-            typeof entry.usage?.input === 'number' &&
-            entry.usage.input < threshold
-          ) {
+          // JSONL message entries store usage under entry.message.usage (not top-level entry.usage)
+          const usage = entry.type === 'message' ? entry.message?.usage : undefined;
+          if (typeof usage?.input === 'number' && usage.input < threshold) {
             splitIndex = i;
             break;
           }
@@ -1030,7 +1038,7 @@ export class AgentHost {
 
       if (splitIndex === -1) {
         console.log('[AgentHost] Context overflow: no safe split point found');
-        return;
+        return false;
       }
 
       // Step 3: Split into head and tail
@@ -1066,6 +1074,7 @@ export class AgentHost {
       }
 
       console.log('[AgentHost] Context overflow recovery complete');
+      return true;
     } catch (error) {
       console.error('[AgentHost] Context overflow recovery failed:', error);
       // Best-effort: if the file was already truncated, restore the tail so no
@@ -1078,6 +1087,7 @@ export class AgentHost {
           // Ignore — best-effort only
         }
       }
+      return false;
     }
   }
 }
