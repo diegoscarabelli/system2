@@ -127,6 +127,78 @@ export function collectAgentActivity(
 }
 
 /**
+ * Strip verbose fields from a parsed JSONL session entry before injecting into
+ * the Narrator's context. Removes fields that are useless for narrative synthesis
+ * (crypto signatures, token usage, provider metadata, raw tool outputs) and
+ * truncates large argument/result values to 100 chars.
+ *
+ * Operates on plain objects — never mutates the input.
+ */
+export function stripSessionEntry(entry: Record<string, unknown>): Record<string, unknown> {
+  const type = entry.type;
+
+  if (type === 'custom_message') {
+    const { details: _d, ...rest } = entry;
+    return rest;
+  }
+
+  if (type !== 'message') return entry;
+
+  const msg = entry.message;
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return entry;
+  const message = msg as Record<string, unknown>;
+  const role = message.role;
+
+  if (role === 'assistant') {
+    const { usage: _u, api: _a, provider: _p, model: _m, ...strippedMsg } = message;
+    const content = message.content;
+    if (Array.isArray(content)) {
+      strippedMsg.content = content.map((block) => {
+        if (!block || typeof block !== 'object' || Array.isArray(block)) return block;
+        const b = block as Record<string, unknown>;
+        if (b.type !== 'toolCall') return b;
+        const { thoughtSignature: _ts, arguments: args, ...rest } = b;
+        if (args !== undefined) {
+          let processedArgs: unknown;
+          if (args && typeof args === 'object' && !Array.isArray(args)) {
+            const truncatedArgs: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
+              truncatedArgs[k] = typeof v === 'string' && v.length > 100 ? v.slice(0, 100) : v;
+            }
+            processedArgs = truncatedArgs;
+          } else if (typeof args === 'string' && args.length > 100) {
+            processedArgs = args.slice(0, 100);
+          } else {
+            processedArgs = args;
+          }
+          return { ...rest, arguments: processedArgs };
+        }
+        return rest;
+      });
+    }
+    return { ...entry, message: strippedMsg };
+  }
+
+  if (role === 'toolResult') {
+    const { details: _d, ...strippedMsg } = message;
+    const content = message.content;
+    if (Array.isArray(content)) {
+      strippedMsg.content = content.map((block) => {
+        if (!block || typeof block !== 'object' || Array.isArray(block)) return block;
+        const b = block as Record<string, unknown>;
+        if (b.type !== 'text' || typeof b.text !== 'string') return b;
+        return b.text.length > 100 ? { ...b, text: b.text.slice(0, 100) } : b;
+      });
+    } else if (typeof content === 'string' && content.length > 100) {
+      strippedMsg.content = content.slice(0, 100);
+    }
+    return { ...entry, message: strippedMsg };
+  }
+
+  return entry;
+}
+
+/**
  * Read JSONL entries from all session files in a directory, filtered by time window.
  */
 function readSessionEntries(sessionDir: string, lastRunTs: string, newRunTs: string): string[] {
@@ -149,7 +221,7 @@ function readSessionEntries(sessionDir: string, lastRunTs: string, newRunTs: str
 
         const ts = entry.timestamp;
         if (ts >= lastRunTs && ts < newRunTs) {
-          entries.push(line);
+          entries.push(JSON.stringify(stripSessionEntry(entry)));
         }
       } catch {
         // Skip malformed lines
