@@ -39,7 +39,7 @@ Read file contents from the filesystem.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `file_path` | string | Absolute path or `~/` relative path |
+| `path` | string | Absolute path or `~/` relative path |
 
 Returns the file contents as a string.
 
@@ -75,7 +75,7 @@ Write or create files on the filesystem. Overwrites the entire file.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `file_path` | string | Absolute path or `~/` relative path |
+| `path` | string | Absolute path or `~/` relative path |
 | `content` | string | File content to write |
 | `commit_message` | string? | If provided and path is inside `~/.system2/`, git-commits the file with this message |
 
