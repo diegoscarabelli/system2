@@ -358,6 +358,53 @@ describe('AgentHost', () => {
       expect(host.isBusy()).toBe(false);
     });
 
+    it('handlePotentialError compacts and retries on context_overflow', async () => {
+      const { internal } = makeHostWithBusyTracking();
+      setupWithFakeSession(internal);
+
+      internal.session = {
+        ...internal.session,
+        compact: vi.fn().mockResolvedValue(undefined),
+        prompt: vi.fn().mockResolvedValue(undefined),
+      } as unknown as typeof internal.session;
+      internal.pendingPrompt = 'scheduled task';
+      internal.currentProvider = 'google';
+      internal.busy = true;
+
+      // Stub compaction count persistence
+      const hostWithCompaction = internal as unknown as {
+        compactionCount: number;
+        compactionDepth: number;
+        writeCompactionCount: ReturnType<typeof vi.fn>;
+        resourceLoader: { reload: ReturnType<typeof vi.fn> } | null;
+      };
+      hostWithCompaction.compactionCount = 0;
+      hostWithCompaction.compactionDepth = 2;
+      hostWithCompaction.writeCompactionCount = vi.fn();
+      hostWithCompaction.resourceLoader = { reload: vi.fn().mockResolvedValue(undefined) };
+
+      const errorEvent = {
+        type: 'message_end',
+        message: {
+          stopReason: 'error',
+          errorMessage:
+            'The input token count (1075988) exceeds the maximum number of tokens allowed (1048575).',
+        },
+      };
+
+      await internal.handlePotentialError(errorEvent);
+
+      // Should compact, increment count, and retry
+      expect(
+        (internal.session as unknown as { compact: ReturnType<typeof vi.fn> }).compact
+      ).toHaveBeenCalled();
+      expect(hostWithCompaction.compactionCount).toBe(1);
+      expect(hostWithCompaction.writeCompactionCount).toHaveBeenCalledWith(1);
+      expect(internal.session.prompt).toHaveBeenCalledWith('scheduled task', {
+        streamingBehavior: 'followUp',
+      });
+    });
+
     it('handlePotentialError clears busy when all recovery paths exhausted', async () => {
       const { host, internal } = makeHostWithBusyTracking();
       setupWithFakeSession(internal);

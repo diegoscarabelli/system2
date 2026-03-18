@@ -76,6 +76,31 @@ describe('categorizeError', () => {
     expect(categorizeError(null)).toBe('unknown');
     expect(categorizeError(undefined)).toBe('unknown');
   });
+
+  it('returns "context_overflow" for Google token limit errors', () => {
+    const error = {
+      message:
+        'The input token count (1075988) exceeds the maximum number of tokens allowed (1048575).',
+      code: 400,
+    };
+    expect(categorizeError(error)).toBe('context_overflow');
+  });
+
+  it('returns "context_overflow" for OpenAI context length errors', () => {
+    expect(
+      categorizeError(new Error('maximum context length is 128000 tokens, you requested 130000'))
+    ).toBe('context_overflow');
+  });
+
+  it('returns "context_overflow" for Anthropic prompt too long errors', () => {
+    expect(categorizeError(new Error('prompt is too long: 250000 tokens > 200000 maximum'))).toBe(
+      'context_overflow'
+    );
+  });
+
+  it('returns "client" for non-overflow 400 errors', () => {
+    expect(categorizeError({ status: 400, message: 'Invalid request body' })).toBe('client');
+  });
 });
 
 describe('extractErrorMessage', () => {
@@ -139,6 +164,10 @@ describe('shouldRetry', () => {
     expect(shouldRetry('client', 0)).toBe(false);
   });
 
+  it('never retries context_overflow errors', () => {
+    expect(shouldRetry('context_overflow', 0)).toBe(false);
+  });
+
   it('retries rate_limit up to maxRateLimitRetries', () => {
     expect(shouldRetry('rate_limit', 0)).toBe(true);
     expect(shouldRetry('rate_limit', 2)).toBe(true);
@@ -172,6 +201,11 @@ describe('shouldFailover', () => {
   it('never fails over on client errors', () => {
     expect(shouldFailover('client', false)).toBe(false);
     expect(shouldFailover('client', true)).toBe(false);
+  });
+
+  it('never fails over on context_overflow errors', () => {
+    expect(shouldFailover('context_overflow', false)).toBe(false);
+    expect(shouldFailover('context_overflow', true)).toBe(false);
   });
 
   it('fails over on rate_limit only when retries exhausted', () => {

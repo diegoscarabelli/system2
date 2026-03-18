@@ -30,6 +30,7 @@ export type ErrorCategory =
   | 'auth' // 401, 403 - immediate failover
   | 'rate_limit' // 429 - exponential retry, then failover
   | 'transient' // 500, 503, timeout - brief retry, then failover
+  | 'context_overflow' // 400 with token limit exceeded - compact and retry
   | 'client' // 400 - no retry, surface error
   | 'unknown'; // unexpected - treat as transient
 
@@ -39,6 +40,12 @@ export type ErrorCategory =
 export function categorizeError(error: unknown): ErrorCategory {
   // Extract status code from various error formats
   const statusCode = extractStatusCode(error);
+
+  // Check for context overflow before status code classification (400 that is recoverable)
+  const errorMessage = extractErrorMessage(error).toLowerCase();
+  if (isContextOverflow(errorMessage)) {
+    return 'context_overflow';
+  }
 
   if (statusCode) {
     switch (statusCode) {
@@ -65,7 +72,6 @@ export function categorizeError(error: unknown): ErrorCategory {
   }
 
   // Check for timeout/network errors
-  const errorMessage = extractErrorMessage(error).toLowerCase();
   if (
     errorMessage.includes('timeout') ||
     errorMessage.includes('econnrefused') ||
@@ -76,6 +82,24 @@ export function categorizeError(error: unknown): ErrorCategory {
   }
 
   return 'unknown';
+}
+
+/**
+ * Check if an error message indicates context window overflow.
+ * Matches patterns from Google, OpenAI, Anthropic, and other providers.
+ */
+function isContextOverflow(message: string): boolean {
+  return (
+    // Google: "The input token count (N) exceeds the maximum number of tokens allowed (N)"
+    /input token count.*exceeds.*maximum.*tokens/.test(message) ||
+    // OpenAI: "maximum context length is N tokens"
+    /maximum context length/.test(message) ||
+    // Anthropic: "prompt is too long: N tokens > N maximum"
+    /prompt is too long.*tokens/.test(message) ||
+    // Generic patterns
+    /token.*limit.*exceeded/.test(message) ||
+    /context.*length.*exceeded/.test(message)
+  );
 }
 
 /**
@@ -156,7 +180,8 @@ export function shouldRetry(
   switch (category) {
     case 'auth':
     case 'client':
-      // Never retry auth errors or client errors
+    case 'context_overflow':
+      // Never retry auth, client, or context overflow errors (overflow needs compaction, not retry)
       return false;
     case 'rate_limit':
       return attempt < config.maxRateLimitRetries;
@@ -180,7 +205,8 @@ export function shouldFailover(category: ErrorCategory, retriesExhausted: boolea
       // Failover only after retries exhausted
       return retriesExhausted;
     case 'client':
-      // Never failover for client errors (our bug)
+    case 'context_overflow':
+      // Never failover for client or context overflow errors (another provider has the same context)
       return false;
   }
 }

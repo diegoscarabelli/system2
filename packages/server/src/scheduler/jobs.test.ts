@@ -433,19 +433,22 @@ describe('stripSessionEntry', () => {
       expect(block).not.toHaveProperty('arguments');
     });
 
-    it('preserves thinking blocks unchanged', () => {
+    it('drops thinking blocks entirely', () => {
       const thinking = 'deep thought '.repeat(20);
       const entry = {
         type: 'message',
         message: {
           role: 'assistant',
-          content: [{ type: 'thinking', thinking, thinkingSignature: 'sig' }],
+          content: [
+            { type: 'thinking', thinking, thinkingSignature: 'sig' },
+            { type: 'text', text: 'Done.' },
+          ],
         },
       };
       const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
-      const block = (result.message.content as Record<string, unknown>[])[0];
-      expect(block.thinking).toBe(thinking);
-      expect(block.thinkingSignature).toBe('sig');
+      const blocks = result.message.content as Record<string, unknown>[];
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].type).toBe('text');
     });
 
     it('preserves text blocks unchanged', () => {

@@ -111,6 +111,7 @@ export class AgentHost {
   private compactionCount = 0;
   private compactionDepth = 0;
   private isPruning = false;
+  private isCompactingOverflow = false;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -383,6 +384,29 @@ export class AgentHost {
 
     // Capture before any await — agent_end may clear it before this async handler resumes
     const promptToRetry = this.pendingPrompt;
+
+    // Context overflow: compact the session and retry the prompt (once)
+    if (category === 'context_overflow' && this.session && !this.isCompactingOverflow) {
+      this.isCompactingOverflow = true;
+      console.log('[AgentHost] Context overflow detected, triggering compaction before retry...');
+      try {
+        await this.session.compact();
+        this.compactionCount++;
+        this.writeCompactionCount(this.compactionCount);
+        console.log('[AgentHost] Compaction completed after context overflow');
+
+        if (promptToRetry) {
+          this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
+          await this.resourceLoader?.reload();
+          await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
+        }
+      } catch (err) {
+        console.error('[AgentHost] Compaction after context overflow failed:', err);
+      } finally {
+        this.isCompactingOverflow = false;
+      }
+      return;
+    }
 
     // Check if we should retry
     if (shouldRetry(category, currentAttempts)) {
