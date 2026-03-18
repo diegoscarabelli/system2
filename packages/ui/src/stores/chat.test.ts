@@ -106,6 +106,68 @@ describe('useChatStore', () => {
     });
   });
 
+  describe('addUserMessage during steering', () => {
+    it('snapshots in-progress turn events into a partial assistant message', () => {
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      // Simulate agent mid-stream with a tool call
+      useChatStore.getState().startToolCall('bash', '{"command":"ls"}', 1);
+      useChatStore.getState().setStreaming(true, 1);
+
+      // Steer: send a user message while streaming
+      useChatStore.getState().addUserMessage('change direction', undefined, undefined, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      // Should have 2 messages: the snapshot (partial assistant) + user message
+      expect(state?.messages).toHaveLength(2);
+      expect(state?.messages[0].role).toBe('assistant');
+      expect(state?.messages[0].turnEvents).toHaveLength(1);
+      expect(state?.messages[0].turnEvents?.[0].type).toBe('tool_call');
+      expect(state?.messages[1].role).toBe('user');
+      expect(state?.messages[1].content).toBe('change direction');
+      // Streaming state should be cleared, and isWaitingForResponse stays false
+      expect(state?.currentTurnEvents).toHaveLength(0);
+      expect(state?.currentAssistantMessage).toBeNull();
+      expect(state?.isWaitingForResponse).toBe(false);
+    });
+
+    it('does not snapshot when agent is idle (normal send)', () => {
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      // Agent is idle (not streaming)
+      useChatStore.getState().addUserMessage('hello', undefined, undefined, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].role).toBe('user');
+      expect(state?.isWaitingForResponse).toBe(true);
+    });
+
+    it('snapshots partial assistant text along with turn events', () => {
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      // Simulate agent mid-stream with thinking + partial text
+      useChatStore.getState().startThinking(1);
+      useChatStore.getState().appendThinkingChunk('analyzing...', 1);
+      useChatStore.getState().finishThinking(1);
+      useChatStore.getState().startAssistantMessage(1);
+      useChatStore.getState().appendAssistantChunk('Here is my partial', 1);
+
+      useChatStore.getState().addUserMessage('actually do X', undefined, undefined, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(2);
+      expect(state?.messages[0].role).toBe('assistant');
+      expect(state?.messages[0].content).toBe('Here is my partial');
+      expect(state?.messages[0].turnEvents).toHaveLength(1);
+      expect(state?.messages[0].turnEvents?.[0].type).toBe('thinking');
+      expect(state?.messages[1].role).toBe('user');
+    });
+  });
+
   describe('provider (per-agent state)', () => {
     it('setProvider updates only the specified agent', () => {
       useChatStore.getState().loadHistory([], 1);

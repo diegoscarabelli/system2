@@ -55,7 +55,7 @@ export class WebSocketHandler {
       messages: guideHost.chatCache.getMessages(),
       agentId: guideAgentId,
     });
-    this.send({ type: 'provider_info', provider: guideHost.getProvider() });
+    this.send({ type: 'provider_info', provider: guideHost.getProvider(), agentId: guideAgentId });
 
     // Subscribe to Guide's events for streaming to this client
     this.subscribeToAgent(guideAgentId, guideHost);
@@ -164,12 +164,13 @@ export class WebSocketHandler {
         this.activeAgentId = newAgentId;
         this.subscribeToAgent(newAgentId, host);
 
-        // Send new agent's chat cache
+        // Send new agent's chat cache and provider
         this.send({
           type: 'chat_history',
           messages: host.chatCache.getMessages(),
           agentId: newAgentId,
         });
+        this.send({ type: 'provider_info', provider: host.getProvider(), agentId: newAgentId });
 
         // Send context usage for the new agent
         const usage = host.getContextUsage();
@@ -202,7 +203,7 @@ export class WebSocketHandler {
     if (eventType === 'status') {
       const statusEvent = event as unknown as { provider?: string };
       if (statusEvent.provider) {
-        this.send({ type: 'provider_change', provider: statusEvent.provider });
+        this.send({ type: 'provider_change', provider: statusEvent.provider, agentId });
       }
       return;
     }

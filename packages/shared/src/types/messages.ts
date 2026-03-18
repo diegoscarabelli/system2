@@ -41,5 +41,5 @@ export type ServerMessage =
       timestamp: number;
       agentId?: number;
     }
-  | { type: 'provider_info'; provider: string } // Sent on connect — current LLM provider
-  | { type: 'provider_change'; provider: string }; // Sent on failover — provider switched
+  | { type: 'provider_info'; provider: string; agentId: number } // Sent on connect/switch — current LLM provider for an agent
+  | { type: 'provider_change'; provider: string; agentId: number }; // Sent on failover — provider switched

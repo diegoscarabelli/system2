@@ -138,6 +138,26 @@ export const useChatStore = create<ChatState>()(
         const targetId = agentId ?? get().activeAgentId;
         if (targetId === null) return;
 
+        const agentState = get().agentStates.get(targetId);
+        const isSteering = agentState?.isStreaming ?? false;
+
+        // When steering mid-stream, commit any in-progress content so the
+        // existing thinking/tool blocks stay visible above the user's message
+        const partialMessages: Message[] = [];
+        if (isSteering && agentState) {
+          const hasTurnEvents = agentState.currentTurnEvents.length > 0;
+          const hasPartialText = !!agentState.currentAssistantMessage;
+          if (hasTurnEvents || hasPartialText) {
+            partialMessages.push({
+              id: `msg-${Date.now()}-partial`,
+              role: 'assistant',
+              content: agentState.currentAssistantMessage ?? '',
+              timestamp: Date.now(),
+              turnEvents: hasTurnEvents ? [...agentState.currentTurnEvents] : undefined,
+            });
+          }
+        }
+
         const message: Message = {
           id: id ?? `msg-${Date.now()}`,
           role: 'user',
@@ -146,10 +166,11 @@ export const useChatStore = create<ChatState>()(
         };
         set((state) => ({
           agentStates: updateAgentState(state.agentStates, targetId, (s) => ({
-            messages: [...s.messages, message],
+            messages: [...s.messages, ...partialMessages, message],
+            currentAssistantMessage: null,
             currentTurnEvents: [],
             activeThinkingId: null,
-            isWaitingForResponse: true,
+            isWaitingForResponse: !isSteering,
           })),
         }));
       },
