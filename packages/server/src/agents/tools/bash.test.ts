@@ -102,10 +102,11 @@ describe('bash tool', () => {
       expect((result.content[0] as { text: string }).text).toContain('started in background');
       expect((result.details as { background: boolean }).background).toBe(true);
 
-      // Wait for background process to finish
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      expect(notifyBackground).toHaveBeenCalledTimes(1);
+      // Poll until the background process notifies — avoids a fixed sleep that
+      // can be too short on slow CI runners (Windows in particular)
+      await vi.waitFor(() => expect(notifyBackground).toHaveBeenCalledTimes(1), {
+        timeout: 5000,
+      });
       const [content] = notifyBackground.mock.calls[0];
       expect(content).toContain('background');
       expect(content).toContain('completed');
