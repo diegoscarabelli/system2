@@ -164,7 +164,16 @@ export function AgentPane() {
                   {/* Group header row */}
                   <Box
                     as="tr"
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={!isCollapsed}
                     onClick={() => toggleGroupCollapse(group)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        toggleGroupCollapse(group);
+                      }
+                    }}
                     sx={{ cursor: 'pointer', '&:hover td': { color: 'fg.default' } }}
                   >
                     <Box
@@ -200,9 +209,17 @@ export function AgentPane() {
                         <Box
                           key={agent.id}
                           as="tr"
+                          role="button"
+                          tabIndex={0}
                           onClick={() =>
                             useChatStore.getState().setActiveAgent(agent.id, agent.role)
                           }
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              useChatStore.getState().setActiveAgent(agent.id, agent.role);
+                            }
+                          }}
                           sx={{
                             cursor: 'pointer',
                             '&:hover': { backgroundColor: 'canvas.subtle' },

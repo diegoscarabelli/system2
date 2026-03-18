@@ -129,7 +129,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
               as="button"
               type="button"
               onClick={onAbort}
-              disabled={!isConnected}
+              disabled={!isConnected || activeAgentId === null}
               aria-label="Stop"
               sx={{
                 display: 'inline-flex',
@@ -152,7 +152,7 @@ export function MessageInput({ onSend, onQueue, onAbort }: MessageInputProps) {
             <Box
               as="button"
               type="submit"
-              disabled={!isConnected || !input.trim()}
+              disabled={!isConnected || !input.trim() || activeAgentId === null}
               aria-label={isStreaming ? 'Queue message' : 'Send message'}
               sx={{
                 display: 'inline-flex',
