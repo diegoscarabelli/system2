@@ -193,16 +193,35 @@ export const useChatStore = create<ChatState>()(
       },
 
       loadHistory: (messages: Message[], agentId: number) => {
-        set((state) => ({
-          agentStates: updateAgentState(state.agentStates, agentId, () => ({
-            messages,
-            currentAssistantMessage: null,
-            currentTurnEvents: [],
-            activeThinkingId: null,
-            isStreaming: false,
-            isWaitingForResponse: false,
-          })),
-        }));
+        set((state) => {
+          const existing = state.agentStates.get(agentId);
+          const hasInProgress =
+            existing &&
+            (existing.isStreaming ||
+              existing.currentTurnEvents.length > 0 ||
+              existing.currentAssistantMessage);
+
+          // If agent has in-progress work (e.g., switching back to a busy agent),
+          // only update committed messages and preserve streaming state.
+          if (hasInProgress) {
+            return {
+              agentStates: updateAgentState(state.agentStates, agentId, () => ({
+                messages,
+              })),
+            };
+          }
+
+          return {
+            agentStates: updateAgentState(state.agentStates, agentId, () => ({
+              messages,
+              currentAssistantMessage: null,
+              currentTurnEvents: [],
+              activeThinkingId: null,
+              isStreaming: false,
+              isWaitingForResponse: false,
+            })),
+          };
+        });
       },
 
       startAssistantMessage: (agentId?: number) => {

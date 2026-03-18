@@ -110,11 +110,11 @@ User clicks agent in AgentPane
   -> UI sends { type: 'switch_agent', agentId }
     -> WebSocketHandler:
        1. Updates activeAgentId
-       2. Unsubscribes from previous agent's events
-       3. Subscribes to new agent's events
-       4. Sends chat_history (from agent's chatCache)
-       5. Sends context_usage (if available)
-       6. Sends ready_for_input (if agent is idle)
+       2. Subscribes to new agent's events (additive, keeps previous subscriptions)
+       3. Sends chat_history (from agent's chatCache)
+       4. Sends context_usage (if available)
+       5. Sends ready_for_input (if agent is idle)
+  -> UI loadHistory merges committed messages but preserves in-progress streaming state
 ```
 
 ### Steering
@@ -145,7 +145,7 @@ Each WebSocket connection gets its own `WebSocketHandler` instance. It:
 
 1. Receives `AgentRegistry` and `guideAgentId` in its constructor
 2. Sends Guide's chat history and provider info on connect
-3. Subscribes to the active agent's events (one subscription at a time)
+3. Subscribes to agent events (additive: subscriptions are kept across switches so background agents continue streaming)
 4. Converts Pi SDK events to `ServerMessage` types (all tagged with `agentId`):
    - `message_update` (with thinking) -> `thinking_chunk`; transition to text/tool/end -> `thinking_end`
    - `message_update` (with text) -> `assistant_chunk`
@@ -154,7 +154,7 @@ Each WebSocket connection gets its own `WebSocketHandler` instance. It:
    - `tool_execution_end` -> `tool_call_end`
    - `agent_end` -> `context_usage` + `ready_for_input`
 5. Captures user messages in the target agent's chat cache and broadcasts to other tabs
-6. Handles `switch_agent` by re-subscribing and sending the new agent's state
+6. Handles `switch_agent` by adding a subscription (if not already subscribed) and sending the new agent's state
 7. Records non-Guide user messages in the `ConversationSummarizer` for Guide notification
 8. Watches artifact files for live reload (`fs.watch`)
 

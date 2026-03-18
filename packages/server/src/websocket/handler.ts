@@ -21,11 +21,11 @@ export class WebSocketHandler {
   private guideAgentId: number;
   private wss: WebSocketServer;
   private activeAgentId: number;
-  private activeSubscription?: () => void;
+  private subscriptions = new Map<number, () => void>();
+  private thinkingAgents = new Set<number>();
   private artifactWatcher?: FSWatcher;
   private artifactUrl?: string;
   private summarizer?: ConversationSummarizer;
-  private isThinking = false;
 
   constructor(
     ws: WebSocket,
@@ -84,19 +84,19 @@ export class WebSocketHandler {
 
   /**
    * Subscribe to an agent's events for streaming to this WebSocket client.
-   * Replaces any existing subscription (one active agent at a time).
+   * Subscriptions are kept alive across agent switches so events continue
+   * flowing for background agents (preserving in-progress tool calls, etc.).
    */
   private subscribeToAgent(agentId: number, host: AgentHost): void {
-    // Unsubscribe from previous agent
-    if (this.activeSubscription) {
-      this.activeSubscription();
-      this.activeSubscription = undefined;
-    }
+    // Already subscribed to this agent
+    if (this.subscriptions.has(agentId)) return;
 
-    this.isThinking = false;
-    this.activeSubscription = host.subscribe((event) => {
-      this.handleAgentEvent(event, agentId, host);
-    });
+    this.subscriptions.set(
+      agentId,
+      host.subscribe((event) => {
+        this.handleAgentEvent(event, agentId, host);
+      })
+    );
   }
 
   private handleClientMessage(message: ClientMessage): void {
@@ -212,9 +212,9 @@ export class WebSocketHandler {
       case 'message_update':
         // Stream text as it's generated
         if (event.assistantMessageEvent.type === 'text_delta') {
-          if (this.isThinking) {
+          if (this.thinkingAgents.has(agentId)) {
             this.send({ type: 'thinking_end', agentId });
-            this.isThinking = false;
+            this.thinkingAgents.delete(agentId);
           }
           this.send({
             type: 'assistant_chunk',
@@ -224,7 +224,7 @@ export class WebSocketHandler {
         }
         // Stream thinking blocks
         else if (event.assistantMessageEvent.type === 'thinking_delta') {
-          this.isThinking = true;
+          this.thinkingAgents.add(agentId);
           this.send({
             type: 'thinking_chunk',
             content: event.assistantMessageEvent.delta,
@@ -234,17 +234,17 @@ export class WebSocketHandler {
         break;
 
       case 'message_end':
-        if (this.isThinking) {
+        if (this.thinkingAgents.has(agentId)) {
           this.send({ type: 'thinking_end', agentId });
-          this.isThinking = false;
+          this.thinkingAgents.delete(agentId);
         }
         this.send({ type: 'assistant_end', agentId });
         break;
 
       case 'tool_execution_start': {
-        if (this.isThinking) {
+        if (this.thinkingAgents.has(agentId)) {
           this.send({ type: 'thinking_end', agentId });
-          this.isThinking = false;
+          this.thinkingAgents.delete(agentId);
         }
         // Format tool input for display
         let inputText = '';
@@ -389,9 +389,10 @@ export class WebSocketHandler {
       this.artifactWatcher.close();
       this.artifactWatcher = undefined;
     }
-    if (this.activeSubscription) {
-      this.activeSubscription();
-      this.activeSubscription = undefined;
+    for (const unsub of this.subscriptions.values()) {
+      unsub();
     }
+    this.subscriptions.clear();
+    this.thinkingAgents.clear();
   }
 }

@@ -65,14 +65,12 @@ describe('useChatStore', () => {
   });
 
   describe('loadHistory', () => {
-    it('sets messages and resets streaming state', () => {
+    it('resets streaming state for idle agents', () => {
       useChatStore.setState({ activeAgentId: 1 });
 
-      // Simulate an agent mid-stream
-      useChatStore.getState().startAssistantMessage(1);
-      useChatStore.getState().setStreaming(true, 1);
+      // Agent is idle (not streaming)
+      useChatStore.getState().loadHistory([], 1);
 
-      // Load history should reset all state
       useChatStore
         .getState()
         .loadHistory([{ id: 'm1', role: 'assistant', content: 'past message', timestamp: 1 }], 1);
@@ -83,6 +81,29 @@ describe('useChatStore', () => {
       expect(state?.isWaitingForResponse).toBe(false);
       expect(state?.activeThinkingId).toBeNull();
       expect(state?.currentAssistantMessage).toBeNull();
+    });
+
+    it('preserves streaming state for busy agents', () => {
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      // Simulate agent mid-stream with a tool call
+      useChatStore.getState().startToolCall('bash', '{"command":"ls"}', 1);
+      useChatStore.getState().setStreaming(true, 1);
+
+      // Load history (e.g., on switch back) should preserve streaming state
+      useChatStore
+        .getState()
+        .loadHistory([{ id: 'm1', role: 'assistant', content: 'committed msg', timestamp: 1 }], 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      // Committed messages are updated
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].content).toBe('committed msg');
+      // But streaming state is preserved
+      expect(state?.isStreaming).toBe(true);
+      expect(state?.currentTurnEvents).toHaveLength(1);
+      expect(state?.currentTurnEvents[0].type).toBe('tool_call');
     });
   });
 

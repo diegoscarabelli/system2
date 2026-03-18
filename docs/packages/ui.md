@@ -216,6 +216,7 @@ Manages the WebSocket connection to the server with multi-agent routing:
 - Watches `activeAgentId` changes and sends `switch_agent` to the server when the user switches agents
 - On reconnect: re-sends `switch_agent` if the user was viewing a non-Guide agent
 - On `ready_for_input`: clears `isStreaming` and `isWaitingForResponse` for that agent
+- On `chat_history`: merges committed messages but preserves in-progress streaming state (tool calls, thinking, partial text) for busy agents
 
 See [WebSocket Protocol](../websocket-protocol.md) for the full message specification.
 
