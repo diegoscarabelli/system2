@@ -152,10 +152,21 @@ describe('AgentHost', () => {
       // After session.prompt() resolves, pendingPrompt is still set —
       // clearing moved to agent_end so queued turns (followUp/steer) stay retryable
       expect(hostInternal.pendingPrompt).toBe('hello world');
+      // Non-steering: streamingBehavior must be 'followUp' (not undefined) to prevent
+      // silent drops when a background sendCustomMessage turn is in flight
+      expect(hostInternal.session.prompt).toHaveBeenCalledWith('hello world', {
+        streamingBehavior: 'followUp',
+      });
 
       // Simulate agent_end: pendingPrompt is now cleared
       hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingPrompt).toBeNull();
+
+      // Steering: streamingBehavior must be 'steer'
+      await host.prompt('steer message', { isSteering: true });
+      expect(hostInternal.session.prompt).toHaveBeenLastCalledWith('steer message', {
+        streamingBehavior: 'steer',
+      });
     });
 
     it('handleSessionEvent clears pendingPrompt on agent_end but not on other events', () => {
@@ -174,7 +185,8 @@ describe('AgentHost', () => {
       };
 
       // Suppress internal method calls (not under test here)
-      hostInternal.handlePotentialError = vi.fn();
+      // handlePotentialError must return a Promise since handleSessionEvent calls .catch() on it
+      hostInternal.handlePotentialError = vi.fn().mockResolvedValue(undefined);
       hostInternal.handleCompactionTracking = vi.fn();
 
       hostInternal.pendingPrompt = 'pending message';
@@ -227,12 +239,11 @@ describe('AgentHost', () => {
         },
       };
 
-      // No failover — just retry path (mark enough attempts to skip retry and go to failover,
-      // but have no next provider so it exits cleanly after retrying once)
+      // retryAttempts=0 means shouldRetry returns true → handlePotentialError takes the
+      // retry path, calls session.prompt(), then returns early. The failover mocks are
+      // set up defensively but are not exercised in this scenario.
       hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
       hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
-
-      // Set retryAttempts to 0 so the first shouldRetry call returns true
       hostInternal.retryAttempts = new Map();
 
       await hostInternal.handlePotentialError(errorEvent);

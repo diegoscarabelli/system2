@@ -310,8 +310,10 @@ export class AgentHost {
    * Extracted from the initialize() subscribe callback so tests can invoke it directly.
    */
   private handleSessionEvent(event: AgentSessionEvent): void {
-    // Check for API errors that need failover handling
-    this.handlePotentialError(event);
+    // Check for API errors that need failover handling (async, errors logged internally)
+    void this.handlePotentialError(event).catch((err) => {
+      console.error('[AgentHost] handlePotentialError threw unexpectedly:', err);
+    });
 
     // Track busy state from agent activity
     if (event.type === 'message_update' || event.type === 'tool_execution_start') {
@@ -383,7 +385,9 @@ export class AgentHost {
       // Retry the pending prompt if there is one
       if (promptToRetry && this.session) {
         console.log('[AgentHost] Retrying prompt...');
-        this.pendingPrompt = promptToRetry; // restore so the retry turn is also retryable
+        // Restore only if nothing newer arrived during sleep — a new prompt() call during the
+        // delay would have set pendingPrompt to the newer message; don't overwrite it.
+        this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
         await this.resourceLoader?.reload();
         await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
       }
@@ -469,7 +473,8 @@ export class AgentHost {
       // Retry the pending prompt with the new provider
       if (promptToRetry && this.session) {
         console.log('[AgentHost] Retrying prompt with new provider...');
-        this.pendingPrompt = promptToRetry; // restore so the retry turn is also retryable
+        // Restore only if nothing newer arrived during reinitialization.
+        this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
         await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
       }
     } catch (error) {
