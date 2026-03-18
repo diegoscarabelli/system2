@@ -37,7 +37,7 @@ For each active project (those with a non-archived Conductor):
 1. Ensure `~/.system2/projects/{id}_{name}/` directory exists
 2. Create `log.md` with YAML frontmatter if it doesn't exist
 3. Read most recent `log.md` content (last 10,000 characters via `readTailChars`)
-4. Collect activity from all agents involved in the project (project-scoped agents + Guide; Narrator is excluded via `projectLogSystemAgents` to prevent recursive embedding)
+4. Collect activity from all agents involved in the project (project-scoped agents + Guide; Narrator is excluded via `projectLogSystemAgents` to prevent recursive embedding). JSONL entries are stripped of verbose fields before injection: `thoughtSignature`, `usage`, `api`, `provider`, `model`, and `details` are dropped; tool call argument values and tool result content are truncated to 100 chars.
 5. Collect project-scoped DB changes (task, project, task_comment, task_link records belonging to the project)
 6. If there is activity, deliver a `[Scheduled task: project-log]` message to the Narrator
 
