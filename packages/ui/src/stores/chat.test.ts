@@ -4,7 +4,7 @@
  * Tests for per-agent state isolation, dequeue routing, and loadHistory resets.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from './chat';
 
 function resetStore() {
@@ -147,6 +147,10 @@ describe('useChatStore', () => {
   });
 
   describe('localStorage persistence', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
     function makeMockStorage() {
       const store: Record<string, string> = {};
       return {
@@ -169,7 +173,6 @@ describe('useChatStore', () => {
         'system2:active-agent',
         JSON.stringify({ id: 1, label: 'guide_1', role: 'Guide' })
       );
-      vi.unstubAllGlobals();
     });
 
     it('setActiveAgent overwrites a previously persisted agent', () => {
@@ -181,7 +184,6 @@ describe('useChatStore', () => {
         'system2:active-agent',
         JSON.stringify({ id: 5, label: 'conductor_5', role: 'Conductor' })
       );
-      vi.unstubAllGlobals();
     });
 
     it('setActiveAgent does not throw when localStorage write fails', () => {
@@ -191,7 +193,6 @@ describe('useChatStore', () => {
       });
       vi.stubGlobal('localStorage', mock);
       expect(() => useChatStore.getState().setActiveAgent(1, 'guide')).not.toThrow();
-      vi.unstubAllGlobals();
     });
   });
 
