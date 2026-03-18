@@ -217,8 +217,6 @@ describe('AgentHost', () => {
       };
       hostInternal.currentProvider = 'cerebras';
       hostInternal.pendingPrompt = 'original message';
-      // Simulate agent_end having cleared it before the error handler retries
-      hostInternal.pendingPrompt = null;
 
       // Use a rate_limit error — shouldRetry returns true for first attempt
       const errorEvent = {
@@ -228,11 +226,6 @@ describe('AgentHost', () => {
           errorMessage: 'Error 429: rate limit exceeded',
         },
       };
-
-      // Capture promptToRetry via a saved reference before pendingPrompt was cleared
-      // This simulates the real scenario: pendingPrompt was 'original message' when
-      // the error was captured, but was then cleared by agent_end
-      hostInternal.pendingPrompt = 'original message';
 
       // No failover — just retry path (mark enough attempts to skip retry and go to failover,
       // but have no next provider so it exits cleanly after retrying once)
