@@ -328,6 +328,14 @@ export class WebSocketHandler {
         break;
       }
 
+      case 'auto_compaction_start':
+        this.send({ type: 'compaction_start', agentId });
+        break;
+
+      case 'auto_compaction_end':
+        this.send({ type: 'compaction_end', agentId });
+        break;
+
       default:
         // Log other events for debugging
         console.log('Agent event:', event.type);

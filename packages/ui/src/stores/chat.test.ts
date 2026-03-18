@@ -115,6 +115,7 @@ describe('useChatStore', () => {
       useChatStore.getState().startAssistantMessage(1);
       useChatStore.getState().setStreaming(true, 1);
       useChatStore.getState().setWaitingForResponse(true, 1);
+      useChatStore.getState().startCompaction(1);
 
       useChatStore.getState().clearAllStreamingState();
 
@@ -124,6 +125,7 @@ describe('useChatStore', () => {
       expect(state?.activeThinkingId).toBeNull();
       expect(state?.currentAssistantMessage).toBeNull();
       expect(state?.currentTurnEvents).toHaveLength(0);
+      expect(state?.compactionStatus).toBe('idle');
     });
   });
 

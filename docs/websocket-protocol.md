@@ -69,6 +69,7 @@ type ServerMessage =
 | `ready_for_input` | Agent finished, ready for next message |
 | `chat_history` | Sent on connect (Guide) and on `switch_agent`: recent messages for the specified agent |
 | `user_message_broadcast` | User message from another tab, broadcast to all other connected clients |
+| `compaction_start` / `compaction_end` | Auto-compaction lifecycle (context window management). UI shows transient "Compacting..." / "Compacted" indicator |
 
 Note: the Board, Catalog, and Agent Pane poll their REST endpoints every 2 seconds rather than relying on push notifications. This ensures the UI reflects database changes regardless of how they were made (tool callbacks, direct sqlite3 access, etc.).
 

@@ -177,6 +177,7 @@ Supports multi-agent chat via per-agent state. Each agent has its own message hi
 | `isStreaming` | `boolean` | Currently receiving chunks |
 | `isWaitingForResponse` | `boolean` | Sent message, no response yet |
 | `contextPercent` | `number \| null` | Context window usage % |
+| `compactionStatus` | `'idle' \| 'compacting' \| 'compacted'` | Auto-compaction state (transient, not persisted) |
 
 Components read the active agent's state via selectors (e.g., `useChatStore(s => s.agentStates.get(s.activeAgentId))`). An exported `EMPTY_AGENT_STATE` constant provides a stable default for selectors when no agent state exists yet.
 

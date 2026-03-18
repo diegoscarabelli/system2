@@ -582,7 +582,9 @@ export function MessageList() {
       (e.type === 'thinking' && e.data.isStreaming)
   );
   const showBrainLoader =
-    (isWaitingForResponse || (isStreaming && !hasActiveInProgress)) && !currentAssistantMessage;
+    (isWaitingForResponse ||
+      (isStreaming && !hasActiveInProgress && compactionStatus === 'idle')) &&
+    !currentAssistantMessage;
 
   // Track whether user is near the bottom of the scroll container
   useEffect(() => {

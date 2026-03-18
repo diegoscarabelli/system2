@@ -31,6 +31,7 @@ export interface PerAgentState {
   isWaitingForResponse: boolean;
   contextPercent: number | null;
   provider: string | null;
+  compactionStatus: 'idle' | 'compacting' | 'compacted';
 }
 
 function createDefaultAgentState(): PerAgentState {
@@ -43,6 +44,7 @@ function createDefaultAgentState(): PerAgentState {
     isWaitingForResponse: false,
     contextPercent: null,
     provider: null,
+    compactionStatus: 'idle',
   };
 }
 
@@ -85,6 +87,9 @@ interface ChatState {
   setWaitingForResponse: (waiting: boolean, agentId?: number) => void;
   setContextPercent: (percent: number | null, agentId?: number) => void;
   setProvider: (provider: string, agentId: number) => void;
+  startCompaction: (agentId: number) => void;
+  finishCompaction: (agentId: number) => void;
+  resetCompaction: (agentId: number) => void;
 }
 
 /** Immutably update a specific agent's state within the Map. */
@@ -390,7 +395,8 @@ export const useChatStore = create<ChatState>()(
               s.isStreaming ||
               s.isWaitingForResponse ||
               s.activeThinkingId ||
-              s.currentAssistantMessage
+              s.currentAssistantMessage ||
+              s.compactionStatus !== 'idle'
             ) {
               next.set(id, {
                 ...s,
@@ -399,6 +405,7 @@ export const useChatStore = create<ChatState>()(
                 activeThinkingId: null,
                 currentAssistantMessage: null,
                 currentTurnEvents: [],
+                compactionStatus: 'idle',
               });
             }
           }
@@ -439,6 +446,34 @@ export const useChatStore = create<ChatState>()(
       setProvider: (provider: string, agentId: number) => {
         set((state) => ({
           agentStates: updateAgentState(state.agentStates, agentId, () => ({ provider })),
+        }));
+      },
+
+      startCompaction: (agentId: number) => {
+        set((state) => ({
+          agentStates: updateAgentState(state.agentStates, agentId, () => ({
+            compactionStatus: 'compacting' as const,
+            isStreaming: true,
+          })),
+        }));
+      },
+
+      finishCompaction: (agentId: number) => {
+        set((state) => ({
+          agentStates: updateAgentState(state.agentStates, agentId, () => ({
+            compactionStatus: 'compacted' as const,
+            isStreaming: false,
+          })),
+        }));
+      },
+
+      resetCompaction: (agentId: number) => {
+        const agentState = get().agentStates.get(agentId);
+        if (!agentState || agentState.compactionStatus === 'idle') return;
+        set((state) => ({
+          agentStates: updateAgentState(state.agentStates, agentId, () => ({
+            compactionStatus: 'idle' as const,
+          })),
         }));
       },
     }),

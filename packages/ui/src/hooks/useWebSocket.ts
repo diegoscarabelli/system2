@@ -113,6 +113,7 @@ export function useWebSocket() {
           if (aid !== null) {
             state.setStreaming(false, aid);
             state.setWaitingForResponse(false, aid);
+            state.resetCompaction(aid);
           }
           break;
         }
@@ -176,6 +177,18 @@ export function useWebSocket() {
           state.setProvider(message.provider, message.agentId);
           state.addSystemMessage(`Switched to ${message.provider}`);
           break;
+
+        case 'compaction_start': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid !== null) state.startCompaction(aid);
+          break;
+        }
+
+        case 'compaction_end': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid !== null) state.finishCompaction(aid);
+          break;
+        }
 
         case 'error': {
           console.error('Server error:', message.message);
