@@ -657,6 +657,87 @@ describe('AgentHost', () => {
     });
   });
 
+  describe('pushSystemMessage on failover', () => {
+    it('pushes a system message to chatCache before switching provider', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+        };
+        reinitializeWithProvider: ReturnType<typeof vi.fn>;
+        retryAttempts: Map<string, number>;
+        session: unknown;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.currentProvider = 'google';
+      internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(true);
+      internal.authResolver.getNextProvider = vi.fn().mockReturnValue('anthropic');
+      internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
+
+      // 429 rate limit error: shouldRetry is false at attempt 3, triggers failover
+      internal.retryAttempts.set('google:rate_limit', 3);
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
+      });
+
+      expect(internal._chatCache.push).toHaveBeenCalledOnce();
+      const pushed = internal._chatCache.push.mock.calls[0][0];
+      expect(pushed.role).toBe('system');
+      expect(pushed.content).toBe('Rate limit on google, switching to anthropic');
+    });
+
+    it('pushes unavailable message when no providers remain', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        session: unknown;
+        busy: boolean;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.currentProvider = 'cerebras';
+      internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(true);
+      internal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 401: Unauthorized' },
+      });
+
+      expect(internal._chatCache.push).toHaveBeenCalledOnce();
+      const pushed = internal._chatCache.push.mock.calls[0][0];
+      expect(pushed.role).toBe('system');
+      expect(pushed.content).toBe('All providers unavailable, error will surface in chat');
+    });
+  });
+
   describe('compaction pruning', () => {
     /** Internal type escape hatch for compaction pruning tests */
     type PruningInternal = {

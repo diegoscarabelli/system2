@@ -443,11 +443,15 @@ export class AgentHost {
         const nextProvider = this.authResolver.getNextProvider();
         if (nextProvider) {
           console.log(`[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`);
+          this.pushSystemMessage(
+            `${category === 'rate_limit' ? 'Rate limit' : 'API error'} on ${this.currentProvider}, switching to ${nextProvider}`
+          );
           await this.reinitializeWithProvider(nextProvider, promptToRetry);
           return;
         }
       }
 
+      this.pushSystemMessage('All providers unavailable, error will surface in chat');
       console.log('[AgentHost] No fallback providers available, error will be surfaced to user');
     }
 
@@ -533,6 +537,17 @@ export class AgentHost {
     } finally {
       this.isReinitializing = false;
     }
+  }
+
+  /** Push a system-role message into the chat cache (visible in UI history). */
+  private pushSystemMessage(content: string): void {
+    if (!this._chatCache) return;
+    this._chatCache.push({
+      id: `msg-${Date.now()}`,
+      role: 'system',
+      content,
+      timestamp: Date.now(),
+    });
   }
 
   /**
