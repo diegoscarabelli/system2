@@ -7,7 +7,8 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import open from 'open';
 import { backupIfNeeded } from '../utils/backup.js';
 import { loadConfig, SYSTEM2_DIR } from '../utils/config.js';
@@ -86,7 +87,10 @@ export async function start(options: {
     const server = new Server({
       port,
       dbPath: join(SYSTEM2_DIR, 'app.db'),
-      uiDistPath: join(import.meta.dirname, '..', '..', 'ui', 'dist'),
+      uiDistPath: join(
+        dirname(createRequire(import.meta.url).resolve('@system2/ui/package.json')),
+        'dist'
+      ),
       llmConfig: config.llm,
       servicesConfig: config.services,
       toolsConfig: config.tools,

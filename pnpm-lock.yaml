@@ -41,6 +41,9 @@ importers:
       '@system2/shared':
         specifier: workspace:*
         version: link:../shared
+      '@system2/ui':
+        specifier: workspace:*
+        version: link:../ui
       commander:
         specifier: ^11.1.0
         version: 11.1.0
