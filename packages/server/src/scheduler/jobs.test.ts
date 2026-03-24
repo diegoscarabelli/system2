@@ -1,18 +1,29 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentHost } from '../agents/host.js';
+import type { DatabaseClient } from '../db/client.js';
 import {
   buildAndDeliverMemoryUpdate,
   collectAgentActivity,
   formatMarkdownTable,
   readFrontmatterField,
   readTailChars,
+  registerNarratorJobs,
   resolveDailySummaryTimestamp,
   stripSessionEntry,
 } from './jobs.js';
+import type { Scheduler } from './scheduler.js';
+
+vi.mock('./network.js', () => ({
+  isNetworkAvailable: vi.fn(),
+}));
+
+import { isNetworkAvailable } from './network.js';
+
+const mockIsNetworkAvailable = vi.mocked(isNetworkAvailable);
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `system2-test-${randomUUID().slice(0, 8)}`);
@@ -26,11 +37,22 @@ function trackTmpDir(dir: string): string {
   return dir;
 }
 
+function mockNarratorHost(): AgentHost & { calls: Array<{ content: string; details: unknown }> } {
+  const calls: Array<{ content: string; details: unknown }> = [];
+  return {
+    calls,
+    deliverMessage(content: string, details: unknown) {
+      calls.push({ content, details });
+    },
+  } as unknown as AgentHost & { calls: Array<{ content: string; details: unknown }> };
+}
+
 afterEach(() => {
   for (const dir of tmpDirs) {
     rmSync(dir, { recursive: true, force: true });
   }
   tmpDirs.length = 0;
+  mockIsNetworkAvailable.mockReset();
 });
 
 describe('readFrontmatterField', () => {
@@ -182,16 +204,6 @@ describe('collectAgentActivity', () => {
 });
 
 describe('buildAndDeliverMemoryUpdate', () => {
-  function mockNarratorHost(): AgentHost & { calls: Array<{ content: string; details: unknown }> } {
-    const calls: Array<{ content: string; details: unknown }> = [];
-    return {
-      calls,
-      deliverMessage(content: string, details: unknown) {
-        calls.push({ content, details });
-      },
-    } as unknown as AgentHost & { calls: Array<{ content: string; details: unknown }> };
-  }
-
   it('skips delivery when no daily summary files exist', () => {
     const dir = trackTmpDir(makeTmpDir());
     const knowledgeDir = join(dir, 'knowledge');
@@ -561,5 +573,83 @@ describe('stripSessionEntry', () => {
       const result = stripSessionEntry(entry) as Record<string, Record<string, unknown>>;
       expect(result.message.content).toBe('short');
     });
+  });
+});
+
+describe('registerNarratorJobs (network guard)', () => {
+  /** Fake Scheduler that captures registered handlers by name. */
+  function mockScheduler() {
+    const handlers: Record<string, () => Promise<void>> = {};
+    return {
+      schedule(name: string, _pattern: string, handler: () => Promise<void>) {
+        handlers[name] = handler;
+      },
+      handlers,
+    };
+  }
+
+  it('skips daily-summary when network is unavailable', async () => {
+    mockIsNetworkAvailable.mockResolvedValueOnce(false);
+    const scheduler = mockScheduler();
+    const host = mockNarratorHost();
+    const dir = trackTmpDir(makeTmpDir());
+
+    registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, {} as DatabaseClient, dir, 30);
+
+    await scheduler.handlers['daily-summary']();
+    expect(host.calls).toHaveLength(0);
+    expect(mockIsNetworkAvailable).toHaveBeenCalledOnce();
+  });
+
+  it('skips memory-update when network is unavailable', async () => {
+    mockIsNetworkAvailable.mockResolvedValueOnce(false);
+    const scheduler = mockScheduler();
+    const host = mockNarratorHost();
+    const dir = trackTmpDir(makeTmpDir());
+
+    registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, {} as DatabaseClient, dir, 30);
+
+    await scheduler.handlers['memory-update']();
+    expect(host.calls).toHaveLength(0);
+    expect(mockIsNetworkAvailable).toHaveBeenCalledOnce();
+  });
+
+  it('proceeds with daily-summary when network is available', async () => {
+    mockIsNetworkAvailable.mockResolvedValueOnce(true);
+    const scheduler = mockScheduler();
+    const host = mockNarratorHost();
+    const dir = trackTmpDir(makeTmpDir());
+    mkdirSync(join(dir, 'knowledge', 'daily_summaries'), { recursive: true });
+
+    const mockDb = { query: () => [] } as unknown as DatabaseClient;
+
+    registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, mockDb, dir, 30);
+
+    await scheduler.handlers['daily-summary']();
+
+    // buildAndDeliverDailySummary was reached: it creates today's summary file
+    const today = new Date().toISOString().slice(0, 10);
+    expect(existsSync(join(dir, 'knowledge', 'daily_summaries', `${today}.md`))).toBe(true);
+    // With no agents/projects the daily summary still delivers (file has content)
+    expect(host.calls.length).toBeGreaterThanOrEqual(1);
+    expect(host.calls[0].content).toContain('[Scheduled task: daily-summary]');
+  });
+
+  it('proceeds with memory-update when network is available', async () => {
+    mockIsNetworkAvailable.mockResolvedValueOnce(true);
+    const scheduler = mockScheduler();
+    const host = mockNarratorHost();
+    const dir = trackTmpDir(makeTmpDir());
+    const knowledgeDir = join(dir, 'knowledge');
+    const summariesDir = join(knowledgeDir, 'daily_summaries');
+    mkdirSync(summariesDir, { recursive: true });
+    writeFileSync(join(knowledgeDir, 'memory.md'), '---\nlast_narrator_update_ts:\n---\n');
+    writeFileSync(join(summariesDir, '2026-03-24.md'), '---\n---\n# Summary');
+
+    registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, {} as DatabaseClient, dir, 30);
+
+    await scheduler.handlers['memory-update']();
+    expect(host.calls).toHaveLength(1);
+    expect(host.calls[0].content).toContain('[Scheduled task: memory-update]');
   });
 });
