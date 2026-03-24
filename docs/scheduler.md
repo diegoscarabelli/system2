@@ -80,10 +80,15 @@ The Narrator synthesizes each section into narrative summaries, avoiding repetit
 
 Croner does **not** catch up missed jobs after laptop sleep or server shutdown. The server handles this explicitly in `checkNarratorCatchUp()`:
 
-1. **Daily summary**: resolve the last daily summary timestamp. If stale by more than `intervalMinutes`, queue `buildAndDeliverDailySummary()`
-2. **Memory update**: read `last_narrator_update_ts` from `memory.md`. If stale by more than 24 hours, queue `buildAndDeliverMemoryUpdate()`
+1. **Network guard**: check `isNetworkAvailable()`. If the network is unreachable, skip all catch-up entirely.
+2. **Daily summary**: resolve the last daily summary timestamp. If stale by more than `intervalMinutes`, queue `buildAndDeliverDailySummary()`
+3. **Memory update**: read `last_narrator_update_ts` from `memory.md`. If stale by more than 24 hours, queue `buildAndDeliverMemoryUpdate()`
 
 This runs once at server start, after agent sessions are initialized.
+
+Both checks use `last_narrator_update_ts` as a cursor. This timestamp only advances when the Narrator successfully processes the delivered message and writes it back to the file's frontmatter. If a job is skipped (network down) or fails, the cursor stays stale and the next restart will re-trigger catch-up.
+
+**Within a single server lifecycle:** if the server starts without network, catch-up is skipped entirely. The `daily-summary` job self-recovers within one cron interval (default 30 min) once the network is back, because its staleness check runs on every cron tick. The `memory-update` catch-up is lost until its next scheduled run (daily at 11 AM), since the cron handler only fires once per day. A server restart recovers both.
 
 ## See Also
 
