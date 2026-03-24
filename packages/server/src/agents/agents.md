@@ -387,7 +387,7 @@ All System2 data lives in `~/.system2/`:
 ```text
 ~/.system2/
 ├── .git/                  # Git tracking for text files
-├── .gitignore             # Excludes app.db, sessions, logs, config.toml, chat-history.json
+├── .gitignore             # Excludes app.db, sessions, logs, config.toml
 ├── config.toml            # Settings and credentials
 ├── app.db                 # SQLite database (projects, tasks, agents)
 ├── server.pid             # PID file when server is running

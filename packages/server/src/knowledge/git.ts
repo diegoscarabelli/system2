@@ -22,10 +22,7 @@ server.pid
 logs/
 *.log
 
-# UI state
-chat-history.json
-
-# Session files (large, binary-like JSONL)
+# Session files (JSONL + per-agent chat caches)
 sessions/
 `;
 
