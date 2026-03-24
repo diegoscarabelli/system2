@@ -235,7 +235,7 @@ describe('buildAndDeliverMemoryUpdate', () => {
     expect(host.calls).toHaveLength(0);
   });
 
-  it('delivers message with summary files since last update', () => {
+  it('delivers message with embedded summary content since last update', () => {
     const dir = trackTmpDir(makeTmpDir());
     const knowledgeDir = join(dir, 'knowledge');
     const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -244,9 +244,15 @@ describe('buildAndDeliverMemoryUpdate', () => {
       join(knowledgeDir, 'memory.md'),
       '---\nlast_narrator_update_ts: 2026-03-10T00:00:00Z\n---\n# Memory'
     );
-    writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary 10');
-    writeFileSync(join(summariesDir, '2026-03-11.md'), '---\n---\n# Summary 11');
-    writeFileSync(join(summariesDir, '2026-03-09.md'), '---\n---\n# Before');
+    writeFileSync(
+      join(summariesDir, '2026-03-10.md'),
+      '---\n---\n# Summary 10\nDay ten narrative.'
+    );
+    writeFileSync(
+      join(summariesDir, '2026-03-11.md'),
+      '---\n---\n# Summary 11\nDay eleven narrative.'
+    );
+    writeFileSync(join(summariesDir, '2026-03-09.md'), '---\n---\n# Before\nOld narrative.');
 
     const host = mockNarratorHost();
     buildAndDeliverMemoryUpdate(host, 2, dir);
@@ -254,8 +260,11 @@ describe('buildAndDeliverMemoryUpdate', () => {
 
     const msg = host.calls[0].content;
     expect(msg).toContain('[Scheduled task: memory-update]');
-    expect(msg).toContain('2026-03-10.md');
-    expect(msg).toContain('2026-03-11.md');
+    // Content is embedded inline (not just file paths)
+    expect(msg).toContain('Day ten narrative.');
+    expect(msg).toContain('Day eleven narrative.');
+    // Older summary excluded entirely
+    expect(msg).not.toContain('Old narrative.');
     expect(msg).not.toContain('2026-03-09.md');
     expect(msg).toContain('IMPORTANT');
     expect(msg).toContain('UTC ISO 8601');
@@ -267,12 +276,12 @@ describe('buildAndDeliverMemoryUpdate', () => {
     const summariesDir = join(knowledgeDir, 'daily_summaries');
     mkdirSync(summariesDir, { recursive: true });
     writeFileSync(join(knowledgeDir, 'memory.md'), '---\nlast_narrator_update_ts:\n---\n# Memory');
-    writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary');
+    writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary\nNarrative content.');
 
     const host = mockNarratorHost();
     buildAndDeliverMemoryUpdate(host, 2, dir);
     expect(host.calls).toHaveLength(1);
-    expect(host.calls[0].content).toContain('2026-03-10.md');
+    expect(host.calls[0].content).toContain('Narrative content.');
   });
 });
 

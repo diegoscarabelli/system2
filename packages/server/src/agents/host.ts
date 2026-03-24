@@ -181,11 +181,15 @@ export class AgentHost {
     // Store session dir for rotation checks
     this._sessionDir = agentSessionDir;
 
-    // Initialize per-agent chat cache (ring buffer persisted to JSON)
-    this._chatCache = new MessageHistory(
-      join(agentSessionDir, 'chat-cache.json'),
-      this.chatMaxMessages
-    );
+    // Initialize per-agent chat cache (ring buffer persisted to JSON).
+    // Only create on first init; reinitialization (failover) preserves the
+    // existing instance to prevent losing entries pushed between file loads.
+    if (!this._chatCache) {
+      this._chatCache = new MessageHistory(
+        join(agentSessionDir, 'chat-cache.json'),
+        this.chatMaxMessages
+      );
+    }
 
     // Rotate session file if it exceeds size threshold (10MB)
     const rotated = rotateSessionIfNeeded(agentSessionDir, SYSTEM2_DIR);

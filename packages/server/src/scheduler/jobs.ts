@@ -9,7 +9,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { AgentHost } from '../agents/host.js';
 import type { DatabaseClient } from '../db/client.js';
 import { isNetworkAvailable } from './network.js';
@@ -297,6 +297,7 @@ interface ProjectActivityData {
   projectName: string;
   agentActivity: string;
   dbChanges: string;
+  hasChanges: boolean;
 }
 
 type AgentRow = { id: number; role: string; project_name: string | null };
@@ -546,6 +547,7 @@ export function buildAndDeliverDailySummary(
       projectName: project.name,
       agentActivity: projectScopedActivity,
       dbChanges: projectDbChanges,
+      hasChanges: hasActivity(projectScopedActivity, projectDbChanges),
     });
 
     // Deliver project-log message (with all agents including Guide)
@@ -591,7 +593,16 @@ ${projectDbChanges}`;
   );
   const nonProjectDbChanges = collectNonProjectDbChanges(db, activeProjectIds, lastRunTs, newRunTs);
 
-  // 7. Assemble daily summary message
+  // 7. Check for any activity at all
+  const hasProjectChanges = projectDataList.some((pd) => pd.hasChanges);
+  const hasNonProjectChanges = hasActivity(nonProjectAgentActivity, nonProjectDbChanges);
+
+  if (!hasProjectChanges && !hasNonProjectChanges) {
+    console.log('[Scheduler] No activity since last run, skipping daily-summary');
+    return;
+  }
+
+  // 8. Assemble daily summary message (only sections with activity)
   const messageParts: string[] = [
     `[Scheduled task: daily-summary]
 
@@ -606,29 +617,21 @@ IMPORTANT: After writing the summary, you MUST set last_narrator_update_ts to ex
 ${dailySummaryContent}`,
   ];
 
-  if (projectDataList.length > 0) {
-    const projectParts: string[] = [];
-    for (const pd of projectDataList) {
-      projectParts.push(
-        `### Project: ${pd.projectName} (#${pd.projectId})\n\n#### Agent Activity\n\n${pd.agentActivity}\n#### Database Changes\n\n${pd.dbChanges}`
-      );
-    }
-    messageParts.push(`## Project Activity\n\n${projectParts.join('\n')}`);
+  const activeProjectParts: string[] = [];
+  for (const pd of projectDataList) {
+    if (!pd.hasChanges) continue;
+    activeProjectParts.push(
+      `### Project: ${pd.projectName} (#${pd.projectId})\n\n#### Agent Activity\n\n${pd.agentActivity}\n#### Database Changes\n\n${pd.dbChanges}`
+    );
+  }
+  if (activeProjectParts.length > 0) {
+    messageParts.push(`## Project Activity\n\n${activeProjectParts.join('\n')}`);
   }
 
-  messageParts.push(
-    `## Non-Project Activity\n\n#### Agent Activity\n\n${nonProjectAgentActivity}\n#### Database Changes\n\n${nonProjectDbChanges}`
-  );
-
-  // 8. Check for any activity at all
-  const hasProjectChanges = projectDataList.some((pd) =>
-    hasActivity(pd.agentActivity, pd.dbChanges)
-  );
-  const hasNonProjectChanges = hasActivity(nonProjectAgentActivity, nonProjectDbChanges);
-
-  if (!hasProjectChanges && !hasNonProjectChanges) {
-    console.log('[Scheduler] No activity since last run, skipping daily-summary');
-    return;
+  if (hasNonProjectChanges) {
+    messageParts.push(
+      `## Non-Project Activity\n\n#### Agent Activity\n\n${nonProjectAgentActivity}\n#### Database Changes\n\n${nonProjectDbChanges}`
+    );
   }
 
   // 9. Deliver daily summary
@@ -704,6 +707,13 @@ export function buildAndDeliverMemoryUpdate(
     return;
   }
 
+  // Embed summary content inline so the Narrator doesn't need read tool calls
+  const summaryEntries = summaryFiles.map((f) => {
+    const content = readFileSync(f, 'utf-8');
+    const filename = basename(f);
+    return `### ${filename}\n\n${content}`;
+  });
+
   const message = `[Scheduled task: memory-update]
 
 memory_file: ${memoryFile}
@@ -712,8 +722,9 @@ new_run_ts: ${newRunTs}
 
 IMPORTANT: After writing memory.md, you MUST set last_narrator_update_ts to exactly "${newRunTs}" (UTC ISO 8601) in the frontmatter of ${memoryFile}. This advances the cursor for the next run.
 
-Daily summaries to incorporate:
-${summaryFiles.map((f) => `- ${f}`).join('\n')}`;
+## Daily summaries to incorporate
+
+${summaryEntries.join('\n\n')}`;
 
   narratorHost.deliverMessage(message, {
     sender: 0,
