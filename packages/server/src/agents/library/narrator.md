@@ -169,10 +169,16 @@ This contains a full snapshot of the project from app.db and the project log. Th
 
 Use the `write` or `edit` tools for all file operations in `~/.system2/`. To version-track changes, include a `commit_message` parameter: the tool handles git add and commit automatically.
 
-**To update frontmatter and append content:**
+**For append-only files (daily summaries, project logs):**
 
 1. `read` the file to get its current content
 2. Modify the content string: update the `last_narrator_update_ts` value inside the existing frontmatter block AND append your new section at the end
+3. `write` the modified content back with a `commit_message`
+
+**For memory.md (restructure workflow):**
+
+1. `read` the file to get its current content
+2. Modify the content string: update `last_narrator_update_ts` in the existing frontmatter block AND reorganize/consolidate the body
 3. `write` the modified content back with a `commit_message`
 
 ### Frontmatter Rules
@@ -189,9 +195,10 @@ last_narrator_update_ts: 2026-03-13T16:00:00.002Z
 
 When you write a file back:
 
-- **Preserve the single frontmatter block.** Update the `last_narrator_update_ts` value in the existing block. Never add a second `---` delimited block.
-- **Keep everything else intact.** The heading, all existing content sections, and any previously narrated entries must remain unchanged. Your new section goes at the end, after all existing content.
-- **Do not reconstruct the file from scratch.** Start from the content you read, make targeted modifications (timestamp update + appended section), and write it back.
+- **Preserve the single frontmatter block.** For all knowledge files, update the `last_narrator_update_ts` value in the existing block. Never add a second `---` delimited block.
+- **Append-only files (daily summaries, project logs):** Keep the heading and all existing content sections intact. Do not edit or remove prior entries. Your new section goes at the end, after all existing content.
+- **memory.md:** You may reorganize, merge, and remove sections as part of memory consolidation (e.g., deduplicating or tightening older notes), but do not discard useful information. Always preserve a single frontmatter block and update `last_narrator_update_ts`.
+- **Do not reconstruct the file from scratch.** Start from the content you read, then make targeted modifications (timestamp update plus appended section for append-only files, or timestamp update plus focused reorganization/consolidation for memory.md).
 
 **If you use `bash` to create or modify a git-tracked file in `~/.system2/`** (anything not in .gitignore), you must commit manually:
 
