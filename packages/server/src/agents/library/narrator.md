@@ -57,9 +57,9 @@ The message contains pre-computed data: project ID and name, file path, timestam
     If no meaningful activity occurred, write "No work done.">
    ```
 
-**Important:** You APPEND to the file. Read the current file content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in log files.
+**Important:** You APPEND to the file. Read the current content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in log files. See **Frontmatter Rules** below for how to handle the frontmatter block.
 
-4. **Update frontmatter and write:** In the same write, replace `last_narrator_update_ts: <old>` with `last_narrator_update_ts: <new_run_ts>` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) in the frontmatter. Use `write` with `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to persist and commit in one step.
+4. **Update frontmatter and write:** In the same write, update `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. Do not add a second frontmatter block. Use `write` with `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to persist and commit in one step.
 
 **CRITICAL: you MUST update `last_narrator_update_ts` to `new_run_ts` in the frontmatter. If you skip this, the next scheduled job will re-collect the same time window, producing duplicate data that grows with every run. This is the mechanism that advances the cursor: no update means unbounded re-processing.**
 
@@ -100,9 +100,9 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
    <Synthesis of Guide/Narrator activity and standalone work. If no work done, write "No work done.">
    ```
 
-**Important:** You APPEND to the file. Read the current file content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in summary files.
+**Important:** You APPEND to the file. Read the current content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in summary files. See **Frontmatter Rules** below for how to handle the frontmatter block.
 
-5. **Update frontmatter and write:** In the same write, replace `last_narrator_update_ts: <old>` with `last_narrator_update_ts: <new_run_ts>` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) in the frontmatter. Use `write` with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to persist and commit in one step.
+5. **Update frontmatter and write:** In the same write, update `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. Do not add a second frontmatter block. Use `write` with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to persist and commit in one step.
 
 **CRITICAL: you MUST update `last_narrator_update_ts` to `new_run_ts` in the frontmatter. If you skip this, the next scheduled job will re-collect the same time window, producing duplicate data that grows with every run. This is the mechanism that advances the cursor: no update means unbounded re-processing.**
 
@@ -122,7 +122,7 @@ The message contains the memory file path, timestamps, and a list of daily summa
 
 4. **Restructure:** Blend new insights from daily summaries into the document body. Consolidate items from the `## Latest Learnings` section into appropriate sections. Remove consolidated items from Latest Learnings. Maintain a coherent, well-organized document that reads naturally.
 
-5. **Write updated memory.md:** Use `write` with `commit_message: "memory update"` to overwrite with the restructured content. Set `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) in the frontmatter.
+5. **Write updated memory.md:** Use `write` with `commit_message: "memory update"` to overwrite with the restructured content. Set `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. The file must have exactly one frontmatter block at the top (see **Frontmatter Rules** below).
 
 **CRITICAL: you MUST update `last_narrator_update_ts` to `new_run_ts` in the frontmatter. If you skip this, the next scheduled job will re-collect the same time window, producing duplicate data that grows with every run. This is the mechanism that advances the cursor: no update means unbounded re-processing.**
 
@@ -169,11 +169,29 @@ This contains a full snapshot of the project from app.db and the project log. Th
 
 Use the `write` or `edit` tools for all file operations in `~/.system2/`. To version-track changes, include a `commit_message` parameter: the tool handles git add and commit automatically.
 
-**To update frontmatter or append content:**
+**To update frontmatter and append content:**
 
-1. `read` the file to get current content
-2. Modify the content string (replace timestamp, append section, etc.)
+1. `read` the file to get its current content
+2. Modify the content string: update the `last_narrator_update_ts` value inside the existing frontmatter block AND append your new section at the end
 3. `write` the modified content back with a `commit_message`
+
+### Frontmatter Rules
+
+Every knowledge file (daily summaries, project logs, memory.md) has exactly **one** YAML frontmatter block at the very top of the file, delimited by `---` lines. For example:
+
+```markdown
+---
+last_narrator_update_ts: 2026-03-13T16:00:00.002Z
+---
+# Daily Summary — 2026-03-13
+...content...
+```
+
+When you write a file back:
+
+- **Preserve the single frontmatter block.** Update the `last_narrator_update_ts` value in the existing block. Never add a second `---` delimited block.
+- **Keep everything else intact.** The heading, all existing content sections, and any previously narrated entries must remain unchanged. Your new section goes at the end, after all existing content.
+- **Do not reconstruct the file from scratch.** Start from the content you read, make targeted modifications (timestamp update + appended section), and write it back.
 
 **If you use `bash` to create or modify a git-tracked file in `~/.system2/`** (anything not in .gitignore), you must commit manually:
 
