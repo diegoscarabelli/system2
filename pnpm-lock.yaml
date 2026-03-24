@@ -32,18 +32,18 @@ importers:
       '@clack/prompts':
         specifier: ^1.0.1
         version: 1.1.0
+      '@dscarabelli/server':
+        specifier: workspace:*
+        version: link:../server
+      '@dscarabelli/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@dscarabelli/ui':
+        specifier: workspace:*
+        version: link:../ui
       '@iarna/toml':
         specifier: ^2.2.5
         version: 2.2.5
-      '@system2/server':
-        specifier: workspace:*
-        version: link:../server
-      '@system2/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@system2/ui':
-        specifier: workspace:*
-        version: link:../ui
       commander:
         specifier: ^11.1.0
         version: 11.1.0
@@ -72,6 +72,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@dscarabelli/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@mariozechner/pi-agent-core':
         specifier: ^0.55.3
         version: 0.55.4(ws@8.19.0)(zod@4.3.6)
@@ -87,9 +90,6 @@ importers:
       '@sinclair/typebox':
         specifier: ^0.32.0
         version: 0.32.35
-      '@system2/shared':
-        specifier: workspace:*
-        version: link:../shared
       better-sqlite3:
         specifier: ^11.10.0
         version: 11.10.0
@@ -139,15 +139,15 @@ importers:
 
   packages/ui:
     dependencies:
+      '@dscarabelli/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@primer/octicons-react':
         specifier: ^19.22.0
         version: 19.22.0(react@18.3.1)
       '@primer/react':
         specifier: ^36.8.0
         version: 36.27.0(@types/react-dom@18.3.7)(@types/react@18.3.28)(react-dom@18.3.1)(react@18.3.1)(styled-components@5.3.11)
-      '@system2/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@tsparticles/engine':
         specifier: ^3.0.2
         version: 3.9.1

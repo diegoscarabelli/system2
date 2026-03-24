@@ -83,12 +83,12 @@ export async function start(options: {
     console.log('Press Ctrl+C to stop');
     console.log('');
 
-    const { Server } = await import('@system2/server');
+    const { Server } = await import('@dscarabelli/server');
     const server = new Server({
       port,
       dbPath: join(SYSTEM2_DIR, 'app.db'),
       uiDistPath: join(
-        dirname(createRequire(import.meta.url).resolve('@system2/ui/package.json')),
+        dirname(createRequire(import.meta.url).resolve('@dscarabelli/ui/package.json')),
         'dist'
       ),
       llmConfig: config.llm,

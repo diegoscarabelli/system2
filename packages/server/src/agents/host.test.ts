@@ -9,7 +9,7 @@
 import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { LlmConfig } from '@system2/shared';
+import type { LlmConfig } from '@dscarabelli/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentHost } from './host.js';
 import type { AgentRegistry } from './registry.js';

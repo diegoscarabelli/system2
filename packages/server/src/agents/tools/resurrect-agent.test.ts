@@ -1,4 +1,4 @@
-import type { Agent } from '@system2/shared';
+import type { Agent } from '@dscarabelli/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseClient } from '../../db/client.js';
 import { createResurrectAgentTool } from './resurrect-agent.js';

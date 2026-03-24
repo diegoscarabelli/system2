@@ -8,8 +8,8 @@
  */
 
 import { type FSWatcher, watch } from 'node:fs';
+import type { ClientMessage, ServerMessage } from '@dscarabelli/shared';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
-import type { ClientMessage, ServerMessage } from '@system2/shared';
 import type { WebSocket, WebSocketServer } from 'ws';
 import type { AgentHost } from '../agents/host.js';
 import type { AgentRegistry } from '../agents/registry.js';

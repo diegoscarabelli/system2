@@ -111,7 +111,7 @@ Before submitting a PR, ensure:
 
 - Node.js >= 20
 - pnpm >= 8
-- System2 installed globally (`npm install -g @system2/cli`) and onboarded (`system2 onboard`)
+- System2 installed globally (`npm install -g @dscarabelli/cli`) and onboarded (`system2 onboard`)
 
 ### Initial Setup
 
@@ -158,7 +158,7 @@ This starts Vite on `http://localhost:3001`. Open this URL in your browser.
 |--------|------------|------------|
 | UI components (`packages/ui/src/`) | Yes | Saves automatically reflect in the browser |
 | Server code (`packages/server/src/`) | No | Rebuild and restart: `pnpm build && system2 stop && system2 start` |
-| CLI code (`packages/cli/src/`) | No | Rebuild: `pnpm --filter @system2/cli build` |
+| CLI code (`packages/cli/src/`) | No | Rebuild: `pnpm --filter @dscarabelli/cli build` |
 | Shared types (`packages/shared/src/`) | No | Rebuild: `pnpm build` (all packages depend on it) |
 
 ### Commands Reference
@@ -195,8 +195,8 @@ Build order: `shared` → `server` + `ui` (parallel) → `cli`
 ### Building Individual Packages
 
 ```bash
-pnpm --filter @system2/server build   # Build only server
-pnpm --filter @system2/cli build      # Build only CLI
+pnpm --filter @dscarabelli/server build   # Build only server
+pnpm --filter @dscarabelli/cli build      # Build only CLI
 ```
 
 ## Code Quality

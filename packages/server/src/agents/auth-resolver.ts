@@ -11,8 +11,8 @@
  * 4. Keys in cooldown recover after the cooldown period expires
  */
 
+import type { LlmConfig, LlmKey, LlmProvider } from '@dscarabelli/shared';
 import { AuthStorage } from '@mariozechner/pi-coding-agent';
-import type { LlmConfig, LlmKey, LlmProvider } from '@system2/shared';
 
 /** Default cooldown period: 5 minutes */
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;

@@ -1,4 +1,4 @@
-# @system2/ui
+# @dscarabelli/ui
 
 React web interface providing a real-time chat experience with artifact display. Chat history is managed server-side: the UI is stateless and receives history on WebSocket connect.
 

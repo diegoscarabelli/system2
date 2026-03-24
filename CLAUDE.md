@@ -54,8 +54,8 @@ pnpm test:watch           # Run tests in watch mode
 Build individual packages:
 
 ```bash
-pnpm --filter @system2/server build
-pnpm --filter @system2/cli build
+pnpm --filter @dscarabelli/server build
+pnpm --filter @dscarabelli/cli build
 ```
 
 ## Before Committing

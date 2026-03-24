@@ -1,4 +1,4 @@
-import type { Agent, Artifact, Project, Task, TaskComment, TaskLink } from '@system2/shared';
+import type { Agent, Artifact, Project, Task, TaskComment, TaskLink } from '@dscarabelli/shared';
 import { describe, expect, it } from 'vitest';
 import type { DatabaseClient } from '../../db/client.js';
 import { createWriteSystem2DbTool } from './write-system2-db.js';

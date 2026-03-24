@@ -1,4 +1,4 @@
-# @system2/server
+# @dscarabelli/server
 
 HTTP + WebSocket server that hosts all agents (Guide and Narrator at startup, others spawned dynamically), serves the UI, and runs the scheduler.
 

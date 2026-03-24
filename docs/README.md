@@ -10,10 +10,10 @@ For installation and usage, see the [project README](../README.md).
 
 ## Packages
 
-- [@system2/shared](packages/shared.md): The TypeScript types and interfaces that all other packages depend on.
-- [@system2/server](packages/server.md): The main runtime, hosting agents, serving the UI over HTTP and WebSocket, and running scheduled jobs.
-- [@system2/cli](packages/cli.md): Command-line tool for managing the server (initial setup, starting, stopping, checking status).
-- [@system2/ui](packages/ui.md): The browser-based chat interface where you interact with the Guide agent and view artifacts.
+- [@dscarabelli/shared](packages/shared.md): The TypeScript types and interfaces that all other packages depend on.
+- [@dscarabelli/server](packages/server.md): The main runtime, hosting agents, serving the UI over HTTP and WebSocket, and running scheduled jobs.
+- [@dscarabelli/cli](packages/cli.md): Command-line tool for managing the server (initial setup, starting, stopping, checking status).
+- [@dscarabelli/ui](packages/ui.md): The browser-based chat interface where you interact with the Guide agent and view artifacts.
 
 ## Core Systems
 

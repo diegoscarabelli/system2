@@ -17,6 +17,7 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { LlmConfig, LlmProvider, ServicesConfig, ToolsConfig } from '@dscarabelli/shared';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import {
   type AgentSession,
@@ -27,7 +28,6 @@ import {
   SessionManager,
   SettingsManager,
 } from '@mariozechner/pi-coding-agent';
-import type { LlmConfig, LlmProvider, ServicesConfig, ToolsConfig } from '@system2/shared';
 import matter from 'gray-matter';
 import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';

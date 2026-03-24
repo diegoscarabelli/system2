@@ -8,7 +8,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { ChatMessage } from '@system2/shared';
+import type { ChatMessage } from '@dscarabelli/shared';
 
 export class MessageHistory {
   private messages: ChatMessage[] = [];

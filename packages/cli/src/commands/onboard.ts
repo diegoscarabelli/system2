@@ -10,7 +10,13 @@ import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
-import type { LlmConfig, LlmKey, LlmProvider, ServicesConfig, ToolsConfig } from '@system2/shared';
+import type {
+  LlmConfig,
+  LlmKey,
+  LlmProvider,
+  ServicesConfig,
+  ToolsConfig,
+} from '@dscarabelli/shared';
 import pc from 'picocolors';
 import { buildConfigToml, CONFIG_FILE, SYSTEM2_DIR, writeConfigFile } from '../utils/config.js';
 

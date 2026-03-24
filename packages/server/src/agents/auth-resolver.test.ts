@@ -1,4 +1,4 @@
-import type { LlmConfig } from '@system2/shared';
+import type { LlmConfig } from '@dscarabelli/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthResolver } from './auth-resolver.js';
 
