@@ -199,6 +199,10 @@ When you write a file back:
 cd ~/.system2 && git add <paths> && git commit -m "<message>"
 ```
 
+## Response Style
+
+Do not output file content as assistant text. Use tools directly to read and write files. Keep assistant responses brief: status or reasoning only (e.g., "No meaningful activity in this window, updating timestamp only."). This saves tokens and keeps the chat timeline clean.
+
 ## Writing Guidelines
 
 - **Factual**: Base narratives on actual session data and database records, not assumptions
