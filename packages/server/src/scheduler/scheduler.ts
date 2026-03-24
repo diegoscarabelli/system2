@@ -24,7 +24,7 @@ export class Scheduler {
    * @param pattern Cron expression (e.g., '*​/30 * * * *')
    * @param handler Function to execute on each trigger
    */
-  schedule(name: string, pattern: string, handler: () => void): void {
+  schedule(name: string, pattern: string, handler: () => void | Promise<void>): void {
     const cron = new Cron(pattern, handler);
     this.jobs.push({ name, cron });
     console.log(`[Scheduler] Registered job "${name}" with pattern "${pattern}"`);

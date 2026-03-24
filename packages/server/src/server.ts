@@ -39,6 +39,7 @@ import {
   registerNarratorJobs,
   resolveDailySummaryTimestamp,
 } from './scheduler/jobs.js';
+import { isNetworkAvailable } from './scheduler/network.js';
 import { Scheduler } from './scheduler/scheduler.js';
 import { WebSocketHandler } from './websocket/handler.js';
 
@@ -548,7 +549,7 @@ export class Server {
     );
 
     // Check if narrator needs catch-up after sleep/shutdown
-    this.checkNarratorCatchUp();
+    await this.checkNarratorCatchUp();
 
     // Graceful shutdown handlers
     const shutdown = async () => {
@@ -572,7 +573,12 @@ export class Server {
    * Check if the Narrator missed scheduled work (e.g., after laptop sleep/shutdown).
    * Croner does NOT catch up missed jobs, so we check timestamps on startup.
    */
-  private checkNarratorCatchUp(): void {
+  private async checkNarratorCatchUp(): Promise<void> {
+    if (!(await isNetworkAvailable())) {
+      console.log('[Server] No network connectivity, skipping narrator catch-up');
+      return;
+    }
+
     const intervalMinutes = this.config.schedulerConfig?.daily_summary_interval_minutes ?? 30;
 
     // Daily summary catch-up

@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import type { AgentHost } from '../agents/host.js';
 import type { DatabaseClient } from '../db/client.js';
+import { isNetworkAvailable } from './network.js';
 import type { Scheduler } from './scheduler.js';
 
 /** Entry types to include from JSONL session files */
@@ -653,13 +654,21 @@ export function registerNarratorJobs(
   // Daily summary — configurable interval
   const cronPattern = 60 % intervalMinutes === 0 ? `*/${intervalMinutes} * * * *` : '*/30 * * * *';
 
-  scheduler.schedule('daily-summary', cronPattern, () => {
+  scheduler.schedule('daily-summary', cronPattern, async () => {
+    if (!(await isNetworkAvailable())) {
+      console.log('[Scheduler] No network connectivity, skipping daily-summary');
+      return;
+    }
     console.log('[Scheduler] Triggering daily-summary job (project logs + daily summary)');
     buildAndDeliverDailySummary(db, narratorHost, narratorId, system2Dir, intervalMinutes);
   });
 
   // Memory update — daily at 11 AM
-  scheduler.schedule('memory-update', '0 11 * * *', () => {
+  scheduler.schedule('memory-update', '0 11 * * *', async () => {
+    if (!(await isNetworkAvailable())) {
+      console.log('[Scheduler] No network connectivity, skipping memory-update');
+      return;
+    }
     console.log('[Scheduler] Triggering memory-update job');
     buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir);
   });

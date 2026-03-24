@@ -5,6 +5,7 @@ System2 runs an in-process scheduler using [Croner](https://github.com/Hexagon/c
 **Key source files:**
 - `packages/server/src/scheduler/scheduler.ts`: Scheduler class
 - `packages/server/src/scheduler/jobs.ts`: job definitions and data collection
+- `packages/server/src/scheduler/network.ts`: network connectivity check
 
 ## Scheduler Class
 
@@ -12,7 +13,7 @@ Thin wrapper around Croner:
 
 ```typescript
 class Scheduler {
-  schedule(name: string, pattern: string, handler: () => void): void
+  schedule(name: string, pattern: string, handler: () => void | Promise<void>): void
   stop(): void  // called during graceful shutdown
 }
 ```
@@ -25,6 +26,12 @@ class Scheduler {
 | `memory-update`  | Daily at 11 AM                 | Send daily summaries list to Narrator for memory consolidation       |
 
 The `daily-summary` interval is configurable via `[scheduler].daily_summary_interval_minutes` in config.toml.
+
+## Network Guard
+
+Each job checks network connectivity via a DNS lookup (`dns.google`) before executing. If the network is unreachable, the job is silently skipped and nothing is written to the Narrator's JSONL session. This prevents session bloat and context pollution when the laptop is sleeping (macOS Power Nap wakes the process periodically, but the network may not be available).
+
+The check lives in each job handler, not in the Scheduler class, so future jobs can opt in or out individually. See `isNetworkAvailable()` in `packages/server/src/scheduler/network.ts`.
 
 ## Daily Summary Pipeline
 
