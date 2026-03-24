@@ -625,9 +625,8 @@ ${dailySummaryContent}`,
     hasActivity(pd.agentActivity, pd.dbChanges)
   );
   const hasNonProjectChanges = hasActivity(nonProjectAgentActivity, nonProjectDbChanges);
-  const hasDailySummaryContent = dailySummaryContent !== '(none)';
 
-  if (!hasProjectChanges && !hasNonProjectChanges && !hasDailySummaryContent) {
+  if (!hasProjectChanges && !hasNonProjectChanges) {
     console.log('[Scheduler] No activity since last run, skipping daily-summary');
     return;
   }

@@ -62,7 +62,7 @@ Each project log is a single continuous file per project lifetime (unlike daily 
 4. **Build message** with two sections:
    - **Project Activity:** per-project sections with project-scoped agent JSONL and project DB changes (reused from Phase 1)
    - **Non-Project Activity:** Guide JSONL (via `dailySummarySystemAgents`, which excludes Narrator to prevent recursive embedding of its own `custom_message` injections) and DB changes not tied to any active project.
-5. **Check for activity:** skip delivery if there's no meaningful activity
+5. **Check for activity:** skip delivery if neither project activity (agent JSONL entries or DB changes) nor non-project activity is detected in the time window. Existing file content does not influence the skip decision: even if the file already has a narrative from an earlier run, a new delivery only happens when fresh activity arrives.
 6. **Deliver:** send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
 
 The Narrator synthesizes each section into narrative summaries, avoiding repetition of project-specific content already covered in project-log entries (which are processed first).
