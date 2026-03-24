@@ -57,7 +57,7 @@ The message contains pre-computed data: project ID and name, file path, timestam
     If no meaningful activity occurred, write "No work done.">
    ```
 
-**Important:** You APPEND to the file. Read the current content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in log files. See **Frontmatter Rules** below for how to handle the frontmatter block.
+   **Important:** You APPEND to the file. Read the current content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in log files. See **Frontmatter Rules** below for how to handle the frontmatter block.
 
 4. **Update frontmatter and write:** In the same write, update `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. Do not add a second frontmatter block. Use `write` with `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to persist and commit in one step.
 
@@ -100,7 +100,7 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
    <Synthesis of Guide/Narrator activity and standalone work. If no work done, write "No work done.">
    ```
 
-**Important:** You APPEND to the file. Read the current content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in summary files. See **Frontmatter Rules** below for how to handle the frontmatter block.
+   **Important:** You APPEND to the file. Read the current content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in summary files. See **Frontmatter Rules** below for how to handle the frontmatter block.
 
 5. **Update frontmatter and write:** In the same write, update `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. Do not add a second frontmatter block. Use `write` with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to persist and commit in one step.
 
