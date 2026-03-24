@@ -464,6 +464,29 @@ describe('AgentHost', () => {
 
       expect(host.chatCache).toBe(mockCache);
     });
+
+    it('preserves existing instance across reinitialize', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as { _chatCache: object; initialize: () => Promise<void> };
+      const originalCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._chatCache = originalCache;
+
+      // Calling initialize() again (as reinitializeWithProvider does) should
+      // keep the existing chat cache instance, not replace it.
+      try {
+        await internal.initialize();
+      } catch {
+        // initialize() may throw due to missing agent DB record; that's fine
+      }
+
+      expect(internal._chatCache).toBe(originalCache);
+    });
   });
 
   describe('deliverMessage', () => {

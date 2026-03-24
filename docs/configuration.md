@@ -135,7 +135,6 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 ├── .git/                  # Version control for text files
 ├── config.toml            # Settings and credentials (0600)
 ├── app.db                 # SQLite database
-├── chat-history.json      # Chat message ring buffer (max 1000)
 ├── server.pid             # PID file when server is running
 ├── knowledge/
 │   ├── infrastructure.md  # Data stack details (Guide)

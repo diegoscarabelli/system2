@@ -20,10 +20,10 @@ class Scheduler {
 
 ## Registered Jobs
 
-| Job              | Schedule                       | Description                                                          |
-|------------------|--------------------------------|----------------------------------------------------------------------|
-| `daily-summary`  | Every N minutes (default: 30)  | Collect activity, deliver project logs and daily summary to Narrator |
-| `memory-update`  | Daily at 11 AM                 | Send daily summaries list to Narrator for memory consolidation       |
+| Job              | Schedule                       | Description                                                                |
+|------------------|--------------------------------|----------------------------------------------------------------------------|
+| `daily-summary`  | Every N minutes (default: 30)  | Collect activity, deliver project logs and daily summary to Narrator       |
+| `memory-update`  | Daily at 11 AM                 | Embed daily summary content and send to Narrator for memory consolidation  |
 
 The `daily-summary` interval is configurable via `[scheduler].daily_summary_interval_minutes` in config.toml.
 
@@ -59,10 +59,10 @@ Each project log is a single continuous file per project lifetime (unlike daily 
    - Most recent daily summary frontmatter (by filename sort)
    - `memory.md` frontmatter
    - Fall back to `intervalMinutes` ago
-4. **Build message** with two sections:
-   - **Project Activity:** per-project sections with project-scoped agent JSONL and project DB changes (reused from Phase 1)
-   - **Non-Project Activity:** Guide JSONL (via `dailySummarySystemAgents`, which excludes Narrator to prevent recursive embedding of its own `custom_message` injections) and DB changes not tied to any active project.
-5. **Check for activity:** skip delivery if there's no meaningful activity
+4. **Check for activity:** skip delivery if neither project activity (agent JSONL entries or DB changes) nor non-project activity is detected in the time window. Existing file content does not influence the skip decision: even if the file already has a narrative from an earlier run, a new delivery only happens when fresh activity arrives.
+5. **Build message** with only the sections that have activity:
+   - **Project Activity:** included only for projects that have agent JSONL entries or DB changes in the window; inactive projects are omitted entirely. The entire section is omitted when no project has changes.
+   - **Non-Project Activity:** Guide JSONL (via `dailySummarySystemAgents`, which excludes Narrator to prevent recursive embedding of its own `custom_message` injections) and DB changes not tied to any active project. Omitted when there is no non-project activity.
 6. **Deliver:** send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
 
 The Narrator synthesizes each section into narrative summaries, avoiding repetition of project-specific content already covered in project-log entries (which are processed first).
@@ -72,9 +72,10 @@ The Narrator synthesizes each section into narrative summaries, avoiding repetit
 `buildAndDeliverMemoryUpdate()` runs daily at 11 AM:
 
 1. Read `last_narrator_update_ts` from `memory.md`
-2. List daily summary files since that date
-3. Send file paths to Narrator via `deliverMessage()`
-4. Narrator reads summaries, incorporates into `memory.md`, clears processed Notes
+2. List daily summary files since that date (lexicographic `>=` comparison, inclusive)
+3. Read each file and embed its content inline in the message
+4. Deliver to Narrator via `deliverMessage()` with all summary content included
+5. Narrator incorporates summaries into `memory.md`, clears processed Notes
 
 ## Catch-Up on Startup
 

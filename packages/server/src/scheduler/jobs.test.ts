@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentHost } from '../agents/host.js';
 import type { DatabaseClient } from '../db/client.js';
 import {
+  buildAndDeliverDailySummary,
   buildAndDeliverMemoryUpdate,
   collectAgentActivity,
   formatMarkdownTable,
@@ -234,7 +235,7 @@ describe('buildAndDeliverMemoryUpdate', () => {
     expect(host.calls).toHaveLength(0);
   });
 
-  it('delivers message with summary files since last update', () => {
+  it('delivers message with embedded summary content since last update', () => {
     const dir = trackTmpDir(makeTmpDir());
     const knowledgeDir = join(dir, 'knowledge');
     const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -243,9 +244,15 @@ describe('buildAndDeliverMemoryUpdate', () => {
       join(knowledgeDir, 'memory.md'),
       '---\nlast_narrator_update_ts: 2026-03-10T00:00:00Z\n---\n# Memory'
     );
-    writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary 10');
-    writeFileSync(join(summariesDir, '2026-03-11.md'), '---\n---\n# Summary 11');
-    writeFileSync(join(summariesDir, '2026-03-09.md'), '---\n---\n# Before');
+    writeFileSync(
+      join(summariesDir, '2026-03-10.md'),
+      '---\n---\n# Summary 10\nDay ten narrative.'
+    );
+    writeFileSync(
+      join(summariesDir, '2026-03-11.md'),
+      '---\n---\n# Summary 11\nDay eleven narrative.'
+    );
+    writeFileSync(join(summariesDir, '2026-03-09.md'), '---\n---\n# Before\nOld narrative.');
 
     const host = mockNarratorHost();
     buildAndDeliverMemoryUpdate(host, 2, dir);
@@ -253,8 +260,11 @@ describe('buildAndDeliverMemoryUpdate', () => {
 
     const msg = host.calls[0].content;
     expect(msg).toContain('[Scheduled task: memory-update]');
-    expect(msg).toContain('2026-03-10.md');
-    expect(msg).toContain('2026-03-11.md');
+    // Content is embedded inline (not just file paths)
+    expect(msg).toContain('Day ten narrative.');
+    expect(msg).toContain('Day eleven narrative.');
+    // Older summary excluded entirely
+    expect(msg).not.toContain('Old narrative.');
     expect(msg).not.toContain('2026-03-09.md');
     expect(msg).toContain('IMPORTANT');
     expect(msg).toContain('UTC ISO 8601');
@@ -266,12 +276,12 @@ describe('buildAndDeliverMemoryUpdate', () => {
     const summariesDir = join(knowledgeDir, 'daily_summaries');
     mkdirSync(summariesDir, { recursive: true });
     writeFileSync(join(knowledgeDir, 'memory.md'), '---\nlast_narrator_update_ts:\n---\n# Memory');
-    writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary');
+    writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary\nNarrative content.');
 
     const host = mockNarratorHost();
     buildAndDeliverMemoryUpdate(host, 2, dir);
     expect(host.calls).toHaveLength(1);
-    expect(host.calls[0].content).toContain('2026-03-10.md');
+    expect(host.calls[0].content).toContain('Narrative content.');
   });
 });
 
@@ -630,9 +640,8 @@ describe('registerNarratorJobs (network guard)', () => {
     // buildAndDeliverDailySummary was reached: it creates today's summary file
     const today = new Date().toISOString().slice(0, 10);
     expect(existsSync(join(dir, 'knowledge', 'daily_summaries', `${today}.md`))).toBe(true);
-    // With no agents/projects the daily summary still delivers (file has content)
-    expect(host.calls.length).toBeGreaterThanOrEqual(1);
-    expect(host.calls[0].content).toContain('[Scheduled task: daily-summary]');
+    // With no agents/projects and no activity, delivery is correctly skipped
+    expect(host.calls).toHaveLength(0);
   });
 
   it('proceeds with memory-update when network is available', async () => {
@@ -651,5 +660,268 @@ describe('registerNarratorJobs (network guard)', () => {
     await scheduler.handlers['memory-update']();
     expect(host.calls).toHaveLength(1);
     expect(host.calls[0].content).toContain('[Scheduled task: memory-update]');
+  });
+});
+
+describe('buildAndDeliverDailySummary', () => {
+  const FIXED_NOW = new Date('2026-03-15T14:00:00.000Z');
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function mockHost(): AgentHost & { calls: Array<{ content: string; details: unknown }> } {
+    const calls: Array<{ content: string; details: unknown }> = [];
+    return {
+      calls,
+      deliverMessage(content: string, details: unknown) {
+        calls.push({ content, details });
+      },
+    } as unknown as AgentHost & { calls: Array<{ content: string; details: unknown }> };
+  }
+
+  function mockDb(
+    agents: Array<{ id: number; role: string; project_name: string | null }>,
+    projects: Array<{ id: number; name: string }> = []
+  ): DatabaseClient {
+    return {
+      query(sql: string) {
+        if (sql.includes('FROM agent')) return agents;
+        if (sql.includes('FROM project p')) return projects;
+        return [];
+      },
+    } as unknown as DatabaseClient;
+  }
+
+  it('skips when file has content but no new activity', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    mkdirSync(summariesDir, { recursive: true });
+
+    writeFileSync(
+      join(summariesDir, '2026-03-15.md'),
+      '---\nlast_narrator_update_ts: 2020-01-01T00:00:00Z\n---\n# Daily Summary — 2026-03-15\n\n## 09:00\nSome prior narrative.'
+    );
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    expect(host.calls).toHaveLength(0);
+  });
+
+  it('skips on first run with no activity', () => {
+    const dir = trackTmpDir(makeTmpDir());
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    expect(host.calls).toHaveLength(0);
+  });
+
+  it('delivers when non-project agent has JSONL activity', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+
+    // Set lastRunTs to 10 minutes ago, entry timestamp to 5 minutes ago
+    const lastRunTs = new Date(Date.now() - 10 * 60_000).toISOString();
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+    writeFileSync(
+      join(summariesDir, '2026-03-15.md'),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — 2026-03-15\n`
+    );
+
+    const entry = JSON.stringify({
+      type: 'message',
+      timestamp: entryTs,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'hello from guide' }] },
+    });
+    writeFileSync(join(sessionDir, 'session.jsonl'), entry);
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+
+    expect(host.calls).toHaveLength(1);
+    expect(host.calls[0].content).toContain('[Scheduled task: daily-summary]');
+  });
+
+  it('delivers when project has DB changes', () => {
+    const dir = trackTmpDir(makeTmpDir());
+
+    const host = mockHost();
+    const db = {
+      query(sql: string) {
+        if (sql.includes('FROM agent')) {
+          return [
+            { id: 1, role: 'guide', project_name: null },
+            { id: 2, role: 'conductor', project_name: 'TestProject' },
+          ];
+        }
+        if (sql.includes('FROM project p')) {
+          return [{ id: 1, name: 'TestProject' }];
+        }
+        // Return task rows only for project-scoped queries (not non-project)
+        if (sql.includes('project = 1') || sql.includes('t.project = 1')) {
+          return [{ id: 10, title: 'A task', status: 'done', project: 1 }];
+        }
+        return [];
+      },
+    } as unknown as DatabaseClient;
+
+    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+
+    expect(host.calls.length).toBeGreaterThanOrEqual(1);
+    const messages = host.calls.map((c) => c.content);
+    expect(messages.some((m) => m.includes('[Scheduled task: daily-summary]'))).toBe(true);
+  });
+
+  it('includes existing file content in the delivered message', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 10 * 60_000).toISOString();
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+    writeFileSync(
+      join(summariesDir, '2026-03-15.md'),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — 2026-03-15\n\n## 09:00\nPrior narrative here.`
+    );
+
+    const entry = JSON.stringify({
+      type: 'message',
+      timestamp: entryTs,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'guide activity' }] },
+    });
+    writeFileSync(join(sessionDir, 'session.jsonl'), entry);
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+
+    expect(host.calls).toHaveLength(1);
+    expect(host.calls[0].content).toContain('Prior narrative here.');
+  });
+
+  it('excludes inactive projects from the message', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(sessionDir, { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 10 * 60_000).toISOString();
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+
+    // Guide has activity (so the message gets delivered), but the project has none
+    const entry = JSON.stringify({
+      type: 'message',
+      timestamp: entryTs,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'guide work' }] },
+    });
+    writeFileSync(join(sessionDir, 'session.jsonl'), entry);
+
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    mkdirSync(summariesDir, { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(summariesDir, `${today}.md`),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary\n`
+    );
+
+    const host = mockHost();
+    const db = mockDb(
+      [
+        { id: 1, role: 'guide', project_name: null },
+        { id: 2, role: 'conductor', project_name: 'InactiveProject' },
+      ],
+      [{ id: 1, name: 'InactiveProject' }]
+    );
+    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+
+    const dailySummaryMsg = host.calls
+      .map((c) => c.content)
+      .find((m) => m.includes('[Scheduled task: daily-summary]'));
+    expect(dailySummaryMsg).toBeDefined();
+    expect(dailySummaryMsg).not.toContain('## Project Activity');
+    expect(dailySummaryMsg).not.toContain('InactiveProject');
+    expect(dailySummaryMsg).toContain('## Non-Project Activity');
+  });
+
+  it('includes only active projects when multiple exist', () => {
+    const dir = trackTmpDir(makeTmpDir());
+
+    const host = mockHost();
+    const db = {
+      query(sql: string) {
+        if (sql.includes('FROM agent')) {
+          return [
+            { id: 1, role: 'guide', project_name: null },
+            { id: 2, role: 'conductor', project_name: 'ActiveProject' },
+            { id: 3, role: 'conductor', project_name: 'IdleProject' },
+          ];
+        }
+        if (sql.includes('FROM project p')) {
+          return [
+            { id: 1, name: 'ActiveProject' },
+            { id: 2, name: 'IdleProject' },
+          ];
+        }
+        // Return task rows only for project 1 (ActiveProject)
+        if (sql.includes('project = 1') || sql.includes('t.project = 1')) {
+          return [{ id: 10, title: 'A task', status: 'done', project: 1 }];
+        }
+        return [];
+      },
+    } as unknown as DatabaseClient;
+
+    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+
+    const dailySummaryMsg = host.calls
+      .map((c) => c.content)
+      .find((m) => m.includes('[Scheduled task: daily-summary]'));
+    expect(dailySummaryMsg).toBeDefined();
+    expect(dailySummaryMsg).toContain('ActiveProject');
+    expect(dailySummaryMsg).not.toContain('IdleProject');
+  });
+
+  it('omits Non-Project Activity section when only projects have changes', () => {
+    const dir = trackTmpDir(makeTmpDir());
+
+    const host = mockHost();
+    const db = {
+      query(sql: string) {
+        if (sql.includes('FROM agent')) {
+          return [
+            { id: 1, role: 'guide', project_name: null },
+            { id: 2, role: 'conductor', project_name: 'TestProject' },
+          ];
+        }
+        if (sql.includes('FROM project p')) {
+          return [{ id: 1, name: 'TestProject' }];
+        }
+        // Return task rows only for project-scoped queries (not non-project)
+        if (sql.includes('project = 1') || sql.includes('t.project = 1')) {
+          return [{ id: 10, title: 'A task', status: 'done', project: 1 }];
+        }
+        return [];
+      },
+    } as unknown as DatabaseClient;
+
+    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+
+    const dailySummaryMsg = host.calls
+      .map((c) => c.content)
+      .find((m) => m.includes('[Scheduled task: daily-summary]'));
+    expect(dailySummaryMsg).toBeDefined();
+    expect(dailySummaryMsg).toContain('## Project Activity');
+    expect(dailySummaryMsg).not.toContain('## Non-Project Activity');
   });
 });

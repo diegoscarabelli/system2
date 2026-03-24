@@ -110,19 +110,17 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
 
 **Goal:** Restructure `memory.md` into a coherent long-term memory document incorporating recent daily summaries.
 
-The message contains the memory file path, timestamps, and a list of daily summary files to incorporate.
+The message contains the memory file path, timestamps, and the full content of each daily summary file to incorporate (embedded inline, no need to read them separately).
 
 **Workflow:**
 
-1. **Parse metadata:** Extract `memory_file`, `last_narrator_update_ts`, `new_run_ts`, and the list of daily summary file paths.
+1. **Parse metadata:** Extract `memory_file`, `last_narrator_update_ts`, `new_run_ts`, and the embedded daily summary content from the `## Daily summaries to incorporate` section.
 
 2. **Read memory.md:** Read the full document including any items in the `## Latest Learnings` section that other agents may have written.
 
-3. **Read daily summaries:** Read each listed daily summary file.
+3. **Restructure:** Blend new insights from the daily summaries (provided in the message) into the document body. Consolidate items from the `## Latest Learnings` section into appropriate sections. Remove consolidated items from Latest Learnings. Maintain a coherent, well-organized document that reads naturally.
 
-4. **Restructure:** Blend new insights from daily summaries into the document body. Consolidate items from the `## Latest Learnings` section into appropriate sections. Remove consolidated items from Latest Learnings. Maintain a coherent, well-organized document that reads naturally.
-
-5. **Write updated memory.md:** Use `write` with `commit_message: "memory update"` to overwrite with the restructured content. Set `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. The file must have exactly one frontmatter block at the top (see **Frontmatter Rules** below).
+4. **Write updated memory.md:** Use `write` with `commit_message: "memory update"` to overwrite with the restructured content. Set `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. The file must have exactly one frontmatter block at the top (see **Frontmatter Rules** below).
 
 **CRITICAL: you MUST update `last_narrator_update_ts` to `new_run_ts` in the frontmatter. If you skip this, the next scheduled job will re-collect the same time window, producing duplicate data that grows with every run. This is the mechanism that advances the cursor: no update means unbounded re-processing.**
 
