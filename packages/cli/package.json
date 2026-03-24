@@ -1,6 +1,10 @@
 {
-  "name": "@system2/cli",
+  "name": "@dscarabelli/cli",
   "version": "0.1.0",
+  "license": "SEE LICENSE IN LICENSE",
+  "publishConfig": {
+    "access": "restricted"
+  },
   "type": "module",
   "bin": {
     "system2": "./dist/index.js"
@@ -17,8 +21,9 @@
   "dependencies": {
     "@clack/prompts": "^1.0.1",
     "@iarna/toml": "^2.2.5",
-    "@system2/server": "workspace:*",
-    "@system2/shared": "workspace:*",
+    "@dscarabelli/server": "workspace:*",
+    "@dscarabelli/shared": "workspace:*",
+    "@dscarabelli/ui": "workspace:*",
     "commander": "^11.1.0",
     "dotenv": "^16.3.1",
     "gray-matter": "^4.0.3",

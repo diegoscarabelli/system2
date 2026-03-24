@@ -11,14 +11,14 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import TOML from '@iarna/toml';
 import type {
   LlmConfig,
   LlmProvider,
   LlmProviderConfig,
   ServicesConfig,
   ToolsConfig,
-} from '@system2/shared';
+} from '@dscarabelli/shared';
+import TOML from '@iarna/toml';
 
 export const SYSTEM2_DIR = join(homedir(), '.system2');
 export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');

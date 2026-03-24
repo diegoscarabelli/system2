@@ -8,9 +8,9 @@
  * registration, and initial message delivery.
  */
 
+import type { Agent } from '@dscarabelli/shared';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
-import type { Agent } from '@system2/shared';
 import type { DatabaseClient } from '../../db/client.js';
 
 export type AgentSpawner = (

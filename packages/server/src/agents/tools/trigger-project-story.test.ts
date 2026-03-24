@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import type { Agent, Project, Task } from '@system2/shared';
+import type { Agent, Project, Task } from '@dscarabelli/shared';
 import { describe, expect, it, type Mock, vi } from 'vitest';
 import type { DatabaseClient } from '../../db/client.js';
 import type { AgentRegistry } from '../registry.js';

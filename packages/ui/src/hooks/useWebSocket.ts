@@ -7,7 +7,7 @@
  * Routes messages to/from per-agent state via agentId.
  */
 
-import type { ClientMessage, ServerMessage } from '@system2/shared';
+import type { ClientMessage, ServerMessage } from '@dscarabelli/shared';
 import { useCallback, useEffect, useRef } from 'react';
 import { useArtifactStore } from '../stores/artifact';
 import { useChatStore } from '../stores/chat';

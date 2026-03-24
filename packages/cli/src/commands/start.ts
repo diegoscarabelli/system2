@@ -7,7 +7,8 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import open from 'open';
 import { backupIfNeeded } from '../utils/backup.js';
 import { loadConfig, SYSTEM2_DIR } from '../utils/config.js';
@@ -82,11 +83,14 @@ export async function start(options: {
     console.log('Press Ctrl+C to stop');
     console.log('');
 
-    const { Server } = await import('@system2/server');
+    const { Server } = await import('@dscarabelli/server');
     const server = new Server({
       port,
       dbPath: join(SYSTEM2_DIR, 'app.db'),
-      uiDistPath: join(import.meta.dirname, '..', '..', 'ui', 'dist'),
+      uiDistPath: join(
+        dirname(createRequire(import.meta.url).resolve('@dscarabelli/ui/package.json')),
+        'dist'
+      ),
       llmConfig: config.llm,
       servicesConfig: config.services,
       toolsConfig: config.tools,

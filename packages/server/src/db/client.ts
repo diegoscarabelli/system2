@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Agent, Artifact, Project, Task, TaskComment, TaskLink } from '@system2/shared';
+import type { Agent, Artifact, Project, Task, TaskComment, TaskLink } from '@dscarabelli/shared';
 import Database from 'better-sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);

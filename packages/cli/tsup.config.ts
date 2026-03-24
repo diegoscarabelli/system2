@@ -20,7 +20,7 @@ export default defineConfig({
     'url',
     'better-sqlite3',
     // Server dependencies with CJS code
-    '@system2/server',
+    '@dscarabelli/server',
     '@mariozechner/pi-coding-agent',
     '@mariozechner/pi-agent-core',
     '@mariozechner/pi-ai',

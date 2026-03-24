@@ -1,4 +1,4 @@
-# @system2/cli
+# @dscarabelli/cli
 
 Command-line interface for managing the System2 server lifecycle. Provides interactive onboarding, daemon management, and status reporting.
 

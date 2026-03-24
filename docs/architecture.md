@@ -61,10 +61,10 @@ All runtime state lives in `~/.system2/`. See [Configuration](configuration.md) 
 ```
 system2/
 ├── packages/
-│   ├── shared/    @system2/shared    Shared TypeScript types
-│   ├── server/    @system2/server    HTTP/WS server + agent runtime
-│   ├── ui/        @system2/ui        React chat interface
-│   └── cli/       @system2/cli       CLI entry point
+│   ├── shared/    @dscarabelli/shared    Shared TypeScript types
+│   ├── server/    @dscarabelli/server    HTTP/WS server + agent runtime
+│   ├── ui/        @dscarabelli/ui        React chat interface
+│   └── cli/       @dscarabelli/cli       CLI entry point
 ├── docs/                              Developer documentation
 ├── biome.json                         Formatting/linting config
 ├── tsconfig.json                      Root TypeScript config

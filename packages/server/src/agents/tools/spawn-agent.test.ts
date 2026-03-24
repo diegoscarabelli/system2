@@ -1,4 +1,4 @@
-import type { Agent, Project } from '@system2/shared';
+import type { Agent, Project } from '@dscarabelli/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseClient } from '../../db/client.js';
 import { createSpawnAgentTool } from './spawn-agent.js';

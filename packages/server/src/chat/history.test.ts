@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ChatMessage } from '@system2/shared';
+import type { ChatMessage } from '@dscarabelli/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MessageHistory } from './history.js';
 

@@ -11,7 +11,12 @@
  * Active agent selection is persisted to localStorage so it survives refreshes.
  */
 
-import type { ChatMessage, ChatThinkingBlock, ChatToolCall, ChatTurnEvent } from '@system2/shared';
+import type {
+  ChatMessage,
+  ChatThinkingBlock,
+  ChatToolCall,
+  ChatTurnEvent,
+} from '@dscarabelli/shared';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 

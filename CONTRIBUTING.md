@@ -21,6 +21,7 @@ Thank you for your interest in contributing to System2! This document provides g
   - [Commands](#commands)
   - [Formatting Rules](#formatting-rules)
 - [Testing](#testing)
+- [Releasing](#releasing)
 - [Before Committing](#before-committing)
 - [Commit Messages](#commit-messages)
 - [Code Review Process](#code-review-process)
@@ -111,7 +112,7 @@ Before submitting a PR, ensure:
 
 - Node.js >= 20
 - pnpm >= 8
-- System2 installed globally (`npm install -g @system2/cli`) and onboarded (`system2 onboard`)
+- System2 installed globally (`npm install -g @dscarabelli/cli`) and onboarded (`system2 onboard`)
 
 ### Initial Setup
 
@@ -158,7 +159,7 @@ This starts Vite on `http://localhost:3001`. Open this URL in your browser.
 |--------|------------|------------|
 | UI components (`packages/ui/src/`) | Yes | Saves automatically reflect in the browser |
 | Server code (`packages/server/src/`) | No | Rebuild and restart: `pnpm build && system2 stop && system2 start` |
-| CLI code (`packages/cli/src/`) | No | Rebuild: `pnpm --filter @system2/cli build` |
+| CLI code (`packages/cli/src/`) | No | Rebuild: `pnpm --filter @dscarabelli/cli build` |
 | Shared types (`packages/shared/src/`) | No | Rebuild: `pnpm build` (all packages depend on it) |
 
 ### Commands Reference
@@ -195,8 +196,8 @@ Build order: `shared` → `server` + `ui` (parallel) → `cli`
 ### Building Individual Packages
 
 ```bash
-pnpm --filter @system2/server build   # Build only server
-pnpm --filter @system2/cli build      # Build only CLI
+pnpm --filter @dscarabelli/server build   # Build only server
+pnpm --filter @dscarabelli/cli build      # Build only CLI
 ```
 
 ## Code Quality
@@ -259,6 +260,27 @@ When adding new functionality, add tests for any exported logic — especially p
 ### CI
 
 A GitHub Actions workflow runs on every push and PR. It executes `pnpm check`, `pnpm typecheck`, `pnpm build`, and `pnpm test`. A local pre-push git hook runs the same checks before code leaves your machine.
+
+## Releasing
+
+Packages are published to npm under the `@dscarabelli` scope (private, restricted access). Publishing is automated via GitHub Actions.
+
+### How to release
+
+1. Bump the `version` field in all four `packages/*/package.json` files to the same version.
+2. Commit the version bump: `git commit -m "chore: bump version to 0.2.0"`
+3. Push to `main`.
+4. Go to **GitHub > Releases > Create a new release**.
+5. Create a new tag matching the version (e.g., `v0.2.0`), write release notes, and click **Publish release**.
+6. The `release.yml` workflow runs automatically: builds, tests, and publishes all packages to npm.
+
+### Adding users
+
+To grant someone install access without exposing source code:
+
+1. Go to **npmjs.com > Your org > Members**.
+2. Invite them as a **read-only** member.
+3. They run `npm login`, then `npm install -g @dscarabelli/cli`.
 
 ## Before Committing
 

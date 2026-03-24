@@ -9,8 +9,6 @@ import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Api, Model } from '@mariozechner/pi-ai';
-import { type AgentSessionEvent, ModelRegistry } from '@mariozechner/pi-coding-agent';
 import type {
   ChatConfig,
   ChatMessage,
@@ -19,7 +17,9 @@ import type {
   SchedulerConfig,
   ServicesConfig,
   ToolsConfig,
-} from '@system2/shared';
+} from '@dscarabelli/shared';
+import type { Api, Model } from '@mariozechner/pi-ai';
+import { type AgentSessionEvent, ModelRegistry } from '@mariozechner/pi-coding-agent';
 import express from 'express';
 import matter from 'gray-matter';
 import { WebSocketServer } from 'ws';
@@ -182,7 +182,7 @@ export class Server {
       try {
         const agents = this.db.query(
           "SELECT a.id, a.role, a.project, a.status, a.created_at, p.name AS project_name FROM agent a LEFT JOIN project p ON a.project = p.id WHERE a.status != 'archived' ORDER BY a.id"
-        ) as (import('@system2/shared').Agent & { project_name: string | null })[];
+        ) as (import('@dscarabelli/shared').Agent & { project_name: string | null })[];
 
         const result = agents.map((agent) => {
           const host = this.agentRegistry.get(agent.id);
@@ -624,7 +624,7 @@ export class Server {
   private async restoreActiveAgents(): Promise<void> {
     const agents = this.db.query(
       "SELECT * FROM agent WHERE status != 'archived' AND role NOT IN ('guide', 'narrator') ORDER BY id"
-    ) as import('@system2/shared').Agent[];
+    ) as import('@dscarabelli/shared').Agent[];
     if (agents.length === 0) return;
 
     console.log(`[Server] Restoring ${agents.length} agent(s)...`);

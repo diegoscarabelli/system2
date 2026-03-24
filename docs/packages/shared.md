@@ -1,10 +1,10 @@
-# @system2/shared
+# @dscarabelli/shared
 
 Shared TypeScript type definitions used by all other System2 packages. This package has no runtime dependencies: it exports only types.
 
 **Source:** `packages/shared/src/`
 **Build:** [tsup](https://tsup.egoist.dev/) -> `dist/index.js`
-**Import:** `import { ChatMessage, LlmConfig, ... } from '@system2/shared'`
+**Import:** `import { ChatMessage, LlmConfig, ... } from '@dscarabelli/shared'`
 
 ## Type Modules
 
