@@ -48,13 +48,18 @@ export function resolveProjectDir(
     return canonicalPath;
   }
 
-  // Scan for any existing {id}_* folders
+  // Scan for any existing {id}_* folders, collecting stats in one pass
   const prefix = `${projectId}_`;
-  let candidates: string[] = [];
+  type DirEntry = { name: string; mtimeMs: number };
+  const candidates: DirEntry[] = [];
   if (existsSync(projectsDir)) {
-    candidates = readdirSync(projectsDir).filter(
-      (entry) => entry.startsWith(prefix) && statSync(join(projectsDir, entry)).isDirectory()
-    );
+    for (const entry of readdirSync(projectsDir)) {
+      if (!entry.startsWith(prefix)) continue;
+      const stats = statSync(join(projectsDir, entry));
+      if (stats.isDirectory()) {
+        candidates.push({ name: entry, mtimeMs: stats.mtimeMs });
+      }
+    }
   }
 
   if (candidates.length === 0) {
@@ -64,9 +69,7 @@ export function resolveProjectDir(
   }
 
   // Pick the most recently modified folder
-  const target = candidates
-    .map((name) => ({ name, mtime: statSync(join(projectsDir, name)).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime)[0].name;
+  const target = candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)[0].name;
 
   const targetPath = join(projectsDir, target);
 

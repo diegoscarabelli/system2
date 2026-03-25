@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -44,7 +52,9 @@ describe('resolveProjectDir', () => {
     const newer = join(projectsDir, '1_second-name');
     mkdirSync(older);
     writeFileSync(join(older, 'old-file.txt'), 'old');
-    // Ensure different mtimes
+    // Force older mtime so ordering is deterministic
+    const past = new Date(Date.now() - 10_000);
+    utimesSync(older, past, past);
     mkdirSync(newer);
     writeFileSync(join(newer, 'new-file.txt'), 'new');
 
