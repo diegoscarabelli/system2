@@ -125,6 +125,7 @@ export class AgentHost {
   private isPruning = false;
   private contextWindow = 0;
   private contextOverflowHandled = false;
+  private unsubscribeSession: (() => void) | null = null;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -152,6 +153,13 @@ export class AgentHost {
    * Initialize the agent session (must be called before use)
    */
   async initialize(): Promise<void> {
+    // Detach from old session immediately, before any async work.
+    // Prevents stale events from being processed if createAgentSession() throws.
+    if (this.unsubscribeSession) {
+      this.unsubscribeSession();
+      this.unsubscribeSession = null;
+    }
+
     // Look up the agent record from the database
     const agentRecord = this.db.getAgent(this.agentId);
     if (!agentRecord) {
@@ -288,9 +296,11 @@ export class AgentHost {
     // Store context window size for overflow recovery
     this.contextWindow = model.contextWindow;
 
-    // Configure auto-compaction to fire at 90% of context window instead of default ~98%
+    // Configure auto-compaction to fire at 50% of context window instead of default ~98%.
+    // Earlier compaction reduces the chance of hitting per-model token quotas
+    // when multiple agents share the same API key.
     const settingsManager = SettingsManager.inMemory({
-      compaction: { reserveTokens: Math.floor(model.contextWindow * 0.1) },
+      compaction: { reserveTokens: Math.floor(model.contextWindow * 0.5) },
     });
 
     // Create resource loader with custom system prompt
@@ -335,7 +345,7 @@ export class AgentHost {
     }
 
     // Subscribe to session events and forward to listeners
-    session.subscribe((event) => {
+    this.unsubscribeSession = session.subscribe((event) => {
       this.handleSessionEvent(event);
     });
 
