@@ -153,6 +153,13 @@ export class AgentHost {
    * Initialize the agent session (must be called before use)
    */
   async initialize(): Promise<void> {
+    // Detach from old session immediately, before any async work.
+    // Prevents stale events from being processed if createAgentSession() throws.
+    if (this.unsubscribeSession) {
+      this.unsubscribeSession();
+      this.unsubscribeSession = null;
+    }
+
     // Look up the agent record from the database
     const agentRecord = this.db.getAgent(this.agentId);
     if (!agentRecord) {
@@ -335,12 +342,6 @@ export class AgentHost {
       console.log(
         `[AgentHost] Compaction pruning enabled: depth=${this.compactionDepth}, count=${this.compactionCount}`
       );
-    }
-
-    // Clean up old subscription before attaching to the new session
-    if (this.unsubscribeSession) {
-      this.unsubscribeSession();
-      this.unsubscribeSession = null;
     }
 
     // Subscribe to session events and forward to listeners
