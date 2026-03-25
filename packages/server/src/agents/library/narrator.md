@@ -91,10 +91,7 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
 
    Or run additional database queries for broader context.
 
-4. **Write the narrative section.** Check the "Current daily summary file content" in the message to determine whether the file already exists:
-
-   - **New file** (content is empty): Use `write` to create the file with frontmatter, heading, and your first section. Set `last_narrator_update_ts` to `new_run_ts` in the frontmatter. Include a `commit_message: "daily summary: YYYY-MM-DD HH:MM"`. No separate frontmatter update needed.
-   - **Existing file**: Use `edit` with `append: true` to add the new section (no `commit_message` yet). Then use `edit` (replace mode) to update `last_narrator_update_ts` in the frontmatter with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` so both changes are committed together. **Append first, then update the timestamp** (if the timestamp is updated first and the append fails, the cursor advances with no narrative).
+4. **Write the narrative section.** Use `edit` with `append: true` to add the new section (no `commit_message` yet). Then use `edit` (replace mode) to update `last_narrator_update_ts` in the frontmatter with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` so both changes are committed together. **Append first, then update the timestamp** (if the timestamp is updated first and the append fails, the cursor advances with no narrative).
 
    Section format:
 
