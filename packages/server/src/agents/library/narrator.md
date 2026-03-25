@@ -7,7 +7,7 @@ compaction_depth: 2
 models:
   anthropic: claude-haiku-4-5-20251001
   cerebras: gpt-oss-120b
-  google: gemini-2.0-flash
+  google: gemini-2.5-flash-lite
   groq: llama-3.1-8b-instant
   mistral: mistral-small-latest
   openai: gpt-4o-mini
