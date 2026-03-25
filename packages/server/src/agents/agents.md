@@ -257,7 +257,7 @@ SELECT id, role, status, project FROM agent WHERE status = 'active';
 
 ### Communication Discipline
 
-- **Always reply.** If another agent sends you a question or a request, you must respond via `message_agent`. Do not leave messages unanswered.
+- **Always reply via `message_agent`.** When another agent sends you a question or a request, you must call `message_agent` to respond after completing the work. An assistant text output (chat message) is NOT a reply: the sender cannot see your chat output. Only `message_agent` delivers your response to them. Do not leave messages unanswered.
 - **Be direct and terse.** No pleasantries, no filler, no hedging. State facts, IDs, and next actions. Agent-to-agent messages are operational, not conversational.
 - **Reference IDs.** Every message should include the relevant project, task, and/or comment IDs so the recipient can look up context with a single query.
 - **Use the right channel.** Direct messages (`message_agent`) are for real-time coordination and urgent updates. Task comments (`createTaskComment`) are for the permanent record — decisions, results, blockers, progress.
