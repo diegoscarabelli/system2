@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LlmConfig, LlmProvider, ServicesConfig, ToolsConfig } from '@dscarabelli/shared';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
@@ -31,6 +31,7 @@ import {
 import matter from 'gray-matter';
 import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
+import { resolveProjectDir } from '../projects/dir.js';
 import { AuthResolver } from './auth-resolver.js';
 import type { AgentRegistry } from './registry.js';
 import { calculateDelay, categorizeError, shouldFailover, shouldRetry, sleep } from './retry.js';
@@ -160,10 +161,9 @@ export class AgentHost {
     if (this.agentProject !== null) {
       const projectRecord = this.db.getProject(this.agentProject);
       if (projectRecord) {
-        this.agentProjectDirName = `${projectRecord.id}_${projectRecord.name
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-|-$/g, '')}`;
+        const projectsDir = join(SYSTEM2_DIR, 'projects');
+        const projectDir = resolveProjectDir(projectsDir, projectRecord.id, projectRecord.name);
+        this.agentProjectDirName = basename(projectDir);
       }
     }
     this.agentRole = agentRecord.role;
