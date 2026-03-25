@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
+import { resolveProjectDir } from '../../projects/dir.js';
 import {
   collectAgentActivity,
   collectProjectDbChanges,
@@ -107,12 +108,12 @@ export function createTriggerProjectStoryTool(
           };
         }
 
-        // Compute project slug and paths
-        const projectSlug = `${project.id}_${project.name
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-|-$/g, '')}`;
-        const projectDir = join(SYSTEM2_DIR, 'projects', projectSlug);
+        // Resolve project directory (handles renames)
+        const projectDir = resolveProjectDir(
+          join(SYSTEM2_DIR, 'projects'),
+          project.id,
+          project.name
+        );
         const logFile = join(projectDir, 'log.md');
 
         // Read timestamps

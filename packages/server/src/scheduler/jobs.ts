@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { basename, join } from 'node:path';
 import type { AgentHost } from '../agents/host.js';
 import type { DatabaseClient } from '../db/client.js';
+import { resolveProjectDir } from '../projects/dir.js';
 import { isNetworkAvailable } from './network.js';
 import type { Scheduler } from './scheduler.js';
 
@@ -493,17 +494,8 @@ export function buildAndDeliverDailySummary(
   const projectDataList: ProjectActivityData[] = [];
 
   for (const project of activeProjects) {
-    const projectSlug = `${project.id}_${project.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')}`;
-    const projectDir = join(system2Dir, 'projects', projectSlug);
+    const projectDir = resolveProjectDir(join(system2Dir, 'projects'), project.id, project.name);
     const logFile = join(projectDir, 'log.md');
-
-    // Ensure project directory exists
-    if (!existsSync(projectDir)) {
-      mkdirSync(projectDir, { recursive: true });
-    }
 
     // Create log file if needed
     if (!existsSync(logFile)) {
