@@ -176,8 +176,8 @@ describe('shouldRetry', () => {
 
   it('retries rate_limit up to maxRateLimitRetries', () => {
     expect(shouldRetry('rate_limit', 0)).toBe(true);
-    expect(shouldRetry('rate_limit', 2)).toBe(true);
-    expect(shouldRetry('rate_limit', 3)).toBe(false);
+    expect(shouldRetry('rate_limit', 6)).toBe(true);
+    expect(shouldRetry('rate_limit', 7)).toBe(false);
   });
 
   it('retries transient up to maxTransientRetries', () => {

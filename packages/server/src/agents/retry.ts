@@ -8,9 +8,9 @@
 export interface RetryConfig {
   /** Base delay in milliseconds (default: 1000) */
   baseDelay: number;
-  /** Maximum delay cap in milliseconds (default: 30000) */
+  /** Maximum delay cap in milliseconds (default: 90000) */
   maxDelay: number;
-  /** Maximum retries for rate limit errors (default: 3) */
+  /** Maximum retries for rate limit errors (default: 7) */
   maxRateLimitRetries: number;
   /** Maximum retries for transient errors like 503 (default: 2) */
   maxTransientRetries: number;
@@ -18,8 +18,8 @@ export interface RetryConfig {
 
 export const DEFAULT_RETRY_CONFIG: RetryConfig = {
   baseDelay: 1000,
-  maxDelay: 30000,
-  maxRateLimitRetries: 3,
+  maxDelay: 90000,
+  maxRateLimitRetries: 7,
   maxTransientRetries: 2,
 };
 

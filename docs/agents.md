@@ -160,18 +160,20 @@ When `AgentHost` detects an API error in a `message_end` event:
 
 Exponential backoff with jitter: `min(baseDelay * 2^attempt + jitter, maxDelay)`
 
+Rate limit retries are tuned so that cumulative wait exceeds 60s before failover. This ensures per-minute token quotas (e.g., Google's 1M input tokens/min) have time to reset without unnecessarily switching providers.
+
 | Parameter | Default |
 |-----------|---------|
 | Base delay | 1000ms |
-| Max delay | 30,000ms |
+| Max delay | 90,000ms |
 | Jitter | 0-25% of delay |
-| Max rate limit retries | 3 |
+| Max rate limit retries | 7 |
 | Max transient retries | 2 |
 
 | Error Category | Retry | Failover |
 |---------------|-------|----------|
 | `auth` (401/403) | Never | Immediate |
-| `rate_limit` (429) | Up to 3x | After retries exhausted |
+| `rate_limit` (429) | Up to 7x (~127s cumulative) | After retries exhausted |
 | `transient` (500/503/timeout) | Up to 2x | After retries exhausted |
 | `context_overflow` (400 with token limit message) | Never | Never (compact and recover) |
 | `client` (400) | Never | Never (surface error) |

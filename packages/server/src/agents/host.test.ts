@@ -709,8 +709,8 @@ describe('AgentHost', () => {
       internal.authResolver.getNextProvider = vi.fn().mockReturnValue('anthropic');
       internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
 
-      // 429 rate limit error: shouldRetry is false at attempt 3, triggers failover
-      internal.retryAttempts.set('google:rate_limit', 3);
+      // 429 rate limit error: shouldRetry is false at attempt 7, triggers failover
+      internal.retryAttempts.set('google:rate_limit', 7);
       await internal.handlePotentialError({
         type: 'message_end',
         message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
