@@ -51,15 +51,17 @@ The message contains pre-computed data: project ID and name, file path, timestam
 3. **Append narrative section:** Read the current file content, append a new timestamped section, and write the result back:
 
    ```text
-   ## YYYY-MM-DD HH:MM
+   ## YYYY-MM-DDTHH:MMZ
 
    <Concise but comprehensive synthesis of project work done in this period.
     If no meaningful activity occurred, write "No work done.">
    ```
 
+   Derive the heading timestamp from `new_run_ts` (already UTC).
+
    **Important:** You APPEND to the file. Read the current content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in log files. See **Frontmatter Rules** below for how to handle the frontmatter block.
 
-4. **Update frontmatter and write:** In the same write, update `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. Do not add a second frontmatter block. Use `write` with `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to persist and commit in one step.
+4. **Update frontmatter and write:** In the same write, update `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. Do not add a second frontmatter block. Use `write` with `commit_message: "project log: <project_name> YYYY-MM-DDTHH:MMZ"` to persist and commit in one step.
 
 **CRITICAL: you MUST update `last_narrator_update_ts` to `new_run_ts` in the frontmatter. If you skip this, the next scheduled job will re-collect the same time window, producing duplicate data that grows with every run. This is the mechanism that advances the cursor: no update means unbounded re-processing.**
 
@@ -91,7 +93,7 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
 4. **Append narrative section:** Read the current file content, append a new timestamped section structured by project and non-project activity:
 
    ```text
-   ## HH:MM
+   ## HH:MMZ
 
    ### Project: <project_name>
    <Synthesis of project-specific work. If no work done, write "No work done.">
@@ -100,9 +102,11 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
    <Synthesis of Guide/Narrator activity and standalone work. If no work done, write "No work done.">
    ```
 
+   Derive the heading timestamp from `new_run_ts` (already UTC).
+
    **Important:** You APPEND to the file. Read the current content, add your new timestamped section at the end, and write the full result back. Never rewrite, restructure, or remove existing content in summary files. See **Frontmatter Rules** below for how to handle the frontmatter block.
 
-5. **Update frontmatter and write:** In the same write, update `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. Do not add a second frontmatter block. Use `write` with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to persist and commit in one step.
+5. **Update frontmatter and write:** In the same write, update `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) inside the file's existing frontmatter block. Do not add a second frontmatter block. Use `write` with `commit_message: "daily summary: YYYY-MM-DDTHH:MMZ"` to persist and commit in one step.
 
 **CRITICAL: you MUST update `last_narrator_update_ts` to `new_run_ts` in the frontmatter. If you skip this, the next scheduled job will re-collect the same time window, producing duplicate data that grows with every run. This is the mechanism that advances the cursor: no update means unbounded re-processing.**
 
