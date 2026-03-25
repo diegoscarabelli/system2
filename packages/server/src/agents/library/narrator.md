@@ -62,11 +62,13 @@ The message contains pre-computed data: project ID and name, file path, timestam
 
    Derive the heading timestamp from `new_run_ts` (already UTC). Never rewrite, restructure, or remove existing content in log files.
 
-4. **Update frontmatter and commit:** Use `edit` (replace mode) to update `last_narrator_update_ts` in the frontmatter. Include `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` on this edit so both the appended narrative and the timestamp update are committed together.
+4. **Update frontmatter and commit:** Use `edit` with `regex: true` to update `last_narrator_update_ts` in the frontmatter. Include `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` on this edit so both the appended narrative and the timestamp update are committed together.
 
-   Construct the strings exactly:
-   - `old_string`: `last_narrator_update_ts: <last_run_ts>` (use the value from the message header verbatim)
-   - `new_string`: `last_narrator_update_ts: <new_run_ts>`
+   ```yaml
+   old_string: "last_narrator_update_ts: .*"
+   new_string: "last_narrator_update_ts: <new_run_ts>"
+   regex: true
+   ```
 
    **Ordering matters:** Always append first (step 3), then update the timestamp (step 4). If the timestamp is updated first and the append fails, the cursor advances with no narrative written, losing that window's data.
 
@@ -99,9 +101,13 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
 
 4. **Write the narrative section.** Use `edit` with `append: true` to add the new section (no `commit_message` yet). Then use `edit` (replace mode) to update `last_narrator_update_ts` in the frontmatter with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` so both changes are committed together. **Append first, then update the timestamp** (if the timestamp is updated first and the append fails, the cursor advances with no narrative).
 
-   Construct the strings exactly:
-   - `old_string`: `last_narrator_update_ts: <last_run_ts>` (use the value from the message header verbatim)
-   - `new_string`: `last_narrator_update_ts: <new_run_ts>`
+   Use `regex: true` for the replace:
+
+   ```yaml
+   old_string: "last_narrator_update_ts: .*"
+   new_string: "last_narrator_update_ts: <new_run_ts>"
+   regex: true
+   ```
 
    Section format:
 
@@ -183,7 +189,7 @@ Use the `write` or `edit` tools for all file operations in `~/.system2/`. To ver
 **For append-only files (daily summaries, project logs):**
 
 1. `edit` with `append: true` to add your new section at the end of the file (no `commit_message` yet)
-2. `edit` (replace mode) to update `last_narrator_update_ts` in the frontmatter, with `commit_message` so both changes are committed together. Use `old_string: last_narrator_update_ts: <last_run_ts>` and `new_string: last_narrator_update_ts: <new_run_ts>` (exact values from the message header).
+2. `edit` with `regex: true` to update `last_narrator_update_ts` in the frontmatter (`old_string: "last_narrator_update_ts: .*"`, `new_string: "last_narrator_update_ts: <new_run_ts>"`), with `commit_message` so both changes are committed together.
 
 This is preferred over read + write because append cannot accidentally lose existing content.
 
