@@ -50,7 +50,7 @@ The message contains pre-computed data: project ID and name, file path, timestam
 
 2. **Review provided data:** Read through Agent Activity (all agents involved, including Guide whose activity may span multiple projects; focus on what's relevant to this project) and Database Changes (project-scoped records).
 
-3. **Append narrative section:** Use `edit` with `append: true` to add a new timestamped section at the end of the file. Include a `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"`.
+3. **Append narrative section:** Use `edit` with `append: true` to add a new timestamped section at the end of the file. Do not include a `commit_message` yet.
 
    ```text
    ## YYYY-MM-DDTHH:MMZ
@@ -60,7 +60,7 @@ The message contains pre-computed data: project ID and name, file path, timestam
 
    Derive the heading timestamp from `new_run_ts` (already UTC). Never rewrite, restructure, or remove existing content in log files.
 
-4. **Update frontmatter:** Use `edit` (replace mode) to update `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) in the frontmatter.
+4. **Update frontmatter and commit:** Use `edit` (replace mode) to update `last_narrator_update_ts` to `new_run_ts` (UTC ISO 8601 format, e.g. `2026-03-13T16:00:00.002Z`) in the frontmatter. Include `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` on this edit so both the appended narrative and the timestamp update are committed together.
 
    **Ordering matters:** Always append first (step 3), then update the timestamp (step 4). If the timestamp is updated first and the append fails, the cursor advances with no narrative written, losing that window's data.
 
@@ -94,7 +94,7 @@ Your job is to synthesize each section into a concise but comprehensive narrativ
 4. **Write the narrative section.** Check the "Current daily summary file content" in the message to determine whether the file already exists:
 
    - **New file** (content is empty): Use `write` to create the file with frontmatter, heading, and your first section. Set `last_narrator_update_ts` to `new_run_ts` in the frontmatter. Include a `commit_message: "daily summary: YYYY-MM-DD HH:MM"`. No separate frontmatter update needed.
-   - **Existing file**: Use `edit` with `append: true` to add the new section. Then use `edit` (replace mode) to update `last_narrator_update_ts` in the frontmatter. **Append first, then update the timestamp** (if the timestamp is updated first and the append fails, the cursor advances with no narrative).
+   - **Existing file**: Use `edit` with `append: true` to add the new section (no `commit_message` yet). Then use `edit` (replace mode) to update `last_narrator_update_ts` in the frontmatter with `commit_message: "daily summary: YYYY-MM-DD HH:MM"` so both changes are committed together. **Append first, then update the timestamp** (if the timestamp is updated first and the append fails, the cursor advances with no narrative).
 
    Section format:
 
@@ -175,8 +175,8 @@ Use the `write` or `edit` tools for all file operations in `~/.system2/`. To ver
 
 **For append-only files (daily summaries, project logs):**
 
-1. `edit` with `append: true` to add your new section at the end of the file (with `commit_message`)
-2. `edit` (replace mode) to update `last_narrator_update_ts` in the frontmatter
+1. `edit` with `append: true` to add your new section at the end of the file (no `commit_message` yet)
+2. `edit` (replace mode) to update `last_narrator_update_ts` in the frontmatter, with `commit_message` so both changes are committed together
 
 This is preferred over read + write because append cannot accidentally lose existing content.
 
