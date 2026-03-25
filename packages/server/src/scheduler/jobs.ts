@@ -501,7 +501,7 @@ export function buildAndDeliverDailySummary(
     if (!existsSync(logFile)) {
       writeFileSync(
         logFile,
-        `---\nlast_narrator_update_ts:\nproject_id: ${project.id}\nproject_name: ${project.name}\n---\n# Project Log — ${project.name}\n`,
+        `---\nlast_narrator_update_ts:\nproject_id: ${project.id}\nproject_name: ${project.name}\n---\n`,
         'utf-8'
       );
     }
