@@ -132,13 +132,19 @@ A simple `Map<number, AgentHost>` that maps agent database IDs to active AgentHo
 
 ## AuthResolver (`auth-resolver.ts`)
 
-Manages API key rotation and multi-provider failover. Providers and API keys are defined in [Configuration](configuration.md):
+Manages API key rotation and multi-provider failover. Providers and API keys are defined in [Configuration](configuration.md).
+
+**Shared state, per-agent provider choice:** one `AuthResolver` instance lives in `server.ts` and is shared by all `AgentHost`s. Key cooldown state is global: if Agent A puts a key in cooldown, Agent B sees it too. But each agent tracks its own `currentProvider` independently and only consults the resolver at failover time or reinitialization. There is no push mechanism: agents discover key failures when they hit errors themselves.
 
 ### Key Rotation
 
-Each provider can have multiple labeled API keys. Keys are tried in order. When a key fails:
-- **Auth errors (401/403):** Key is permanently marked failed
-- **Rate limits / transient errors:** Key enters 5-minute cooldown, then becomes available again
+Each provider can have multiple labeled API keys. Keys are tried in order. When a key fails, it enters cooldown:
+- **Rate limits (429):** 90-second cooldown (covers per-minute quota reset windows)
+- **All other errors (400, 401, 403, 5xx, timeout):** 5-minute cooldown (user needs time to take corrective action)
+
+All failures use cooldown (no permanent failures). The system auto-recovers after the cooldown expires, so if the user fixes the issue (adds credits, rotates a key, adjusts permissions), the key becomes available again without a restart.
+
+Cooldowns are set once: if a key is already in cooldown, subsequent failures skip the set to avoid extending the lockout when multiple agents hit the same key at staggered times.
 
 ### Failover Order
 
@@ -152,9 +158,11 @@ When `AgentHost` detects an API error in a `message_end` event:
 
 1. Categorize the error (see [retry.ts](#retry-logic))
 2. If retriable: wait with exponential backoff, retry with same provider
-3. If retries exhausted: mark key failed, failover to next provider
+3. If retries exhausted or immediate failover: mark key in cooldown, failover to next provider
 4. Reinitialize the session with the new provider (`reinitializeWithProvider()`)
 5. Retry the pending prompt
+
+Error details (status code and category) are shown in agent chat messages so the user can diagnose issues. Key rotation within a provider: "429 rate_limit on google, rotating to next key". Provider switch: "429 rate_limit on google, switching to anthropic".
 
 ### Retry Logic (`retry.ts`)
 
@@ -176,7 +184,7 @@ Rate limit retries are tuned so that cumulative wait exceeds 60s before failover
 | `rate_limit` (429) | Up to 7x (~127s cumulative) | After retries exhausted |
 | `transient` (500/503/timeout) | Up to 2x | After retries exhausted |
 | `context_overflow` (400 with token limit message) | Never | Never (compact and recover) |
-| `client` (400) | Never | Never (surface error) |
+| `client` (400) | Never | Immediate |
 
 **Context overflow detection:** `categorizeError()` in `retry.ts` checks the error message _before_ status code classification, so a 400 error that matches a context overflow pattern is categorized as `context_overflow` rather than `client`. Detection uses provider-specific regex patterns:
 
@@ -196,6 +204,8 @@ These patterns are intentionally narrow to avoid false positives on rate-limit e
 The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. If no split point below 90% is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
 
 Auto-compaction is also configured to fire earlier (at 90% of the context window instead of the SDK default of ~98%) to reduce the chance of overflow in the first place.
+
+**Last-resort provider recovery:** after all normal recovery paths (retry, failover, context overflow) are exhausted, `handlePotentialError` checks if a different provider is available before giving up. This covers cases where an agent is stuck on a dead fallback provider (e.g., Anthropic with $0 credits returning 400 `client` errors) while the primary provider's cooldown has expired. `getNextProvider()` iterates in provider order (primary first), so agents naturally gravitate back to the primary when it becomes available.
 
 ## Session Persistence
 

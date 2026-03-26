@@ -14,8 +14,14 @@
 import type { LlmConfig, LlmKey, LlmProvider } from '@dscarabelli/shared';
 import { AuthStorage } from '@mariozechner/pi-coding-agent';
 
-/** Default cooldown period: 5 minutes */
+/** Default cooldown durations */
+const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 90 * 1000;
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
+
+export interface CooldownConfig {
+  rateLimitMs: number;
+  defaultMs: number;
+}
 
 export interface ActiveKey {
   provider: LlmProvider;
@@ -38,13 +44,15 @@ interface KeyCooldown {
 export class AuthResolver {
   private config: LlmConfig;
   private activeKeys: Map<LlmProvider, number> = new Map();
-  private failedKeys: Set<string> = new Set();
   private cooldowns: Map<string, KeyCooldown> = new Map();
-  private cooldownMs: number;
+  private cooldownConfig: CooldownConfig;
 
-  constructor(llmConfig: LlmConfig, cooldownMs: number = DEFAULT_COOLDOWN_MS) {
+  constructor(llmConfig: LlmConfig, cooldownConfig?: Partial<CooldownConfig>) {
     this.config = this.validateConfig(llmConfig);
-    this.cooldownMs = cooldownMs;
+    this.cooldownConfig = {
+      rateLimitMs: cooldownConfig?.rateLimitMs ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS,
+      defaultMs: cooldownConfig?.defaultMs ?? DEFAULT_COOLDOWN_MS,
+    };
 
     // Initialize active key index to 0 for each provider with keys
     for (const provider of Object.keys(this.config.providers) as LlmProvider[]) {
@@ -65,24 +73,18 @@ export class AuthResolver {
   }
 
   /**
-   * Check if a key is currently unavailable (failed or in cooldown).
+   * Check if a key is currently unavailable (in cooldown).
    */
   private isKeyUnavailable(keyId: string): boolean {
-    // Permanently failed (auth error)
-    if (this.failedKeys.has(keyId)) return true;
-
-    // Check cooldown
     const cooldown = this.cooldowns.get(keyId);
     if (cooldown) {
       if (Date.now() >= cooldown.expiresAt) {
-        // Cooldown expired, remove it
         this.cooldowns.delete(keyId);
         console.log(`[AuthResolver] Cooldown expired for ${keyId}, key available again`);
         return false;
       }
       return true;
     }
-
     return false;
   }
 
@@ -157,33 +159,36 @@ export class AuthResolver {
 
   /**
    * Mark the current key for a provider as failed.
+   * All failures use cooldown so the system recovers if the user fixes the issue.
    *
    * @param provider - The provider whose key failed
-   * @param reason - Why it failed: 'auth' = permanent, others = cooldown
+   * @param reason - Why it failed (determines cooldown duration for rate_limit)
+   * @param errorMessage - Original API error message for logging
    * @returns true if there's a fallback available (next key or next provider)
    */
   markKeyFailed(
     provider: LlmProvider,
-    reason: 'auth' | 'rate_limit' | 'transient' = 'transient'
+    reason: 'auth' | 'rate_limit' | 'transient' = 'transient',
+    errorMessage?: string
   ): boolean {
     const currentIndex = this.activeKeys.get(provider) ?? 0;
     const keyId = `${provider}:${currentIndex}`;
 
-    if (reason === 'auth') {
-      // Auth errors are permanent - key is invalid/revoked
-      this.failedKeys.add(keyId);
-      console.log(`[AuthResolver] Key permanently failed (auth error): ${keyId}`);
-    } else {
-      // Rate limits and transient errors go into cooldown
+    if (!this.cooldowns.has(keyId)) {
       const now = Date.now();
+      const duration =
+        reason === 'rate_limit' ? this.cooldownConfig.rateLimitMs : this.cooldownConfig.defaultMs;
       this.cooldowns.set(keyId, {
         startTime: now,
-        expiresAt: now + this.cooldownMs,
+        expiresAt: now + duration,
         reason,
       });
+      const detail = errorMessage ? `: ${errorMessage}` : '';
       console.log(
-        `[AuthResolver] Key in cooldown (${reason}): ${keyId}, expires in ${this.cooldownMs / 1000}s`
+        `[AuthResolver] Key in cooldown: ${keyId}, expires in ${duration / 1000}s${detail}`
       );
+    } else {
+      console.log(`[AuthResolver] Key ${keyId} already in cooldown, skipping`);
     }
 
     // Try to find next valid key for this provider
@@ -223,10 +228,9 @@ export class AuthResolver {
   }
 
   /**
-   * Reset all failed keys and cooldowns.
+   * Reset all cooldowns.
    */
   resetFailures(): void {
-    this.failedKeys.clear();
     this.cooldowns.clear();
     // Reset to first key for each provider
     for (const provider of Object.keys(this.config.providers) as LlmProvider[]) {
@@ -279,7 +283,6 @@ export class AuthResolver {
   getStatus(): {
     primary: LlmProvider;
     activeProvider: LlmProvider | undefined;
-    failedKeys: string[];
     cooldowns: { keyId: string; reason: string; expiresIn: number }[];
   } {
     // Clear expired cooldowns first
@@ -294,7 +297,6 @@ export class AuthResolver {
     return {
       primary: this.config.primary,
       activeProvider: this.getNextProvider(),
-      failedKeys: Array.from(this.failedKeys),
       cooldowns: cooldownInfo,
     };
   }

@@ -34,7 +34,14 @@ import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js';
 import { AuthResolver } from './auth-resolver.js';
 import type { AgentRegistry } from './registry.js';
-import { calculateDelay, categorizeError, shouldFailover, shouldRetry, sleep } from './retry.js';
+import {
+  calculateDelay,
+  categorizeError,
+  extractStatusCode,
+  shouldFailover,
+  shouldRetry,
+  sleep,
+} from './retry.js';
 import { parseSessionEntries, rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
 import { createEditTool } from './tools/edit.js';
@@ -409,8 +416,10 @@ export class AgentHost {
     const errorMessage = message.errorMessage;
     console.log('[AgentHost] API error detected:', errorMessage);
 
-    // Categorize the error
+    // Categorize the error and extract status code for user-facing messages
     const category = categorizeError({ message: errorMessage });
+    const statusCode = extractStatusCode({ message: errorMessage });
+    const errorPrefix = statusCode ? `${statusCode} ${category}` : category;
     console.log('[AgentHost] Error category:', category);
 
     // Get retry key for this error type
@@ -428,7 +437,7 @@ export class AgentHost {
           `[AgentHost] Provider ${this.currentProvider} already in cooldown, failing over to ${nextProvider}`
         );
         this.pushSystemMessage(
-          `${this.currentProvider} in cooldown (another agent hit rate limit), switching to ${nextProvider}`
+          `${errorPrefix} on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}`
         );
         await this.reinitializeWithProvider(nextProvider, promptToRetry);
         return;
@@ -467,22 +476,35 @@ export class AgentHost {
         category === 'auth' ? 'auth' : category === 'rate_limit' ? 'rate_limit' : 'transient';
 
       // Mark current key as failed
-      const hasMore = this.authResolver.markKeyFailed(this.currentProvider, failureReason);
+      const hasMore = this.authResolver.markKeyFailed(
+        this.currentProvider,
+        failureReason,
+        errorMessage
+      );
 
       if (hasMore) {
         // Get next available provider
         const nextProvider = this.authResolver.getNextProvider();
         if (nextProvider) {
-          console.log(`[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`);
-          this.pushSystemMessage(
-            `${category === 'rate_limit' ? 'Rate limit' : 'API error'} on ${this.currentProvider}, switching to ${nextProvider}`
-          );
+          if (nextProvider === this.currentProvider) {
+            console.log(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
+            this.pushSystemMessage(
+              `${errorPrefix} on ${this.currentProvider}, rotating to next key`
+            );
+          } else {
+            console.log(`[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`);
+            this.pushSystemMessage(
+              `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`
+            );
+          }
           await this.reinitializeWithProvider(nextProvider, promptToRetry);
           return;
         }
       }
 
-      this.pushSystemMessage('All providers unavailable, error will surface in chat');
+      this.pushSystemMessage(
+        `${errorPrefix} on ${this.currentProvider}, all providers unavailable`
+      );
       console.log('[AgentHost] No fallback providers available, error will be surfaced to user');
     }
 
@@ -501,6 +523,20 @@ export class AgentHost {
       }
       // Recovery was a no-op — reset guard so a future overflow can try again
       this.contextOverflowHandled = false;
+    }
+
+    // Last resort: if a different provider is available (e.g., primary came out of cooldown),
+    // switch to it. This covers cases like being stuck on a dead fallback provider.
+    const nextProvider = this.authResolver.getNextProvider();
+    if (nextProvider && nextProvider !== this.currentProvider) {
+      console.log(
+        `[AgentHost] Recovery: switching from ${this.currentProvider} to ${nextProvider}`
+      );
+      this.pushSystemMessage(
+        `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`
+      );
+      await this.reinitializeWithProvider(nextProvider, promptToRetry);
+      return;
     }
 
     // All recovery paths exhausted; ensure busy is cleared
