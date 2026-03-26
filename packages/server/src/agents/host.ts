@@ -43,6 +43,11 @@ import {
   shouldRetry,
   sleep,
 } from './retry.js';
+import {
+  findMostRecentSession,
+  parseSessionEntries,
+  rotateSessionIfNeeded,
+} from './session-rotation.js';
 
 /** Human-readable label for error categories shown in chat messages. */
 function categoryLabel(category: ErrorCategory): string {
@@ -61,8 +66,6 @@ function categoryLabel(category: ErrorCategory): string {
       return 'error';
   }
 }
-
-import { parseSessionEntries, rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
 import { createEditTool } from './tools/edit.js';
 import { createMessageAgentTool } from './tools/message-agent.js';
@@ -228,10 +231,15 @@ export class AgentHost {
       );
     }
 
-    // Rotate session file if it exceeds size threshold (10MB)
-    const rotated = rotateSessionIfNeeded(agentSessionDir, SYSTEM2_DIR);
-    if (rotated) {
-      console.log('[AgentHost] Session file rotated to new file');
+    // Rotate session file only on cold start. During re-initialization (failover),
+    // the outgoing SDK session still holds a reference to the active JSONL file;
+    // renaming it would cause the SDK to recreate the file without a header on
+    // the next append — exactly the hazard rotation is meant to prevent.
+    if (!this.session) {
+      const rotated = rotateSessionIfNeeded(agentSessionDir, SYSTEM2_DIR);
+      if (rotated) {
+        console.log('[AgentHost] Session file rotated to new file');
+      }
     }
 
     // Load shared agent reference (prepended to all agent system prompts)
@@ -349,11 +357,19 @@ export class AgentHost {
     });
     await this.resourceLoader.reload();
 
-    // Create session with JSONL persistence - use continueRecent to persist across restarts
+    // Create session with JSONL persistence.
+    // Use open() on the most recent .jsonl (by mtime) if one exists — this tolerates
+    // files that lack a valid session header, which continueRecent() would reject and
+    // silently replace with a new empty session. Fall back to continueRecent() only
+    // when no .jsonl file exists at all (first-time setup).
+    const latestSession = findMostRecentSession(agentSessionDir);
+    const sessionManager = latestSession
+      ? SessionManager.open(latestSession, agentSessionDir)
+      : SessionManager.continueRecent(SYSTEM2_DIR, agentSessionDir);
     const { session } = await createAgentSession({
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
-      sessionManager: SessionManager.continueRecent(SYSTEM2_DIR, agentSessionDir),
+      sessionManager,
       authStorage: this.authResolver.createAuthStorage(),
       modelRegistry: this.modelRegistry,
       resourceLoader: this.resourceLoader,
@@ -854,11 +870,6 @@ export class AgentHost {
         content: cacheContent,
         timestamp: details.timestamp,
       });
-    }
-
-    // Rotate session file if needed (catches growth between server restarts)
-    if (this._sessionDir) {
-      rotateSessionIfNeeded(this._sessionDir, SYSTEM2_DIR);
     }
 
     // Reload resource loader to pick up knowledge file changes, then deliver.

@@ -18,7 +18,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 | **Conductor** | Orchestrates and executes work within a project: breaks it into tasks, spawns specialist agents or executes directly, and coordinates with the Reviewer before reporting completion. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
 | **Reviewer** | Critically assesses work before it is considered complete. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
 
-**Guide and Narrator** are singletons created at server startup. Their sessions persist indefinitely across restarts (via `SessionManager.continueRecent()`).
+**Guide and Narrator** are singletons created at server startup. Their sessions persist indefinitely across restarts.
 
 **Conductor and Reviewer** are project-scoped, spawned by Guide for every project and archived when done. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project. On server restart, all non-archived project-scoped agents are restored automatically. If an agent fails to restore, its status remains `active` in the database, the error is logged, and the Guide is notified so it can investigate.
 
@@ -213,9 +213,10 @@ Agent sessions are persisted as JSONL files in `~/.system2/sessions/{role}_{id}/
 - **Session format:** tree structure with `id` and `parentId` for in-place branching
 - **Auto-compaction:** when context approaches model limits, older messages are summarized
 - **Compaction pruning:** long-running agents can set `compaction_depth: N` in their frontmatter. After N auto-compactions, a manual "pruning" compaction runs at 30% context usage. It uses the Nth oldest compaction summary as a baseline to shed stale information, creating a sliding window instead of an ever-growing chain. The compaction counter is persisted to `.compaction-count` in the session directory so it survives restarts.
-- **Session continuation:** `SessionManager.continueRecent()` picks up the latest session on restart
 
-**Session rotation** (`session-rotation.ts`): when a JSONL file exceeds 10MB, a new file is created carrying over the compacted history. The old file is archived. Rotation is checked both at initialization and before each `deliverMessage()` call, so long-running singleton agents (Guide, Narrator) don't grow unbounded between server restarts.
+**Session continuation** (`initialize()`): at startup, system2 finds the newest `.jsonl` file by mtime (`findMostRecentSession()`) and opens it directly via `SessionManager.open()`. This tolerates files that lack a valid session header, which `SessionManager.continueRecent()` would reject and silently replace with a fresh empty session. `continueRecent()` is used only when no `.jsonl` file exists yet (first-time setup).
+
+**Session rotation** (`session-rotation.ts`): when a JSONL file exceeds 10MB at initialization, a new file is created carrying over the compacted history. The old file is renamed to `.jsonl.archived` so it is no longer picked up as a continuation candidate. Rotation only runs on cold start (when no prior session exists in memory), before a `SessionManager` is created. It is skipped during failover re-initialization because the outgoing SDK session still holds an open reference to the file and would recreate it without a header on the next append.
 
 See the [pi-coding-agent session format docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md) for details.
 
