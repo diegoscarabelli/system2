@@ -32,6 +32,7 @@ import matter from 'gray-matter';
 import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js';
+import type { ReminderManager } from '../reminders/manager.js';
 import { AuthResolver } from './auth-resolver.js';
 import type { AgentRegistry } from './registry.js';
 import {
@@ -44,11 +45,14 @@ import {
 } from './retry.js';
 import { parseSessionEntries, rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
+import { createCancelReminderTool } from './tools/cancel-reminder.js';
 import { createEditTool } from './tools/edit.js';
+import { createListRemindersTool } from './tools/list-reminders.js';
 import { createMessageAgentTool } from './tools/message-agent.js';
 import { createReadTool } from './tools/read.js';
 import { createReadSystem2DbTool } from './tools/read-system2-db.js';
 import { type AgentResurrector, createResurrectAgentTool } from './tools/resurrect-agent.js';
+import { createSetReminderTool } from './tools/set-reminder.js';
 import { createShowArtifactTool } from './tools/show-artifact.js';
 import { type AgentSpawner, createSpawnAgentTool } from './tools/spawn-agent.js';
 import { createTerminateAgentTool } from './tools/terminate-agent.js';
@@ -100,6 +104,7 @@ export interface AgentHostConfig {
   chatMaxMessages?: number;
   /** Shared AuthResolver for cross-agent rate limit awareness. Falls back to creating a local instance. */
   authResolver?: AuthResolver;
+  reminderManager?: ReminderManager;
 }
 
 export class AgentHost {
@@ -132,6 +137,7 @@ export class AgentHost {
   private isPruning = false;
   private contextWindow = 0;
   private contextOverflowHandled = false;
+  private reminderManager?: ReminderManager;
   private unsubscribeSession: (() => void) | null = null;
 
   constructor(config: AgentHostConfig) {
@@ -143,6 +149,7 @@ export class AgentHost {
     this.spawner = config.spawner;
     this.resurrector = config.resurrector;
     this.chatMaxMessages = config.chatMaxMessages ?? 1000;
+    this.reminderManager = config.reminderManager;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -702,6 +709,13 @@ export class AgentHost {
 
     // All agents can show artifacts — any agent can now interact with the user directly
     tools.push(createShowArtifactTool(this.db));
+
+    // All agents can set, cancel, and list reminders
+    if (this.reminderManager) {
+      tools.push(createSetReminderTool(this.agentId, this.reminderManager));
+      tools.push(createCancelReminderTool(this.agentId, this.reminderManager));
+      tools.push(createListRemindersTool(this.agentId, this.reminderManager));
+    }
 
     // Guide and Conductor only: spawn, manage, and resurrect agents
     const canOrchestrate = this.agentRole !== null && ORCHESTRATOR_ROLES.has(this.agentRole);

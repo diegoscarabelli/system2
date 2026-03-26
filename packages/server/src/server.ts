@@ -32,6 +32,7 @@ import { ConversationSummarizer } from './chat/summarizer.js';
 import { DatabaseClient } from './db/client.js';
 import { initializeGitRepo } from './knowledge/git.js';
 import { initializeKnowledge } from './knowledge/init.js';
+import { ReminderManager } from './reminders/manager.js';
 import {
   buildAndDeliverDailySummary,
   buildAndDeliverMemoryUpdate,
@@ -73,6 +74,7 @@ export class Server {
   private guideAgentId: number;
   private conversationSummarizer?: ConversationSummarizer;
   private authResolver: AuthResolver;
+  private reminderManager: ReminderManager;
 
   constructor(config: ServerConfig) {
     this.config = config;
@@ -90,6 +92,9 @@ export class Server {
     // Shared AuthResolver: all agents see the same cooldown/failover state
     this.authResolver = new AuthResolver(config.llmConfig);
 
+    // Shared ReminderManager: all agents schedule reminders through the same instance
+    this.reminderManager = new ReminderManager(this.agentRegistry);
+
     // Initialize Guide agent (singleton) — receives the spawner so it can create Conductors/Reviewers
     const chatMaxMessages = config.chatConfig?.max_history_messages ?? 1000;
 
@@ -106,6 +111,7 @@ export class Server {
       resurrector: this.makeResurrector(),
       chatMaxMessages,
       authResolver: this.authResolver,
+      reminderManager: this.reminderManager,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
 
@@ -121,6 +127,7 @@ export class Server {
       toolsConfig: config.toolsConfig,
       chatMaxMessages,
       authResolver: this.authResolver,
+      reminderManager: this.reminderManager,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
 
@@ -333,6 +340,7 @@ export class Server {
       resurrector: this.makeResurrector(),
       chatMaxMessages,
       authResolver: this.authResolver,
+      reminderManager: this.reminderManager,
     });
 
     // Subscribe for chat cache capture before initialize() so no events are missed
@@ -755,7 +763,8 @@ export class Server {
     // Clean up conversation summarizer
     this.conversationSummarizer?.cleanup();
 
-    // Stop scheduled jobs first
+    // Stop reminder timers and scheduled jobs
+    this.reminderManager.stop();
     this.scheduler.stop();
 
     // Initiate clean WebSocket close handshake with all clients
