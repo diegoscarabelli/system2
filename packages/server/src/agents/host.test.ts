@@ -650,9 +650,7 @@ describe('AgentHost', () => {
       );
 
       const pushed = internal._chatCache.push.mock.calls[0][0];
-      expect(pushed.content).toBe(
-        'Scheduled task: project-log #3 (US Employment Rate Analysis)'
-      );
+      expect(pushed.content).toBe('Scheduled task: project-log #3 (US Employment Rate Analysis)');
     });
 
     it('falls back to plain project-log label when metadata is missing', () => {
