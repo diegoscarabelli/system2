@@ -160,8 +160,11 @@ export function createEditTool() {
             };
           }
 
-          const matches = content.match(pattern);
-          const count = matches ? matches.length : 0;
+          let count = 0;
+          for (const _match of content.matchAll(pattern)) {
+            count++;
+            if (count > 1) break;
+          }
 
           if (count === 0) {
             return {
