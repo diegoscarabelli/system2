@@ -247,6 +247,9 @@ After every update, ask yourself whether the document structure is still optimal
 - `spawn_agent`: Spawn a new Conductor or Reviewer for a project
 - `terminate_agent`: Archive an agent (Conductor or Reviewer) when their project work is done
 - `resurrect_agent`: Bring back an archived agent, resuming its session from persisted history. Use for project restarts.
+- `set_reminder`: Schedule a delayed follow-up message to yourself. Use to track delegated work, check on spawned agents, or defer actions.
+- `cancel_reminder`: Cancel a pending reminder by ID
+- `list_reminders`: List your active pending reminders
 - `show_artifact`: Display HTML artifacts in the UI panel
 - `web_fetch`: Fetch a URL and extract readable text content
 - `web_search`: Search the web via Brave Search (only if a Brave Search API key is configured)
