@@ -626,6 +626,63 @@ describe('AgentHost', () => {
       expect(pushed.content).toBe('Task: project-story');
     });
 
+    it('includes project ID and name in project-log chat label', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      host.deliverMessage(
+        '[Scheduled task: project-log]\n\nproject_id: 3\nproject_name: US Employment Rate Analysis\n\n## Activity\nsome log content',
+        { sender: 0, receiver: 2, timestamp: 1_700_000_000_000 }
+      );
+
+      const pushed = internal._chatCache.push.mock.calls[0][0];
+      expect(pushed.content).toBe(
+        'Scheduled task: project-log #3 (US Employment Rate Analysis)'
+      );
+    });
+
+    it('falls back to plain project-log label when metadata is missing', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      host.deliverMessage('[Scheduled task: project-log]\n\n## Activity\nno metadata here', {
+        sender: 0,
+        receiver: 2,
+        timestamp: 1_700_000_000_000,
+      });
+
+      const pushed = internal._chatCache.push.mock.calls[0][0];
+      expect(pushed.content).toBe('Scheduled task: project-log');
+    });
+
     it('truncates untagged content to 100 characters', () => {
       const host = new AgentHost({
         db: makeDbStub(),

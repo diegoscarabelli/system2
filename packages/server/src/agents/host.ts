@@ -756,8 +756,11 @@ export class AgentHost {
 
         if (tag.startsWith('Scheduled task:') || tag.startsWith('Task:')) {
           if (tag === 'Scheduled task: project-log') {
-            const pidMatch = body.match(/^project_id:\s*(\d+)/m);
-            const pnameMatch = body.match(/^project_name:\s*(.+)/m);
+            const firstBlankLine = body.search(/\n\s*\n/);
+            const metadata =
+              firstBlankLine === -1 ? body.slice(0, 4096) : body.slice(0, firstBlankLine);
+            const pidMatch = metadata.match(/^project_id:\s*(\d+)/m);
+            const pnameMatch = metadata.match(/^project_name:\s*(.+)/m);
             const pid = pidMatch?.[1];
             const pname = pnameMatch?.[1]?.trim();
             cacheContent = pid && pname ? `${tag} #${pid} (${pname})` : tag;
