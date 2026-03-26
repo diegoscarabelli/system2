@@ -599,6 +599,12 @@ export class AgentHost {
       this.currentProvider = provider;
       this.currentKeyIndex = this.authResolver.getActiveKey(provider)?.keyIndex ?? 0;
 
+      // Push chat message before init so the user sees the reason even if
+      // initialization fails. Only for actual failovers, not compaction recovery.
+      if (reason) {
+        this.pushSystemMessage(reason);
+      }
+
       // Recreate model registry with updated auth
       const authStorage = this.authResolver.createAuthStorage();
       this.modelRegistry = new ModelRegistry(authStorage);
@@ -609,9 +615,9 @@ export class AgentHost {
       // Clear retry attempts on successful reinit
       this.retryAttempts.clear();
 
-      // Notify UI of provider/key change (only for actual failovers, not compaction recovery)
+      // Notify UI of provider change (after init succeeds, so the provider
+      // indicator only updates when the switch actually worked)
       if (reason) {
-        this.pushSystemMessage(reason);
         const failoverEvent: AgentSessionEvent = {
           type: 'status' as AgentSessionEvent['type'],
           provider,
@@ -631,6 +637,10 @@ export class AgentHost {
       }
     } catch (error) {
       console.error('[AgentHost] Failed to reinitialize:', error);
+      if (reason) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.pushSystemMessage(`Failed to switch: ${msg}`);
+      }
     } finally {
       this.isReinitializing = false;
     }

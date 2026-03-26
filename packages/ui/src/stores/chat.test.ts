@@ -191,6 +191,40 @@ describe('useChatStore', () => {
     });
   });
 
+  describe('addSystemMessage', () => {
+    it('routes to specified agentId instead of activeAgentId', () => {
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().loadHistory([], 2);
+      useChatStore.setState({ activeAgentId: 1 });
+
+      // System message targets agent 2 (background agent failover)
+      useChatStore
+        .getState()
+        .addSystemMessage('429 rate_limit on google, switching to anthropic', 2);
+
+      // Agent 2 should have the message
+      const state2 = useChatStore.getState().agentStates.get(2);
+      expect(state2?.messages).toHaveLength(1);
+      expect(state2?.messages[0].role).toBe('system');
+      expect(state2?.messages[0].content).toContain('rate_limit');
+
+      // Agent 1 (active) should not
+      const state1 = useChatStore.getState().agentStates.get(1);
+      expect(state1?.messages).toHaveLength(0);
+    });
+
+    it('defaults to activeAgentId when agentId is omitted', () => {
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.setState({ activeAgentId: 1 });
+
+      useChatStore.getState().addSystemMessage('something happened');
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].role).toBe('system');
+    });
+  });
+
   describe('provider (per-agent state)', () => {
     it('setProvider updates only the specified agent', () => {
       useChatStore.getState().loadHistory([], 1);
