@@ -310,6 +310,7 @@ export class AgentHost {
 
       llmProvider = resolvedProvider;
       this.currentProvider = resolvedProvider;
+      this.currentKeyIndex = this.authResolver.getActiveKey(resolvedProvider)?.keyIndex ?? 0;
     }
 
     console.log('[AgentHost] Selected model:', modelId, 'for provider:', llmProvider);
