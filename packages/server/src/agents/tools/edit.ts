@@ -8,6 +8,11 @@
  * insertions, use surrounding context as `old_string` and embed the new content
  * in `new_string`.
  *
+ * Regex mode (`regex: true`): same as replace mode but `old_string` is treated
+ * as a JavaScript regex pattern. `new_string` is used as a literal replacement
+ * string ($ is not interpreted as a backreference). The pattern must match
+ * exactly once.
+ *
  * Append mode (`append: true`): appends `new_string` to the end of the file.
  * Creates the file (and parent directories) if it does not exist. Adds a
  * newline separator if the existing content does not end with one.
@@ -28,7 +33,7 @@ export function createEditTool() {
     old_string: Type.Optional(
       Type.String({
         description:
-          'The exact text to find in the file. Must appear exactly once. Include enough surrounding context to make it unique. Required unless append is true.',
+          'The exact text to find in the file (or a regex pattern when regex is true). Must match exactly once. Include enough surrounding context to make it unique. Required unless append is true.',
       })
     ),
     new_string: Type.String({
@@ -39,6 +44,12 @@ export function createEditTool() {
       Type.Boolean({
         description:
           'If true, append new_string to the end of the file instead of replacing old_string. Creates the file (and parent directories) if it does not exist.',
+      })
+    ),
+    regex: Type.Optional(
+      Type.Boolean({
+        description:
+          'If true, treat old_string as a JavaScript regular expression pattern. new_string is used as a literal replacement ($ is not interpreted as a backreference). The pattern must match exactly once. Useful for replacing a field value without knowing the current value, e.g. old_string: "last_narrator_update_ts: .*". Ignored when append is true.',
       })
     ),
     commit_message: Type.Optional(
@@ -53,7 +64,7 @@ export function createEditTool() {
     name: 'edit',
     label: 'Edit File',
     description:
-      'Edit a file by replacing an exact string match, or append content to a file. When append is true, appends new_string to the end of the file (creating it if needed) — use this for adding entries to logs, memory files, and similar. When append is not set, old_string must appear exactly once in the file (include more context if not unique). Prefer this over `write` for modifying existing files. Use `write` for creating new files or complete rewrites. For bulk operations (e.g., find-and-replace across many lines), use `bash` with `sed`, `awk`, or similar.',
+      'Edit a file by replacing an exact string match, or append content to a file. When append is true, appends new_string to the end of the file (creating it if needed) — use this for adding entries to logs, memory files, and similar. When append is not set, old_string must appear exactly once in the file (include more context if not unique). Set regex to true to treat old_string as a regex pattern — useful when you need to replace a field value without knowing the current value (e.g. old_string: "fieldName: .*"). Prefer this over `write` for modifying existing files. Use `write` for creating new files or complete rewrites.',
     parameters: params,
     execute: async (_toolCallId, params, signal, _onUpdate) => {
       try {
@@ -131,6 +142,87 @@ export function createEditTool() {
         }
 
         const content = await readFile(filePath, 'utf-8');
+
+        if (params.regex) {
+          // Regex replace mode
+          let pattern: RegExp;
+          try {
+            pattern = new RegExp(params.old_string, 'g');
+          } catch {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Error: invalid regex pattern: ${params.old_string}`,
+                },
+              ],
+              details: { error: 'invalid_regex' },
+            };
+          }
+
+          let count = 0;
+          for (const _match of content.matchAll(pattern)) {
+            count++;
+            if (count > 1) break;
+          }
+
+          if (count === 0) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Error: pattern not found in ${params.path}. Make sure the regex matches the file content.`,
+                },
+              ],
+              details: { error: 'not_found', path: filePath },
+            };
+          }
+
+          if (count > 1) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Error: pattern matches ${count} times in ${params.path}. Refine the regex to match exactly once.`,
+                },
+              ],
+              details: { error: 'not_unique', count, path: filePath },
+            };
+          }
+
+          if (signal?.aborted) {
+            return {
+              content: [{ type: 'text', text: 'Edit aborted.' }],
+              details: { error: 'aborted' },
+            };
+          }
+
+          // Use a replacer function so new_string is treated as a literal
+          // string — $ signs are not interpreted as backreferences.
+          const newContent = content.replace(
+            new RegExp(params.old_string),
+            () => params.new_string
+          );
+          await writeFile(filePath, newContent, 'utf-8');
+
+          if (params.commit_message) {
+            commitIfStateDir(filePath, params.commit_message);
+          }
+
+          const matchIndex = content.search(new RegExp(params.old_string));
+          const linesBefore = content.slice(0, matchIndex).split('\n').length;
+          const linesChanged = params.new_string.split('\n').length;
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Edited ${params.path} — replaced pattern match at line ${linesBefore} with ${linesChanged} line(s).`,
+              },
+            ],
+            details: { path: filePath, startLine: linesBefore, linesChanged },
+          };
+        }
 
         if (params.old_string === params.new_string) {
           return {

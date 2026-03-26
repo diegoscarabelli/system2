@@ -554,6 +554,7 @@ last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
 IMPORTANT: After writing the log entry, you MUST set last_narrator_update_ts to exactly "${newRunTs}" (UTC ISO 8601) in the frontmatter of ${logFile}. This advances the cursor for the next run.
+IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
 
 ## Most recent log.md content
 
@@ -603,6 +604,7 @@ last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
 IMPORTANT: After writing the summary, you MUST set last_narrator_update_ts to exactly "${newRunTs}" (UTC ISO 8601) in the frontmatter of ${filePath}. This advances the cursor for the next run.
+IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
 
 ## Current daily summary file content
 
@@ -713,6 +715,7 @@ last_narrator_update_ts: ${lastTs ?? '(none)'}
 new_run_ts: ${newRunTs}
 
 IMPORTANT: After writing memory.md, you MUST set last_narrator_update_ts to exactly "${newRunTs}" (UTC ISO 8601) in the frontmatter of ${memoryFile}. This advances the cursor for the next run.
+IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
 
 ## Daily summaries to incorporate
 

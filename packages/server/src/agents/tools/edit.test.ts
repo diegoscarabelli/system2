@@ -124,6 +124,89 @@ describe('edit tool', () => {
     expect(result.details).toHaveProperty('error', 'missing_old_string');
   });
 
+  describe('regex mode', () => {
+    it('replaces a line matched by pattern', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, '---\nlast_narrator_update_ts: 2026-03-24T00:00:00.000Z\n---\n');
+
+      const result = await exec({
+        path: file,
+        old_string: 'last_narrator_update_ts: .*',
+        new_string: 'last_narrator_update_ts: 2026-03-25T12:00:00.000Z',
+        regex: true,
+      });
+
+      expect((result.content[0] as { text: string }).text).toContain('Edited');
+      expect(readFileSync(file, 'utf-8')).toBe(
+        '---\nlast_narrator_update_ts: 2026-03-25T12:00:00.000Z\n---\n'
+      );
+    });
+
+    it('treats new_string as a literal (does not interpret $ as backreference)', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, 'key: old_value\n');
+
+      await exec({
+        path: file,
+        old_string: 'key: \\w+',
+        new_string: 'key: new$value',
+        regex: true,
+      });
+
+      expect(readFileSync(file, 'utf-8')).toBe('key: new$value\n');
+    });
+
+    it('errors when pattern matches zero times', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, 'some content');
+
+      const result = await exec({
+        path: file,
+        old_string: 'nonexistent_field: .*',
+        new_string: 'nonexistent_field: value',
+        regex: true,
+      });
+
+      expect((result.content[0] as { text: string }).text).toContain('not found');
+      expect(result.details).toHaveProperty('error', 'not_found');
+    });
+
+    it('errors when pattern matches more than once', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, 'key: aaa\nkey: bbb\n');
+
+      const result = await exec({
+        path: file,
+        old_string: 'key: .*',
+        new_string: 'key: ccc',
+        regex: true,
+      });
+
+      expect((result.content[0] as { text: string }).text).toContain('2 times');
+      expect(result.details).toHaveProperty('error', 'not_unique');
+    });
+
+    it('errors on invalid regex', async () => {
+      const dir = trackDir(makeTmpDir());
+      const file = join(dir, 'test.txt');
+      writeFileSync(file, 'content');
+
+      const result = await exec({
+        path: file,
+        old_string: '[invalid',
+        new_string: 'x',
+        regex: true,
+      });
+
+      expect((result.content[0] as { text: string }).text).toContain('invalid regex');
+      expect(result.details).toHaveProperty('error', 'invalid_regex');
+    });
+  });
+
   describe('append mode', () => {
     it('appends to an existing file with trailing newline', async () => {
       const dir = trackDir(makeTmpDir());
