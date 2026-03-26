@@ -216,7 +216,7 @@ Agent sessions are persisted as JSONL files in `~/.system2/sessions/{role}_{id}/
 
 **Session continuation** (`initialize()`): at startup, system2 finds the newest `.jsonl` file by mtime (`findMostRecentSession()`) and opens it directly via `SessionManager.open()`. This tolerates files that lack a valid session header, which `SessionManager.continueRecent()` would reject and silently replace with a fresh empty session. `continueRecent()` is used only when no `.jsonl` file exists yet (first-time setup).
 
-**Session rotation** (`session-rotation.ts`): when a JSONL file exceeds 10MB at initialization, a new file is created carrying over the compacted history. The old file is renamed to `.jsonl.archived` so it is no longer picked up as a continuation candidate. Rotation only runs at initialization, before a `SessionManager` is created; running it while a session is active is unsafe because the SDK holds an open reference to the file and would recreate it without a header on the next append.
+**Session rotation** (`session-rotation.ts`): when a JSONL file exceeds 10MB at initialization, a new file is created carrying over the compacted history. The old file is renamed to `.jsonl.archived` so it is no longer picked up as a continuation candidate. Rotation only runs on cold start (when no prior session exists in memory), before a `SessionManager` is created. It is skipped during failover re-initialization because the outgoing SDK session still holds an open reference to the file and would recreate it without a header on the next append.
 
 See the [pi-coding-agent session format docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md) for details.
 
