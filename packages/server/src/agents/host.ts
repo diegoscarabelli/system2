@@ -37,11 +37,31 @@ import type { AgentRegistry } from './registry.js';
 import {
   calculateDelay,
   categorizeError,
+  type ErrorCategory,
   extractStatusCode,
   shouldFailover,
   shouldRetry,
   sleep,
 } from './retry.js';
+
+/** Human-readable label for error categories shown in chat messages. */
+function categoryLabel(category: ErrorCategory): string {
+  switch (category) {
+    case 'auth':
+      return 'auth error';
+    case 'rate_limit':
+      return 'rate limited';
+    case 'transient':
+      return 'server error';
+    case 'client':
+      return 'client error';
+    case 'context_overflow':
+      return 'context overflow';
+    case 'unknown':
+      return 'error';
+  }
+}
+
 import { parseSessionEntries, rotateSessionIfNeeded } from './session-rotation.js';
 import { createBashTool } from './tools/bash.js';
 import { createEditTool } from './tools/edit.js';
@@ -116,6 +136,7 @@ export class AgentHost {
   private modelRegistry: ModelRegistry;
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
   private currentProvider: LlmProvider;
+  private currentKeyIndex = 0;
   private retryAttempts: Map<string, number> = new Map(); // Track retries per error type
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
@@ -152,6 +173,7 @@ export class AgentHost {
     const authStorage = this.authResolver.createAuthStorage();
     this.modelRegistry = new ModelRegistry(authStorage);
     this.currentProvider = this.authResolver.primaryProvider;
+    this.currentKeyIndex = this.authResolver.getActiveKey(this.currentProvider)?.keyIndex ?? 0;
 
     console.log('[AgentHost] Auth status:', this.authResolver.getStatus());
   }
@@ -416,10 +438,11 @@ export class AgentHost {
     const errorMessage = message.errorMessage;
     console.log('[AgentHost] API error detected:', errorMessage);
 
-    // Categorize the error and extract status code for user-facing messages
+    // Categorize the error and build human-readable prefix for chat messages
     const category = categorizeError({ message: errorMessage });
     const statusCode = extractStatusCode({ message: errorMessage });
-    const errorPrefix = statusCode ? `${statusCode} ${category}` : category;
+    const label = categoryLabel(category);
+    const errorPrefix = statusCode ? `${statusCode} ${label}` : label;
     console.log('[AgentHost] Error category:', category);
 
     // Get retry key for this error type
@@ -429,17 +452,20 @@ export class AgentHost {
     // Capture before any await — agent_end may clear it before this async handler resumes
     const promptToRetry = this.pendingPrompt;
 
-    // If another agent already put this provider's key in cooldown, skip retries and fail over
-    if (!this.authResolver.getActiveKey(this.currentProvider)) {
+    // If another agent already put our key in cooldown, skip retries and reinitialize.
+    // Uses the tracked key index so we check our actual key, not whatever index
+    // another agent may have rotated to.
+    if (this.authResolver.isKeyInCooldown(this.currentProvider, this.currentKeyIndex)) {
       const nextProvider = this.authResolver.getNextProvider();
-      if (nextProvider && nextProvider !== this.currentProvider) {
+      if (nextProvider) {
+        const reason =
+          nextProvider === this.currentProvider
+            ? `${errorPrefix} on ${this.currentProvider}, rotating to next key`
+            : `${errorPrefix} on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}`;
         console.log(
-          `[AgentHost] Provider ${this.currentProvider} already in cooldown, failing over to ${nextProvider}`
+          `[AgentHost] Key ${this.currentProvider}:${this.currentKeyIndex} already in cooldown`
         );
-        this.pushSystemMessage(
-          `${errorPrefix} on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}`
-        );
-        await this.reinitializeWithProvider(nextProvider, promptToRetry);
+        await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
         return;
       }
     }
@@ -475,11 +501,13 @@ export class AgentHost {
       const failureReason =
         category === 'auth' ? 'auth' : category === 'rate_limit' ? 'rate_limit' : 'transient';
 
-      // Mark current key as failed
+      // Mark our specific key as failed (pass currentKeyIndex to avoid marking the wrong key
+      // when another agent has already rotated the shared activeKeys index)
       const hasMore = this.authResolver.markKeyFailed(
         this.currentProvider,
         failureReason,
-        errorMessage
+        errorMessage,
+        this.currentKeyIndex
       );
 
       if (hasMore) {
@@ -487,17 +515,14 @@ export class AgentHost {
         const nextProvider = this.authResolver.getNextProvider();
         if (nextProvider) {
           if (nextProvider === this.currentProvider) {
+            const reason = `${errorPrefix} on ${this.currentProvider}, rotating to next key`;
             console.log(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
-            this.pushSystemMessage(
-              `${errorPrefix} on ${this.currentProvider}, rotating to next key`
-            );
+            await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
           } else {
+            const reason = `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`;
             console.log(`[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`);
-            this.pushSystemMessage(
-              `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`
-            );
+            await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
           }
-          await this.reinitializeWithProvider(nextProvider, promptToRetry);
           return;
         }
       }
@@ -529,13 +554,11 @@ export class AgentHost {
     // switch to it. This covers cases like being stuck on a dead fallback provider.
     const nextProvider = this.authResolver.getNextProvider();
     if (nextProvider && nextProvider !== this.currentProvider) {
+      const reason = `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`;
       console.log(
         `[AgentHost] Recovery: switching from ${this.currentProvider} to ${nextProvider}`
       );
-      this.pushSystemMessage(
-        `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`
-      );
-      await this.reinitializeWithProvider(nextProvider, promptToRetry);
+      await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
       return;
     }
 
@@ -550,10 +573,12 @@ export class AgentHost {
 
   /**
    * Reinitialize the agent session with a different provider.
+   * @param reason - Human-readable reason for the switch (shown in chat and UI status)
    */
   private async reinitializeWithProvider(
     provider: LlmProvider,
-    promptToRetry?: string | null
+    promptToRetry?: string | null,
+    reason?: string
   ): Promise<void> {
     if (this.isReinitializing) {
       console.log('[AgentHost] Already reinitializing, skipping');
@@ -569,8 +594,9 @@ export class AgentHost {
     }
 
     try {
-      // Update current provider
+      // Update current provider and key index
       this.currentProvider = provider;
+      this.currentKeyIndex = this.authResolver.getActiveKey(provider)?.keyIndex ?? 0;
 
       // Recreate model registry with updated auth
       const authStorage = this.authResolver.createAuthStorage();
@@ -582,15 +608,18 @@ export class AgentHost {
       // Clear retry attempts on successful reinit
       this.retryAttempts.clear();
 
-      // Emit a custom event to notify UI of provider change
-      const failoverEvent: AgentSessionEvent = {
-        type: 'status' as AgentSessionEvent['type'],
-        provider,
-        message: `Switched to ${provider} due to API issues`,
-      } as AgentSessionEvent;
-      this.listeners.forEach((listener) => {
-        listener(failoverEvent);
-      });
+      // Notify UI of provider/key change (only for actual failovers, not compaction recovery)
+      if (reason) {
+        this.pushSystemMessage(reason);
+        const failoverEvent: AgentSessionEvent = {
+          type: 'status' as AgentSessionEvent['type'],
+          provider,
+          reason,
+        } as AgentSessionEvent;
+        this.listeners.forEach((listener) => {
+          listener(failoverEvent);
+        });
+      }
 
       // Retry the pending prompt with the new provider
       if (promptToRetry && this.session) {

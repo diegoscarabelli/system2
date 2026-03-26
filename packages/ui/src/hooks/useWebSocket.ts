@@ -175,7 +175,7 @@ export function useWebSocket() {
 
         case 'provider_change':
           state.setProvider(message.provider, message.agentId);
-          state.addSystemMessage(`Switched to ${message.provider}`);
+          state.addSystemMessage(message.reason ?? `Switched to ${message.provider}`);
           break;
 
         case 'compaction_start': {

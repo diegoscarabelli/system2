@@ -151,6 +151,33 @@ describe('AuthResolver', () => {
     });
   });
 
+  describe('isKeyInCooldown', () => {
+    it('returns true for a key in cooldown', () => {
+      const resolver = new AuthResolver(makeConfig());
+      resolver.markKeyFailed('anthropic', 'rate_limit', undefined, 0);
+      expect(resolver.isKeyInCooldown('anthropic', 0)).toBe(true);
+      expect(resolver.isKeyInCooldown('anthropic', 1)).toBe(false);
+    });
+  });
+
+  describe('markKeyFailed with explicit keyIndex', () => {
+    it('marks the specified key, not the global active index', () => {
+      const resolver = new AuthResolver(makeConfig());
+
+      // Simulate Agent A rotating from key 0 to key 1
+      resolver.markKeyFailed('anthropic', 'rate_limit', undefined, 0);
+      expect(resolver.getActiveKey('anthropic')?.keyIndex).toBe(1);
+
+      // Simulate Agent B (still using key 0) reporting the same failure.
+      // Without explicit keyIndex, this would mark key 1 (the current active).
+      // With explicit keyIndex=0, it should be a no-op (already in cooldown).
+      resolver.markKeyFailed('anthropic', 'rate_limit', undefined, 0);
+      // Key 1 should NOT be in cooldown
+      expect(resolver.isKeyInCooldown('anthropic', 1)).toBe(false);
+      expect(resolver.getActiveKey('anthropic')?.keyIndex).toBe(1);
+    });
+  });
+
   describe('cooldown expiry', () => {
     it('restores keys after cooldown expires', () => {
       vi.useFakeTimers();

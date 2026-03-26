@@ -736,7 +736,7 @@ describe('AgentHost', () => {
   });
 
   describe('pushSystemMessage on failover', () => {
-    it('pushes a system message to chatCache before switching provider', async () => {
+    it('passes reason to reinitializeWithProvider when switching provider', async () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -747,8 +747,9 @@ describe('AgentHost', () => {
       const internal = host as unknown as {
         handlePotentialError: (event: unknown) => Promise<void>;
         currentProvider: string;
-        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        currentKeyIndex: number;
         authResolver: {
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
           markKeyFailed: ReturnType<typeof vi.fn>;
           getNextProvider: ReturnType<typeof vi.fn>;
         };
@@ -758,8 +759,9 @@ describe('AgentHost', () => {
       };
 
       internal.session = { prompt: vi.fn() };
-      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
       internal.currentProvider = 'google';
+      internal.currentKeyIndex = 0;
+      internal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
       internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(true);
       internal.authResolver.getNextProvider = vi.fn().mockReturnValue('anthropic');
       internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
@@ -771,13 +773,14 @@ describe('AgentHost', () => {
         message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
       });
 
-      expect(internal._chatCache.push).toHaveBeenCalledOnce();
-      const pushed = internal._chatCache.push.mock.calls[0][0];
-      expect(pushed.role).toBe('system');
-      expect(pushed.content).toBe('429 rate_limit on google, switching to anthropic');
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
+        'anthropic',
+        null,
+        '429 rate limited on google, switching to anthropic'
+      );
     });
 
-    it('pushes key rotation message when staying on same provider', async () => {
+    it('passes key rotation reason when staying on same provider', async () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -788,8 +791,9 @@ describe('AgentHost', () => {
       const internal = host as unknown as {
         handlePotentialError: (event: unknown) => Promise<void>;
         currentProvider: string;
-        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        currentKeyIndex: number;
         authResolver: {
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
           markKeyFailed: ReturnType<typeof vi.fn>;
           getNextProvider: ReturnType<typeof vi.fn>;
         };
@@ -799,8 +803,9 @@ describe('AgentHost', () => {
       };
 
       internal.session = { prompt: vi.fn() };
-      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
       internal.currentProvider = 'google';
+      internal.currentKeyIndex = 0;
+      internal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
       internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(true);
       // Same provider returned — key rotation, not provider switch
       internal.authResolver.getNextProvider = vi.fn().mockReturnValue('google');
@@ -812,10 +817,11 @@ describe('AgentHost', () => {
         message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
       });
 
-      expect(internal._chatCache.push).toHaveBeenCalledOnce();
-      const pushed = internal._chatCache.push.mock.calls[0][0];
-      expect(pushed.role).toBe('system');
-      expect(pushed.content).toBe('429 rate_limit on google, rotating to next key');
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
+        'google',
+        null,
+        '429 rate limited on google, rotating to next key'
+      );
     });
 
     it('pushes unavailable message when no providers remain', async () => {
@@ -829,8 +835,10 @@ describe('AgentHost', () => {
       const internal = host as unknown as {
         handlePotentialError: (event: unknown) => Promise<void>;
         currentProvider: string;
+        currentKeyIndex: number;
         _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
         authResolver: {
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
           markKeyFailed: ReturnType<typeof vi.fn>;
           getNextProvider: ReturnType<typeof vi.fn>;
         };
@@ -842,6 +850,8 @@ describe('AgentHost', () => {
       internal.session = { prompt: vi.fn() };
       internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
       internal.currentProvider = 'cerebras';
+      internal.currentKeyIndex = 0;
+      internal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
       internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(true);
       internal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
 
@@ -853,12 +863,12 @@ describe('AgentHost', () => {
       expect(internal._chatCache.push).toHaveBeenCalledOnce();
       const pushed = internal._chatCache.push.mock.calls[0][0];
       expect(pushed.role).toBe('system');
-      expect(pushed.content).toBe('401 auth on cerebras, all providers unavailable');
+      expect(pushed.content).toBe('401 auth error on cerebras, all providers unavailable');
     });
   });
 
   describe('shared AuthResolver early-out', () => {
-    it('skips retries and fails over immediately when provider key is already in cooldown', async () => {
+    it('skips retries and fails over immediately when our key is already in cooldown', async () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -869,7 +879,7 @@ describe('AgentHost', () => {
       const internal = host as unknown as {
         handlePotentialError: (event: unknown) => Promise<void>;
         currentProvider: string;
-        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        currentKeyIndex: number;
         authResolver: import('./auth-resolver.js').AuthResolver;
         reinitializeWithProvider: ReturnType<typeof vi.fn>;
         retryAttempts: Map<string, number>;
@@ -877,12 +887,12 @@ describe('AgentHost', () => {
       };
 
       internal.session = { prompt: vi.fn() };
-      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
       internal.currentProvider = 'cerebras';
+      internal.currentKeyIndex = 0;
       internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
 
-      // Simulate another agent having already put cerebras in cooldown
-      internal.authResolver.markKeyFailed('cerebras', 'rate_limit');
+      // Simulate another agent having already put cerebras key 0 in cooldown
+      internal.authResolver.markKeyFailed('cerebras', 'rate_limit', undefined, 0);
 
       // Fire a rate limit error (attempt 0, normally would retry)
       expect(internal.retryAttempts.get('cerebras:rate_limit')).toBeUndefined();
@@ -892,14 +902,14 @@ describe('AgentHost', () => {
       });
 
       // Should have skipped retries and failed over directly to google
-      expect(internal.reinitializeWithProvider).toHaveBeenCalledWith('google', null);
-      // System message should mention the cooldown
-      const pushed = internal._chatCache.push.mock.calls[0][0];
-      expect(pushed.role).toBe('system');
-      expect(pushed.content).toContain('cooldown');
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
+        'google',
+        null,
+        expect.stringContaining('cooldown')
+      );
     });
 
-    it('proceeds with normal retries when provider key is not in cooldown', async () => {
+    it('proceeds with normal retries when our key is not in cooldown', async () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -910,6 +920,7 @@ describe('AgentHost', () => {
       const internal = host as unknown as {
         handlePotentialError: (event: unknown) => Promise<void>;
         currentProvider: string;
+        currentKeyIndex: number;
         authResolver: import('./auth-resolver.js').AuthResolver;
         reinitializeWithProvider: ReturnType<typeof vi.fn>;
         retryAttempts: Map<string, number>;
@@ -919,6 +930,7 @@ describe('AgentHost', () => {
 
       internal.session = { prompt: vi.fn().mockResolvedValue(undefined) };
       internal.currentProvider = 'cerebras';
+      internal.currentKeyIndex = 0;
       internal.pendingPrompt = 'test';
       internal.reinitializeWithProvider = vi.fn();
 
@@ -946,9 +958,9 @@ describe('AgentHost', () => {
       const internal = host as unknown as {
         handlePotentialError: (event: unknown) => Promise<void>;
         currentProvider: string;
-        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        currentKeyIndex: number;
         authResolver: {
-          getActiveKey: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
           markKeyFailed: ReturnType<typeof vi.fn>;
           getNextProvider: ReturnType<typeof vi.fn>;
         };
@@ -959,13 +971,11 @@ describe('AgentHost', () => {
       };
 
       internal.session = { prompt: vi.fn() };
-      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
       internal.currentProvider = 'anthropic';
+      internal.currentKeyIndex = 0;
       internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
 
-      internal.authResolver.getActiveKey = vi
-        .fn()
-        .mockReturnValue({ provider: 'anthropic', keyIndex: 0, label: 'main' });
+      internal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
       internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(true);
       internal.authResolver.getNextProvider = vi.fn().mockReturnValue('google');
 
@@ -974,10 +984,11 @@ describe('AgentHost', () => {
         message: { stopReason: 'error', errorMessage: 'Error 400: credit balance too low' },
       });
 
-      expect(internal.reinitializeWithProvider).toHaveBeenCalledWith('google', null);
-      const pushed = internal._chatCache.push.mock.calls[0][0];
-      expect(pushed.role).toBe('system');
-      expect(pushed.content).toBe('400 client on anthropic, switching to google');
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
+        'google',
+        null,
+        '400 client error on anthropic, switching to google'
+      );
     });
 
     it('gives up when all providers exhausted', async () => {
@@ -991,9 +1002,10 @@ describe('AgentHost', () => {
       const internal = host as unknown as {
         handlePotentialError: (event: unknown) => Promise<void>;
         currentProvider: string;
+        currentKeyIndex: number;
         _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
         authResolver: {
-          getActiveKey: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
           markKeyFailed: ReturnType<typeof vi.fn>;
           getNextProvider: ReturnType<typeof vi.fn>;
         };
@@ -1006,13 +1018,12 @@ describe('AgentHost', () => {
       internal.session = { prompt: vi.fn() };
       internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
       internal.currentProvider = 'anthropic';
+      internal.currentKeyIndex = 0;
       internal.busy = true;
       internal.reinitializeWithProvider = vi.fn();
 
       // All providers exhausted
-      internal.authResolver.getActiveKey = vi
-        .fn()
-        .mockReturnValue({ provider: 'anthropic', keyIndex: 0, label: 'main' });
+      internal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
       internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
       internal.authResolver.getNextProvider = vi.fn().mockReturnValue('anthropic');
 
@@ -1027,7 +1038,7 @@ describe('AgentHost', () => {
       expect(internal.busy).toBe(false);
       // Should show error details in the exhausted message
       const pushed = internal._chatCache.push.mock.calls[0][0];
-      expect(pushed.content).toBe('400 client on anthropic, all providers unavailable');
+      expect(pushed.content).toBe('400 client error on anthropic, all providers unavailable');
     });
   });
 

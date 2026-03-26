@@ -158,20 +158,30 @@ export class AuthResolver {
   }
 
   /**
-   * Mark the current key for a provider as failed.
+   * Check if a specific key is currently in cooldown.
+   * Used by AgentHost to detect when another agent has already put its key in cooldown.
+   */
+  isKeyInCooldown(provider: LlmProvider, keyIndex: number): boolean {
+    return this.isKeyUnavailable(`${provider}:${keyIndex}`);
+  }
+
+  /**
+   * Mark a specific key for a provider as failed.
    * All failures use cooldown so the system recovers if the user fixes the issue.
    *
    * @param provider - The provider whose key failed
    * @param reason - Why it failed (determines cooldown duration for rate_limit)
    * @param errorMessage - Original API error message for logging
+   * @param keyIndex - The specific key index that failed (avoids stale global state when multiple agents share the resolver)
    * @returns true if there's a fallback available (next key or next provider)
    */
   markKeyFailed(
     provider: LlmProvider,
     reason: 'auth' | 'rate_limit' | 'transient' = 'transient',
-    errorMessage?: string
+    errorMessage?: string,
+    keyIndex?: number
   ): boolean {
-    const currentIndex = this.activeKeys.get(provider) ?? 0;
+    const currentIndex = keyIndex ?? this.activeKeys.get(provider) ?? 0;
     const keyId = `${provider}:${currentIndex}`;
 
     if (!this.cooldowns.has(keyId)) {
