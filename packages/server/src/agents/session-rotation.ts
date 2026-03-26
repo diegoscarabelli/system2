@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SESSION_FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
@@ -24,9 +24,9 @@ export interface SessionEntry {
 
 /**
  * Find the most recent JSONL session file by modification time.
- * Returns null if no valid session files exist.
+ * Returns null if no .jsonl files exist in the directory.
  */
-function findMostRecentSession(sessionDir: string): string | null {
+export function findMostRecentSession(sessionDir: string): string | null {
   let files: string[];
   try {
     files = readdirSync(sessionDir);
@@ -107,14 +107,19 @@ function createSessionHeader(cwd: string): SessionEntry {
 /**
  * Rotate session file if it exceeds the size threshold.
  *
+ * Only call this during initialization, before a SessionManager is created.
+ * Calling it while a session is running is unsafe: the SDK holds an open
+ * reference to the current file and will recreate it (without a header) on
+ * the next append if it disappears.
+ *
  * When rotation occurs:
  * 1. Creates new JSONL file with:
  *    - New session header
  *    - Entries from firstKeptEntryId up to compaction entry
  *    - The compaction entry
  *    - All entries after the compaction entry
- * 2. Old file remains on disk (archived)
- * 3. New file will be picked up by continueRecent() due to newer mtime
+ * 2. Old file is renamed to <filename>.jsonl.archived
+ * 3. New file is picked up by findMostRecentSession() on next initialize()
  *
  * @param sessionDir - Directory containing session JSONL files
  * @param cwd - Current working directory for session header
@@ -204,10 +209,14 @@ export function rotateSessionIfNeeded(
   const content = `${newEntries.map((e) => JSON.stringify(e)).join('\n')}\n`;
   writeFileSync(newFilePath, content);
 
+  // Rename old file so it is no longer picked up as a candidate session
+  const archivedPath = `${currentFile}.archived`;
+  renameSync(currentFile, archivedPath);
+
   console.log(
     `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries`
   );
-  console.log(`[SessionRotation] Old file archived: ${currentFile.split('/').pop()}`);
+  console.log(`[SessionRotation] Old file archived: ${currentFile.split('/').pop()}.archived`);
 
   return true;
 }
