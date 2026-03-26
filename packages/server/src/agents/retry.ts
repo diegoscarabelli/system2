@@ -31,7 +31,7 @@ export type ErrorCategory =
   | 'rate_limit' // 429 - exponential retry, then failover
   | 'transient' // 500, 503, timeout - brief retry, then failover
   | 'context_overflow' // 400 with token limit exceeded - compact and retry
-  | 'client' // 400 - no retry, surface error
+  | 'client' // 400 - no retry, immediate failover
   | 'unknown'; // unexpected - treat as transient
 
 /**
@@ -102,7 +102,7 @@ function isContextOverflow(message: string): boolean {
 /**
  * Extract HTTP status code from various error formats.
  */
-function extractStatusCode(error: unknown): number | undefined {
+export function extractStatusCode(error: unknown): number | undefined {
   if (!error || typeof error !== 'object') return undefined;
 
   const err = error as Record<string, unknown>;
@@ -202,8 +202,11 @@ export function shouldFailover(category: ErrorCategory, retriesExhausted: boolea
       // Failover only after retries exhausted
       return retriesExhausted;
     case 'client':
+      // Immediate failover for client errors (e.g., credit balance too low).
+      // Key goes into cooldown so the system recovers if the user fixes the issue.
+      return true;
     case 'context_overflow':
-      // Never failover for client or context overflow errors (another provider has the same context)
+      // Never failover for context overflow (another provider has the same context)
       return false;
   }
 }

@@ -204,9 +204,9 @@ describe('shouldFailover', () => {
     expect(shouldFailover('auth', true)).toBe(true);
   });
 
-  it('never fails over on client errors', () => {
-    expect(shouldFailover('client', false)).toBe(false);
-    expect(shouldFailover('client', true)).toBe(false);
+  it('immediately fails over on client errors', () => {
+    expect(shouldFailover('client', false)).toBe(true);
+    expect(shouldFailover('client', true)).toBe(true);
   });
 
   it('never fails over on context_overflow errors', () => {

@@ -719,7 +719,48 @@ describe('AgentHost', () => {
       expect(internal._chatCache.push).toHaveBeenCalledOnce();
       const pushed = internal._chatCache.push.mock.calls[0][0];
       expect(pushed.role).toBe('system');
-      expect(pushed.content).toBe('Rate limit on google, switching to anthropic');
+      expect(pushed.content).toBe('429 rate_limit on google, switching to anthropic');
+    });
+
+    it('pushes key rotation message when staying on same provider', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+        };
+        reinitializeWithProvider: ReturnType<typeof vi.fn>;
+        retryAttempts: Map<string, number>;
+        session: unknown;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.currentProvider = 'google';
+      internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(true);
+      // Same provider returned — key rotation, not provider switch
+      internal.authResolver.getNextProvider = vi.fn().mockReturnValue('google');
+      internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
+
+      internal.retryAttempts.set('google:rate_limit', 7);
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
+      });
+
+      expect(internal._chatCache.push).toHaveBeenCalledOnce();
+      const pushed = internal._chatCache.push.mock.calls[0][0];
+      expect(pushed.role).toBe('system');
+      expect(pushed.content).toBe('429 rate_limit on google, rotating to next key');
     });
 
     it('pushes unavailable message when no providers remain', async () => {
@@ -757,7 +798,7 @@ describe('AgentHost', () => {
       expect(internal._chatCache.push).toHaveBeenCalledOnce();
       const pushed = internal._chatCache.push.mock.calls[0][0];
       expect(pushed.role).toBe('system');
-      expect(pushed.content).toBe('All providers unavailable, error will surface in chat');
+      expect(pushed.content).toBe('401 auth on cerebras, all providers unavailable');
     });
   });
 
@@ -835,6 +876,103 @@ describe('AgentHost', () => {
       // Should have retried (attempt incremented), NOT failed over
       expect(internal.retryAttempts.get('cerebras:rate_limit')).toBe(1);
       expect(internal.reinitializeWithProvider).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('failover and recovery', () => {
+    it('fails over on client error to available provider', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        authResolver: {
+          getActiveKey: ReturnType<typeof vi.fn>;
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+        };
+        reinitializeWithProvider: ReturnType<typeof vi.fn>;
+        retryAttempts: Map<string, number>;
+        session: unknown;
+        busy: boolean;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.currentProvider = 'anthropic';
+      internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
+
+      internal.authResolver.getActiveKey = vi
+        .fn()
+        .mockReturnValue({ provider: 'anthropic', keyIndex: 0, label: 'main' });
+      internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(true);
+      internal.authResolver.getNextProvider = vi.fn().mockReturnValue('google');
+
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 400: credit balance too low' },
+      });
+
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledWith('google', null);
+      const pushed = internal._chatCache.push.mock.calls[0][0];
+      expect(pushed.role).toBe('system');
+      expect(pushed.content).toBe('400 client on anthropic, switching to google');
+    });
+
+    it('gives up when all providers exhausted', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        authResolver: {
+          getActiveKey: ReturnType<typeof vi.fn>;
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+        };
+        reinitializeWithProvider: ReturnType<typeof vi.fn>;
+        retryAttempts: Map<string, number>;
+        session: unknown;
+        busy: boolean;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.currentProvider = 'anthropic';
+      internal.busy = true;
+      internal.reinitializeWithProvider = vi.fn();
+
+      // All providers exhausted
+      internal.authResolver.getActiveKey = vi
+        .fn()
+        .mockReturnValue({ provider: 'anthropic', keyIndex: 0, label: 'main' });
+      internal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      internal.authResolver.getNextProvider = vi.fn().mockReturnValue('anthropic');
+
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 400: credit balance too low' },
+      });
+
+      // Should NOT have switched
+      expect(internal.reinitializeWithProvider).not.toHaveBeenCalled();
+      // Busy should be cleared
+      expect(internal.busy).toBe(false);
+      // Should show error details in the exhausted message
+      const pushed = internal._chatCache.push.mock.calls[0][0];
+      expect(pushed.content).toBe('400 client on anthropic, all providers unavailable');
     });
   });
 
