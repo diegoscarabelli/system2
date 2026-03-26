@@ -182,7 +182,7 @@ Schedule a delayed reminder for the calling agent. After the specified delay, a 
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `delay_minutes` | number | Minutes from now until the reminder fires. Must be > 0. |
+| `delay_minutes` | number | Minutes from now. Must be 1 to 35,791 (~24.8 days max). |
 | `message` | string | Reminder text delivered back as a follow-up message when the timer fires. |
 
 - **Non-blocking:** uses `setTimeout` internally; the agent continues working after setting the reminder

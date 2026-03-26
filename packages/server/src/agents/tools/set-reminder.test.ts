@@ -34,7 +34,16 @@ describe('set_reminder tool', () => {
     const result = await exec(tool, { delay_minutes: 0, message: 'bad' });
 
     expect(reminderManager.schedule).not.toHaveBeenCalled();
-    expect((result.content[0] as { text: string }).text).toContain('must be greater than 0');
+    expect((result.content[0] as { text: string }).text).toContain('must be between 1 and');
+  });
+
+  it('rejects delay_minutes exceeding setTimeout limit (~24.8 days)', async () => {
+    const { tool, reminderManager } = setup();
+
+    const result = await exec(tool, { delay_minutes: 40_000, message: 'too far' });
+
+    expect(reminderManager.schedule).not.toHaveBeenCalled();
+    expect((result.content[0] as { text: string }).text).toContain('must be between 1 and');
   });
 
   it('handles manager errors gracefully', async () => {
