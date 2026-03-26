@@ -58,6 +58,7 @@ export class ReminderManager {
         results.push({ id: r.id, agentId: r.agentId, message: r.message, fireAt: r.fireAt });
       }
     }
+    results.sort((a, b) => a.fireAt.getTime() - b.fireAt.getTime());
     return results;
   }
 

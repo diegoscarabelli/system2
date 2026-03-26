@@ -25,7 +25,7 @@ export function createSetReminderTool(agentId: number, reminderManager: Reminder
     execute: async (_toolCallId, args) => {
       const { delay_minutes, message } = args;
 
-      if (delay_minutes <= 0 || delay_minutes > MAX_DELAY_MINUTES) {
+      if (delay_minutes < 1 || delay_minutes > MAX_DELAY_MINUTES) {
         return {
           content: [
             {

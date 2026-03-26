@@ -28,13 +28,16 @@ describe('set_reminder tool', () => {
     expect((result.content[0] as { text: string }).text).toContain('5 minute(s)');
   });
 
-  it('rejects delay_minutes <= 0', async () => {
+  it('rejects delay_minutes < 1 (including fractional sub-minute values)', async () => {
     const { tool, reminderManager } = setup();
 
-    const result = await exec(tool, { delay_minutes: 0, message: 'bad' });
-
+    const result0 = await exec(tool, { delay_minutes: 0, message: 'bad' });
     expect(reminderManager.schedule).not.toHaveBeenCalled();
-    expect((result.content[0] as { text: string }).text).toContain('must be between 1 and');
+    expect((result0.content[0] as { text: string }).text).toContain('must be between 1 and');
+
+    const result05 = await exec(tool, { delay_minutes: 0.5, message: 'bad' });
+    expect(reminderManager.schedule).not.toHaveBeenCalled();
+    expect((result05.content[0] as { text: string }).text).toContain('must be between 1 and');
   });
 
   it('rejects delay_minutes exceeding setTimeout limit (~24.8 days)', async () => {
