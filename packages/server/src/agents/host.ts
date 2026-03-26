@@ -755,7 +755,18 @@ export class AgentHost {
         const body = content.slice(tagMatch[0].length).replace(/^\n+/, '');
 
         if (tag.startsWith('Scheduled task:') || tag.startsWith('Task:')) {
-          cacheContent = tag;
+          if (tag === 'Scheduled task: project-log') {
+            const firstBlankLine = body.search(/\n\s*\n/);
+            const metadata =
+              firstBlankLine === -1 ? body.slice(0, 4096) : body.slice(0, firstBlankLine);
+            const pidMatch = metadata.match(/^project_id:\s*(\d+)/m);
+            const pnameMatch = metadata.match(/^project_name:\s*(.+)/m);
+            const pid = pidMatch?.[1];
+            const pname = pnameMatch?.[1]?.trim();
+            cacheContent = pid && pname ? `${tag} #${pid} (${pname})` : tag;
+          } else {
+            cacheContent = tag;
+          }
         } else {
           cacheContent = body ? `${tag}\n\n${body}` : tag;
         }
