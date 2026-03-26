@@ -48,12 +48,14 @@ type ServerMessage =
   | { type: 'tool_call_end'; name: string; result: string; agentId?: number }
   | { type: 'artifact'; url: string; title?: string; filePath?: string }
   | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number; agentId?: number }
-  | { type: 'provider_info'; provider: string }
-  | { type: 'provider_change'; provider: string }
+  | { type: 'provider_info'; provider: string; agentId: number }
+  | { type: 'provider_change'; provider: string; reason?: string; agentId: number }
   | { type: 'error'; message: string; agentId?: number }
   | { type: 'ready_for_input'; agentId?: number }
   | { type: 'chat_history'; messages: ChatMessage[]; agentId: number }
-  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number; agentId?: number };
+  | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number; agentId?: number }
+  | { type: 'compaction_start'; agentId?: number }
+  | { type: 'compaction_end'; agentId?: number };
 ```
 
 | Message | Description |
@@ -63,8 +65,8 @@ type ServerMessage =
 | `tool_call_start` / `tool_call_end` | Tool execution lifecycle |
 | `artifact` | Display artifact in a UI tab. Includes `title` (from DB or filename) and `filePath` (absolute path for tab dedup and reload targeting). Also sent on live reload (file watch). |
 | `context_usage` | Context window usage after each agent turn |
-| `provider_info` | Sent on connect: current LLM provider name |
-| `provider_change` | Sent on failover: provider switched due to API issues |
+| `provider_info` | Sent on connect/switch: current LLM provider for an agent |
+| `provider_change` | Sent on failover: provider switched. Includes `reason` (status code + category) and `agentId` so the UI routes the system message to the correct agent chat |
 | `error` | Error message |
 | `ready_for_input` | Agent finished, ready for next message |
 | `chat_history` | Sent on connect (Guide) and on `switch_agent`: recent messages for the specified agent |

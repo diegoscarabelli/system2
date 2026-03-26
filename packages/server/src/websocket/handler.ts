@@ -201,9 +201,14 @@ export class WebSocketHandler {
     // Handle synthetic events (not part of AgentSessionEvent type)
     const eventType = event.type as string;
     if (eventType === 'status') {
-      const statusEvent = event as unknown as { provider?: string };
+      const statusEvent = event as unknown as { provider?: string; reason?: string };
       if (statusEvent.provider) {
-        this.send({ type: 'provider_change', provider: statusEvent.provider, agentId });
+        this.send({
+          type: 'provider_change',
+          provider: statusEvent.provider,
+          reason: statusEvent.reason,
+          agentId,
+        });
       }
       return;
     }

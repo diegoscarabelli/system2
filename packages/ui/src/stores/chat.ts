@@ -76,7 +76,7 @@ interface ChatState {
 
   // Actions (agentId optional, defaults to active agent)
   addUserMessage: (content: string, id?: string, timestamp?: number, agentId?: number) => void;
-  addSystemMessage: (content: string) => void;
+  addSystemMessage: (content: string, agentId?: number) => void;
   loadHistory: (messages: Message[], agentId: number) => void;
   startAssistantMessage: (agentId?: number) => void;
   appendAssistantChunk: (chunk: string, agentId?: number) => void;
@@ -185,8 +185,8 @@ export const useChatStore = create<ChatState>()(
         }));
       },
 
-      addSystemMessage: (content: string) => {
-        const targetId = get().activeAgentId;
+      addSystemMessage: (content: string, agentId?: number) => {
+        const targetId = agentId ?? get().activeAgentId;
         if (targetId === null) return;
 
         const message: Message = {

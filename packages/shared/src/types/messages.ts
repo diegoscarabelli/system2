@@ -42,6 +42,6 @@ export type ServerMessage =
       agentId?: number;
     }
   | { type: 'provider_info'; provider: string; agentId: number } // Sent on connect/switch — current LLM provider for an agent
-  | { type: 'provider_change'; provider: string; agentId: number } // Sent on failover — provider switched
+  | { type: 'provider_change'; provider: string; reason?: string; agentId: number } // Sent on failover — provider switched
   | { type: 'compaction_start'; agentId?: number } // Sent when auto-compaction begins
   | { type: 'compaction_end'; agentId?: number }; // Sent when auto-compaction completes

@@ -134,7 +134,7 @@ A simple `Map<number, AgentHost>` that maps agent database IDs to active AgentHo
 
 Manages API key rotation and multi-provider failover. Providers and API keys are defined in [Configuration](configuration.md).
 
-**Shared state, per-agent provider choice:** one `AuthResolver` instance lives in `server.ts` and is shared by all `AgentHost`s. Key cooldown state is global: if Agent A puts a key in cooldown, Agent B sees it too. But each agent tracks its own `currentProvider` independently and only consults the resolver at failover time or reinitialization. There is no push mechanism: agents discover key failures when they hit errors themselves.
+**Shared state, per-agent provider choice:** one `AuthResolver` instance lives in `server.ts` and is shared by all `AgentHost`s. Key cooldown state is global: if Agent A puts a key in cooldown, Agent B sees it too. But each agent tracks its own `currentProvider` and `currentKeyIndex` independently, and only consults the resolver at failover time or reinitialization. There is no push mechanism: agents discover key failures when they hit errors themselves. The `currentKeyIndex` ensures each agent marks the correct key in cooldown, even when another agent has already rotated the shared key index.
 
 ### Key Rotation
 
@@ -162,7 +162,7 @@ When `AgentHost` detects an API error in a `message_end` event:
 4. Reinitialize the session with the new provider (`reinitializeWithProvider()`)
 5. Retry the pending prompt
 
-Error details (status code and category) are shown in agent chat messages so the user can diagnose issues. Key rotation within a provider: "429 rate_limit on google, rotating to next key". Provider switch: "429 rate_limit on google, switching to anthropic".
+Error details (status code and human-readable category) are shown in agent chat messages so the user can diagnose issues. Key rotation within a provider: "429 rate limited on google, rotating to next key". Provider switch: "429 rate limited on google, switching to anthropic".
 
 ### Retry Logic (`retry.ts`)
 
