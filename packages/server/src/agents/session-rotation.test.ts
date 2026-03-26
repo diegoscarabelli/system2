@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { findMostRecentSession, rotateSessionIfNeeded } from './session-rotation.js';
 
 function makeTmpDir(): string {
@@ -49,6 +49,10 @@ beforeEach(() => {
   tmpDir = makeTmpDir();
 });
 
+afterEach(() => {
+  rmSync(tmpDir, { recursive: true, force: true });
+});
+
 describe('findMostRecentSession', () => {
   it('returns null when directory does not exist', () => {
     expect(findMostRecentSession('/nonexistent/path/xyz')).toBeNull();
@@ -69,13 +73,14 @@ describe('findMostRecentSession', () => {
     expect(findMostRecentSession(tmpDir)).toBe(file);
   });
 
-  it('returns the most recently modified .jsonl file', async () => {
+  it('returns the most recently modified .jsonl file', () => {
     const older = join(tmpDir, 'older.jsonl');
-    writeFileSync(older, '');
-    // Small delay to ensure distinct mtime
-    await new Promise((r) => setTimeout(r, 10));
     const newer = join(tmpDir, 'newer.jsonl');
+    writeFileSync(older, '');
     writeFileSync(newer, '');
+    // Set mtimes deterministically to avoid relying on filesystem timestamp resolution
+    utimesSync(older, new Date(1000), new Date(1000));
+    utimesSync(newer, new Date(2000), new Date(2000));
     expect(findMostRecentSession(tmpDir)).toBe(newer);
   });
 

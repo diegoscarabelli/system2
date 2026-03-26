@@ -231,10 +231,15 @@ export class AgentHost {
       );
     }
 
-    // Rotate session file if it exceeds size threshold (10MB)
-    const rotated = rotateSessionIfNeeded(agentSessionDir, SYSTEM2_DIR);
-    if (rotated) {
-      console.log('[AgentHost] Session file rotated to new file');
+    // Rotate session file only on cold start. During re-initialization (failover),
+    // the outgoing SDK session still holds a reference to the active JSONL file;
+    // renaming it would cause the SDK to recreate the file without a header on
+    // the next append — exactly the hazard rotation is meant to prevent.
+    if (!this.session) {
+      const rotated = rotateSessionIfNeeded(agentSessionDir, SYSTEM2_DIR);
+      if (rotated) {
+        console.log('[AgentHost] Session file rotated to new file');
+      }
     }
 
     // Load shared agent reference (prepended to all agent system prompts)

@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 const SESSION_FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 
@@ -216,7 +216,7 @@ export function rotateSessionIfNeeded(
   console.log(
     `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries`
   );
-  console.log(`[SessionRotation] Old file archived: ${currentFile.split('/').pop()}.archived`);
+  console.log(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
 
   return true;
 }
