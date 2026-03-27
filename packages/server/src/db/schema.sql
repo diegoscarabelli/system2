@@ -109,6 +109,6 @@ CREATE TABLE IF NOT EXISTS job_execution (
   updated_at   TEXT DEFAULT (datetime('now'))        -- Last modification timestamp
 );
 
-CREATE INDEX IF NOT EXISTS idx_job_execution_job_name   ON job_execution(job_name);
-CREATE INDEX IF NOT EXISTS idx_job_execution_status     ON job_execution(status);
-CREATE INDEX IF NOT EXISTS idx_job_execution_started_at ON job_execution(started_at);
+CREATE INDEX IF NOT EXISTS idx_job_execution_job_name   ON job_execution(job_name);   -- Filter executions by job name
+CREATE INDEX IF NOT EXISTS idx_job_execution_status     ON job_execution(status);     -- Filter executions by lifecycle state
+CREATE INDEX IF NOT EXISTS idx_job_execution_started_at ON job_execution(started_at); -- Order executions by recency

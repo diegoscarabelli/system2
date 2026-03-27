@@ -123,7 +123,11 @@ Scheduler job execution records.
 | `ended_at` | TEXT | ISO 8601 timestamp when execution finished |
 | `created_at` / `updated_at` | TEXT | Auto-set |
 
-**Indices:** `idx_job_execution_job_name`, `idx_job_execution_status`, `idx_job_execution_started_at`
+**Indices:**
+
+- `idx_job_execution_job_name` on `job_name` (filter by job)
+- `idx_job_execution_status` on `status` (filter by lifecycle state)
+- `idx_job_execution_started_at` on `started_at` (order by recency)
 
 ## DatabaseClient (`client.ts`)
 

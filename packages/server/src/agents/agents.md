@@ -192,19 +192,21 @@ Reference these tables when writing queries.
 | created_at | TEXT | Row creation timestamp |
 | updated_at | TEXT | Last modification timestamp |
 
-**job_execution** — A record of a scheduler job execution
+**job_execution** — A record of a scheduler job execution (written by the server, not by agents)
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | INTEGER PK | Auto-incrementing identifier |
 | job_name | TEXT | Job identifier (`daily-summary`, `memory-update`) |
-| status | TEXT | `running`, `completed`, `failed` |
-| trigger_type | TEXT | `cron`, `catch-up`, `manual` |
-| error | TEXT | Error message if status is `failed` |
+| status | TEXT | `running` (in progress), `completed` (succeeded), `failed` (error or crash recovery) |
+| trigger_type | TEXT | How the execution was initiated: `cron` (scheduled), `catch-up` (startup recovery), `manual` |
+| error | TEXT | Error message when status is `failed`, NULL otherwise |
 | started_at | TEXT | ISO 8601 — when execution began |
-| ended_at | TEXT | ISO 8601 — when execution finished (NULL while running) |
+| ended_at | TEXT | ISO 8601 — when execution finished (NULL while still running) |
 | created_at | TEXT | Row creation timestamp |
 | updated_at | TEXT | Last modification timestamp |
+
+**Indices:** `idx_job_execution_job_name` on `job_name` (filter by job), `idx_job_execution_status` on `status` (filter by lifecycle state), `idx_job_execution_started_at` on `started_at` (order by recency)
 
 ## Work Management
 
