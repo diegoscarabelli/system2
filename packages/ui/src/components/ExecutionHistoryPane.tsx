@@ -7,9 +7,10 @@
 
 import { TriangleDownIcon, TriangleUpIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { colors } from '../theme/colors';
+import { JobExecutionDetailModal } from './JobExecutionDetailModal';
 import type { MultiSelectOption } from './MultiSelectDropdown';
 import { MultiSelectDropdown } from './MultiSelectDropdown';
 
@@ -88,8 +89,13 @@ const TRIGGER_OPTIONS: MultiSelectOption[] = [
 ];
 
 function SortIndicator({ active, dir }: { active: boolean; dir: SortDir }) {
-  if (!active) return null;
-  return dir === 'asc' ? <TriangleUpIcon size={12} /> : <TriangleDownIcon size={12} />;
+  const icon =
+    active && dir === 'asc' ? <TriangleUpIcon size={12} /> : <TriangleDownIcon size={12} />;
+  return (
+    <Box as="span" sx={{ opacity: active ? 1 : 0.3 }}>
+      {icon}
+    </Box>
+  );
 }
 
 interface TableHeadersProps {
@@ -133,7 +139,7 @@ function TableHeaders({ sortKey, sortDir, onSort }: TableHeadersProps) {
 export function ExecutionHistoryPane() {
   const [executions, setExecutions] = useState<JobExecutionInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedErrors, setExpandedErrors] = useState<Set<number>>(new Set());
+  const [selectedExecution, setSelectedExecution] = useState<JobExecutionInfo | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('started_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const initialized = useRef(false);
@@ -188,15 +194,6 @@ export function ExecutionHistoryPane() {
       controller.abort();
       clearTimeout(timeoutId);
     };
-  }, []);
-
-  const toggleError = useCallback((id: number) => {
-    setExpandedErrors((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }, []);
 
   const handleSort = useCallback(
@@ -288,118 +285,103 @@ export function ExecutionHistoryPane() {
             </Box>
             <Box as="tbody">
               {filtered.map((exec) => (
-                <Fragment key={exec.id}>
+                <Box
+                  key={exec.id}
+                  as="tr"
+                  onClick={() => setSelectedExecution(exec)}
+                  sx={{
+                    cursor: 'pointer',
+                    '&:hover': { backgroundColor: 'canvas.subtle' },
+                  }}
+                >
                   <Box
-                    as="tr"
-                    onClick={exec.error ? () => toggleError(exec.id) : undefined}
+                    as="td"
                     sx={{
-                      cursor: exec.error ? 'pointer' : 'default',
-                      '&:hover': exec.error ? { backgroundColor: 'canvas.subtle' } : undefined,
+                      px: 2,
+                      py: 1,
+                      borderBottom: '1px solid',
+                      borderColor: 'border.muted',
+                      whiteSpace: 'nowrap',
+                      fontFamily: 'mono',
+                      color: 'fg.muted',
                     }}
                   >
-                    <Box
-                      as="td"
-                      sx={{
-                        px: 2,
-                        py: 1,
-                        borderBottom: '1px solid',
-                        borderColor: 'border.muted',
-                        whiteSpace: 'nowrap',
-                        fontFamily: 'mono',
-                        color: 'fg.muted',
-                      }}
-                    >
-                      {exec.id}
-                    </Box>
-                    <Box
-                      as="td"
-                      sx={{
-                        px: 2,
-                        py: 1,
-                        borderBottom: '1px solid',
-                        borderColor: 'border.muted',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {exec.job_name}
-                    </Box>
-                    <Box
-                      as="td"
-                      sx={{
-                        px: 2,
-                        py: 1,
-                        borderBottom: '1px solid',
-                        borderColor: 'border.muted',
-                        whiteSpace: 'nowrap',
-                        color: statusColor[exec.status],
-                      }}
-                    >
-                      {exec.status}
-                    </Box>
-                    <Box
-                      as="td"
-                      sx={{
-                        px: 2,
-                        py: 1,
-                        borderBottom: '1px solid',
-                        borderColor: 'border.muted',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {exec.trigger_type}
-                    </Box>
-                    <Box
-                      as="td"
-                      sx={{
-                        px: 2,
-                        py: 1,
-                        borderBottom: '1px solid',
-                        borderColor: 'border.muted',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {formatTime(exec.started_at)}
-                    </Box>
-                    <Box
-                      as="td"
-                      sx={{
-                        px: 2,
-                        py: 1,
-                        borderBottom: '1px solid',
-                        borderColor: 'border.muted',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {exec.ended_at ? formatTime(exec.ended_at) : '—'}
-                    </Box>
+                    {exec.id}
                   </Box>
-                  {exec.error && expandedErrors.has(exec.id) && (
-                    <Box as="tr">
-                      <Box
-                        as="td"
-                        colSpan={6}
-                        sx={{
-                          px: 2,
-                          py: 1,
-                          borderBottom: '1px solid',
-                          borderColor: 'border.muted',
-                          color: colors.coral,
-                          fontSize: 0,
-                          fontFamily: 'mono',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-all',
-                        }}
-                      >
-                        {exec.error}
-                      </Box>
-                    </Box>
-                  )}
-                </Fragment>
+                  <Box
+                    as="td"
+                    sx={{
+                      px: 2,
+                      py: 1,
+                      borderBottom: '1px solid',
+                      borderColor: 'border.muted',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {exec.job_name}
+                  </Box>
+                  <Box
+                    as="td"
+                    sx={{
+                      px: 2,
+                      py: 1,
+                      borderBottom: '1px solid',
+                      borderColor: 'border.muted',
+                      whiteSpace: 'nowrap',
+                      color: statusColor[exec.status],
+                    }}
+                  >
+                    {exec.status}
+                  </Box>
+                  <Box
+                    as="td"
+                    sx={{
+                      px: 2,
+                      py: 1,
+                      borderBottom: '1px solid',
+                      borderColor: 'border.muted',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {exec.trigger_type}
+                  </Box>
+                  <Box
+                    as="td"
+                    sx={{
+                      px: 2,
+                      py: 1,
+                      borderBottom: '1px solid',
+                      borderColor: 'border.muted',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {formatTime(exec.started_at)}
+                  </Box>
+                  <Box
+                    as="td"
+                    sx={{
+                      px: 2,
+                      py: 1,
+                      borderBottom: '1px solid',
+                      borderColor: 'border.muted',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {exec.ended_at ? formatTime(exec.ended_at) : '—'}
+                  </Box>
+                </Box>
               ))}
             </Box>
           </Box>
         )}
       </Box>
+
+      {selectedExecution && (
+        <JobExecutionDetailModal
+          execution={selectedExecution}
+          onClose={() => setSelectedExecution(null)}
+        />
+      )}
     </Box>
   );
 }
