@@ -252,6 +252,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
   const [collapsed, setCollapsed] = useState(true);
   const { highlight } = useAccentColors();
   const hasContent = tc.input || tc.result;
+  const summary = toolSummary(tc.name, tc.input);
 
   // For message_agent: extract target as "role_id" from result, or "agent_id" when running
   let agentTarget: string | null = null;
@@ -274,38 +275,39 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
         sx={{
           display: 'flex',
           alignItems: 'center',
-          gap: 1,
+          justifyContent: 'space-between',
           cursor: hasContent ? 'pointer' : 'default',
           '&:hover': hasContent ? { opacity: 0.8 } : {},
         }}
       >
-        <Text
-          sx={{
-            fontSize: 0,
-            fontWeight: 'semibold',
-            color: highlight,
-          }}
-        >
-          {isRunning ? '⚙️ ' : '✓ '}
-          {tc.name}
-        </Text>
-        {agentTarget && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{agentTarget}</Text>}
-        {toolSummary(tc.name, tc.input) && (
-          <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{toolSummary(tc.name, tc.input)}</Text>
-        )}
-        {hasContent && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Text
             sx={{
               fontSize: 0,
-              color: 'fg.muted',
-              transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.15s ease',
-              lineHeight: 1,
+              fontWeight: 'semibold',
+              color: highlight,
             }}
           >
-            ^
+            {isRunning ? '⚙️ ' : '✓ '}
+            {tc.name}
           </Text>
-        )}
+          {agentTarget && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{agentTarget}</Text>}
+          {summary && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{summary}</Text>}
+          {hasContent && (
+            <Text
+              sx={{
+                fontSize: 0,
+                color: 'fg.muted',
+                transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.15s ease',
+                lineHeight: 1,
+              }}
+            >
+              ^
+            </Text>
+          )}
+        </Box>
+        <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(tc.timestamp)}</Text>
       </Box>
       {!collapsed && hasContent && (
         <Box
@@ -399,31 +401,34 @@ function ThinkingBlock({ thinking }: { thinking: ThinkingBlockType }) {
         sx={{
           display: 'flex',
           alignItems: 'center',
-          gap: 1,
+          justifyContent: 'space-between',
           cursor: 'pointer',
           '&:hover': { opacity: 0.8 },
         }}
       >
-        <Text
-          sx={{
-            fontWeight: 'semibold',
-            fontSize: 0,
-            color: 'fg.muted',
-          }}
-        >
-          {thinking.isStreaming ? 'Thinking...' : 'Thought'}
-        </Text>
-        <Text
-          sx={{
-            fontSize: 0,
-            color: 'fg.muted',
-            transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 0.15s ease',
-            lineHeight: 1,
-          }}
-        >
-          ^
-        </Text>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Text
+            sx={{
+              fontWeight: 'semibold',
+              fontSize: 0,
+              color: 'fg.muted',
+            }}
+          >
+            {thinking.isStreaming ? 'Thinking...' : 'Thought'}
+          </Text>
+          <Text
+            sx={{
+              fontSize: 0,
+              color: 'fg.muted',
+              transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.15s ease',
+              lineHeight: 1,
+            }}
+          >
+            ^
+          </Text>
+        </Box>
+        <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(thinking.timestamp)}</Text>
       </Box>
       {!collapsed && (
         <Box sx={{ marginTop: 1 }}>
