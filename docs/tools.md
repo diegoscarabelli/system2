@@ -8,6 +8,7 @@ Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts
 
 - Eight tools are always included: `bash`, `read`, `edit`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `web_fetch`
 - `show_artifact` is Guide-only: the Guide is the only agent that interacts with the user via the UI
+- `set_reminder`, `cancel_reminder`, and `list_reminders` are included for all agents when a `ReminderManager` is provided
 - `spawn_agent`, `terminate_agent`, and `trigger_project_story` are conditional: only agents that receive a spawner callback (Guide and Conductors) get these tools
 - `resurrect_agent` is Guide-only: only the Guide receives a resurrector callback
 - `web_search` is conditional on a Brave Search API key being configured
@@ -174,6 +175,36 @@ Search the web via the Brave Search API.
 Returns structured results (title, URL, description). Requires a [Brave Search API](https://brave.com/search/api/) key in config.toml.
 
 **Conditional:** only registered when `[services.brave_search]` key exists AND `[tools.web_search].enabled` is not `false`. Max results configurable via `[tools.web_search].max_results`.
+
+### `set_reminder`
+
+Schedule a delayed reminder for the calling agent. After the specified delay, a follow-up message containing the reminder text is delivered back to the agent via `deliverMessage()`.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `delay_minutes` | number | Minutes from now. Must be 1 to 35,791 (~24.8 days max). |
+| `message` | string | Reminder text delivered back as a follow-up message when the timer fires. |
+
+- **Non-blocking:** uses `setTimeout` internally; the agent continues working after setting the reminder
+- **Delivery:** fires as a `followUp` custom message with `sender: 0` (system sentinel)
+- **In-memory only:** reminders do not survive server restarts
+- **Timer handle:** `unref()`'d so it does not prevent graceful shutdown
+
+### `cancel_reminder`
+
+Cancel a pending reminder by its ID.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `reminder_id` | number | ID returned by `set_reminder`. |
+
+Only the agent that created the reminder can cancel it. Returns whether the cancellation succeeded.
+
+### `list_reminders`
+
+List the calling agent's active (pending) reminders. Takes no parameters.
+
+Returns reminder IDs, messages, and scheduled fire times.
 
 ### `spawn_agent`
 

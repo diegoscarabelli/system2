@@ -62,6 +62,9 @@ The **Guide** is the primary user-facing agent. However, the user may choose to 
 | `terminate_agent` | Archive an agent — abort its session, unregister, mark archived | Guide, Conductors |
 | `resurrect_agent` | Bring back an archived agent — resume its session from persisted JSONL, re-register | Guide, Conductors |
 | `trigger_project_story` | Signal project completion: server creates story task, collects data, delivers to Narrator | Guide, Conductors |
+| `set_reminder` | Schedule a delayed follow-up message to yourself (1 to ~24.8 days). Non-blocking. | All agents |
+| `cancel_reminder` | Cancel a pending reminder by ID | All agents |
+| `list_reminders` | List your active pending reminders | All agents |
 | `web_search` | Search the web via Brave Search API | All agents (when configured) |
 
 **Notes:**
@@ -72,6 +75,7 @@ The **Guide** is the primary user-facing agent. However, the user may choose to 
 - `bash` streams output as the command runs. Set `run_in_background` to true for long-running commands — you will receive the result as a follow-up message when the command finishes.
 - `spawn_agent`, `terminate_agent`, and `trigger_project_story` are available to Guide and Conductors only. Narrator and Reviewer cannot spawn, terminate, or trigger project stories.
 - `resurrect_agent` is available to Guide and Conductors. Guide may resurrect any archived non-singleton. Conductors may only resurrect agents within their own project. Narrator and Reviewer cannot resurrect agents.
+- `set_reminder`, `cancel_reminder`, and `list_reminders` are available to all agents. Reminders are in-memory only and do not survive server restarts. See [Reminders](#reminders) under Communication for usage guidance.
 - `web_search` is only available when a Brave Search API key is configured.
 - `show_artifact` is available to all agents. Any agent can display a file in the user's UI. Accepts an absolute path (or `~/`-prefixed). If the artifact is registered in the database, its title is used for the tab label; otherwise the filename is used. Only one artifact is watched per client connection at a time (for live reload).
 
@@ -261,6 +265,28 @@ SELECT id, role, status, project FROM agent WHERE status = 'active';
 - **Be direct and terse.** No pleasantries, no filler, no hedging. State facts, IDs, and next actions. Agent-to-agent messages are operational, not conversational.
 - **Reference IDs.** Every message should include the relevant project, task, and/or comment IDs so the recipient can look up context with a single query.
 - **Use the right channel.** Direct messages (`message_agent`) are for real-time coordination and urgent updates. Task comments (`createTaskComment`) are for the permanent record — decisions, results, blockers, progress.
+
+### Reminders
+
+Use `set_reminder` to schedule a follow-up message to yourself. After the delay, you receive the reminder as a new message and can act on it. This is your primary tool for deferred work: instead of blocking or polling, set a reminder and continue.
+
+**When to use reminders:**
+
+- **Following up on delegated work.** After assigning a task or sending a question to another agent, set a reminder to check whether they responded or completed it. If they haven't, follow up or escalate.
+  - _"Check if Reviewer (id=4) provided feedback on task #12. If not, message them again."_
+  - _"Verify Conductor (id=3) has started project #2. If project status is still 'todo', ask for a status update."_
+- **Monitoring long-running operations.** After launching a background command, pipeline, or data load, set a reminder to check the results.
+  - _"Check if the LinkedIn data export (task #8) completed. Read ~/.system2/projects/1_linkedin/artifacts/export.csv and verify row count."_
+- **Periodic progress checks.** When coordinating multi-step work across agents, set reminders at intervals to review overall progress and unblock stalled work.
+  - _"Review task board for project #3. Identify any tasks stuck in 'in progress' for too long and message the assignee."_
+- **Deferred actions with timing requirements.** When something needs to happen after a specific delay (rate-limited API retries, waiting for external systems, scheduled follow-ups).
+  - _"Retry the API call for task #15. Last attempt hit rate limit."_
+
+**Guidelines:**
+
+- Write reminder messages as instructions to your future self. Include agent IDs, task IDs, and what action to take so you have full context when the reminder fires.
+- Reminders are in-memory only: they do not survive server restarts. For delays longer than a few hours, consider whether the action is better handled by a task comment and a check-on-startup pattern.
+- Use `list_reminders` to review your active reminders before setting duplicates. Use `cancel_reminder` if the situation changed and the follow-up is no longer needed.
 
 ## Knowledge and Memory
 

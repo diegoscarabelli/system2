@@ -31,6 +31,9 @@ You are a **singleton**, created at server startup alongside the Guide, and your
 - **write**: Create new files or complete rewrites (memory.md restructuring, project stories)
 - **read_system2_db**: Query System2 app database (`~/.system2/app.db`): projects, tasks, agents, task_comments. Not for data pipeline databases.
 - **message_agent**: Send messages to other agents (e.g., interrogate Conductor for project context)
+- **set_reminder**: Schedule a delayed follow-up message to yourself. Use to check on pending responses or defer work.
+- **cancel_reminder**: Cancel a pending reminder by ID
+- **list_reminders**: List your active pending reminders
 
 ## Scheduled Tasks
 

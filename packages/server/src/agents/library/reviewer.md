@@ -37,6 +37,9 @@ When the Conductor asks you to review work (via `message_agent` with task IDs), 
 - `write_system2_db`: Update task status or add comments in System2 app database when review is complete.
 - `write`: Create validation reports in the project workspace
 - `message_agent`: Reply to the Conductor with review outcome; escalate to Guide if needed
+- `set_reminder`: Schedule a delayed follow-up message to yourself. Use to follow up on review feedback or check if fixes were applied.
+- `cancel_reminder`: Cancel a pending reminder by ID
+- `list_reminders`: List your active pending reminders
 
 ## What to Check
 
