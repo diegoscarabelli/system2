@@ -457,7 +457,7 @@ export class AgentHost {
     const message = eventWithMessage.message;
     if (!message || message.stopReason !== 'error' || !message.errorMessage) return;
 
-    // Don't handle errors while already reinitializing
+    // Don't handle errors while already reinitializing (session setup in progress)
     if (this.isReinitializing) return;
 
     const errorMessage = message.errorMessage;
@@ -474,7 +474,8 @@ export class AgentHost {
     const retryKey = `${this.currentProvider}:${category}`;
     const currentAttempts = this.retryAttempts.get(retryKey) ?? 0;
 
-    // Capture before any await — agent_end may clear it before this async handler resumes
+    // Capture before any await — agent_end clears pendingPrompt synchronously, but this
+    // handler yields at the first await. The ?? promptToRetry pattern below restores it.
     const promptToRetry = this.pendingPrompt;
 
     // If another agent already put our key in cooldown, skip retries and reinitialize.
@@ -659,6 +660,10 @@ export class AgentHost {
           listener(failoverEvent);
         });
       }
+
+      // Re-arm error handling before retrying the prompt. Errors from the new
+      // provider need normal failover, not the isReinitializing early-return.
+      this.isReinitializing = false;
 
       // Retry the pending prompt with the new provider
       if (promptToRetry && this.session) {
