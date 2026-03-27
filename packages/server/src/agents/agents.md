@@ -192,6 +192,20 @@ Reference these tables when writing queries.
 | created_at | TEXT | Row creation timestamp |
 | updated_at | TEXT | Last modification timestamp |
 
+**job_execution** — A record of a scheduler job execution
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER PK | Auto-incrementing identifier |
+| job_name | TEXT | Job identifier (`daily-summary`, `memory-update`) |
+| status | TEXT | `running`, `completed`, `failed` |
+| trigger_type | TEXT | `cron`, `catch-up`, `manual` |
+| error | TEXT | Error message if status is `failed` |
+| started_at | TEXT | ISO 8601 — when execution began |
+| ended_at | TEXT | ISO 8601 — when execution finished (NULL while running) |
+| created_at | TEXT | Row creation timestamp |
+| updated_at | TEXT | Last modification timestamp |
+
 ## Work Management
 
 All planning and tracking happens in app.db. Never create JSON plans, markdown plans, or any other planning artifact outside the database. The task hierarchy in app.db IS the plan.
