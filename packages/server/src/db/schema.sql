@@ -93,3 +93,22 @@ CREATE TABLE IF NOT EXISTS artifact (
 
 CREATE INDEX IF NOT EXISTS idx_artifact_project ON artifact(project);
 CREATE INDEX IF NOT EXISTS idx_artifact_file_path ON artifact(file_path);
+
+-- A record of a scheduler job execution
+CREATE TABLE IF NOT EXISTS job_execution (
+  id           INTEGER PRIMARY KEY,                -- Auto-incrementing unique identifier
+  job_name     TEXT NOT NULL,                       -- Job identifier (e.g., 'daily-summary', 'memory-update')
+  status       TEXT NOT NULL DEFAULT 'running'      -- Execution lifecycle state
+               CHECK(status IN ('running', 'completed', 'failed')),
+  trigger_type TEXT NOT NULL                        -- How the execution was initiated
+               CHECK(trigger_type IN ('cron', 'catch-up', 'manual')),
+  error        TEXT,                                -- Error message if status is 'failed'
+  started_at   TEXT NOT NULL DEFAULT (datetime('now')), -- When the execution began
+  ended_at     TEXT,                                -- When the execution finished (NULL while running)
+  created_at   TEXT DEFAULT (datetime('now')),       -- Row creation timestamp
+  updated_at   TEXT DEFAULT (datetime('now'))        -- Last modification timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_execution_job_name   ON job_execution(job_name);
+CREATE INDEX IF NOT EXISTS idx_job_execution_status     ON job_execution(status);
+CREATE INDEX IF NOT EXISTS idx_job_execution_started_at ON job_execution(started_at);

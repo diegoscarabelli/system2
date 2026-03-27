@@ -5,6 +5,7 @@
  */
 
 import {
+  HistoryIcon,
   MoonIcon,
   PeopleIcon,
   StackIcon,
@@ -21,6 +22,7 @@ import { AgentPane } from './AgentPane';
 import { ArtifactCatalog } from './ArtifactCatalog';
 import { ArtifactViewer } from './ArtifactViewer';
 import { Chat } from './Chat';
+import { ExecutionHistoryPane } from './ExecutionHistoryPane';
 
 const ACTIVITY_BAR_PX = 48;
 
@@ -65,8 +67,10 @@ export function Layout() {
   const kanbanOpen = useArtifactStore((s) => s.kanbanOpen);
   const toggleCatalog = useArtifactStore((s) => s.toggleCatalog);
   const toggleAgents = useArtifactStore((s) => s.toggleAgents);
+  const executionsOpen = useArtifactStore((s) => s.executionsOpen);
+  const toggleExecutions = useArtifactStore((s) => s.toggleExecutions);
   const toggleKanbanTab = useArtifactStore((s) => s.toggleKanbanTab);
-  const sideDrawerOpen = catalogOpen || agentsOpen;
+  const sideDrawerOpen = catalogOpen || agentsOpen || executionsOpen;
 
   const handleMouseDown = useCallback(() => {
     isDragging.current = true;
@@ -223,6 +227,32 @@ export function Layout() {
               }}
             />
           </Box>
+          <Box data-tooltip="Job executions" sx={tooltipWrapperSx}>
+            <IconButton
+              unsafeDisableTooltip
+              aria-label="Job executions"
+              icon={HistoryIcon}
+              variant="invisible"
+              size="medium"
+              onClick={toggleExecutions}
+              sx={{
+                color: executionsOpen ? 'fg.default' : 'fg.muted',
+                position: 'relative',
+                '&::before': executionsOpen
+                  ? {
+                      content: '""',
+                      position: 'absolute',
+                      left: '-8px',
+                      top: '25%',
+                      bottom: '25%',
+                      width: '2px',
+                      backgroundColor: accent,
+                      borderRadius: 1,
+                    }
+                  : {},
+              }}
+            />
+          </Box>
         </Box>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
           <Box
@@ -269,6 +299,7 @@ export function Layout() {
         >
           {catalogOpen && <ArtifactCatalog />}
           {agentsOpen && <AgentPane />}
+          {executionsOpen && <ExecutionHistoryPane />}
         </Box>
       )}
 

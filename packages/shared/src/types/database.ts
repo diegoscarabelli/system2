@@ -69,3 +69,15 @@ export interface Artifact {
   created_at: string;
   updated_at: string;
 }
+
+export interface JobExecution {
+  id: number;
+  job_name: string;
+  status: 'running' | 'completed' | 'failed';
+  trigger_type: 'cron' | 'catch-up' | 'manual';
+  error: string | null;
+  started_at: string;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+}

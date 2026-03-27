@@ -39,6 +39,7 @@ import {
   readFrontmatterField,
   registerNarratorJobs,
   resolveDailySummaryTimestamp,
+  trackJobExecution,
 } from './scheduler/jobs.js';
 import { isNetworkAvailable } from './scheduler/network.js';
 import { Scheduler } from './scheduler/scheduler.js';
@@ -227,6 +228,38 @@ export class Server {
         `);
         const agents = this.db.query('SELECT id, role, project FROM agent');
         res.json({ tasks, projects, agents });
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+      }
+    });
+
+    // Job execution history
+    this.app.get('/api/job-executions', (req, res) => {
+      try {
+        const jobName = req.query.job_name as string | undefined;
+        const status = req.query.status as string | undefined;
+        const rawLimit = req.query.limit ? Number(req.query.limit) : undefined;
+        if (rawLimit !== undefined && (!Number.isFinite(rawLimit) || rawLimit < 1)) {
+          res.status(400).json({ error: 'Invalid limit. Must be a positive integer.' });
+          return;
+        }
+        const limit = rawLimit !== undefined ? Math.min(rawLimit, 500) : undefined;
+
+        const validStatuses = ['running', 'completed', 'failed'] as const;
+        if (status && !validStatuses.includes(status as (typeof validStatuses)[number])) {
+          res
+            .status(400)
+            .json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+          return;
+        }
+
+        const executions = this.db.listJobExecutions({
+          jobName: jobName || undefined,
+          status: (status as 'running' | 'completed' | 'failed') || undefined,
+          limit,
+        });
+
+        res.json({ executions });
       } catch (error) {
         res.status(500).json({ error: (error as Error).message });
       }
@@ -545,6 +578,12 @@ export class Server {
     // Restore previously active spawned agents (conductors, reviewers, etc.)
     await this.restoreActiveAgents();
 
+    // Mark any stale 'running' job executions from a previous crash as failed
+    const staleCount = this.db.failStaleJobExecutions('server shutdown');
+    if (staleCount > 0) {
+      console.log(`[Server] Recovered ${staleCount} stale job execution(s) from previous process`);
+    }
+
     // Start scheduled jobs
     const intervalMinutes = this.config.schedulerConfig?.daily_summary_interval_minutes ?? 30;
     registerNarratorJobs(
@@ -599,13 +638,19 @@ export class Server {
         console.log(
           `[Server] Daily summary stale by ${Math.round(staleness / 60000)} min, queuing catch-up`
         );
-        buildAndDeliverDailySummary(
-          this.db,
-          this.narratorHost,
-          this.narratorId,
-          SYSTEM2_DIR,
-          intervalMinutes
-        );
+        try {
+          await trackJobExecution(this.db, 'daily-summary', 'catch-up', () => {
+            buildAndDeliverDailySummary(
+              this.db,
+              this.narratorHost,
+              this.narratorId,
+              SYSTEM2_DIR,
+              intervalMinutes
+            );
+          });
+        } catch (error) {
+          console.error('[Server] Daily summary catch-up failed:', error);
+        }
       }
     }
 
@@ -620,7 +665,13 @@ export class Server {
         console.log(
           `[Server] Memory stale by ${Math.round(memoryStaleness / 3600000)}h, queuing memory-update catch-up`
         );
-        buildAndDeliverMemoryUpdate(this.narratorHost, this.narratorId, SYSTEM2_DIR);
+        try {
+          await trackJobExecution(this.db, 'memory-update', 'catch-up', () => {
+            buildAndDeliverMemoryUpdate(this.narratorHost, this.narratorId, SYSTEM2_DIR);
+          });
+        } catch (error) {
+          console.error('[Server] Memory update catch-up failed:', error);
+        }
       }
     }
   }
