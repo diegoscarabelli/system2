@@ -240,6 +240,14 @@ export class Server {
         const status = req.query.status as string | undefined;
         const limit = req.query.limit ? Number(req.query.limit) : undefined;
 
+        const validStatuses = ['running', 'completed', 'failed'] as const;
+        if (status && !validStatuses.includes(status as (typeof validStatuses)[number])) {
+          res
+            .status(400)
+            .json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+          return;
+        }
+
         const executions = this.db.listJobExecutions({
           jobName: jobName || undefined,
           status: (status as 'running' | 'completed' | 'failed') || undefined,
