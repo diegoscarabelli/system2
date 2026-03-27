@@ -471,6 +471,7 @@ export const useChatStore = create<ChatState>()(
         set((state) => ({
           agentStates: updateAgentState(state.agentStates, agentId, () => ({
             compactionStatus: 'compacted' as const,
+            compactionTimestamp: Date.now(),
             isStreaming: false,
           })),
         }));
