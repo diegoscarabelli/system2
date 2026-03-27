@@ -67,6 +67,7 @@ function categoryLabel(category: ErrorCategory): string {
       return 'error';
   }
 }
+
 import { createBashTool } from './tools/bash.js';
 import { createCancelReminderTool } from './tools/cancel-reminder.js';
 import { createEditTool } from './tools/edit.js';
