@@ -76,7 +76,7 @@ Each assistant message shows its turn events (thinking -> tool calls -> response
 
 ### MessageInput
 
-Auto-growing textarea (1-10 lines, then scrolls). Shows the current LLM provider name and context window usage percentage (teal below 50%, accent 50-69%, coral at 70%+) in the status bar. Messages sent while the agent is streaming are delivered immediately as steering messages. Toggles between Send and Stop buttons based on streaming state. Provider changes on failover trigger a system message in the chat timeline.
+Auto-growing textarea (1-10 lines, then scrolls). Shows the current LLM provider name and context window usage percentage (teal below 40%, accent 40-49%, coral at 50%+) in the status bar. Messages sent while the agent is streaming are delivered immediately as steering messages. Toggles between Send and Stop buttons based on streaming state. Provider changes on failover trigger a system message in the chat timeline.
 
 ### ArtifactViewer
 

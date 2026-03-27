@@ -56,7 +56,7 @@ export const palettes = {
 
 /** Map a context-usage percentage to a severity color. */
 export function contextColor(percent: number, accent: string): string {
-  if (percent >= 70) return colors.coral;
-  if (percent >= 50) return accent;
+  if (percent >= 50) return colors.coral;
+  if (percent >= 40) return accent;
   return colors.teal;
 }
