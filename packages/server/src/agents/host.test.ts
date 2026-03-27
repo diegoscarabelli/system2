@@ -776,7 +776,8 @@ describe('AgentHost', () => {
       expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
         'anthropic',
         null,
-        '429 rate limited on google, switching to anthropic'
+        '429 rate limited, switched to anthropic',
+        'on google, switching to anthropic'
       );
     });
 
@@ -820,7 +821,8 @@ describe('AgentHost', () => {
       expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
         'google',
         null,
-        '429 rate limited on google, rotating to next key'
+        '429 rate limited, rotating to next key',
+        'on google, rotating to next key'
       );
     });
 
@@ -863,7 +865,9 @@ describe('AgentHost', () => {
       expect(internal._chatCache.push).toHaveBeenCalledOnce();
       const pushed = internal._chatCache.push.mock.calls[0][0];
       expect(pushed.role).toBe('system');
-      expect(pushed.content).toBe('401 auth error on cerebras, all providers unavailable');
+      expect(pushed.content).toBe(
+        '401 auth error, all providers unavailable\n\non cerebras, all providers unavailable'
+      );
     });
   });
 
@@ -905,6 +909,7 @@ describe('AgentHost', () => {
       expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
         'google',
         null,
+        expect.stringContaining('switched to google'),
         expect.stringContaining('cooldown')
       );
     });
@@ -987,7 +992,8 @@ describe('AgentHost', () => {
       expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
         'google',
         null,
-        '400 client error on anthropic, switching to google'
+        '400 client error, switched to google',
+        'on anthropic, switching to google'
       );
     });
 
@@ -1038,7 +1044,9 @@ describe('AgentHost', () => {
       expect(internal.busy).toBe(false);
       // Should show error details in the exhausted message
       const pushed = internal._chatCache.push.mock.calls[0][0];
-      expect(pushed.content).toBe('400 client error on anthropic, all providers unavailable');
+      expect(pushed.content).toBe(
+        '400 client error, all providers unavailable\n\non anthropic, all providers unavailable'
+      );
     });
   });
 

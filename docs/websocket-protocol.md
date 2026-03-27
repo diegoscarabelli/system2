@@ -66,7 +66,7 @@ type ServerMessage =
 | `artifact` | Display artifact in a UI tab. Includes `title` (from DB or filename) and `filePath` (absolute path for tab dedup and reload targeting). Also sent on live reload (file watch). |
 | `context_usage` | Context window usage after each agent turn |
 | `provider_info` | Sent on connect/switch: current LLM provider for an agent |
-| `provider_change` | Sent on failover: provider switched. Includes `reason` (status code + category) and `agentId` so the UI routes the system message to the correct agent chat |
+| `provider_change` | Sent on failover: provider switched. Includes `reason` (e.g., "503 server error, switched to anthropic") and `agentId` so the UI routes the system message to the correct agent chat |
 | `error` | Error message |
 | `ready_for_input` | Agent finished, ready for next message |
 | `chat_history` | Sent on connect (Guide) and on `switch_agent`: recent messages for the specified agent |
