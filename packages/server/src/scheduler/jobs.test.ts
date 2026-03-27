@@ -15,6 +15,7 @@ import {
   registerNarratorJobs,
   resolveDailySummaryTimestamp,
   stripSessionEntry,
+  trackJobExecution,
 } from './jobs.js';
 import type { Scheduler } from './scheduler.js';
 
@@ -631,7 +632,11 @@ describe('registerNarratorJobs (network guard)', () => {
     const dir = trackTmpDir(makeTmpDir());
     mkdirSync(join(dir, 'knowledge', 'daily_summaries'), { recursive: true });
 
-    const mockDb = { query: () => [] } as unknown as DatabaseClient;
+    const mockDb = {
+      query: () => [],
+      createJobExecution: () => ({ id: 1 }),
+      completeJobExecution: () => {},
+    } as unknown as DatabaseClient;
 
     registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, mockDb, dir, 30);
 
@@ -655,7 +660,12 @@ describe('registerNarratorJobs (network guard)', () => {
     writeFileSync(join(knowledgeDir, 'memory.md'), '---\nlast_narrator_update_ts:\n---\n');
     writeFileSync(join(summariesDir, '2026-03-24.md'), '---\n---\n# Summary');
 
-    registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, {} as DatabaseClient, dir, 30);
+    const mockDb = {
+      createJobExecution: () => ({ id: 1 }),
+      completeJobExecution: () => {},
+    } as unknown as DatabaseClient;
+
+    registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, mockDb, dir, 30);
 
     await scheduler.handlers['memory-update']();
     expect(host.calls).toHaveLength(1);
@@ -923,5 +933,78 @@ describe('buildAndDeliverDailySummary', () => {
     expect(dailySummaryMsg).toBeDefined();
     expect(dailySummaryMsg).toContain('## Project Activity');
     expect(dailySummaryMsg).not.toContain('## Non-Project Activity');
+  });
+});
+
+describe('trackJobExecution', () => {
+  function mockDbForTracking() {
+    return {
+      createJobExecution: vi.fn(() => ({ id: 42, job_name: 'test-job', status: 'running' })),
+      completeJobExecution: vi.fn(() => ({ id: 42, status: 'completed' })),
+      failJobExecution: vi.fn(() => ({ id: 42, status: 'failed' })),
+    } as unknown as DatabaseClient;
+  }
+
+  it('creates a running record and completes it on success', async () => {
+    const db = mockDbForTracking();
+    const handler = vi.fn();
+
+    await trackJobExecution(db, 'test-job', 'cron', handler);
+
+    expect(db.createJobExecution).toHaveBeenCalledWith('test-job', 'cron');
+    expect(handler).toHaveBeenCalled();
+    expect(db.completeJobExecution).toHaveBeenCalledWith(42);
+    expect(db.failJobExecution).not.toHaveBeenCalled();
+  });
+
+  it('creates a running record and fails it on error', async () => {
+    const db = mockDbForTracking();
+    const handler = vi.fn(() => {
+      throw new Error('something broke');
+    });
+
+    await expect(trackJobExecution(db, 'test-job', 'catch-up', handler)).rejects.toThrow(
+      'something broke'
+    );
+
+    expect(db.createJobExecution).toHaveBeenCalledWith('test-job', 'catch-up');
+    expect(db.failJobExecution).toHaveBeenCalledWith(42, 'something broke');
+    expect(db.completeJobExecution).not.toHaveBeenCalled();
+  });
+
+  it('re-throws the original error after recording failure', async () => {
+    const db = mockDbForTracking();
+    const originalError = new Error('original');
+    const handler = vi.fn(() => {
+      throw originalError;
+    });
+
+    try {
+      await trackJobExecution(db, 'test-job', 'manual', handler);
+    } catch (error) {
+      expect(error).toBe(originalError);
+    }
+  });
+
+  it('handles non-Error thrown values', async () => {
+    const db = mockDbForTracking();
+    const handler = vi.fn(() => {
+      throw 'string error';
+    });
+
+    await expect(trackJobExecution(db, 'test-job', 'cron', handler)).rejects.toThrow();
+
+    expect(db.failJobExecution).toHaveBeenCalledWith(42, 'string error');
+  });
+
+  it('works with async handlers', async () => {
+    const db = mockDbForTracking();
+    const handler = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+
+    await trackJobExecution(db, 'test-job', 'cron', handler);
+
+    expect(db.completeJobExecution).toHaveBeenCalledWith(42);
   });
 });

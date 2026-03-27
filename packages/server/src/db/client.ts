@@ -7,7 +7,15 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Agent, Artifact, Project, Task, TaskComment, TaskLink } from '@dscarabelli/shared';
+import type {
+  Agent,
+  Artifact,
+  JobExecution,
+  Project,
+  Task,
+  TaskComment,
+  TaskLink,
+} from '@dscarabelli/shared';
 import Database from 'better-sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -463,6 +471,77 @@ export class DatabaseClient {
   deleteArtifact(id: number): boolean {
     const stmt = this.db.prepare('DELETE FROM artifact WHERE id = ?');
     return stmt.run(id).changes > 0;
+  }
+
+  // Job execution operations
+  createJobExecution(jobName: string, triggerType: JobExecution['trigger_type']): JobExecution {
+    const stmt = this.db.prepare(`
+      INSERT INTO job_execution (job_name, trigger_type)
+      VALUES (?, ?)
+      RETURNING *
+    `);
+
+    return stmt.get(jobName, triggerType) as JobExecution;
+  }
+
+  completeJobExecution(id: number): JobExecution | null {
+    const stmt = this.db.prepare(`
+      UPDATE job_execution
+      SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now')
+      WHERE id = ?
+      RETURNING *
+    `);
+
+    return (stmt.get(id) as JobExecution) || null;
+  }
+
+  failJobExecution(id: number, error: string): JobExecution | null {
+    const stmt = this.db.prepare(`
+      UPDATE job_execution
+      SET status = 'failed', ended_at = datetime('now'), updated_at = datetime('now'), error = ?
+      WHERE id = ?
+      RETURNING *
+    `);
+
+    return (stmt.get(error, id) as JobExecution) || null;
+  }
+
+  failStaleJobExecutions(error: string): number {
+    const stmt = this.db.prepare(`
+      UPDATE job_execution
+      SET status = 'failed', ended_at = datetime('now'), updated_at = datetime('now'), error = ?
+      WHERE status = 'running'
+    `);
+
+    return stmt.run(error).changes;
+  }
+
+  listJobExecutions(filters?: {
+    jobName?: string;
+    status?: JobExecution['status'];
+    limit?: number;
+  }): JobExecution[] {
+    const conditions: string[] = [];
+    const values: (string | number)[] = [];
+
+    if (filters?.jobName) {
+      conditions.push('job_name = ?');
+      values.push(filters.jobName);
+    }
+    if (filters?.status) {
+      conditions.push('status = ?');
+      values.push(filters.status);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = filters?.limit ?? 100;
+    values.push(limit);
+
+    const stmt = this.db.prepare(
+      `SELECT * FROM job_execution ${where} ORDER BY started_at DESC LIMIT ?`
+    );
+
+    return stmt.all(...values) as JobExecution[];
   }
 
   // Query method for custom queries (used by read_system2_db tool and REST endpoints)

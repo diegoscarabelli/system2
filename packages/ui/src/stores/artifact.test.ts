@@ -13,6 +13,7 @@ function resetStore() {
     activeTabId: null,
     catalogOpen: false,
     agentsOpen: false,
+    executionsOpen: false,
     kanbanOpen: false,
   });
 }
@@ -95,6 +96,54 @@ describe('useArtifactStore', () => {
       useArtifactStore.getState().toggleKanbanTab();
 
       expect(useArtifactStore.getState().kanbanOpen).toBe(false);
+    });
+  });
+
+  describe('toggleExecutions', () => {
+    it('opens the executions panel', () => {
+      useArtifactStore.getState().toggleExecutions();
+
+      expect(useArtifactStore.getState().executionsOpen).toBe(true);
+    });
+
+    it('closes the executions panel when already open', () => {
+      useArtifactStore.getState().toggleExecutions();
+      useArtifactStore.getState().toggleExecutions();
+
+      expect(useArtifactStore.getState().executionsOpen).toBe(false);
+    });
+
+    it('closes catalog and agents when opening executions', () => {
+      useArtifactStore.setState({ catalogOpen: true, agentsOpen: true });
+
+      useArtifactStore.getState().toggleExecutions();
+
+      const state = useArtifactStore.getState();
+      expect(state.executionsOpen).toBe(true);
+      expect(state.catalogOpen).toBe(false);
+      expect(state.agentsOpen).toBe(false);
+    });
+  });
+
+  describe('panel mutual exclusivity with executions', () => {
+    it('toggleCatalog closes executions', () => {
+      useArtifactStore.setState({ executionsOpen: true });
+
+      useArtifactStore.getState().toggleCatalog();
+
+      const state = useArtifactStore.getState();
+      expect(state.catalogOpen).toBe(true);
+      expect(state.executionsOpen).toBe(false);
+    });
+
+    it('toggleAgents closes executions', () => {
+      useArtifactStore.setState({ executionsOpen: true });
+
+      useArtifactStore.getState().toggleAgents();
+
+      const state = useArtifactStore.getState();
+      expect(state.agentsOpen).toBe(true);
+      expect(state.executionsOpen).toBe(false);
     });
   });
 

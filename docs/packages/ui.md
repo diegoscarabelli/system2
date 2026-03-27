@@ -21,6 +21,7 @@ src/
 │   ├── ArtifactViewer.tsx    # Tabbed artifact display (iframe + native tabs)
 │   ├── AgentPane.tsx          # Active agent list with busy indicators
 │   ├── ArtifactCatalog.tsx  # Browsable overlay of all registered artifacts
+│   ├── ExecutionHistoryPane.tsx  # Scheduler job execution history panel
 │   ├── KanbanBoard.tsx    # Live kanban dashboard (swimlane layout, native tab)
 │   ├── TaskDetailModal.tsx # Task detail overlay (comments, links, markdown)
 │   ├── ProjectDetailModal.tsx # Project detail overlay (status, labels, dates)
@@ -56,7 +57,7 @@ App (ThemeProvider)
 
 ### Layout
 
-VSCode-style layout with an activity bar on the left edge (48px). The activity bar contains toggle buttons for the artifact catalog, agent pane, and kanban board (top), plus particles and theme toggles (bottom). Opening the catalog or agents panel closes the other; the kanban board toggles a native tab instead. Opening one side panel closes the other. The artifact viewer fills the center, with the chat panel on the right (20-60% resizable, default 33%). Both the side panel and chat panel have draggable resize handles.
+VSCode-style layout with an activity bar on the left edge (48px). The activity bar contains toggle buttons for the artifact catalog, agent pane, kanban board, and execution history (top), plus particles and theme toggles (bottom). Opening the catalog or agents panel closes the other; the kanban board toggles a native tab instead. Opening one side panel closes the other. The artifact viewer fills the center, with the chat panel on the right (20-60% resizable, default 33%). Both the side panel and chat panel have draggable resize handles.
 
 ### MessageList
 
@@ -147,6 +148,10 @@ Side panel showing all non-archived agents with busy/idle indicators. Polls `GET
 
 Clicking an agent row switches the chat panel to that agent. The active agent is highlighted with an accent-colored left border on its ID cell. Switching updates `activeAgentId` in the chat store, which triggers the WebSocket hook to send `switch_agent` to the server. The server responds with the agent's chat history and streaming state.
 
+### ExecutionHistoryPane
+
+Side panel showing scheduler job execution history. Polls `GET /api/job-executions` every 2 seconds. Groups executions by job name (daily-summary, memory-update) with collapsible sections. Each row shows a status dot (teal for completed, coral for failed, amber for running), trigger type, start time, and duration. Failed executions are expandable to show the error message. Toggled via HistoryIcon in the activity bar.
+
 ## State Management
 
 Three [Zustand](https://github.com/pmndrs/zustand) stores with no Redux or Context:
@@ -192,6 +197,7 @@ Tab-based artifact state persisted via the Zustand `persist` middleware (key: `s
 | `catalogOpen` | `boolean` | Whether the catalog panel is visible (not persisted) |
 | `agentsOpen` | `boolean` | Whether the agents panel is visible (persisted) |
 | `kanbanOpen` | `boolean` | Whether the kanban board tab is open (persisted) |
+| `executionsOpen` | `boolean` | Whether the execution history panel is visible (persisted) |
 
 Key behaviors:
 

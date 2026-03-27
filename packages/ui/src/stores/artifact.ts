@@ -23,6 +23,7 @@ interface ArtifactState {
   activeTabId: string | null;
   catalogOpen: boolean;
   agentsOpen: boolean;
+  executionsOpen: boolean;
   kanbanOpen: boolean;
   openArtifact: (url: string, title?: string, filePath?: string) => void;
   closeTab: (tabId: string) => void;
@@ -30,6 +31,7 @@ interface ArtifactState {
   reloadTab: (filePath: string, newUrl: string) => void;
   toggleCatalog: () => void;
   toggleAgents: () => void;
+  toggleExecutions: () => void;
   openKanbanTab: () => void;
   toggleKanbanTab: () => void;
 }
@@ -66,6 +68,7 @@ export const useArtifactStore = create<ArtifactState>()(
       activeTabId: null,
       catalogOpen: false,
       agentsOpen: false,
+      executionsOpen: false,
       kanbanOpen: false,
 
       openArtifact: (url: string, title?: string, filePath?: string) => {
@@ -130,11 +133,27 @@ export const useArtifactStore = create<ArtifactState>()(
       },
 
       toggleCatalog: () => {
-        set((state) => ({ catalogOpen: !state.catalogOpen, agentsOpen: false }));
+        set((state) => ({
+          catalogOpen: !state.catalogOpen,
+          agentsOpen: false,
+          executionsOpen: false,
+        }));
       },
 
       toggleAgents: () => {
-        set((state) => ({ agentsOpen: !state.agentsOpen, catalogOpen: false }));
+        set((state) => ({
+          agentsOpen: !state.agentsOpen,
+          catalogOpen: false,
+          executionsOpen: false,
+        }));
+      },
+
+      toggleExecutions: () => {
+        set((state) => ({
+          executionsOpen: !state.executionsOpen,
+          catalogOpen: false,
+          agentsOpen: false,
+        }));
       },
 
       openKanbanTab: () => {
@@ -164,6 +183,7 @@ export const useArtifactStore = create<ArtifactState>()(
           .map((t) => ({ ...t, url: `/api/artifact?path=${encodeURIComponent(t.filePath)}` })),
         activeTabId: state.activeTabId,
         agentsOpen: state.agentsOpen,
+        executionsOpen: state.executionsOpen,
         kanbanOpen: state.kanbanOpen,
       }),
       merge: (persistedState, currentState) => {

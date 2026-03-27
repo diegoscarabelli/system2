@@ -62,10 +62,11 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 
 1. Initialize Guide and Narrator agent sessions (`agentHost.initialize()`)
 2. Restore previously active spawned agents (conductors, reviewers, etc.) from the database via `initializeAgentHost()`
-3. Register Narrator scheduled jobs
-4. Check if Narrator needs catch-up (handles server downtime / laptop sleep)
-5. Register SIGTERM/SIGINT shutdown handlers
-6. Start listening on configured port
+3. Recover stale job executions from previous crash (`failStaleJobExecutions`)
+4. Register Narrator scheduled jobs
+5. Check if Narrator needs catch-up (handles server downtime / laptop sleep)
+6. Register SIGTERM/SIGINT shutdown handlers
+7. Start listening on configured port
 
 ### Express Routes
 
@@ -75,6 +76,7 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 | `/api/artifacts` | GET | List all registered artifacts with project names (for catalog UI) |
 | `/api/agents` | GET | List all non-archived agents with in-memory busy state (for agents pane) |
 | `/api/kanban` | GET | Kanban board data: all tasks (with project/assignee joins), projects, and active agents |
+| `/api/job-executions` | GET | Scheduler job execution history (query params: `job_name`, `status`, `limit`) |
 | `/api/tasks/:id` | GET | Full task detail: task row, all comments (with author role), and all linked tasks (bidirectional) |
 | `/api/query` | POST | SQL query endpoint for artifact dashboards (SELECT only) |
 | `/*` | GET | UI static files (if `uiDistPath` configured) |

@@ -10,6 +10,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import type { JobExecution } from '@dscarabelli/shared';
 import type { AgentHost } from '../agents/host.js';
 import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js';
@@ -637,6 +638,27 @@ ${dailySummaryContent}`,
 }
 
 /**
+ * Execute a job with execution tracking: inserts a 'running' record,
+ * calls the handler, then marks it 'completed' or 'failed'.
+ */
+export async function trackJobExecution(
+  db: DatabaseClient,
+  jobName: string,
+  triggerType: JobExecution['trigger_type'],
+  handler: () => void | Promise<void>
+): Promise<void> {
+  const execution = db.createJobExecution(jobName, triggerType);
+  try {
+    await handler();
+    db.completeJobExecution(execution.id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    db.failJobExecution(execution.id, message);
+    throw error;
+  }
+}
+
+/**
  * Register all Narrator scheduled jobs.
  */
 export function registerNarratorJobs(
@@ -656,7 +678,9 @@ export function registerNarratorJobs(
       return;
     }
     console.log('[Scheduler] Triggering daily-summary job (project logs + daily summary)');
-    buildAndDeliverDailySummary(db, narratorHost, narratorId, system2Dir, intervalMinutes);
+    await trackJobExecution(db, 'daily-summary', 'cron', () => {
+      buildAndDeliverDailySummary(db, narratorHost, narratorId, system2Dir, intervalMinutes);
+    });
   });
 
   // Memory update — daily at 11 AM
@@ -666,7 +690,9 @@ export function registerNarratorJobs(
       return;
     }
     console.log('[Scheduler] Triggering memory-update job');
-    buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir);
+    await trackJobExecution(db, 'memory-update', 'cron', () => {
+      buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir);
+    });
   });
 }
 

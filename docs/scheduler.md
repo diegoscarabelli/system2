@@ -85,11 +85,27 @@ Croner does **not** catch up missed jobs after laptop sleep or server shutdown. 
 2. **Daily summary**: resolve the last daily summary timestamp. If stale by more than `intervalMinutes`, queue `buildAndDeliverDailySummary()`
 3. **Memory update**: read `last_narrator_update_ts` from `memory.md`. If stale by more than 24 hours, queue `buildAndDeliverMemoryUpdate()`
 
-This runs once at server start, after agent sessions are initialized.
+This runs once at server start, after agent sessions are initialized. Catch-up executions are tracked in the `job_execution` table with `trigger_type: 'catch-up'`.
 
 Both checks use `last_narrator_update_ts` as a cursor. This timestamp only advances when the Narrator successfully processes the delivered message and writes it back to the file's frontmatter. If a job is skipped (network down) or fails, the cursor stays stale and the next restart will re-trigger catch-up.
 
 **Within a single server lifecycle:** if the server starts without network, catch-up is skipped entirely. The `daily-summary` job self-recovers within one cron interval (default 30 min) once the network is back, because its staleness check runs on every cron tick. The `memory-update` catch-up is lost until its next scheduled run (daily at 11 AM), since the cron handler only fires once per day. A server restart recovers both.
+
+## Execution Tracking
+
+Every job execution is recorded in the [`job_execution`](database.md#job_execution) table. When a job fires, a row is inserted with status `running`. On success it transitions to `completed`; on failure it transitions to `failed` with the error message preserved.
+
+The `trigger_type` column distinguishes how the execution was initiated:
+
+| Value | Meaning |
+|-------|---------|
+| `cron` | Normal scheduled cron tick |
+| `catch-up` | Server startup recovery for missed runs |
+| `manual` | Reserved for future manual triggers |
+
+**Startup recovery:** before Croner starts, the server marks any stale `running` rows as `failed` with error `'server shutdown'`. At that point no new jobs have fired, so every `running` row is definitively from the previous (crashed) process.
+
+**Network-skipped runs** do not create rows. The network check happens before execution tracking, so a skip is not an execution attempt.
 
 ## See Also
 

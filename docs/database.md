@@ -108,6 +108,23 @@ File artifacts created by agents, displayed in the UI.
 
 **Indices:** `idx_artifact_project` on `project`, `idx_artifact_file_path` on `file_path`
 
+### `job_execution`
+
+Scheduler job execution records.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK | Auto-incrementing |
+| `job_name` | TEXT NOT NULL | Job identifier (e.g., `daily-summary`, `memory-update`) |
+| `status` | TEXT NOT NULL | `running` \| `completed` \| `failed` |
+| `trigger_type` | TEXT NOT NULL | `cron` \| `catch-up` \| `manual` |
+| `error` | TEXT | Error message if status is `failed` |
+| `started_at` | TEXT NOT NULL | ISO 8601 timestamp when execution began |
+| `ended_at` | TEXT | ISO 8601 timestamp when execution finished |
+| `created_at` / `updated_at` | TEXT | Auto-set |
+
+**Indices:** `idx_job_execution_job_name`, `idx_job_execution_status`, `idx_job_execution_started_at`
+
 ## DatabaseClient (`client.ts`)
 
 The `DatabaseClient` class initializes SQLite with WAL mode and a 5-second busy timeout, then applies the schema.
@@ -120,6 +137,11 @@ The `DatabaseClient` class initializes SQLite with WAL mode and a 5-second busy 
 | `getOrCreateNarratorAgent()` | Returns the singleton narrator agent, creating it if needed |
 | `getAgent(id)` | Get agent by ID |
 | `query(sql)` | Execute a custom SELECT query, returns rows as objects |
+| `createJobExecution(jobName, triggerType)` | Insert a new execution with status `running` |
+| `completeJobExecution(id)` | Mark execution as `completed` with `ended_at` |
+| `failJobExecution(id, error)` | Mark execution as `failed` with error message |
+| `failStaleJobExecutions(error)` | Bulk-fail all `running` rows (startup crash recovery) |
+| `listJobExecutions(filters?)` | List executions with optional `jobName`, `status`, `limit` filters |
 | `close()` | Close the database connection |
 
 Project, task, comment, link, and artifact CRUD methods are also available (`createArtifact`, `getArtifact`, `updateArtifact`, `deleteArtifact`).
