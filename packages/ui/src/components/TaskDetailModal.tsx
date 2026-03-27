@@ -71,7 +71,7 @@ const RELATIONSHIP_LABELS: Record<string, string> = {
 function formatDate(iso: string | null): string {
   if (!iso) return '';
   try {
-    return new Date(`${iso}Z`).toLocaleString(undefined, {
+    return new Date(iso).toLocaleString(undefined, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',

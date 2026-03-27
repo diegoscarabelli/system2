@@ -125,6 +125,10 @@ Scheduler job execution records.
 
 **Indices:** `idx_job_execution_job_name` on `job_name`, `idx_job_execution_status` on `status`, `idx_job_execution_started_at` on `started_at`
 
+## Timestamp Format
+
+All `DEFAULT` expressions in the schema use `strftime('%Y-%m-%dT%H:%M:%SZ', 'now')` instead of `datetime('now')` to produce proper ISO 8601 timestamps with a `Z` (UTC) suffix. `UPDATE` statements in `DatabaseClient` follow the same convention, so every `created_at` and `updated_at` value stored in the database is a valid ISO 8601 string that JavaScript's `Date` constructor parses correctly without any suffix workaround.
+
 ## DatabaseClient (`client.ts`)
 
 The `DatabaseClient` class initializes SQLite with WAL mode and a 5-second busy timeout, then applies the schema.
