@@ -252,6 +252,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
   const [collapsed, setCollapsed] = useState(true);
   const { highlight } = useAccentColors();
   const hasContent = tc.input || tc.result;
+  const summary = toolSummary(tc.name, tc.input);
 
   // For message_agent: extract target as "role_id" from result, or "agent_id" when running
   let agentTarget: string | null = null;
@@ -291,9 +292,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
             {tc.name}
           </Text>
           {agentTarget && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{agentTarget}</Text>}
-          {toolSummary(tc.name, tc.input) && (
-            <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{toolSummary(tc.name, tc.input)}</Text>
-          )}
+          {summary && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{summary}</Text>}
           {hasContent && (
             <Text
               sx={{
