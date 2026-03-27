@@ -308,9 +308,7 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
             </Text>
           )}
         </Box>
-        {!isRunning && (
-          <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(tc.timestamp)}</Text>
-        )}
+        <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(tc.timestamp)}</Text>
       </Box>
       {!collapsed && hasContent && (
         <Box
@@ -431,9 +429,7 @@ function ThinkingBlock({ thinking }: { thinking: ThinkingBlockType }) {
             ^
           </Text>
         </Box>
-        {!thinking.isStreaming && (
-          <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(thinking.timestamp)}</Text>
-        )}
+        <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(thinking.timestamp)}</Text>
       </Box>
       {!collapsed && (
         <Box sx={{ marginTop: 1 }}>
