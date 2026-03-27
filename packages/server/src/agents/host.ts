@@ -67,6 +67,7 @@ function categoryLabel(category: ErrorCategory): string {
       return 'error';
   }
 }
+
 import { createBashTool } from './tools/bash.js';
 import { createCancelReminderTool } from './tools/cancel-reminder.js';
 import { createEditTool } from './tools/edit.js';
@@ -484,12 +485,16 @@ export class AgentHost {
       if (nextProvider) {
         const reason =
           nextProvider === this.currentProvider
-            ? `${errorPrefix} on ${this.currentProvider}, rotating to next key`
-            : `${errorPrefix} on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}`;
+            ? `${errorPrefix}, rotating to next key`
+            : `${errorPrefix}, switched to ${nextProvider}`;
+        const detail =
+          nextProvider === this.currentProvider
+            ? `on ${this.currentProvider}, rotating to next key`
+            : `on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}`;
         console.log(
           `[AgentHost] Key ${this.currentProvider}:${this.currentKeyIndex} already in cooldown`
         );
-        await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
+        await this.reinitializeWithProvider(nextProvider, promptToRetry, reason, detail);
         return;
       }
     }
@@ -539,20 +544,22 @@ export class AgentHost {
         const nextProvider = this.authResolver.getNextProvider();
         if (nextProvider) {
           if (nextProvider === this.currentProvider) {
-            const reason = `${errorPrefix} on ${this.currentProvider}, rotating to next key`;
+            const reason = `${errorPrefix}, rotating to next key`;
+            const detail = `on ${this.currentProvider}, rotating to next key`;
             console.log(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
-            await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
+            await this.reinitializeWithProvider(nextProvider, promptToRetry, reason, detail);
           } else {
-            const reason = `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`;
+            const reason = `${errorPrefix}, switched to ${nextProvider}`;
+            const detail = `on ${this.currentProvider}, switching to ${nextProvider}`;
             console.log(`[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`);
-            await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
+            await this.reinitializeWithProvider(nextProvider, promptToRetry, reason, detail);
           }
           return;
         }
       }
 
       this.pushSystemMessage(
-        `${errorPrefix} on ${this.currentProvider}, all providers unavailable`
+        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable`
       );
       console.log('[AgentHost] No fallback providers available, error will be surfaced to user');
     }
@@ -578,11 +585,12 @@ export class AgentHost {
     // switch to it. This covers cases like being stuck on a dead fallback provider.
     const nextProvider = this.authResolver.getNextProvider();
     if (nextProvider && nextProvider !== this.currentProvider) {
-      const reason = `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`;
+      const reason = `${errorPrefix}, switched to ${nextProvider}`;
+      const detail = `on ${this.currentProvider}, switching to ${nextProvider}`;
       console.log(
         `[AgentHost] Recovery: switching from ${this.currentProvider} to ${nextProvider}`
       );
-      await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
+      await this.reinitializeWithProvider(nextProvider, promptToRetry, reason, detail);
       return;
     }
 
@@ -602,7 +610,8 @@ export class AgentHost {
   private async reinitializeWithProvider(
     provider: LlmProvider,
     promptToRetry?: string | null,
-    reason?: string
+    reason?: string,
+    detail?: string
   ): Promise<void> {
     if (this.isReinitializing) {
       console.log('[AgentHost] Already reinitializing, skipping');
@@ -625,7 +634,7 @@ export class AgentHost {
       // Push chat message before init so the user sees the reason even if
       // initialization fails. Only for actual failovers, not compaction recovery.
       if (reason) {
-        this.pushSystemMessage(reason);
+        this.pushSystemMessage(detail ? `${reason}\n\n${detail}` : reason);
       }
 
       // Recreate model registry with updated auth
@@ -662,7 +671,7 @@ export class AgentHost {
       console.error('[AgentHost] Failed to reinitialize:', error);
       if (reason) {
         const msg = error instanceof Error ? error.message : String(error);
-        this.pushSystemMessage(`Failed to switch: ${msg}`);
+        this.pushSystemMessage(`Failed to switch provider\n\n${msg}`);
       }
     } finally {
       this.isReinitializing = false;

@@ -162,7 +162,7 @@ When `AgentHost` detects an API error in a `message_end` event:
 4. Reinitialize the session with the new provider (`reinitializeWithProvider()`)
 5. Retry the pending prompt
 
-Error details (status code and human-readable category) are shown in agent chat messages so the user can diagnose issues. Key rotation within a provider: "429 rate limited on google, rotating to next key". Provider switch: "429 rate limited on google, switching to anthropic".
+Error details are shown as collapsible system messages in the agent chat. The title shows the error type and action taken, and the collapsible body has provider-specific details. Key rotation: "429 rate limited, rotating to next key". Provider switch: "503 server error, switched to anthropic".
 
 ### Retry Logic (`retry.ts`)
 

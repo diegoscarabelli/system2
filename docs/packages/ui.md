@@ -70,7 +70,7 @@ Displays messages as a vertical timeline with color-coded indicators:
 | Thinking blocks | `#8b949e` (gray) | Collapsible extended thinking |
 | System messages | `#8b949e` (gray) | Inter-agent messages, scheduled tasks, provider changes |
 
-System messages have two rendering modes based on content format. Messages containing `\n\n` are treated as full-content: the text before the separator is shown as the header label (e.g., "Message from conductor agent (id=5)") and the body is rendered as markdown. Messages without `\n\n` are abbreviated: displayed as plain muted text under a "System2" header. The server's `deliverMessage()` controls which format is stored in the chat cache (full content for inter-agent messages and summaries, tag-only for scheduled tasks).
+System messages have two rendering modes based on content format. Messages containing `\n\n` are treated as collapsible: the text before the separator is shown as the header label (e.g., "Conversation: user <-> conductor_7" for summaries, "503 server error, switched to anthropic" for failovers) and the body is rendered as collapsible markdown, collapsed by default. Messages without `\n\n` are displayed as plain muted text under a "System2" header. The server's `deliverMessage()` controls which format is stored in the chat cache (full content for inter-agent messages and summaries, tag-only for scheduled tasks).
 
 Each assistant message shows its turn events (thinking -> tool calls -> response text) in chronological order. An animated "brain loader" appears while waiting for a response and between completed blocks (e.g., after a tool finishes, before the next starts) to indicate the agent is still working.
 
