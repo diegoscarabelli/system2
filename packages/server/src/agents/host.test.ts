@@ -179,6 +179,7 @@ describe('AgentHost', () => {
 
       const hostInternal = host as unknown as {
         pendingPrompt: string | null;
+        isHandlingError: boolean;
         handleSessionEvent: (event: { type: string }) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
         handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -199,6 +200,32 @@ describe('AgentHost', () => {
 
       hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingPrompt).toBeNull();
+    });
+
+    it('handleSessionEvent preserves pendingPrompt on agent_end during error handling', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        isHandlingError: boolean;
+        handleSessionEvent: (event: { type: string }) => void;
+        handlePotentialError: ReturnType<typeof vi.fn>;
+        handleCompactionTracking: ReturnType<typeof vi.fn>;
+      };
+
+      hostInternal.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+      hostInternal.handleCompactionTracking = vi.fn();
+
+      hostInternal.pendingPrompt = 'pending message';
+      hostInternal.isHandlingError = true;
+
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
+      expect(hostInternal.pendingPrompt).toBe('pending message');
     });
 
     it('retry paths restore pendingPrompt and pass streamingBehavior before calling session.prompt()', async () => {

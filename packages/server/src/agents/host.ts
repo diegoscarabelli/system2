@@ -67,6 +67,7 @@ function categoryLabel(category: ErrorCategory): string {
       return 'error';
   }
 }
+
 import { createBashTool } from './tools/bash.js';
 import { createCancelReminderTool } from './tools/cancel-reminder.js';
 import { createEditTool } from './tools/edit.js';
@@ -147,6 +148,7 @@ export class AgentHost {
   private currentKeyIndex = 0;
   private retryAttempts: Map<string, number> = new Map(); // Track retries per error type
   private isReinitializing = false;
+  private isHandlingError = false;
   private pendingPrompt: string | null = null;
   private agentRole: string | null = null;
   private agentProject: number | null = null;
@@ -431,7 +433,10 @@ export class AgentHost {
       // When streamingBehavior is 'followUp' or 'steer', session.prompt() queues
       // the message and returns immediately, so clearing it there would be too early.
       // Waiting for agent_end ensures the message stays retryable until the turn runs.
-      this.pendingPrompt = null;
+      // Skip clearing during error handling so the failover chain can retry the prompt.
+      if (!this.isHandlingError) {
+        this.pendingPrompt = null;
+      }
     }
 
     // Track compaction for pruning
@@ -456,143 +461,152 @@ export class AgentHost {
     const message = eventWithMessage.message;
     if (!message || message.stopReason !== 'error' || !message.errorMessage) return;
 
-    // Don't handle errors while already reinitializing
+    // Don't handle errors while already reinitializing (session setup in progress)
     if (this.isReinitializing) return;
 
-    const errorMessage = message.errorMessage;
-    console.log('[AgentHost] API error detected:', errorMessage);
+    this.isHandlingError = true;
 
-    // Categorize the error and build human-readable prefix for chat messages
-    const category = categorizeError({ message: errorMessage });
-    const statusCode = extractStatusCode({ message: errorMessage });
-    const label = categoryLabel(category);
-    const errorPrefix = statusCode ? `${statusCode} ${label}` : label;
-    console.log('[AgentHost] Error category:', category);
+    try {
+      const errorMessage = message.errorMessage;
+      console.log('[AgentHost] API error detected:', errorMessage);
 
-    // Get retry key for this error type
-    const retryKey = `${this.currentProvider}:${category}`;
-    const currentAttempts = this.retryAttempts.get(retryKey) ?? 0;
+      // Categorize the error and build human-readable prefix for chat messages
+      const category = categorizeError({ message: errorMessage });
+      const statusCode = extractStatusCode({ message: errorMessage });
+      const label = categoryLabel(category);
+      const errorPrefix = statusCode ? `${statusCode} ${label}` : label;
+      console.log('[AgentHost] Error category:', category);
 
-    // Capture before any await — agent_end may clear it before this async handler resumes
-    const promptToRetry = this.pendingPrompt;
+      // Get retry key for this error type
+      const retryKey = `${this.currentProvider}:${category}`;
+      const currentAttempts = this.retryAttempts.get(retryKey) ?? 0;
 
-    // If another agent already put our key in cooldown, skip retries and reinitialize.
-    // Uses the tracked key index so we check our actual key, not whatever index
-    // another agent may have rotated to.
-    if (this.authResolver.isKeyInCooldown(this.currentProvider, this.currentKeyIndex)) {
-      const nextProvider = this.authResolver.getNextProvider();
-      if (nextProvider) {
-        const reason =
-          nextProvider === this.currentProvider
-            ? `${errorPrefix} on ${this.currentProvider}, rotating to next key`
-            : `${errorPrefix} on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}`;
-        console.log(
-          `[AgentHost] Key ${this.currentProvider}:${this.currentKeyIndex} already in cooldown`
-        );
-        await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
-        return;
-      }
-    }
+      // Capture before any await — agent_end would clear it before this async handler resumes,
+      // but isHandlingError prevents that now. Belt-and-suspenders: still capture early.
+      const promptToRetry = this.pendingPrompt;
 
-    // Check if we should retry
-    if (shouldRetry(category, currentAttempts)) {
-      const delay = calculateDelay(currentAttempts);
-      console.log(
-        `[AgentHost] Retrying in ${Math.round(delay)}ms (attempt ${currentAttempts + 1})`
-      );
-
-      this.retryAttempts.set(retryKey, currentAttempts + 1);
-
-      // Wait and retry with the same provider
-      await sleep(delay);
-
-      // Retry the pending prompt if there is one
-      if (promptToRetry && this.session) {
-        console.log('[AgentHost] Retrying prompt...');
-        // Restore only if nothing newer arrived during sleep — a new prompt() call during the
-        // delay would have set pendingPrompt to the newer message; don't overwrite it.
-        this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
-        await this.resourceLoader?.reload();
-        await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
-      }
-      return;
-    }
-
-    // Check if we should failover
-    const retriesExhausted = !shouldRetry(category, currentAttempts);
-    if (shouldFailover(category, retriesExhausted)) {
-      // Determine failure reason for cooldown tracking
-      const failureReason =
-        category === 'auth' ? 'auth' : category === 'rate_limit' ? 'rate_limit' : 'transient';
-
-      // Mark our specific key as failed (pass currentKeyIndex to avoid marking the wrong key
-      // when another agent has already rotated the shared activeKeys index)
-      const hasMore = this.authResolver.markKeyFailed(
-        this.currentProvider,
-        failureReason,
-        errorMessage,
-        this.currentKeyIndex
-      );
-
-      if (hasMore) {
-        // Get next available provider
+      // If another agent already put our key in cooldown, skip retries and reinitialize.
+      // Uses the tracked key index so we check our actual key, not whatever index
+      // another agent may have rotated to.
+      if (this.authResolver.isKeyInCooldown(this.currentProvider, this.currentKeyIndex)) {
         const nextProvider = this.authResolver.getNextProvider();
         if (nextProvider) {
-          if (nextProvider === this.currentProvider) {
-            const reason = `${errorPrefix} on ${this.currentProvider}, rotating to next key`;
-            console.log(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
-            await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
-          } else {
-            const reason = `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`;
-            console.log(`[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`);
-            await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
-          }
+          const reason =
+            nextProvider === this.currentProvider
+              ? `${errorPrefix} on ${this.currentProvider}, rotating to next key`
+              : `${errorPrefix} on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}`;
+          console.log(
+            `[AgentHost] Key ${this.currentProvider}:${this.currentKeyIndex} already in cooldown`
+          );
+          await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
           return;
         }
       }
 
-      this.pushSystemMessage(
-        `${errorPrefix} on ${this.currentProvider}, all providers unavailable`
-      );
-      console.log('[AgentHost] No fallback providers available, error will be surfaced to user');
-    }
+      // Check if we should retry
+      if (shouldRetry(category, currentAttempts)) {
+        const delay = calculateDelay(currentAttempts);
+        console.log(
+          `[AgentHost] Retrying in ${Math.round(delay)}ms (attempt ${currentAttempts + 1})`
+        );
 
-    // Context overflow: truncate JSONL, compact, restore tail, reinitialize.
-    // The guard prevents re-entry during recovery; it re-arms after recovery completes.
-    // Uses the context_overflow category from categorizeError() which detects token limit
-    // errors before status code classification, avoiding false positives on rate-limit
-    // errors whose messages may also contain size/token keywords.
-    if (category === 'context_overflow' && !this.contextOverflowHandled) {
-      this.contextOverflowHandled = true;
-      const recovered = await this.handleContextOverflow();
-      if (recovered) {
-        // Clear the overflow-causing prompt so a future failover doesn't retry it
-        this.pendingPrompt = null;
+        this.retryAttempts.set(retryKey, currentAttempts + 1);
+
+        // Wait and retry with the same provider
+        await sleep(delay);
+
+        // Retry the pending prompt if there is one
+        if (promptToRetry && this.session) {
+          console.log('[AgentHost] Retrying prompt...');
+          // Restore only if nothing newer arrived during sleep — a new prompt() call during the
+          // delay would have set pendingPrompt to the newer message; don't overwrite it.
+          this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
+          await this.resourceLoader?.reload();
+          await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
+        }
         return;
       }
-      // Recovery was a no-op — reset guard so a future overflow can try again
-      this.contextOverflowHandled = false;
-    }
 
-    // Last resort: if a different provider is available (e.g., primary came out of cooldown),
-    // switch to it. This covers cases like being stuck on a dead fallback provider.
-    const nextProvider = this.authResolver.getNextProvider();
-    if (nextProvider && nextProvider !== this.currentProvider) {
-      const reason = `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`;
-      console.log(
-        `[AgentHost] Recovery: switching from ${this.currentProvider} to ${nextProvider}`
-      );
-      await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
-      return;
-    }
+      // Check if we should failover
+      const retriesExhausted = !shouldRetry(category, currentAttempts);
+      if (shouldFailover(category, retriesExhausted)) {
+        // Determine failure reason for cooldown tracking
+        const failureReason =
+          category === 'auth' ? 'auth' : category === 'rate_limit' ? 'rate_limit' : 'transient';
 
-    // All recovery paths exhausted; ensure busy is cleared
-    if (this.busy) {
-      this.busy = false;
-    }
+        // Mark our specific key as failed (pass currentKeyIndex to avoid marking the wrong key
+        // when another agent has already rotated the shared activeKeys index)
+        const hasMore = this.authResolver.markKeyFailed(
+          this.currentProvider,
+          failureReason,
+          errorMessage,
+          this.currentKeyIndex
+        );
 
-    // Reset retry attempts for next error
-    this.retryAttempts.clear();
+        if (hasMore) {
+          // Get next available provider
+          const nextProvider = this.authResolver.getNextProvider();
+          if (nextProvider) {
+            if (nextProvider === this.currentProvider) {
+              const reason = `${errorPrefix} on ${this.currentProvider}, rotating to next key`;
+              console.log(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
+              await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
+            } else {
+              const reason = `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`;
+              console.log(
+                `[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`
+              );
+              await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
+            }
+            return;
+          }
+        }
+
+        this.pushSystemMessage(
+          `${errorPrefix} on ${this.currentProvider}, all providers unavailable`
+        );
+        console.log('[AgentHost] No fallback providers available, error will be surfaced to user');
+      }
+
+      // Context overflow: truncate JSONL, compact, restore tail, reinitialize.
+      // The guard prevents re-entry during recovery; it re-arms after recovery completes.
+      // Uses the context_overflow category from categorizeError() which detects token limit
+      // errors before status code classification, avoiding false positives on rate-limit
+      // errors whose messages may also contain size/token keywords.
+      if (category === 'context_overflow' && !this.contextOverflowHandled) {
+        this.contextOverflowHandled = true;
+        const recovered = await this.handleContextOverflow();
+        if (recovered) {
+          // Clear the overflow-causing prompt so a future failover doesn't retry it
+          this.pendingPrompt = null;
+          return;
+        }
+        // Recovery was a no-op — reset guard so a future overflow can try again
+        this.contextOverflowHandled = false;
+      }
+
+      // Last resort: if a different provider is available (e.g., primary came out of cooldown),
+      // switch to it. This covers cases like being stuck on a dead fallback provider.
+      const nextProvider = this.authResolver.getNextProvider();
+      if (nextProvider && nextProvider !== this.currentProvider) {
+        const reason = `${errorPrefix} on ${this.currentProvider}, switching to ${nextProvider}`;
+        console.log(
+          `[AgentHost] Recovery: switching from ${this.currentProvider} to ${nextProvider}`
+        );
+        await this.reinitializeWithProvider(nextProvider, promptToRetry, reason);
+        return;
+      }
+
+      // All recovery paths exhausted; ensure busy is cleared
+      if (this.busy) {
+        this.busy = false;
+      }
+
+      // Reset retry attempts for next error
+      this.retryAttempts.clear();
+    } finally {
+      this.isHandlingError = false;
+    }
   }
 
   /**
@@ -650,6 +664,10 @@ export class AgentHost {
           listener(failoverEvent);
         });
       }
+
+      // Re-arm error handling before retrying the prompt. Errors from the new
+      // provider need normal failover, not the isReinitializing early-return.
+      this.isReinitializing = false;
 
       // Retry the pending prompt with the new provider
       if (promptToRetry && this.session) {
