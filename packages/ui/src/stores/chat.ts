@@ -37,6 +37,7 @@ export interface PerAgentState {
   contextPercent: number | null;
   provider: string | null;
   compactionStatus: 'idle' | 'compacting' | 'compacted';
+  compactionTimestamp: number | null;
 }
 
 function createDefaultAgentState(): PerAgentState {
@@ -50,6 +51,7 @@ function createDefaultAgentState(): PerAgentState {
     contextPercent: null,
     provider: null,
     compactionStatus: 'idle',
+    compactionTimestamp: null,
   };
 }
 
@@ -411,6 +413,7 @@ export const useChatStore = create<ChatState>()(
                 currentAssistantMessage: null,
                 currentTurnEvents: [],
                 compactionStatus: 'idle',
+                compactionTimestamp: null,
               });
             }
           }
@@ -458,6 +461,7 @@ export const useChatStore = create<ChatState>()(
         set((state) => ({
           agentStates: updateAgentState(state.agentStates, agentId, () => ({
             compactionStatus: 'compacting' as const,
+            compactionTimestamp: Date.now(),
             isStreaming: true,
           })),
         }));
@@ -478,6 +482,7 @@ export const useChatStore = create<ChatState>()(
         set((state) => ({
           agentStates: updateAgentState(state.agentStates, agentId, () => ({
             compactionStatus: 'idle' as const,
+            compactionTimestamp: null,
           })),
         }));
       },

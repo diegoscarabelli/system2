@@ -182,11 +182,13 @@ function TimelineItem({
   dotColor,
   pulse,
   isLast,
+  timestamp,
 }: {
   children: React.ReactNode;
   dotColor: string;
   pulse?: boolean;
   isLast?: boolean;
+  timestamp?: number;
 }) {
   return (
     <Box sx={{ display: 'flex', gap: 2, position: 'relative' }}>
@@ -213,6 +215,12 @@ function TimelineItem({
       </Box>
       {/* Content */}
       <Box sx={{ flex: 1, paddingBottom: 3, minWidth: 0 }}>{children}</Box>
+      {/* Timestamp */}
+      {timestamp != null && (
+        <Text sx={{ fontSize: 0, color: 'fg.muted', flexShrink: 0, whiteSpace: 'nowrap' }}>
+          {formatTime(timestamp)}
+        </Text>
+      )}
     </Box>
   );
 }
@@ -275,39 +283,36 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
         sx={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          gap: 1,
           cursor: hasContent ? 'pointer' : 'default',
           '&:hover': hasContent ? { opacity: 0.8 } : {},
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Text
+          sx={{
+            fontSize: 0,
+            fontWeight: 'semibold',
+            color: highlight,
+          }}
+        >
+          {isRunning ? '⚙️ ' : '✓ '}
+          {tc.name}
+        </Text>
+        {agentTarget && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{agentTarget}</Text>}
+        {summary && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{summary}</Text>}
+        {hasContent && (
           <Text
             sx={{
               fontSize: 0,
-              fontWeight: 'semibold',
-              color: highlight,
+              color: 'fg.muted',
+              transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.15s ease',
+              lineHeight: 1,
             }}
           >
-            {isRunning ? '⚙️ ' : '✓ '}
-            {tc.name}
+            ^
           </Text>
-          {agentTarget && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{agentTarget}</Text>}
-          {summary && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{summary}</Text>}
-          {hasContent && (
-            <Text
-              sx={{
-                fontSize: 0,
-                color: 'fg.muted',
-                transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
-                transition: 'transform 0.15s ease',
-                lineHeight: 1,
-              }}
-            >
-              ^
-            </Text>
-          )}
-        </Box>
-        <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(tc.timestamp)}</Text>
+        )}
       </Box>
       {!collapsed && hasContent && (
         <Box
@@ -395,40 +400,41 @@ function ThinkingBlock({ thinking }: { thinking: ThinkingBlockType }) {
   const [collapsed, setCollapsed] = useState(true);
 
   return (
-    <TimelineItem dotColor={colors.gray} pulse={thinking.isStreaming}>
+    <TimelineItem
+      dotColor={colors.gray}
+      pulse={thinking.isStreaming}
+      timestamp={thinking.timestamp}
+    >
       <Box
         onClick={() => setCollapsed(!collapsed)}
         sx={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          gap: 1,
           cursor: 'pointer',
           '&:hover': { opacity: 0.8 },
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Text
-            sx={{
-              fontWeight: 'semibold',
-              fontSize: 0,
-              color: 'fg.muted',
-            }}
-          >
-            {thinking.isStreaming ? 'Thinking...' : 'Thought'}
-          </Text>
-          <Text
-            sx={{
-              fontSize: 0,
-              color: 'fg.muted',
-              transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.15s ease',
-              lineHeight: 1,
-            }}
-          >
-            ^
-          </Text>
-        </Box>
-        <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(thinking.timestamp)}</Text>
+        <Text
+          sx={{
+            fontWeight: 'semibold',
+            fontSize: 0,
+            color: 'fg.muted',
+          }}
+        >
+          {thinking.isStreaming ? 'Thinking...' : 'Thought'}
+        </Text>
+        <Text
+          sx={{
+            fontSize: 0,
+            color: 'fg.muted',
+            transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.15s ease',
+            lineHeight: 1,
+          }}
+        >
+          ^
+        </Text>
       </Box>
       {!collapsed && (
         <Box sx={{ marginTop: 1 }}>
@@ -449,7 +455,12 @@ function TurnEventItem({ event, isLast }: { event: TurnEvent; isLast?: boolean }
   // Tool call
   const tc = event.data;
   return (
-    <TimelineItem dotColor={highlight} pulse={tc.status === 'running'} isLast={isLast}>
+    <TimelineItem
+      dotColor={highlight}
+      pulse={tc.status === 'running'}
+      isLast={isLast}
+      timestamp={tc.timestamp}
+    >
       <ToolCallItem tc={tc} />
     </TimelineItem>
   );
@@ -463,36 +474,33 @@ function SystemMessageBlock({ message, isLast }: { message: Message; isLast: boo
   const [collapsed, setCollapsed] = useState(true);
 
   return (
-    <TimelineItem dotColor={colors.gray} isLast={isLast}>
+    <TimelineItem dotColor={colors.gray} isLast={isLast} timestamp={message.timestamp}>
       <Box
         onClick={body ? () => setCollapsed(!collapsed) : undefined}
         sx={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          gap: 1,
           marginBottom: body && !collapsed ? 1 : 0,
           ...(body ? { cursor: 'pointer', '&:hover': { opacity: 0.8 } } : {}),
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: 'fg.muted' }}>
-            {tag ?? 'System2'}
+        <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: 'fg.muted' }}>
+          {tag ?? 'System2'}
+        </Text>
+        {body && (
+          <Text
+            sx={{
+              fontSize: 0,
+              color: 'fg.muted',
+              transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.15s ease',
+              lineHeight: 1,
+            }}
+          >
+            ^
           </Text>
-          {body && (
-            <Text
-              sx={{
-                fontSize: 0,
-                color: 'fg.muted',
-                transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
-                transition: 'transform 0.15s ease',
-                lineHeight: 1,
-              }}
-            >
-              ^
-            </Text>
-          )}
-        </Box>
-        <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
+        )}
       </Box>
       {body ? (
         !collapsed && (
@@ -546,11 +554,10 @@ function AssistantMessageBlock({
 
       {/* Response (skipped for interrupted turns with no text) */}
       {hasContent && (
-        <TimelineItem dotColor={accent} isLast={isLast}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', marginBottom: 1 }}>
-            <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: accent }}>{agentRole}</Text>
-            <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
-          </Box>
+        <TimelineItem dotColor={accent} isLast={isLast} timestamp={message.timestamp}>
+          <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: accent, marginBottom: 1 }}>
+            {agentRole}
+          </Text>
           <MarkdownContent content={message.content} />
         </TimelineItem>
       )}
@@ -570,6 +577,7 @@ export function MessageList() {
     isWaitingForResponse,
     isStreaming,
     compactionStatus,
+    compactionTimestamp,
   } = activeState;
   const activeAgentRole = useChatStore((s) => s.activeAgentLabel ?? s.activeAgentRole) ?? 'Agent';
   const { accent } = useAccentColors();
@@ -646,11 +654,17 @@ export function MessageList() {
 
         if (message.role === 'user') {
           return (
-            <TimelineItem key={message.id} dotColor={colors.teal} isLast={isLastMessage}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', marginBottom: 1 }}>
-                <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: colors.teal }}>You</Text>
-                <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{formatTime(message.timestamp)}</Text>
-              </Box>
+            <TimelineItem
+              key={message.id}
+              dotColor={colors.teal}
+              isLast={isLastMessage}
+              timestamp={message.timestamp}
+            >
+              <Text
+                sx={{ fontWeight: 'semibold', fontSize: 0, color: colors.teal, marginBottom: 1 }}
+              >
+                You
+              </Text>
               <Text
                 as="p"
                 sx={{
@@ -721,7 +735,12 @@ export function MessageList() {
 
       {/* Compaction status indicator */}
       {compactionStatus !== 'idle' && (
-        <TimelineItem dotColor={colors.gray} pulse={compactionStatus === 'compacting'} isLast>
+        <TimelineItem
+          dotColor={colors.gray}
+          pulse={compactionStatus === 'compacting'}
+          isLast
+          timestamp={compactionTimestamp ?? undefined}
+        >
           <Text sx={{ fontWeight: 'semibold', fontSize: 0, color: 'fg.muted' }}>
             {compactionStatus === 'compacting' ? 'Compacting...' : 'Compacted'}
           </Text>

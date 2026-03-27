@@ -126,6 +126,7 @@ describe('useChatStore', () => {
       expect(state?.currentAssistantMessage).toBeNull();
       expect(state?.currentTurnEvents).toHaveLength(0);
       expect(state?.compactionStatus).toBe('idle');
+      expect(state?.compactionTimestamp).toBeNull();
     });
   });
 
