@@ -195,13 +195,25 @@ export function ArtifactCatalog() {
   }, [artifacts, query, allTagsSelected, selectedTags, allProjectsSelected, selectedProjects]);
 
   // Group filtered artifacts by project
-  const grouped = new Map<string, CatalogArtifact[]>();
-  for (const a of filtered) {
-    const key = a.project_name || 'No Project';
-    const list = grouped.get(key) || [];
-    list.push(a);
-    grouped.set(key, list);
-  }
+  const grouped = useMemo(() => {
+    const groups = new Map<string, CatalogArtifact[]>();
+    for (const a of filtered) {
+      const key = a.project_name || 'No Project';
+      const list = groups.get(key) || [];
+      list.push(a);
+      groups.set(key, list);
+    }
+    return groups;
+  }, [filtered]);
+
+  // Auto-collapse all groups on first data load
+  const groupsSeeded = useRef(false);
+  useEffect(() => {
+    if (!groupsSeeded.current && grouped.size > 0) {
+      groupsSeeded.current = true;
+      setCollapsedGroups(new Set(grouped.keys()));
+    }
+  }, [grouped]);
 
   return (
     <Box

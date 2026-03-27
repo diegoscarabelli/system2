@@ -2,14 +2,16 @@
  * Execution History Pane
  *
  * Toggleable panel showing scheduler job execution history.
- * Groups executions by job name with collapsible sections.
+ * Flat sortable table with multiselect filters for job, status, and trigger.
  */
 
-import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
+import { TriangleDownIcon, TriangleUpIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { colors } from '../theme/colors';
+import type { MultiSelectOption } from './MultiSelectDropdown';
+import { MultiSelectDropdown } from './MultiSelectDropdown';
 
 interface JobExecutionInfo {
   id: number;
@@ -29,17 +31,6 @@ const statusColor: Record<JobExecutionInfo['status'], string> = {
   running: colors.amber,
 };
 
-function formatDuration(startedAt: string, endedAt: string | null): string {
-  if (!endedAt) return '—';
-  const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime();
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remaining = seconds % 60;
-  return `${minutes}m ${remaining}s`;
-}
-
 function formatTime(isoString: string): string {
   const date = new Date(isoString);
   const now = new Date();
@@ -55,27 +46,84 @@ function formatTime(isoString: string): string {
   });
 }
 
-const COLS = ['Status', 'Trigger', 'Started', 'Duration'] as const;
+type SortKey = 'id' | 'job_name' | 'status' | 'trigger_type' | 'started_at' | 'ended_at';
+type SortDir = 'asc' | 'desc';
 
-function TableHeaders() {
+function compareValues(
+  a: JobExecutionInfo,
+  b: JobExecutionInfo,
+  key: SortKey,
+  dir: SortDir
+): number {
+  let cmp = 0;
+  const av = a[key];
+  const bv = b[key];
+  if (av == null && bv == null) cmp = 0;
+  else if (av == null) cmp = 1;
+  else if (bv == null) cmp = -1;
+  else if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+  else cmp = String(av).localeCompare(String(bv));
+  return dir === 'asc' ? cmp : -cmp;
+}
+
+const COLS: { label: string; key: SortKey }[] = [
+  { label: 'ID', key: 'id' },
+  { label: 'Job', key: 'job_name' },
+  { label: 'Status', key: 'status' },
+  { label: 'Trigger', key: 'trigger_type' },
+  { label: 'Started', key: 'started_at' },
+  { label: 'Ended', key: 'ended_at' },
+];
+
+const STATUS_OPTIONS: MultiSelectOption[] = [
+  { value: 'completed', label: 'completed' },
+  { value: 'failed', label: 'failed' },
+  { value: 'running', label: 'running' },
+];
+
+const TRIGGER_OPTIONS: MultiSelectOption[] = [
+  { value: 'cron', label: 'cron' },
+  { value: 'catch-up', label: 'catch-up' },
+  { value: 'manual', label: 'manual' },
+];
+
+function SortIndicator({ active, dir }: { active: boolean; dir: SortDir }) {
+  if (!active) return null;
+  return dir === 'asc' ? <TriangleUpIcon size={12} /> : <TriangleDownIcon size={12} />;
+}
+
+interface TableHeadersProps {
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+}
+
+function TableHeaders({ sortKey, sortDir, onSort }: TableHeadersProps) {
   return (
     <Box as="tr">
       {COLS.map((col) => (
         <Box
-          key={col}
+          key={col.key}
           as="th"
+          onClick={() => onSort(col.key)}
           sx={{
             px: 2,
             py: 1,
-            textAlign: col === 'Status' ? 'center' : 'left',
+            textAlign: 'left',
             fontWeight: 'bold',
             color: 'fg.muted',
             borderBottom: '1px solid',
             borderColor: 'border.default',
             whiteSpace: 'nowrap',
+            cursor: 'pointer',
+            userSelect: 'none',
+            '&:hover': { color: 'fg.default' },
           }}
         >
-          {col}
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+            {col.label}
+            <SortIndicator active={sortKey === col.key} dir={sortDir} />
+          </Box>
         </Box>
       ))}
     </Box>
@@ -85,9 +133,21 @@ function TableHeaders() {
 export function ExecutionHistoryPane() {
   const [executions, setExecutions] = useState<JobExecutionInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [expandedErrors, setExpandedErrors] = useState<Set<number>>(new Set());
+  const [sortKey, setSortKey] = useState<SortKey>('started_at');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const initialized = useRef(false);
+
+  // Filter state: initialized with all options on first data load
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(
+    new Set(STATUS_OPTIONS.map((o) => o.value))
+  );
+  const [triggerFilter, setTriggerFilter] = useState<Set<string>>(
+    new Set(TRIGGER_OPTIONS.map((o) => o.value))
+  );
+  const [jobFilter, setJobFilter] = useState<Set<string>>(new Set());
+  const [jobOptions, setJobOptions] = useState<MultiSelectOption[]>([]);
+  const jobsSeeded = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -99,9 +159,20 @@ export function ExecutionHistoryPane() {
       fetch('/api/job-executions?limit=50', { signal: controller.signal })
         .then((res) => res.json())
         .then((data) => {
-          setExecutions(data.executions || []);
+          const items: JobExecutionInfo[] = data.executions || [];
+          setExecutions(items);
           initialized.current = true;
           setLoading(false);
+
+          // Seed job options on first data load
+          if (!jobsSeeded.current && items.length > 0) {
+            jobsSeeded.current = true;
+            const names = [...new Set(items.map((e) => e.job_name))].sort();
+            const opts = names.map((n) => ({ value: n, label: n }));
+            setJobOptions(opts);
+            setJobFilter(new Set(names));
+          }
+
           timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
         })
         .catch((err: unknown) => {
@@ -119,15 +190,6 @@ export function ExecutionHistoryPane() {
     };
   }, []);
 
-  const toggleGroupCollapse = useCallback((group: string) => {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
-  }, []);
-
   const toggleError = useCallback((id: number) => {
     setExpandedErrors((prev) => {
       const next = new Set(prev);
@@ -137,15 +199,28 @@ export function ExecutionHistoryPane() {
     });
   }, []);
 
-  const grouped = useMemo(() => {
-    const groups = new Map<string, JobExecutionInfo[]>();
-    for (const exec of executions) {
-      const list = groups.get(exec.job_name) || [];
-      list.push(exec);
-      groups.set(exec.job_name, list);
-    }
-    return groups;
-  }, [executions]);
+  const handleSort = useCallback(
+    (key: SortKey) => {
+      if (key === sortKey) {
+        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+      } else {
+        setSortKey(key);
+        setSortDir('desc');
+      }
+    },
+    [sortKey]
+  );
+
+  const filtered = useMemo(() => {
+    return executions
+      .filter(
+        (e) =>
+          jobFilter.has(e.job_name) &&
+          statusFilter.has(e.status) &&
+          triggerFilter.has(e.trigger_type)
+      )
+      .sort((a, b) => compareValues(a, b, sortKey, sortDir));
+  }, [executions, jobFilter, statusFilter, triggerFilter, sortKey, sortDir]);
 
   return (
     <Box
@@ -163,11 +238,36 @@ export function ExecutionHistoryPane() {
           borderBottom: '1px solid',
           borderColor: 'border.default',
           flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
         }}
       >
         <Box as="h2" sx={{ fontSize: 2, fontWeight: 'bold', margin: 0 }}>
-          Job Executions
+          Cron Jobs
         </Box>
+        {executions.length > 0 && (
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            <MultiSelectDropdown
+              label="jobs"
+              options={jobOptions}
+              selected={jobFilter}
+              onChange={setJobFilter}
+            />
+            <MultiSelectDropdown
+              label="statuses"
+              options={STATUS_OPTIONS}
+              selected={statusFilter}
+              onChange={setStatusFilter}
+            />
+            <MultiSelectDropdown
+              label="triggers"
+              options={TRIGGER_OPTIONS}
+              selected={triggerFilter}
+              onChange={setTriggerFilter}
+            />
+          </Box>
+        )}
       </Box>
 
       <Box sx={{ flex: 1, overflow: 'auto' }}>
@@ -181,159 +281,124 @@ export function ExecutionHistoryPane() {
           </Text>
         )}
 
-        {!loading &&
-          executions.length > 0 &&
-          [...grouped.entries()].map(([group, items]) => {
-            const isCollapsed = collapsedGroups.has(group);
-            return (
-              <Box
-                key={group}
-                as="table"
-                sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 0, mb: 3 }}
-              >
-                <Box as="thead">
-                  <Box as="tr">
+        {!loading && filtered.length > 0 && (
+          <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 0 }}>
+            <Box as="thead">
+              <TableHeaders sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+            </Box>
+            <Box as="tbody">
+              {filtered.map((exec) => (
+                <Fragment key={exec.id}>
+                  <Box
+                    as="tr"
+                    onClick={exec.error ? () => toggleError(exec.id) : undefined}
+                    sx={{
+                      cursor: exec.error ? 'pointer' : 'default',
+                      '&:hover': exec.error ? { backgroundColor: 'canvas.subtle' } : undefined,
+                    }}
+                  >
                     <Box
                       as="td"
-                      colSpan={4}
                       sx={{
+                        px: 2,
+                        py: 1,
                         borderBottom: '1px solid',
                         borderColor: 'border.muted',
-                        padding: 0,
+                        whiteSpace: 'nowrap',
+                        fontFamily: 'mono',
+                        color: 'fg.muted',
                       }}
                     >
-                      <Box
-                        as="button"
-                        type="button"
-                        onClick={() => toggleGroupCollapse(group)}
-                        aria-expanded={!isCollapsed}
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1,
-                          width: '100%',
-                          px: 2,
-                          py: 1,
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: 'fg.muted',
-                          '&:hover': { color: 'fg.default' },
-                        }}
-                      >
-                        {isCollapsed ? (
-                          <ChevronRightIcon size={12} />
-                        ) : (
-                          <ChevronDownIcon size={12} />
-                        )}
-                        <Text sx={{ fontWeight: 'bold' }}>{group}</Text>
-                        <Text sx={{ ml: 'auto' }}>{items.length}</Text>
-                      </Box>
+                      {exec.id}
+                    </Box>
+                    <Box
+                      as="td"
+                      sx={{
+                        px: 2,
+                        py: 1,
+                        borderBottom: '1px solid',
+                        borderColor: 'border.muted',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {exec.job_name}
+                    </Box>
+                    <Box
+                      as="td"
+                      sx={{
+                        px: 2,
+                        py: 1,
+                        borderBottom: '1px solid',
+                        borderColor: 'border.muted',
+                        whiteSpace: 'nowrap',
+                        color: statusColor[exec.status],
+                      }}
+                    >
+                      {exec.status}
+                    </Box>
+                    <Box
+                      as="td"
+                      sx={{
+                        px: 2,
+                        py: 1,
+                        borderBottom: '1px solid',
+                        borderColor: 'border.muted',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {exec.trigger_type}
+                    </Box>
+                    <Box
+                      as="td"
+                      sx={{
+                        px: 2,
+                        py: 1,
+                        borderBottom: '1px solid',
+                        borderColor: 'border.muted',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {formatTime(exec.started_at)}
+                    </Box>
+                    <Box
+                      as="td"
+                      sx={{
+                        px: 2,
+                        py: 1,
+                        borderBottom: '1px solid',
+                        borderColor: 'border.muted',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {exec.ended_at ? formatTime(exec.ended_at) : '—'}
                     </Box>
                   </Box>
-                  {!isCollapsed && <TableHeaders />}
-                </Box>
-                {!isCollapsed && (
-                  <Box as="tbody">
-                    {items.map((exec) => (
-                      <Fragment key={exec.id}>
-                        <Box
-                          as="tr"
-                          onClick={exec.error ? () => toggleError(exec.id) : undefined}
-                          sx={{
-                            cursor: exec.error ? 'pointer' : 'default',
-                            '&:hover': exec.error
-                              ? { backgroundColor: 'canvas.subtle' }
-                              : undefined,
-                          }}
-                        >
-                          <Box
-                            as="td"
-                            sx={{
-                              px: 2,
-                              py: 1,
-                              textAlign: 'center',
-                              borderBottom: '1px solid',
-                              borderColor: 'border.muted',
-                            }}
-                          >
-                            <Box
-                              sx={{
-                                width: 8,
-                                height: 8,
-                                borderRadius: '50%',
-                                backgroundColor: statusColor[exec.status],
-                                display: 'inline-block',
-                              }}
-                            />
-                          </Box>
-                          <Box
-                            as="td"
-                            sx={{
-                              px: 2,
-                              py: 1,
-                              borderBottom: '1px solid',
-                              borderColor: 'border.muted',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {exec.trigger_type}
-                          </Box>
-                          <Box
-                            as="td"
-                            sx={{
-                              px: 2,
-                              py: 1,
-                              borderBottom: '1px solid',
-                              borderColor: 'border.muted',
-                              whiteSpace: 'nowrap',
-                              width: '100%',
-                            }}
-                          >
-                            {formatTime(exec.started_at)}
-                          </Box>
-                          <Box
-                            as="td"
-                            sx={{
-                              px: 2,
-                              py: 1,
-                              borderBottom: '1px solid',
-                              borderColor: 'border.muted',
-                              whiteSpace: 'nowrap',
-                              fontFamily: 'mono',
-                            }}
-                          >
-                            {formatDuration(exec.started_at, exec.ended_at)}
-                          </Box>
-                        </Box>
-                        {exec.error && expandedErrors.has(exec.id) && (
-                          <Box as="tr">
-                            <Box
-                              as="td"
-                              colSpan={4}
-                              sx={{
-                                px: 2,
-                                py: 1,
-                                borderBottom: '1px solid',
-                                borderColor: 'border.muted',
-                                color: colors.coral,
-                                fontSize: 0,
-                                fontFamily: 'mono',
-                                whiteSpace: 'pre-wrap',
-                                wordBreak: 'break-all',
-                              }}
-                            >
-                              {exec.error}
-                            </Box>
-                          </Box>
-                        )}
-                      </Fragment>
-                    ))}
-                  </Box>
-                )}
-              </Box>
-            );
-          })}
+                  {exec.error && expandedErrors.has(exec.id) && (
+                    <Box as="tr">
+                      <Box
+                        as="td"
+                        colSpan={6}
+                        sx={{
+                          px: 2,
+                          py: 1,
+                          borderBottom: '1px solid',
+                          borderColor: 'border.muted',
+                          color: colors.coral,
+                          fontSize: 0,
+                          fontFamily: 'mono',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
+                        }}
+                      >
+                        {exec.error}
+                      </Box>
+                    </Box>
+                  )}
+                </Fragment>
+              ))}
+            </Box>
+          </Box>
+        )}
       </Box>
     </Box>
   );

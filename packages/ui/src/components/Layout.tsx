@@ -5,7 +5,7 @@
  */
 
 import {
-  HistoryIcon,
+  ClockIcon,
   MoonIcon,
   PeopleIcon,
   StackIcon,
@@ -227,11 +227,11 @@ export function Layout() {
               }}
             />
           </Box>
-          <Box data-tooltip="Job executions" sx={tooltipWrapperSx}>
+          <Box data-tooltip="Cron jobs" sx={tooltipWrapperSx}>
             <IconButton
               unsafeDisableTooltip
-              aria-label="Job executions"
-              icon={HistoryIcon}
+              aria-label="Cron jobs"
+              icon={ClockIcon}
               variant="invisible"
               size="medium"
               onClick={toggleExecutions}
