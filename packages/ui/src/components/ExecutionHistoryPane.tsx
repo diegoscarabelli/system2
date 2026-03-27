@@ -7,7 +7,7 @@
 
 import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { colors } from '../theme/colors';
 
@@ -236,7 +236,7 @@ export function ExecutionHistoryPane() {
                 {!isCollapsed && (
                   <Box as="tbody">
                     {items.map((exec) => (
-                      <Box key={exec.id}>
+                      <Fragment key={exec.id}>
                         <Box
                           as="tr"
                           onClick={exec.error ? () => toggleError(exec.id) : undefined}
@@ -327,7 +327,7 @@ export function ExecutionHistoryPane() {
                             </Box>
                           </Box>
                         )}
-                      </Box>
+                      </Fragment>
                     ))}
                   </Box>
                 )}

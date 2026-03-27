@@ -968,7 +968,10 @@ describe('trackJobExecution', () => {
     );
 
     expect(db.createJobExecution).toHaveBeenCalledWith('test-job', 'catch-up');
-    expect(db.failJobExecution).toHaveBeenCalledWith(42, 'something broke');
+    expect(db.failJobExecution).toHaveBeenCalledWith(
+      42,
+      expect.stringContaining('something broke')
+    );
     expect(db.completeJobExecution).not.toHaveBeenCalled();
   });
 

@@ -238,7 +238,12 @@ export class Server {
       try {
         const jobName = req.query.job_name as string | undefined;
         const status = req.query.status as string | undefined;
-        const limit = req.query.limit ? Number(req.query.limit) : undefined;
+        const rawLimit = req.query.limit ? Number(req.query.limit) : undefined;
+        if (rawLimit !== undefined && (!Number.isFinite(rawLimit) || rawLimit < 1)) {
+          res.status(400).json({ error: 'Invalid limit. Must be a positive integer.' });
+          return;
+        }
+        const limit = rawLimit !== undefined ? Math.min(rawLimit, 500) : undefined;
 
         const validStatuses = ['running', 'completed', 'failed'] as const;
         if (status && !validStatuses.includes(status as (typeof validStatuses)[number])) {

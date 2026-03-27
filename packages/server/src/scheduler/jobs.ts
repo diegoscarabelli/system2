@@ -652,7 +652,7 @@ export async function trackJobExecution(
     await handler();
     db.completeJobExecution(execution.id);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
     db.failJobExecution(execution.id, message);
     throw error;
   }
