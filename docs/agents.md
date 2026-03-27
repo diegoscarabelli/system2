@@ -82,7 +82,7 @@ Prompt caching (where supported by the provider) optimizes the static prefix: on
 | Method | Description |
 |--------|-------------|
 | `prompt(content, options?)` | Reload knowledge, then send a user message. Blocks until agent finishes. `options.isSteering` inserts ASAP into the agent loop. |
-| `deliverMessage(content, details, urgent?)` | Reload knowledge, then send inter-agent message via `sendCustomMessage()`. Non-blocking. Reload errors are swallowed to avoid dropping messages. |
+| `deliverMessage(content, details, urgent?)` | Reload knowledge, then send inter-agent message via `sendCustomMessage()`. Non-blocking. Reload errors are swallowed to avoid dropping messages. Tracked in `pendingDeliveries` for failover replay. |
 | `subscribe(listener)` | Listen to all session events. Returns unsubscribe function. |
 | `abort()` | Cancel current execution. |
 | `getContextUsage()` | Get context window usage stats. |
@@ -157,10 +157,13 @@ Cooldowns are set once: if a key is already in cooldown, subsequent failures ski
 When `AgentHost` detects an API error in a `message_end` event:
 
 1. Categorize the error (see [retry.ts](#retry-logic))
-2. If retriable: wait with exponential backoff, retry with same provider
-3. If retries exhausted or immediate failover: mark key in cooldown, failover to next provider
-4. Reinitialize the session with the new provider (`reinitializeWithProvider()`)
-5. Retry the pending prompt
+2. Set `lastTurnErrored = true` synchronously (prevents `agent_end` from clearing pending state)
+3. Capture `pendingPrompt` and `pendingDeliveries` synchronously (before any `await`)
+4. If retriable: wait with exponential backoff, retry with same provider (re-sends the failed prompt or delivery)
+5. If retries exhausted or immediate failover: mark key in cooldown, failover to next provider
+6. Reinitialize the session with the new provider (`reinitializeWithProvider()`)
+7. Retry the pending prompt and/or replay pending deliveries on the new session
+8. If all providers exhausted: messages remain in `pendingPrompt`/`pendingDeliveries` for recovery when a provider comes out of cooldown
 
 Error details are shown as collapsible system messages in the agent chat. The title shows the error type and action taken, and the collapsible body has provider-specific details. Key rotation: "429 rate limited, rotating to next key". Provider switch: "503 server error, switched to anthropic".
 
