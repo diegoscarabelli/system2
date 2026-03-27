@@ -206,7 +206,7 @@ Reference these tables when writing queries.
 | created_at | TEXT | Row creation timestamp |
 | updated_at | TEXT | Last modification timestamp |
 
-**Indices:** `idx_job_execution_job_name` on `job_name` (filter by job), `idx_job_execution_status` on `status` (filter by lifecycle state), `idx_job_execution_started_at` on `started_at` (order by recency)
+**Indices:** `idx_job_execution_job_name` on `job_name`, `idx_job_execution_status` on `status`, `idx_job_execution_started_at` on `started_at`
 
 ## Work Management
 
