@@ -154,7 +154,7 @@ Side panel titled "Cron Jobs" showing scheduler job execution history as a flat 
 
 **Filters:** Three `MultiSelectDropdown` filters at the top: jobs (e.g., daily-summary, memory-update), statuses (running, completed, failed), and triggers (cron, catch-up, manual).
 
-**Columns:** ID, Job, Status (dot indicator: teal for completed, coral for failed, amber for running), Trigger, Started, Ended. Rows for failed executions expand on click to reveal the error message.
+**Columns:** ID, Job, Status (colored text: teal for completed, coral for failed, amber for running), Trigger, Started, Ended. Rows for failed executions expand on click to reveal the error message.
 
 ## State Management
 
