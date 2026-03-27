@@ -57,7 +57,7 @@ App (ThemeProvider)
 
 ### Layout
 
-VSCode-style layout with an activity bar on the left edge (48px). The activity bar contains toggle buttons for the artifact catalog, agent pane, kanban board, and execution history (top), plus particles and theme toggles (bottom). Opening the catalog or agents panel closes the other; the kanban board toggles a native tab instead. Opening one side panel closes the other. The artifact viewer fills the center, with the chat panel on the right (20-60% resizable, default 33%). Both the side panel and chat panel have draggable resize handles.
+VSCode-style layout with an activity bar on the left edge (48px). The activity bar contains toggle buttons for the artifact catalog, agent pane, kanban board, and cron jobs (top), plus particles and theme toggles (bottom). Opening the catalog or agents panel closes the other; the kanban board toggles a native tab instead. Opening one side panel closes the other. The artifact viewer fills the center, with the chat panel on the right (20-60% resizable, default 33%). Both the side panel and chat panel have draggable resize handles.
 
 ### MessageList
 
@@ -150,7 +150,11 @@ Clicking an agent row switches the chat panel to that agent. The active agent is
 
 ### ExecutionHistoryPane
 
-Side panel showing scheduler job execution history. Polls `GET /api/job-executions` every 2 seconds. Groups executions by job name (daily-summary, memory-update) with collapsible sections. Each row shows a status dot (teal for completed, coral for failed, amber for running), trigger type, start time, and duration. Failed executions are expandable to show the error message. Toggled via HistoryIcon in the activity bar.
+Side panel titled "Cron Jobs" showing scheduler job execution history as a flat sortable table. Polls `GET /api/job-executions` every 2 seconds. Toggled via ClockIcon in the activity bar.
+
+**Filters:** Three `MultiSelectDropdown` filters at the top: jobs (e.g., daily-summary, memory-update), statuses (running, completed, failed), and triggers (cron, catch-up, manual).
+
+**Columns:** ID, Job, Status (colored text: teal for completed, coral for failed, amber for running), Trigger, Started, Ended. Rows for failed executions expand on click to reveal the error message.
 
 ## State Management
 

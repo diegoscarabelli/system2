@@ -110,7 +110,7 @@ export class DatabaseClient {
 
     if (fields.length === 0) return this.getProject(id);
 
-    fields.push("updated_at = datetime('now')");
+    fields.push("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')");
     values.push(id);
 
     const stmt = this.db.prepare(`
@@ -214,7 +214,7 @@ export class DatabaseClient {
 
     if (fields.length === 0) return this.getTask(id);
 
-    fields.push("updated_at = datetime('now')");
+    fields.push("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')");
     values.push(id);
 
     const stmt = this.db.prepare(`
@@ -243,7 +243,7 @@ export class DatabaseClient {
     | { claimed: false; error: 'task_not_found' | 'wrong_project' | 'already_claimed' } {
     const stmt = this.db.prepare(`
       UPDATE task
-      SET status = 'in progress', assignee = ?, start_at = datetime('now'), updated_at = datetime('now')
+      SET status = 'in progress', assignee = ?, start_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
       WHERE id = ?
         AND status = 'todo'
         AND project IS (SELECT project FROM agent WHERE id = ?)
@@ -293,7 +293,7 @@ export class DatabaseClient {
   updateAgentStatus(id: number, status: Agent['status']): Agent | null {
     const stmt = this.db.prepare(`
       UPDATE agent
-      SET status = ?, updated_at = datetime('now')
+      SET status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
       WHERE id = ?
       RETURNING *
     `);
@@ -455,7 +455,7 @@ export class DatabaseClient {
       return (stmt.get(id) as Artifact) || null;
     }
 
-    fields.push("updated_at = datetime('now')");
+    fields.push("updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')");
     values.push(id);
 
     const stmt = this.db.prepare(`
@@ -487,7 +487,7 @@ export class DatabaseClient {
   completeJobExecution(id: number): JobExecution | null {
     const stmt = this.db.prepare(`
       UPDATE job_execution
-      SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now')
+      SET status = 'completed', ended_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
       WHERE id = ?
       RETURNING *
     `);
@@ -498,7 +498,7 @@ export class DatabaseClient {
   failJobExecution(id: number, error: string): JobExecution | null {
     const stmt = this.db.prepare(`
       UPDATE job_execution
-      SET status = 'failed', ended_at = datetime('now'), updated_at = datetime('now'), error = ?
+      SET status = 'failed', ended_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), error = ?
       WHERE id = ?
       RETURNING *
     `);
@@ -509,7 +509,7 @@ export class DatabaseClient {
   failStaleJobExecutions(error: string): number {
     const stmt = this.db.prepare(`
       UPDATE job_execution
-      SET status = 'failed', ended_at = datetime('now'), updated_at = datetime('now'), error = ?
+      SET status = 'failed', ended_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), error = ?
       WHERE status = 'running'
     `);
 
