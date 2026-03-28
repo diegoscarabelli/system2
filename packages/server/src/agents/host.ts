@@ -547,6 +547,7 @@ export class AgentHost {
       } else if (deliveriesToRetry.length > 0 && this.session) {
         // Retry the failed delivery (no prompt took priority)
         console.log('[AgentHost] Retrying failed delivery...');
+        await this.resourceLoader?.reload();
         const failed = deliveriesToRetry[0];
         this.session.sendCustomMessage(
           {
