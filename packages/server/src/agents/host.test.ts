@@ -201,7 +201,7 @@ describe('AgentHost', () => {
       expect(hostInternal.pendingPrompt).toBeNull();
     });
 
-    it('tracks pendingDeliveries and shifts on agent_end', () => {
+    it('tracks pendingDeliveries and shifts on agent_end only for delivery turns', () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -215,7 +215,7 @@ describe('AgentHost', () => {
           details: { sender: number; receiver: number; timestamp: number };
           urgent?: boolean;
         }>;
-        handleSessionEvent: (event: { type: string }) => void;
+        handleSessionEvent: (event: Record<string, unknown>) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
         handleCompactionTracking: ReturnType<typeof vi.fn>;
         session: unknown;
@@ -238,17 +238,33 @@ describe('AgentHost', () => {
       expect(hostInternal.pendingDeliveries[0].content).toBe('msg1');
       expect(hostInternal.pendingDeliveries[1].content).toBe('msg2');
 
-      // agent_end shifts the first delivery
-      hostInternal.handleSessionEvent({ type: 'agent_end' });
+      // Prompt-only agent_end does NOT shift deliveries
+      hostInternal.handleSessionEvent({
+        type: 'agent_end',
+        messages: [{ role: 'user', content: 'hello' }],
+      });
+      expect(hostInternal.pendingDeliveries).toHaveLength(2);
+
+      // Delivery agent_end shifts the matching delivery
+      hostInternal.handleSessionEvent({
+        type: 'agent_end',
+        messages: [{ role: 'custom', customType: 'agent_message', content: 'msg1' }],
+      });
       expect(hostInternal.pendingDeliveries).toHaveLength(1);
       expect(hostInternal.pendingDeliveries[0].content).toBe('msg2');
 
-      // second agent_end clears the queue
-      hostInternal.handleSessionEvent({ type: 'agent_end' });
+      // Second delivery agent_end clears the queue
+      hostInternal.handleSessionEvent({
+        type: 'agent_end',
+        messages: [{ role: 'custom', customType: 'agent_message', content: 'msg2' }],
+      });
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
 
-      // extra agent_end on empty queue is a no-op
-      hostInternal.handleSessionEvent({ type: 'agent_end' });
+      // Extra agent_end on empty queue is a no-op
+      hostInternal.handleSessionEvent({
+        type: 'agent_end',
+        messages: [{ role: 'custom', customType: 'agent_message', content: 'x' }],
+      });
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
     });
 
@@ -268,7 +284,7 @@ describe('AgentHost', () => {
           urgent?: boolean;
         }>;
         lastTurnErrored: boolean;
-        handleSessionEvent: (event: { type: string }) => void;
+        handleSessionEvent: (event: Record<string, unknown>) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
         handleCompactionTracking: ReturnType<typeof vi.fn>;
       };
@@ -283,7 +299,10 @@ describe('AgentHost', () => {
 
       // Simulate error turn: handlePotentialError sets the flag before agent_end fires
       hostInternal.lastTurnErrored = true;
-      hostInternal.handleSessionEvent({ type: 'agent_end' });
+      hostInternal.handleSessionEvent({
+        type: 'agent_end',
+        messages: [{ role: 'custom', customType: 'agent_message', content: 'delivery1' }],
+      });
 
       // Neither pendingPrompt nor pendingDeliveries should be cleaned up
       expect(hostInternal.pendingPrompt).toBe('user message');
@@ -293,8 +312,11 @@ describe('AgentHost', () => {
       // Flag is reset after agent_end
       expect(hostInternal.lastTurnErrored).toBe(false);
 
-      // Next successful agent_end cleans up normally
-      hostInternal.handleSessionEvent({ type: 'agent_end' });
+      // Next successful agent_end with delivery message cleans up normally
+      hostInternal.handleSessionEvent({
+        type: 'agent_end',
+        messages: [{ role: 'custom', customType: 'agent_message', content: 'delivery1' }],
+      });
       expect(hostInternal.pendingPrompt).toBeNull();
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
     });

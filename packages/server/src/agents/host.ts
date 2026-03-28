@@ -439,7 +439,17 @@ export class AgentHost {
       // failed prompt/delivery stays tracked for retry or failover.
       if (!this.lastTurnErrored) {
         this.pendingPrompt = null;
-        if (this.pendingDeliveries.length > 0) {
+        // Count delivery messages that completed in this agent loop. The SDK
+        // batches follow-up turns into a single agent_end, so a prompt turn
+        // followed by queued deliveries produces one event with mixed messages.
+        // Only shift for actual deliveries to avoid desync.
+        const deliveriesCompleted =
+          'messages' in event
+            ? (event.messages as Array<Record<string, unknown>>).filter(
+                (m) => m.role === 'custom' && m.customType === 'agent_message'
+              ).length
+            : 0;
+        for (let i = 0; i < deliveriesCompleted && this.pendingDeliveries.length > 0; i++) {
           this.pendingDeliveries.shift();
         }
       }
