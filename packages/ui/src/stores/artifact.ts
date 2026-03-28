@@ -23,7 +23,7 @@ interface ArtifactState {
   activeTabId: string | null;
   catalogOpen: boolean;
   agentsOpen: boolean;
-  executionsOpen: boolean;
+  cronJobsOpen: boolean;
   kanbanOpen: boolean;
   openArtifact: (url: string, title?: string, filePath?: string) => void;
   closeTab: (tabId: string) => void;
@@ -31,7 +31,7 @@ interface ArtifactState {
   reloadTab: (filePath: string, newUrl: string) => void;
   toggleCatalog: () => void;
   toggleAgents: () => void;
-  toggleExecutions: () => void;
+  toggleCronJobs: () => void;
   openKanbanTab: () => void;
   toggleKanbanTab: () => void;
 }
@@ -68,7 +68,7 @@ export const useArtifactStore = create<ArtifactState>()(
       activeTabId: null,
       catalogOpen: false,
       agentsOpen: false,
-      executionsOpen: false,
+      cronJobsOpen: false,
       kanbanOpen: false,
 
       openArtifact: (url: string, title?: string, filePath?: string) => {
@@ -136,7 +136,7 @@ export const useArtifactStore = create<ArtifactState>()(
         set((state) => ({
           catalogOpen: !state.catalogOpen,
           agentsOpen: false,
-          executionsOpen: false,
+          cronJobsOpen: false,
         }));
       },
 
@@ -144,13 +144,13 @@ export const useArtifactStore = create<ArtifactState>()(
         set((state) => ({
           agentsOpen: !state.agentsOpen,
           catalogOpen: false,
-          executionsOpen: false,
+          cronJobsOpen: false,
         }));
       },
 
-      toggleExecutions: () => {
+      toggleCronJobs: () => {
         set((state) => ({
-          executionsOpen: !state.executionsOpen,
+          cronJobsOpen: !state.cronJobsOpen,
           catalogOpen: false,
           agentsOpen: false,
         }));
@@ -183,7 +183,7 @@ export const useArtifactStore = create<ArtifactState>()(
           .map((t) => ({ ...t, url: `/api/artifact?path=${encodeURIComponent(t.filePath)}` })),
         activeTabId: state.activeTabId,
         agentsOpen: state.agentsOpen,
-        executionsOpen: state.executionsOpen,
+        cronJobsOpen: state.cronJobsOpen,
         kanbanOpen: state.kanbanOpen,
       }),
       merge: (persistedState, currentState) => {

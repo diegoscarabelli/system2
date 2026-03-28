@@ -13,7 +13,7 @@ function resetStore() {
     activeTabId: null,
     catalogOpen: false,
     agentsOpen: false,
-    executionsOpen: false,
+    cronJobsOpen: false,
     kanbanOpen: false,
   });
 }
@@ -99,51 +99,51 @@ describe('useArtifactStore', () => {
     });
   });
 
-  describe('toggleExecutions', () => {
-    it('opens the executions panel', () => {
-      useArtifactStore.getState().toggleExecutions();
+  describe('toggleCronJobs', () => {
+    it('opens the cron jobs panel', () => {
+      useArtifactStore.getState().toggleCronJobs();
 
-      expect(useArtifactStore.getState().executionsOpen).toBe(true);
+      expect(useArtifactStore.getState().cronJobsOpen).toBe(true);
     });
 
-    it('closes the executions panel when already open', () => {
-      useArtifactStore.getState().toggleExecutions();
-      useArtifactStore.getState().toggleExecutions();
+    it('closes the cron jobs panel when already open', () => {
+      useArtifactStore.getState().toggleCronJobs();
+      useArtifactStore.getState().toggleCronJobs();
 
-      expect(useArtifactStore.getState().executionsOpen).toBe(false);
+      expect(useArtifactStore.getState().cronJobsOpen).toBe(false);
     });
 
-    it('closes catalog and agents when opening executions', () => {
+    it('closes catalog and agents when opening cron jobs', () => {
       useArtifactStore.setState({ catalogOpen: true, agentsOpen: true });
 
-      useArtifactStore.getState().toggleExecutions();
+      useArtifactStore.getState().toggleCronJobs();
 
       const state = useArtifactStore.getState();
-      expect(state.executionsOpen).toBe(true);
+      expect(state.cronJobsOpen).toBe(true);
       expect(state.catalogOpen).toBe(false);
       expect(state.agentsOpen).toBe(false);
     });
   });
 
-  describe('panel mutual exclusivity with executions', () => {
-    it('toggleCatalog closes executions', () => {
-      useArtifactStore.setState({ executionsOpen: true });
+  describe('panel mutual exclusivity with cron jobs', () => {
+    it('toggleCatalog closes cron jobs', () => {
+      useArtifactStore.setState({ cronJobsOpen: true });
 
       useArtifactStore.getState().toggleCatalog();
 
       const state = useArtifactStore.getState();
       expect(state.catalogOpen).toBe(true);
-      expect(state.executionsOpen).toBe(false);
+      expect(state.cronJobsOpen).toBe(false);
     });
 
-    it('toggleAgents closes executions', () => {
-      useArtifactStore.setState({ executionsOpen: true });
+    it('toggleAgents closes cron jobs', () => {
+      useArtifactStore.setState({ cronJobsOpen: true });
 
       useArtifactStore.getState().toggleAgents();
 
       const state = useArtifactStore.getState();
       expect(state.agentsOpen).toBe(true);
-      expect(state.executionsOpen).toBe(false);
+      expect(state.cronJobsOpen).toBe(false);
     });
   });
 
