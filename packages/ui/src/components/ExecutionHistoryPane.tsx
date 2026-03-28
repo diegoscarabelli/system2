@@ -14,7 +14,7 @@ import { JobExecutionDetailModal } from './JobExecutionDetailModal';
 import type { MultiSelectOption } from './MultiSelectDropdown';
 import { MultiSelectDropdown } from './MultiSelectDropdown';
 
-interface JobExecutionInfo {
+export interface JobExecutionInfo {
   id: number;
   job_name: string;
   status: 'running' | 'completed' | 'failed';
@@ -26,7 +26,7 @@ interface JobExecutionInfo {
   updated_at: string;
 }
 
-const statusColor: Record<JobExecutionInfo['status'], string> = {
+export const statusColor: Record<JobExecutionInfo['status'], string> = {
   completed: colors.teal,
   failed: colors.coral,
   running: colors.amber,
@@ -139,7 +139,7 @@ function TableHeaders({ sortKey, sortDir, onSort }: TableHeadersProps) {
 export function ExecutionHistoryPane() {
   const [executions, setExecutions] = useState<JobExecutionInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedExecution, setSelectedExecution] = useState<JobExecutionInfo | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('started_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const initialized = useRef(false);
@@ -288,7 +288,7 @@ export function ExecutionHistoryPane() {
                 <Box
                   key={exec.id}
                   as="tr"
-                  onClick={() => setSelectedExecution(exec)}
+                  onClick={() => setSelectedId(exec.id)}
                   sx={{
                     cursor: 'pointer',
                     '&:hover': { backgroundColor: 'canvas.subtle' },
@@ -376,12 +376,13 @@ export function ExecutionHistoryPane() {
         )}
       </Box>
 
-      {selectedExecution && (
-        <JobExecutionDetailModal
-          execution={selectedExecution}
-          onClose={() => setSelectedExecution(null)}
-        />
-      )}
+      {selectedId != null &&
+        (() => {
+          const exec = executions.find((e) => e.id === selectedId);
+          return exec ? (
+            <JobExecutionDetailModal execution={exec} onClose={() => setSelectedId(null)} />
+          ) : null;
+        })()}
     </Box>
   );
 }

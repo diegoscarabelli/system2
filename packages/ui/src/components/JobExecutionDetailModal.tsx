@@ -9,24 +9,8 @@ import { XIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef } from 'react';
 import { colors } from '../theme/colors';
-
-interface JobExecutionInfo {
-  id: number;
-  job_name: string;
-  status: 'running' | 'completed' | 'failed';
-  trigger_type: 'cron' | 'catch-up' | 'manual';
-  error: string | null;
-  started_at: string;
-  ended_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-const statusColor: Record<JobExecutionInfo['status'], string> = {
-  completed: colors.teal,
-  failed: colors.coral,
-  running: colors.amber,
-};
+import type { JobExecutionInfo } from './ExecutionHistoryPane';
+import { statusColor } from './ExecutionHistoryPane';
 
 function formatDate(iso: string | null): string {
   if (!iso) return '';
