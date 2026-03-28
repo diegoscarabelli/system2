@@ -37,7 +37,7 @@ function formatDuration(startedAt: string, endedAt: string | null): string {
   if (!endedAt) return '—';
   const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime();
   if (ms < 1000) return `${ms}ms`;
-  const seconds = Math.round(ms / 1000);
+  const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   const remaining = seconds % 60;

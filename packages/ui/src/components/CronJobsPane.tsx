@@ -291,7 +291,6 @@ export function CronJobsPane() {
                 <Box
                   key={exec.id}
                   as="tr"
-                  role="button"
                   tabIndex={0}
                   onClick={() => setSelectedId(exec.id)}
                   onKeyDown={(e: React.KeyboardEvent) => {
