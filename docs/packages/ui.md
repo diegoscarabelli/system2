@@ -21,7 +21,7 @@ src/
 │   ├── ArtifactViewer.tsx    # Tabbed artifact display (iframe + native tabs)
 │   ├── AgentPane.tsx          # Active agent list with busy indicators
 │   ├── ArtifactCatalog.tsx  # Browsable overlay of all registered artifacts
-│   ├── ExecutionHistoryPane.tsx  # Scheduler job execution history panel
+│   ├── CronJobsPane.tsx       # Scheduler job execution history panel
 │   ├── KanbanBoard.tsx    # Live kanban dashboard (swimlane layout, native tab)
 │   ├── TaskDetailModal.tsx # Task detail overlay (comments, links, markdown)
 │   ├── ProjectDetailModal.tsx # Project detail overlay (status, labels, dates)
@@ -148,7 +148,7 @@ Side panel showing all non-archived agents with busy/idle indicators. Polls `GET
 
 Clicking an agent row switches the chat panel to that agent. The active agent is highlighted with an accent-colored left border on its ID cell. Switching updates `activeAgentId` in the chat store, which triggers the WebSocket hook to send `switch_agent` to the server. The server responds with the agent's chat history and streaming state.
 
-### ExecutionHistoryPane
+### CronJobsPane
 
 Side panel titled "Cron Jobs" showing scheduler job execution history as a flat sortable table. Polls `GET /api/job-executions` every 2 seconds. Toggled via ClockIcon in the activity bar.
 
@@ -201,7 +201,7 @@ Tab-based artifact state persisted via the Zustand `persist` middleware (key: `s
 | `catalogOpen` | `boolean` | Whether the catalog panel is visible (not persisted) |
 | `agentsOpen` | `boolean` | Whether the agents panel is visible (persisted) |
 | `kanbanOpen` | `boolean` | Whether the kanban board tab is open (persisted) |
-| `executionsOpen` | `boolean` | Whether the execution history panel is visible (persisted) |
+| `cronJobsOpen` | `boolean` | Whether the cron jobs panel is visible (persisted) |
 
 Key behaviors:
 

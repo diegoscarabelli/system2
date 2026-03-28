@@ -2,14 +2,14 @@
  * JobExecutionDetailModal Component
  *
  * Overlay modal showing full job execution details.
- * Opened from the ExecutionHistoryPane when a row is clicked.
+ * Opened from the CronJobsPane when a row is clicked.
  */
 
 import { XIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef } from 'react';
 import { colors } from '../theme/colors';
-import type { JobExecutionInfo } from './ExecutionHistoryPane';
+import type { JobExecutionInfo } from './CronJobsPane';
 
 const statusColor: Record<JobExecutionInfo['status'], string> = {
   completed: colors.teal,

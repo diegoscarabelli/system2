@@ -1,5 +1,5 @@
 /**
- * Execution History Pane
+ * Cron Jobs Pane
  *
  * Toggleable panel showing scheduler job execution history.
  * Flat sortable table with multiselect filters for job, status, and trigger.
@@ -137,7 +137,7 @@ function TableHeaders({ sortKey, sortDir, onSort }: TableHeadersProps) {
   );
 }
 
-export function ExecutionHistoryPane() {
+export function CronJobsPane() {
   const [executions, setExecutions] = useState<JobExecutionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);

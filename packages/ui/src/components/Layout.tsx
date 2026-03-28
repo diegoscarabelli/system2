@@ -22,7 +22,7 @@ import { AgentPane } from './AgentPane';
 import { ArtifactCatalog } from './ArtifactCatalog';
 import { ArtifactViewer } from './ArtifactViewer';
 import { Chat } from './Chat';
-import { ExecutionHistoryPane } from './ExecutionHistoryPane';
+import { CronJobsPane } from './CronJobsPane';
 
 const ACTIVITY_BAR_PX = 48;
 
@@ -67,10 +67,10 @@ export function Layout() {
   const kanbanOpen = useArtifactStore((s) => s.kanbanOpen);
   const toggleCatalog = useArtifactStore((s) => s.toggleCatalog);
   const toggleAgents = useArtifactStore((s) => s.toggleAgents);
-  const executionsOpen = useArtifactStore((s) => s.executionsOpen);
-  const toggleExecutions = useArtifactStore((s) => s.toggleExecutions);
+  const cronJobsOpen = useArtifactStore((s) => s.cronJobsOpen);
+  const toggleCronJobs = useArtifactStore((s) => s.toggleCronJobs);
   const toggleKanbanTab = useArtifactStore((s) => s.toggleKanbanTab);
-  const sideDrawerOpen = catalogOpen || agentsOpen || executionsOpen;
+  const sideDrawerOpen = catalogOpen || agentsOpen || cronJobsOpen;
 
   const handleMouseDown = useCallback(() => {
     isDragging.current = true;
@@ -234,11 +234,11 @@ export function Layout() {
               icon={ClockIcon}
               variant="invisible"
               size="medium"
-              onClick={toggleExecutions}
+              onClick={toggleCronJobs}
               sx={{
-                color: executionsOpen ? 'fg.default' : 'fg.muted',
+                color: cronJobsOpen ? 'fg.default' : 'fg.muted',
                 position: 'relative',
-                '&::before': executionsOpen
+                '&::before': cronJobsOpen
                   ? {
                       content: '""',
                       position: 'absolute',
@@ -299,7 +299,7 @@ export function Layout() {
         >
           {catalogOpen && <ArtifactCatalog />}
           {agentsOpen && <AgentPane />}
-          {executionsOpen && <ExecutionHistoryPane />}
+          {cronJobsOpen && <CronJobsPane />}
         </Box>
       )}
 
