@@ -92,6 +92,9 @@ export function JobExecutionDetailModal({
 
   return (
     <Box
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="execution-detail-title"
       onClick={handleBackdropClick}
       sx={{
         position: 'fixed',
@@ -135,7 +138,10 @@ export function JobExecutionDetailModal({
           }}
         >
           <Box sx={{ flex: 1 }}>
-            <Text sx={{ fontWeight: 'bold', fontSize: 3, color: 'fg.default', lineHeight: 1.3 }}>
+            <Text
+              id="execution-detail-title"
+              sx={{ fontWeight: 'bold', fontSize: 3, color: 'fg.default', lineHeight: 1.3 }}
+            >
               <Text as="span" sx={{ color: 'fg.muted' }}>
                 #{execution.id}
               </Text>{' '}

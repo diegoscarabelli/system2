@@ -291,10 +291,19 @@ export function ExecutionHistoryPane() {
                 <Box
                   key={exec.id}
                   as="tr"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setSelectedId(exec.id)}
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedId(exec.id);
+                    }
+                  }}
                   sx={{
                     cursor: 'pointer',
                     '&:hover': { backgroundColor: 'canvas.subtle' },
+                    '&:focus-visible': { outline: '2px solid', outlineColor: 'accent.fg' },
                   }}
                 >
                   <Box
