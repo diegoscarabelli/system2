@@ -206,7 +206,7 @@ These patterns are intentionally narrow to avoid false positives on rate-limit e
 
 The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. Pending deliveries (scheduled tasks, inter-agent messages) are replayed on the recovered session via `sendCustomMessage`, preserving them for the agent to process. If no split point below 90% is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
 
-Auto-compaction is also configured to fire earlier (at 90% of the context window instead of the SDK default of ~98%) to reduce the chance of overflow in the first place.
+Auto-compaction is also configured to fire earlier (at ~50% of the context window via `reserveTokens`, instead of the SDK default of ~98%) to reduce the chance of overflow in the first place.
 
 **Last-resort provider recovery:** after all normal recovery paths (retry, failover, context overflow) are exhausted, `handlePotentialError` checks if a different provider is available before giving up. This covers cases where an agent is stuck on a dead fallback provider (e.g., Anthropic with $0 credits returning 400 `client` errors) while the primary provider's cooldown has expired. `getNextProvider()` iterates in provider order (primary first), so agents naturally gravitate back to the primary when it becomes available.
 
