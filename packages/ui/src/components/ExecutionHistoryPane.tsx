@@ -8,6 +8,7 @@
 import { TriangleDownIcon, TriangleUpIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
 import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { colors } from '../theme/colors';
 import { JobExecutionDetailModal } from './JobExecutionDetailModal';
@@ -26,7 +27,7 @@ export interface JobExecutionInfo {
   updated_at: string;
 }
 
-export const statusColor: Record<JobExecutionInfo['status'], string> = {
+const statusColor: Record<JobExecutionInfo['status'], string> = {
   completed: colors.teal,
   failed: colors.coral,
   running: colors.amber,
@@ -195,6 +196,8 @@ export function ExecutionHistoryPane() {
       clearTimeout(timeoutId);
     };
   }, []);
+
+  const closeModal = useCallback(() => setSelectedId(null), []);
 
   const handleSort = useCallback(
     (key: SortKey) => {
@@ -379,9 +382,7 @@ export function ExecutionHistoryPane() {
       {selectedId != null &&
         (() => {
           const exec = executions.find((e) => e.id === selectedId);
-          return exec ? (
-            <JobExecutionDetailModal execution={exec} onClose={() => setSelectedId(null)} />
-          ) : null;
+          return exec ? <JobExecutionDetailModal execution={exec} onClose={closeModal} /> : null;
         })()}
     </Box>
   );

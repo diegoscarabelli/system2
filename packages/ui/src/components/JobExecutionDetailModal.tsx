@@ -10,7 +10,12 @@ import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef } from 'react';
 import { colors } from '../theme/colors';
 import type { JobExecutionInfo } from './ExecutionHistoryPane';
-import { statusColor } from './ExecutionHistoryPane';
+
+const statusColor: Record<JobExecutionInfo['status'], string> = {
+  completed: colors.teal,
+  failed: colors.coral,
+  running: colors.amber,
+};
 
 function formatDate(iso: string | null): string {
   if (!iso) return '';
