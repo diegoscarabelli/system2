@@ -1847,6 +1847,12 @@ describe('AgentHost', () => {
       handleContextOverflow: ReturnType<typeof vi.fn>;
       contextOverflowHandled: boolean;
       pendingPrompt: string | null;
+      pendingDeliveries: Array<{
+        content: string;
+        details: Record<string, unknown>;
+        urgent: boolean;
+      }>;
+      session: { sendCustomMessage: ReturnType<typeof vi.fn> } | null;
       isReinitializing: boolean;
       currentProvider: string;
       retryAttempts: Map<string, number>;
@@ -1937,6 +1943,43 @@ describe('AgentHost', () => {
       );
       expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
       expect(internal.pendingPrompt).toBeNull();
+    });
+
+    it('replays pending deliveries on the recovered session after context overflow', async () => {
+      const { internal } = makeHostForOverflow();
+      const sendCustomMessage = vi.fn();
+      internal.session = { sendCustomMessage };
+      internal.pendingDeliveries = [
+        { content: 'task-1', details: { source: 'scheduler' }, urgent: false },
+        { content: 'task-2', details: { source: 'scheduler' }, urgent: true },
+      ];
+      await internal.handlePotentialError(
+        makeOverflowEvent('400: input token count exceeds maximum context length')
+      );
+      expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
+      expect(sendCustomMessage).toHaveBeenCalledTimes(2);
+      expect(sendCustomMessage).toHaveBeenNthCalledWith(
+        1,
+        {
+          customType: 'agent_message',
+          content: 'task-1',
+          display: false,
+          details: { source: 'scheduler' },
+        },
+        { deliverAs: 'followUp', triggerTurn: true }
+      );
+      expect(sendCustomMessage).toHaveBeenNthCalledWith(
+        2,
+        {
+          customType: 'agent_message',
+          content: 'task-2',
+          display: false,
+          details: { source: 'scheduler' },
+        },
+        { deliverAs: 'steer', triggerTurn: true }
+      );
+      // pendingDeliveries NOT cleared (agent_end shifts on success)
+      expect(internal.pendingDeliveries).toHaveLength(2);
     });
   });
 

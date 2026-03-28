@@ -204,7 +204,7 @@ These patterns are intentionally narrow to avoid false positives on rate-limit e
 3. Reinitialize the session from the truncated file and run `compact()` to reduce context to ~5%
 4. Append the tail back and reinitialize again
 
-The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. If no split point below 90% is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
+The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. Pending deliveries (scheduled tasks, inter-agent messages) are replayed on the recovered session via `sendCustomMessage`, preserving them for the agent to process. If no split point below 90% is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
 
 Auto-compaction is also configured to fire earlier (at 90% of the context window instead of the SDK default of ~98%) to reduce the chance of overflow in the first place.
 

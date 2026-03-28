@@ -628,6 +628,24 @@ export class AgentHost {
       if (recovered) {
         // Clear the overflow-causing prompt so a future failover doesn't retry it
         this.pendingPrompt = null;
+        // Replay pending deliveries on the recovered session. Don't clear
+        // pendingDeliveries: agent_end will shift each one as turns succeed.
+        if (this.pendingDeliveries.length > 0 && this.session) {
+          for (const delivery of this.pendingDeliveries) {
+            this.session.sendCustomMessage(
+              {
+                customType: 'agent_message',
+                content: delivery.content,
+                display: false,
+                details: delivery.details,
+              },
+              {
+                deliverAs: delivery.urgent ? 'steer' : 'followUp',
+                triggerTurn: true,
+              }
+            );
+          }
+        }
         return;
       }
       // Recovery was a no-op — reset guard so a future overflow can try again
