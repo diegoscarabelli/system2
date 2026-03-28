@@ -86,6 +86,8 @@ export class ReminderManager {
     }
 
     const content = `[Reminder #${reminderId}]\n\n${reminder.message}`;
-    host.deliverMessage(content, { sender: 0, receiver: reminder.agentId, timestamp: Date.now() });
+    host
+      .deliverMessage(content, { sender: 0, receiver: reminder.agentId, timestamp: Date.now() })
+      .catch((err) => console.error('[ReminderManager] delivery failed:', err));
   }
 }

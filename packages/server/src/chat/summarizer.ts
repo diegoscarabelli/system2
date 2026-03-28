@@ -133,14 +133,13 @@ export class ConversationSummarizer {
       });
 
       // Deliver summary to Guide
-      this.guideHost.deliverMessage(
-        `[Conversation: user <-> ${buffer.agentRole}_${agentId}]\n\n${summary}`,
-        {
+      this.guideHost
+        .deliverMessage(`[Conversation: user <-> ${buffer.agentRole}_${agentId}]\n\n${summary}`, {
           sender: agentId,
           receiver: this.guideAgentId,
           timestamp: Date.now(),
-        }
-      );
+        })
+        .catch((err) => console.error('[ConversationSummarizer] delivery failed:', err));
     } catch (err) {
       console.error('[ConversationSummarizer] Failed to generate summary:', err);
     }

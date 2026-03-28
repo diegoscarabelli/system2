@@ -49,7 +49,7 @@ function setup(
   narratorIds: number[] = [],
   registeredNarratorIds: number[] = narratorIds
 ) {
-  const deliverMessage = vi.fn();
+  const deliverMessage = vi.fn().mockReturnValue(Promise.resolve());
   const createTask = vi.fn().mockReturnValue({ id: 100 } as Task);
 
   const db = {

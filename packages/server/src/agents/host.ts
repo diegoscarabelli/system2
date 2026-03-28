@@ -153,6 +153,8 @@ export class AgentHost {
     content: string;
     details: { sender: number; receiver: number; timestamp: number };
     urgent?: boolean;
+    resolve: () => void;
+    reject: (reason: Error) => void;
   }> = [];
   private agentRole: string | null = null;
   private agentProject: number | null = null;
@@ -450,7 +452,8 @@ export class AgentHost {
               ).length
             : 0;
         for (let i = 0; i < deliveriesCompleted && this.pendingDeliveries.length > 0; i++) {
-          this.pendingDeliveries.shift();
+          const completed = this.pendingDeliveries.shift()!;
+          completed.resolve();
         }
       }
       this.lastTurnErrored = false;
@@ -691,6 +694,12 @@ export class AgentHost {
       this.busy = false;
     }
 
+    // Permanently failed: reject all pending delivery promises
+    for (const delivery of this.pendingDeliveries) {
+      delivery.reject(new Error(`All providers exhausted: ${errorMessage}`));
+    }
+    this.pendingDeliveries = [];
+
     // Reset retry attempts for next error
     this.retryAttempts.clear();
   }
@@ -706,6 +715,8 @@ export class AgentHost {
       content: string;
       details: { sender: number; receiver: number; timestamp: number };
       urgent?: boolean;
+      resolve: () => void;
+      reject: (reason: Error) => void;
     }>,
     reason?: string,
     detail?: string
@@ -978,15 +989,25 @@ export class AgentHost {
     content: string,
     details: { sender: number; receiver: number; timestamp: number },
     urgent?: boolean
-  ): void {
+  ): Promise<void> {
     if (!this.session) {
       throw new Error('AgentHost not initialized. Call initialize() first.');
     }
 
+    // Create deferred promise for completion notification. Resolves when
+    // agent_end confirms the delivery was processed, rejects on permanent
+    // failure (all providers exhausted, abort, or send failure).
+    let resolve!: () => void;
+    let reject!: (reason: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+
     // Track for failover retry. If the session is destroyed during reinitialization,
     // queued sendCustomMessage calls are lost. This queue lets handlePotentialError
     // replay them on the new session. Cleared per-turn by agent_end (shift).
-    this.pendingDeliveries.push({ content, details, urgent });
+    this.pendingDeliveries.push({ content, details, urgent, resolve, reject });
 
     // Capture delivered message in chat cache for UI history.
     // Inter-agent messages and summaries store full content (tag + body).
@@ -1051,7 +1072,20 @@ export class AgentHost {
           }
         )
       )
-      .catch((err) => console.error('[AgentHost] deliverMessage error:', err));
+      .catch((err) => {
+        console.error('[AgentHost] deliverMessage error:', err);
+        // Send itself failed (session destroyed, etc.). The message never
+        // reached the agent, so remove from queue and reject immediately.
+        const idx = this.pendingDeliveries.findIndex((d) => d.resolve === resolve);
+        if (idx !== -1) {
+          this.pendingDeliveries.splice(idx, 1);
+          reject(
+            new Error(`Delivery send failed: ${err instanceof Error ? err.message : String(err)}`)
+          );
+        }
+      });
+
+    return promise;
   }
 
   /**
@@ -1065,6 +1099,9 @@ export class AgentHost {
         this.busy = false;
       }
       this.pendingPrompt = null;
+      for (const delivery of this.pendingDeliveries) {
+        delivery.reject(new Error('Agent session aborted'));
+      }
       this.pendingDeliveries = [];
     }
   }

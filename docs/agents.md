@@ -82,7 +82,7 @@ Prompt caching (where supported by the provider) optimizes the static prefix: on
 | Method | Description |
 |--------|-------------|
 | `prompt(content, options?)` | Reload knowledge, then send a user message. Blocks until agent finishes. `options.isSteering` inserts ASAP into the agent loop. |
-| `deliverMessage(content, details, urgent?)` | Reload knowledge, then send inter-agent message via `sendCustomMessage()`. Non-blocking. Reload errors are swallowed to avoid dropping messages. Tracked in `pendingDeliveries` for failover replay. |
+| `deliverMessage(content, details, urgent?)` | Reload knowledge, then send inter-agent message via `sendCustomMessage()`. Returns `Promise<void>` that resolves when the agent finishes processing (on `agent_end`) or rejects on permanent failure. Reload errors are swallowed to avoid dropping messages. Tracked in `pendingDeliveries` for failover replay. |
 | `subscribe(listener)` | Listen to all session events. Returns unsubscribe function. |
 | `abort()` | Cancel current execution. |
 | `getContextUsage()` | Get context window usage stats. |
@@ -113,7 +113,7 @@ Two methods for sending messages, chosen based on the sender:
 | Method | Creates | Used By | Behavior |
 |--------|---------|---------|----------|
 | `prompt()` | `user` message | User -> Guide | Blocking. Streams response back to UI via WebSocket. |
-| `deliverMessage()` | `custom_message` | Agent -> Agent, Scheduler -> Agent | Non-blocking. Queues for delivery. |
+| `deliverMessage()` | `custom_message` | Agent -> Agent, Scheduler -> Agent | Returns `Promise<void>`. Scheduler jobs await completion; inter-agent callers fire-and-forget. |
 
 ### Delivery Modes
 
