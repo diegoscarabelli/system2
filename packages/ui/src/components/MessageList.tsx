@@ -6,7 +6,7 @@
  */
 
 import { Box, Text } from '@primer/react';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import {
   EMPTY_AGENT_STATE,
@@ -602,8 +602,9 @@ export function MessageList() {
 
   // When the active agent changes, snap to the bottom instantly so the user
   // sees the most recent messages without watching the whole history scroll by.
+  // useLayoutEffect runs before paint, avoiding a visible flash of the old scroll position.
   // biome-ignore lint/correctness/useExhaustiveDependencies: only run on agent switch
-  useEffect(() => {
+  useLayoutEffect(() => {
     isNearBottomRef.current = true;
     const container = scrollContainerRef.current;
     if (container) {
