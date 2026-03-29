@@ -566,6 +566,7 @@ function AssistantMessageBlock({
 }
 
 export function MessageList() {
+  const activeAgentId = useChatStore((s) => s.activeAgentId);
   const activeState = useChatStore((s) => {
     if (s.activeAgentId === null) return EMPTY_AGENT_STATE;
     return s.agentStates.get(s.activeAgentId) ?? EMPTY_AGENT_STATE;
@@ -598,6 +599,17 @@ export function MessageList() {
     (isWaitingForResponse ||
       (isStreaming && !hasActiveInProgress && compactionStatus === 'idle')) &&
     !currentAssistantMessage;
+
+  // When the active agent changes, snap to the bottom instantly so the user
+  // sees the most recent messages without watching the whole history scroll by.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only run on agent switch
+  useEffect(() => {
+    isNearBottomRef.current = true;
+    const container = scrollContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [activeAgentId]);
 
   // Track whether user is near the bottom of the scroll container
   useEffect(() => {
