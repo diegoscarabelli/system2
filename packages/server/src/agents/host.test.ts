@@ -1207,12 +1207,12 @@ describe('AgentHost', () => {
     });
 
     describe('handleCompactionTracking', () => {
-      it('increments counter on auto_compaction_end and persists', () => {
+      it('increments counter on compaction_end and persists', () => {
         const { internal } = makeHostForPruning(3);
         internal.compactionCount = 0;
         internal.writeCompactionCount = vi.fn();
 
-        internal.handleCompactionTracking({ type: 'auto_compaction_end' });
+        internal.handleCompactionTracking({ type: 'compaction_end' });
 
         expect(internal.compactionCount).toBe(1);
         expect(internal.writeCompactionCount).toHaveBeenCalledWith(1);
@@ -1222,7 +1222,7 @@ describe('AgentHost', () => {
         const { internal } = makeHostForPruning(0);
         internal.compactionCount = 0;
 
-        internal.handleCompactionTracking({ type: 'auto_compaction_end' });
+        internal.handleCompactionTracking({ type: 'compaction_end' });
 
         expect(internal.compactionCount).toBe(0);
       });
@@ -1647,9 +1647,9 @@ describe('AgentHost', () => {
       // After compact+tail-append the file has head+tail; reinitialize was called twice
       expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
       // compact() was called once (on the session after first reinit)
-      // handleCompactionTracking was called with auto_compaction_end
+      // handleCompactionTracking was called with compaction_end
       expect(internal.handleCompactionTracking).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'auto_compaction_end' })
+        expect.objectContaining({ type: 'compaction_end' })
       );
       // The overflow entry (index 3) should be in the tail and appended back
       expect(remaining.at(-1)).toMatchObject({

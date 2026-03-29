@@ -992,7 +992,7 @@ export class AgentHost {
     if (this.compactionDepth <= 0) return;
 
     // Track auto-compaction counter
-    if (event.type === 'auto_compaction_end') {
+    if (event.type === 'compaction_end') {
       this.compactionCount++;
       this.writeCompactionCount(this.compactionCount);
     }
@@ -1233,9 +1233,10 @@ export class AgentHost {
       if (this.session) {
         console.log('[AgentHost] Context overflow: compacting...');
         await this.session.compact();
-        // Synthesize auto_compaction_end so the pruning counter stays accurate
+        // Synthesize compaction_end so the pruning counter stays accurate
         this.handleCompactionTracking({
-          type: 'auto_compaction_end',
+          type: 'compaction_end',
+          reason: 'overflow',
         } as AgentSessionEvent);
         console.log('[AgentHost] Context overflow: compaction complete');
       }

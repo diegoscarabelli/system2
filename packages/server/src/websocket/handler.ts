@@ -333,11 +333,11 @@ export class WebSocketHandler {
         break;
       }
 
-      case 'auto_compaction_start':
+      case 'compaction_start':
         this.send({ type: 'compaction_start', agentId });
         break;
 
-      case 'auto_compaction_end':
+      case 'compaction_end':
         this.send({ type: 'compaction_end', agentId });
         break;
 

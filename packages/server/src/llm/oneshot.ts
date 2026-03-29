@@ -27,7 +27,10 @@ export async function oneShotComplete(
   model: Model<Api>,
   options: OneShotOptions
 ): Promise<string> {
-  const apiKey = await modelRegistry.getApiKey(model);
+  const auth = await modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok) {
+    throw new Error(`Failed to resolve API key: ${auth.error}`);
+  }
 
   const result = await completeSimple(
     model,
@@ -42,7 +45,8 @@ export async function oneShotComplete(
       ],
     },
     {
-      apiKey,
+      apiKey: auth.apiKey,
+      headers: auth.headers,
       signal: options.signal,
     }
   );
