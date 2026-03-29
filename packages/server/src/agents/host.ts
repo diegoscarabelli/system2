@@ -986,12 +986,12 @@ export class AgentHost {
 
   /**
    * Handle compaction tracking for pruning.
-   * Increments counter on auto-compaction and triggers pruning when threshold is met.
+   * Increments counter on compaction_end and triggers pruning when threshold is met.
    */
-  private handleCompactionTracking(event: AgentSessionEvent): void {
+  private handleCompactionTracking(event: Pick<AgentSessionEvent, 'type'>): void {
     if (this.compactionDepth <= 0) return;
 
-    // Track auto-compaction counter
+    // Track compaction counter
     if (event.type === 'compaction_end') {
       this.compactionCount++;
       this.writeCompactionCount(this.compactionCount);
@@ -1234,10 +1234,7 @@ export class AgentHost {
         console.log('[AgentHost] Context overflow: compacting...');
         await this.session.compact();
         // Synthesize compaction_end so the pruning counter stays accurate
-        this.handleCompactionTracking({
-          type: 'compaction_end',
-          reason: 'overflow',
-        } as AgentSessionEvent);
+        this.handleCompactionTracking({ type: 'compaction_end' });
         console.log('[AgentHost] Context overflow: compaction complete');
       }
 
