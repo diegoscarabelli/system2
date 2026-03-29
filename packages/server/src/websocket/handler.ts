@@ -238,13 +238,20 @@ export class WebSocketHandler {
         }
         break;
 
-      case 'message_end':
+      case 'message_end': {
         if (this.thinkingAgents.has(agentId)) {
           this.send({ type: 'thinking_end', agentId });
           this.thinkingAgents.delete(agentId);
         }
-        this.send({ type: 'assistant_end', agentId });
+        // Forward error info so the UI can render it in the chat timeline
+        const messageData = (
+          event as unknown as { message?: { stopReason?: string; errorMessage?: string } }
+        ).message;
+        const errorMessage =
+          messageData?.stopReason === 'error' ? messageData.errorMessage : undefined;
+        this.send({ type: 'assistant_end', agentId, errorMessage });
         break;
+      }
 
       case 'tool_execution_start': {
         if (this.thinkingAgents.has(agentId)) {

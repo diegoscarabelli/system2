@@ -18,7 +18,7 @@ export type ClientMessage =
 // agentId is optional on streaming messages: when absent, implies the Guide agent.
 export type ServerMessage =
   | { type: 'assistant_chunk'; content: string; agentId?: number }
-  | { type: 'assistant_end'; agentId?: number }
+  | { type: 'assistant_end'; agentId?: number; errorMessage?: string }
   | { type: 'thinking_chunk'; content: string; agentId?: number }
   | { type: 'thinking_end'; agentId?: number }
   | { type: 'tool_call_start'; name: string; input?: string; agentId?: number }

@@ -92,6 +92,10 @@ export function useWebSocket() {
           if (aid !== null) {
             state.finishThinking(aid);
             state.finishAssistantMessage(aid);
+            // Show LLM errors in the chat timeline as collapsible system messages
+            if (message.errorMessage) {
+              state.addSystemMessage(`LLM error\n\n${message.errorMessage}`, aid);
+            }
           }
           break;
         }
