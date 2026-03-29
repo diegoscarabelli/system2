@@ -2267,7 +2267,10 @@ describe('AgentHost', () => {
       compactionCount: number;
       compactionDepth: number;
       currentProvider: string;
-      handleContextOverflow: () => Promise<boolean>;
+      handleContextOverflow: (
+        targetContextWindow?: number,
+        compactionProvider?: string
+      ) => Promise<boolean>;
       handleCompactionTracking: ReturnType<typeof vi.fn>;
       reinitializeWithProvider: ReturnType<typeof vi.fn>;
       writeCompactionCount: ReturnType<typeof vi.fn>;
@@ -2305,11 +2308,11 @@ describe('AgentHost', () => {
     }
 
     it('truncates JSONL at split point, reinitializes, compacts, appends tail, reinitializes again', async () => {
-      // 3 messages: first two below 90% threshold, third above
+      // contextWindow is 1M, 50% = 500K. First two entries below threshold, third above.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } }, // below 90% (900K)
-        { type: 'message', message: { role: 'assistant', usage: { input: 850_000, output: 100 } } }, // below 90%
+        { type: 'message', message: { role: 'assistant', usage: { input: 300_000, output: 100 } } }, // below 50% (500K)
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } }, // below 50% → split here (last below)
         {
           type: 'message',
           message: { role: 'assistant', usage: { input: 1_100_000, output: 100 } },
@@ -2340,12 +2343,13 @@ describe('AgentHost', () => {
       });
     });
 
-    it('splits at the last message below 90% when multiple candidates exist', async () => {
+    it('splits at the last message below 50% when multiple candidates exist', async () => {
+      // contextWindow is 1M, 50% = 500K.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
-        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } }, // last below 90% → split here
-        { type: 'message', message: { role: 'assistant', usage: { input: 950_000, output: 100 } } }, // above 90%
+        { type: 'message', message: { role: 'assistant', usage: { input: 200_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } }, // last below 50% → split here
+        { type: 'message', message: { role: 'assistant', usage: { input: 700_000, output: 100 } } }, // above 50%
         {
           type: 'message',
           message: { role: 'assistant', usage: { input: 1_050_000, output: 100 } },
@@ -2360,7 +2364,7 @@ describe('AgentHost', () => {
     });
 
     it('returns early without reinitializing when no split point exists', async () => {
-      // All messages are above 90%
+      // All messages are above 50%
       const entries = [
         { type: 'session', version: 3 },
         { type: 'message', message: { role: 'assistant', usage: { input: 950_000, output: 100 } } },
@@ -2393,9 +2397,10 @@ describe('AgentHost', () => {
 
     it('skips tail append and second reinit when tail is empty', async () => {
       // Only entries below threshold — no tail
+      // contextWindow is 1M, 50% = 500K. Entry at 400K is below threshold.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } },
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
       const { internal } = makeHostForRecovery();
@@ -2407,9 +2412,10 @@ describe('AgentHost', () => {
     });
 
     it('restores tail to file when compact throws mid-recovery', async () => {
+      // contextWindow is 1M, 50% = 500K. Entry at 400K is below threshold.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } },
         { type: 'tool_call', name: 'bash' }, // becomes the tail
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
@@ -2433,9 +2439,10 @@ describe('AgentHost', () => {
     });
 
     it('does not double-append tail when second reinit fails after tail was already written', async () => {
+      // contextWindow is 1M, 50% = 500K. Entry at 400K is below threshold.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } },
         { type: 'tool_call', name: 'bash' }, // becomes the tail
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
@@ -2464,9 +2471,10 @@ describe('AgentHost', () => {
     });
 
     it('guard resets after successful recovery, allowing a second recovery on the same session', async () => {
+      // contextWindow is 1M, 50% = 500K. Entry at 400K is below threshold.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } },
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
       const { internal } = makeHostForRecovery();
@@ -2480,6 +2488,143 @@ describe('AgentHost', () => {
       writeJsonlFile('session.jsonl', entries, new Date());
       await internal.handleContextOverflow();
       expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
+    });
+
+    it('uses targetContextWindow for split threshold when provided', async () => {
+      // contextWindow is 1M, but targetContextWindow is 131K (e.g. Cerebras)
+      // 50% of 131K = 65.5K. Entry at 60K is below, entry at 100K is above.
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', message: { role: 'assistant', usage: { input: 60_000, output: 100 } } }, // below 50% of 131K
+        { type: 'message', message: { role: 'assistant', usage: { input: 100_000, output: 100 } } }, // above 50% of 131K, below 50% of 1M
+        { type: 'message', message: { role: 'assistant', usage: { input: 148_000, output: 100 } } }, // above 131K
+      ];
+      const filePath = writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      await internal.handleContextOverflow(131_000);
+
+      // Split at entry with 60K (last below 65.5K), tail has 2 entries
+      const remaining = readFileSync(filePath, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
+      // Both tail entries (100K and 148K) should be restored
+      expect(remaining.at(-1)).toMatchObject({
+        type: 'message',
+        message: { usage: { input: 148_000 } },
+      });
+    });
+
+    it('falls back to this.contextWindow with 50% threshold when targetContextWindow is not provided', async () => {
+      // contextWindow is 1M, 50% = 500K. Entry at 400K is below, entry at 800K is above.
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } },
+      ];
+      writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      await internal.handleContextOverflow();
+
+      // Split at 400K entry, tail has 1 entry (800K) → 2 reinitializations
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('compactForProvider', () => {
+    let testDir: string;
+
+    beforeEach(() => {
+      testDir = join(
+        tmpdir(),
+        `system2-compact-provider-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      );
+      mkdirSync(testDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    type CompactProviderInternal = {
+      compactForProvider: (provider: string) => Promise<void>;
+      handleContextOverflow: ReturnType<typeof vi.fn>;
+      agentModels: Record<string, string>;
+      modelRegistry: {
+        find: ReturnType<typeof vi.fn>;
+      };
+      session: {
+        getContextUsage: ReturnType<typeof vi.fn>;
+      } | null;
+    };
+
+    function makeHostForCompactProvider() {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const internal = host as unknown as CompactProviderInternal;
+      internal.handleContextOverflow = vi.fn().mockResolvedValue(true);
+      internal.agentModels = { cerebras: 'zai-glm-4.7', google: 'gemini-2.5-flash' };
+      internal.modelRegistry = {
+        find: vi.fn().mockImplementation((provider: string) => {
+          if (provider === 'cerebras') return { contextWindow: 131_000 };
+          if (provider === 'google') return { contextWindow: 1_000_000 };
+          return null;
+        }),
+      };
+      internal.session = {
+        getContextUsage: vi.fn().mockReturnValue({ tokens: 148_000, percent: 15 }),
+      };
+      return { host, internal };
+    }
+
+    it('triggers handleContextOverflow when context exceeds candidate model window', async () => {
+      const { internal } = makeHostForCompactProvider();
+
+      await internal.compactForProvider('cerebras');
+
+      expect(internal.handleContextOverflow).toHaveBeenCalledWith(131_000, 'cerebras');
+    });
+
+    it('does not compact when context fits within candidate model window', async () => {
+      const { internal } = makeHostForCompactProvider();
+
+      await internal.compactForProvider('google');
+
+      expect(internal.handleContextOverflow).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when candidate model is not in agent models', async () => {
+      const { internal } = makeHostForCompactProvider();
+
+      await internal.compactForProvider('openai');
+
+      expect(internal.handleContextOverflow).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when model registry returns null for candidate', async () => {
+      const { internal } = makeHostForCompactProvider();
+      internal.agentModels = { mistral: 'mistral-large-latest' };
+      internal.modelRegistry.find = vi.fn().mockReturnValue(null);
+
+      await internal.compactForProvider('mistral');
+
+      expect(internal.handleContextOverflow).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when context usage is not available', async () => {
+      const { internal } = makeHostForCompactProvider();
+      internal.session = { getContextUsage: vi.fn().mockReturnValue(null) };
+
+      await internal.compactForProvider('cerebras');
+
+      expect(internal.handleContextOverflow).not.toHaveBeenCalled();
     });
   });
 });
