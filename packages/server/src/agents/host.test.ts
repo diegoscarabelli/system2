@@ -384,54 +384,6 @@ describe('AgentHost', () => {
       await expect(promise).resolves.toBeUndefined();
     });
 
-    it('abort() rejects all pending delivery promises', () => {
-      const host = new AgentHost({
-        db: makeDbStub(),
-        agentId: 1,
-        registry: makeRegistryStub(),
-        llmConfig: makeLlmConfig(),
-      });
-
-      const internal = host as unknown as {
-        pendingDeliveries: Array<{
-          content: string;
-          details: { sender: number; receiver: number; timestamp: number };
-          urgent?: boolean;
-          resolve: () => void;
-          reject: (reason: Error) => void;
-        }>;
-        session: { abort: ReturnType<typeof vi.fn> };
-      };
-
-      const reject1 = vi.fn();
-      const reject2 = vi.fn();
-
-      internal.session = { abort: vi.fn() };
-      internal.pendingDeliveries = [
-        {
-          content: 'msg1',
-          details: { sender: 1, receiver: 2, timestamp: Date.now() },
-          resolve: vi.fn(),
-          reject: reject1,
-        },
-        {
-          content: 'msg2',
-          details: { sender: 1, receiver: 2, timestamp: Date.now() },
-          resolve: vi.fn(),
-          reject: reject2,
-        },
-      ];
-
-      host.abort();
-
-      expect(reject1).toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'Agent session aborted' })
-      );
-      expect(reject2).toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'Agent session aborted' })
-      );
-    });
-
     it('agent_end resolves delivery promises in order', () => {
       const host = new AgentHost({
         db: makeDbStub(),

@@ -163,7 +163,7 @@ When `AgentHost` detects an API error in a `message_end` event:
 5. If retries exhausted or immediate failover: mark key in cooldown, failover to next provider
 6. Reinitialize the session with the new provider (`reinitializeWithProvider()`)
 7. Retry the pending prompt and/or replay pending deliveries on the new session
-8. If all providers exhausted: messages remain in `pendingPrompt`/`pendingDeliveries` for recovery when a provider comes out of cooldown
+8. If all providers exhausted: `pendingPrompt` is preserved on the `AgentHost`, but all pending delivery promises are rejected and `pendingDeliveries` is cleared; no automatic replay occurs when a provider later comes out of cooldown
 
 Error details are shown as collapsible system messages in the agent chat. The title shows the error type and action taken, and the collapsible body has provider-specific details. Key rotation: "429 rate limited, rotating to next key". Provider switch: "503 server error, switched to anthropic".
 

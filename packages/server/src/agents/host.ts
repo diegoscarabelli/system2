@@ -555,7 +555,11 @@ export class AgentHost {
         // Restore only if nothing newer arrived during sleep — a new prompt() call during the
         // delay would have set pendingPrompt to the newer message; don't overwrite it.
         this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
-        await this.resourceLoader?.reload();
+        try {
+          await this.resourceLoader?.reload();
+        } catch {
+          // Swallow reload errors to avoid dropping the retry; continue with cached resources
+        }
         await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
       } else if (deliveriesToRetry.length > 0 && this.session) {
         // Retry the failed delivery (no prompt took priority)
