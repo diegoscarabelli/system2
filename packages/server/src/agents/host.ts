@@ -440,17 +440,21 @@ export class AgentHost {
       // handlePotentialError before agent_end fires). Skip cleanup so the
       // failed prompt/delivery stays tracked for retry or failover.
       if (!this.lastTurnErrored) {
-        this.pendingPrompt = null;
+        const messages =
+          'messages' in event ? (event.messages as Array<Record<string, unknown>>) : null;
+        // Only clear pendingPrompt when a prompt turn (user message) completed.
+        // A delivery-only agent_end (only custom messages) should not clear it,
+        // since a queued prompt may still be waiting to process.
+        if (!messages || messages.some((m) => m.role === 'user')) {
+          this.pendingPrompt = null;
+        }
         // Count delivery messages that completed in this agent loop. The SDK
         // batches follow-up turns into a single agent_end, so a prompt turn
         // followed by queued deliveries produces one event with mixed messages.
         // Only shift for actual deliveries to avoid desync.
-        const deliveriesCompleted =
-          'messages' in event
-            ? (event.messages as Array<Record<string, unknown>>).filter(
-                (m) => m.role === 'custom' && m.customType === 'agent_message'
-              ).length
-            : 0;
+        const deliveriesCompleted = messages
+          ? messages.filter((m) => m.role === 'custom' && m.customType === 'agent_message').length
+          : 0;
         for (let i = 0; i < deliveriesCompleted && this.pendingDeliveries.length > 0; i++) {
           const completed = this.pendingDeliveries.shift()!;
           completed.resolve();
@@ -570,18 +574,22 @@ export class AgentHost {
           // Swallow reload errors to avoid dropping the retry
         }
         const failed = deliveriesToRetry[0];
-        this.session.sendCustomMessage(
-          {
-            customType: 'agent_message',
-            content: failed.content,
-            display: false,
-            details: failed.details,
-          },
-          {
-            deliverAs: failed.urgent ? 'steer' : 'followUp',
-            triggerTurn: true,
-          }
-        );
+        this.session
+          .sendCustomMessage(
+            {
+              customType: 'agent_message',
+              content: failed.content,
+              display: false,
+              details: failed.details,
+            },
+            {
+              deliverAs: failed.urgent ? 'steer' : 'followUp',
+              triggerTurn: true,
+            }
+          )
+          .catch((error) => {
+            console.error('[AgentHost] Failed to resend delivery after retry:', error);
+          });
       }
       return;
     }
@@ -654,18 +662,25 @@ export class AgentHost {
         // pendingDeliveries: agent_end will shift each one as turns succeed.
         if (this.pendingDeliveries.length > 0 && this.session) {
           for (const delivery of this.pendingDeliveries) {
-            this.session.sendCustomMessage(
-              {
-                customType: 'agent_message',
-                content: delivery.content,
-                display: false,
-                details: delivery.details,
-              },
-              {
-                deliverAs: delivery.urgent ? 'steer' : 'followUp',
-                triggerTurn: true,
-              }
-            );
+            this.session
+              .sendCustomMessage(
+                {
+                  customType: 'agent_message',
+                  content: delivery.content,
+                  display: false,
+                  details: delivery.details,
+                },
+                {
+                  deliverAs: delivery.urgent ? 'steer' : 'followUp',
+                  triggerTurn: true,
+                }
+              )
+              .catch((error) => {
+                console.error(
+                  '[AgentHost] Failed to replay delivery after context overflow:',
+                  error
+                );
+              });
           }
         }
         return;
@@ -795,18 +810,22 @@ export class AgentHost {
         this.pendingDeliveries = [...deliveriesToRetry];
         const session = this.session;
         for (const d of deliveriesToRetry) {
-          session.sendCustomMessage(
-            {
-              customType: 'agent_message',
-              content: d.content,
-              display: false,
-              details: d.details,
-            },
-            {
-              deliverAs: d.urgent ? 'steer' : 'followUp',
-              triggerTurn: true,
-            }
-          );
+          session
+            .sendCustomMessage(
+              {
+                customType: 'agent_message',
+                content: d.content,
+                display: false,
+                details: d.details,
+              },
+              {
+                deliverAs: d.urgent ? 'steer' : 'followUp',
+                triggerTurn: true,
+              }
+            )
+            .catch((error) => {
+              console.error('[AgentHost] Failed to replay delivery after failover:', error);
+            });
         }
       }
     } catch (error) {

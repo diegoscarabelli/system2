@@ -336,10 +336,13 @@ describe('AgentHost', () => {
       // Flag is reset after agent_end
       expect(hostInternal.lastTurnErrored).toBe(false);
 
-      // Next successful agent_end with delivery message cleans up normally
+      // Next successful agent_end with user + delivery messages cleans up normally
       hostInternal.handleSessionEvent({
         type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'delivery1' }],
+        messages: [
+          { role: 'user', content: 'user message' },
+          { role: 'custom', customType: 'agent_message', content: 'delivery1' },
+        ],
       });
       expect(hostInternal.pendingPrompt).toBeNull();
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
@@ -588,7 +591,7 @@ describe('AgentHost', () => {
 
       hostInternal.session = {
         prompt: vi.fn().mockResolvedValue(undefined),
-        sendCustomMessage: vi.fn(),
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
       };
       hostInternal.currentProvider = 'cerebras';
       hostInternal.currentKeyIndex = 0;
@@ -664,7 +667,7 @@ describe('AgentHost', () => {
 
       hostInternal.session = {
         prompt: vi.fn().mockResolvedValue(undefined),
-        sendCustomMessage: vi.fn(),
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
       };
       hostInternal.currentProvider = 'cerebras';
       hostInternal.currentKeyIndex = 0;
@@ -2126,7 +2129,7 @@ describe('AgentHost', () => {
 
     it('replays pending deliveries on the recovered session after context overflow', async () => {
       const { internal } = makeHostForOverflow();
-      const sendCustomMessage = vi.fn();
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
       internal.session = { sendCustomMessage };
       internal.pendingDeliveries = [
         {
