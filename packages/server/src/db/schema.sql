@@ -99,10 +99,10 @@ CREATE TABLE IF NOT EXISTS job_execution (
   id           INTEGER PRIMARY KEY,                -- Auto-incrementing unique identifier
   job_name     TEXT NOT NULL,                       -- Job identifier (e.g., 'daily-summary', 'memory-update')
   status       TEXT NOT NULL DEFAULT 'running'      -- Execution lifecycle state
-               CHECK(status IN ('running', 'completed', 'failed')),
+               CHECK(status IN ('running', 'completed', 'failed', 'skipped')),
   trigger_type TEXT NOT NULL                        -- How the execution was initiated
                CHECK(trigger_type IN ('cron', 'catch-up', 'manual')),
-  error        TEXT,                                -- Error message if status is 'failed'
+  error        TEXT,                                -- Error/skip reason (failed: error message, skipped: skip reason)
   started_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), -- When the execution began
   ended_at     TEXT,                                -- When the execution finished (NULL while running)
   created_at   TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),       -- Row creation timestamp

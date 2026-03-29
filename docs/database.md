@@ -116,9 +116,9 @@ Scheduler job execution records.
 |--------|------|-------------|
 | `id` | INTEGER PK | Auto-incrementing |
 | `job_name` | TEXT NOT NULL | Job identifier (e.g., `daily-summary`, `memory-update`) |
-| `status` | TEXT NOT NULL | `running` \| `completed` \| `failed` |
+| `status` | TEXT NOT NULL | `running` \| `completed` \| `failed` \| `skipped` |
 | `trigger_type` | TEXT NOT NULL | `cron` \| `catch-up` \| `manual` |
-| `error` | TEXT | Error message if status is `failed` |
+| `error` | TEXT | Error message (`failed`) or skip reason (`skipped`) |
 | `started_at` | TEXT NOT NULL | ISO 8601 timestamp when execution began |
 | `ended_at` | TEXT | ISO 8601 timestamp when execution finished |
 | `created_at` / `updated_at` | TEXT | Auto-set |

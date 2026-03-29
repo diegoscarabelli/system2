@@ -93,7 +93,7 @@ Both checks use `last_narrator_update_ts` as a cursor. This timestamp only advan
 
 ## Execution Tracking
 
-Every job execution is recorded in the [`job_execution`](database.md#job_execution) table. When a job fires, a row is inserted with status `running`. On success it transitions to `completed`; on failure it transitions to `failed` with the error message preserved.
+Every cron tick creates a row in the [`job_execution`](database.md#job_execution) table with status `running`. It then transitions to one of: `completed` (work done), `skipped` (no work needed, with reason), or `failed` (error, with message preserved).
 
 The `trigger_type` column distinguishes how the execution was initiated:
 
@@ -105,7 +105,9 @@ The `trigger_type` column distinguishes how the execution was initiated:
 
 **Startup recovery:** before Croner starts, the server marks any stale `running` rows as `failed` with error `'server shutdown'`. At that point no new jobs have fired, so every `running` row is definitively from the previous (crashed) process.
 
-**Network-skipped runs** do not create rows. The network check happens before execution tracking, so a skip is not an execution attempt.
+**Skip reasons** are stored in the `error` column when status is `skipped`. Common reasons: `no network connectivity`, `no activity since last run`, `no daily summaries to incorporate`.
+
+**Missing timestamps:** if daily summary files exist but none contain `last_narrator_update_ts` (and memory.md also lacks it), the job fails rather than silently falling back. This catches cases where the Narrator failed to advance the cursor.
 
 ## See Also
 

@@ -15,6 +15,7 @@ const statusColor: Record<JobExecutionInfo['status'], string> = {
   completed: colors.teal,
   failed: colors.coral,
   running: colors.amber,
+  skipped: colors.gray,
 };
 
 function formatDate(iso: string | null): string {
@@ -207,7 +208,7 @@ export function JobExecutionDetailModal({
             <dd>{formatDate(execution.updated_at)}</dd>
           </Box>
 
-          {/* Error */}
+          {/* Error / Skip reason */}
           {execution.error && (
             <Box>
               <Text
@@ -220,12 +221,12 @@ export function JobExecutionDetailModal({
                   display: 'block',
                 }}
               >
-                Error:
+                {execution.status === 'skipped' ? 'Reason:' : 'Error:'}
               </Text>
               <Box
                 sx={{
                   fontSize: 0,
-                  color: colors.coral,
+                  color: execution.status === 'skipped' ? colors.gray : colors.coral,
                   fontFamily: 'mono',
                   lineHeight: 1.6,
                   whiteSpace: 'pre-wrap',

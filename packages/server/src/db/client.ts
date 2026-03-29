@@ -495,6 +495,17 @@ export class DatabaseClient {
     return (stmt.get(id) as JobExecution) || null;
   }
 
+  skipJobExecution(id: number, reason: string): JobExecution | null {
+    const stmt = this.db.prepare(`
+      UPDATE job_execution
+      SET status = 'skipped', ended_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), error = ?
+      WHERE id = ?
+      RETURNING *
+    `);
+
+    return (stmt.get(reason, id) as JobExecution) || null;
+  }
+
   failJobExecution(id: number, error: string): JobExecution | null {
     const stmt = this.db.prepare(`
       UPDATE job_execution

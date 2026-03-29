@@ -73,7 +73,7 @@ export interface Artifact {
 export interface JobExecution {
   id: number;
   job_name: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'failed' | 'skipped';
   trigger_type: 'cron' | 'catch-up' | 'manual';
   error: string | null;
   started_at: string;

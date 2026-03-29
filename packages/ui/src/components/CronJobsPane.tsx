@@ -18,7 +18,7 @@ import { MultiSelectDropdown } from './MultiSelectDropdown';
 export interface JobExecutionInfo {
   id: number;
   job_name: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'failed' | 'skipped';
   trigger_type: 'cron' | 'catch-up' | 'manual';
   error: string | null;
   started_at: string;
@@ -31,6 +31,7 @@ const statusColor: Record<JobExecutionInfo['status'], string> = {
   completed: colors.teal,
   failed: colors.coral,
   running: colors.amber,
+  skipped: colors.gray,
 };
 
 function formatTime(isoString: string): string {
@@ -81,6 +82,7 @@ const STATUS_OPTIONS: MultiSelectOption[] = [
   { value: 'completed', label: 'completed' },
   { value: 'failed', label: 'failed' },
   { value: 'running', label: 'running' },
+  { value: 'skipped', label: 'skipped' },
 ];
 
 const TRIGGER_OPTIONS: MultiSelectOption[] = [

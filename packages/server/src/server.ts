@@ -13,6 +13,7 @@ import type {
   ChatConfig,
   ChatMessage,
   ChatTurnEvent,
+  JobExecution,
   LlmConfig,
   SchedulerConfig,
   ServicesConfig,
@@ -245,7 +246,7 @@ export class Server {
         }
         const limit = rawLimit !== undefined ? Math.min(rawLimit, 500) : undefined;
 
-        const validStatuses = ['running', 'completed', 'failed'] as const;
+        const validStatuses = ['running', 'completed', 'failed', 'skipped'] as const;
         if (status && !validStatuses.includes(status as (typeof validStatuses)[number])) {
           res
             .status(400)
@@ -255,7 +256,7 @@ export class Server {
 
         const executions = this.db.listJobExecutions({
           jobName: jobName || undefined,
-          status: (status as 'running' | 'completed' | 'failed') || undefined,
+          status: (status as JobExecution['status']) || undefined,
           limit,
         });
 
