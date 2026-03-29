@@ -1036,7 +1036,10 @@ export class AgentHost {
     urgent?: boolean
   ): Promise<void> {
     if (!this.session) {
-      throw new Error('AgentHost not initialized. Call initialize() first.');
+      return Promise.reject(new Error('AgentHost not initialized. Call initialize() first.'));
+    }
+    if (this.isReinitializing) {
+      return Promise.reject(new Error('Agent is reinitializing, delivery rejected'));
     }
 
     // Create deferred promise for completion notification. Resolves when

@@ -1111,7 +1111,7 @@ describe('AgentHost', () => {
   });
 
   describe('deliverMessage', () => {
-    it('throws if session is not initialized', () => {
+    it('rejects if session is not initialized', async () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -1119,9 +1119,9 @@ describe('AgentHost', () => {
         llmConfig: makeLlmConfig(),
       });
 
-      expect(() =>
+      await expect(
         host.deliverMessage('hello', { sender: 2, receiver: 1, timestamp: Date.now() })
-      ).toThrow('AgentHost not initialized');
+      ).rejects.toThrow('AgentHost not initialized');
     });
 
     it('stores full content for inter-agent messages', () => {
