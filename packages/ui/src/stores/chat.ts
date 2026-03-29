@@ -266,16 +266,18 @@ export const useChatStore = create<ChatState>()(
         if (!agentState) return;
 
         const content = agentState.currentAssistantMessage;
-        if (content) {
+        const hasTurnEvents = agentState.currentTurnEvents.length > 0;
+
+        // Commit a message when there is text content OR orphaned turn events
+        // (e.g. model returned empty content after a tool call). Without this,
+        // turn events would be silently dropped on the next user message.
+        if (content || hasTurnEvents) {
           const message: Message = {
             id: `msg-${Date.now()}`,
             role: 'assistant',
-            content,
+            content: content ?? '',
             timestamp: Date.now(),
-            turnEvents:
-              agentState.currentTurnEvents.length > 0
-                ? [...agentState.currentTurnEvents]
-                : undefined,
+            turnEvents: hasTurnEvents ? [...agentState.currentTurnEvents] : undefined,
           };
           set((state) => ({
             agentStates: updateAgentState(state.agentStates, targetId, (s) => ({

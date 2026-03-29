@@ -226,6 +226,56 @@ describe('useChatStore', () => {
     });
   });
 
+  describe('finishAssistantMessage', () => {
+    it('preserves orphaned turn events when content is empty', () => {
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      // Simulate a tool call with no follow-up text (model returned empty content)
+      useChatStore.getState().startToolCall('read_system2_db', '{"sql":"SELECT 1"}', 1);
+      useChatStore.getState().finishToolCall('read_system2_db', '[{"id":1}]', 1);
+
+      // Finish with no assistant text
+      useChatStore.getState().finishAssistantMessage(1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      // Should have committed a message with turn events even though content is empty
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].role).toBe('assistant');
+      expect(state?.messages[0].content).toBe('');
+      expect(state?.messages[0].turnEvents).toHaveLength(1);
+      expect(state?.messages[0].turnEvents?.[0].type).toBe('tool_call');
+      // Turn events should be cleared from current state
+      expect(state?.currentTurnEvents).toHaveLength(0);
+    });
+
+    it('does nothing when both content and turn events are empty', () => {
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      useChatStore.getState().finishAssistantMessage(1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(0);
+    });
+
+    it('commits normally when content exists', () => {
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      useChatStore.getState().startAssistantMessage(1);
+      useChatStore.getState().appendAssistantChunk('Hello', 1);
+      useChatStore.getState().startToolCall('bash', '{}', 1);
+      useChatStore.getState().finishToolCall('bash', 'ok', 1);
+      useChatStore.getState().finishAssistantMessage(1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].content).toBe('Hello');
+      expect(state?.messages[0].turnEvents).toHaveLength(1);
+    });
+  });
+
   describe('provider (per-agent state)', () => {
     it('setProvider updates only the specified agent', () => {
       useChatStore.getState().loadHistory([], 1);
