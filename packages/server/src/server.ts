@@ -599,8 +599,11 @@ export class Server {
       intervalMinutes
     );
 
-    // Check if narrator needs catch-up after sleep/shutdown
-    await this.checkNarratorCatchUp();
+    // Check if narrator needs catch-up after sleep/shutdown.
+    // Fire-and-forget: don't block the HTTP server from starting.
+    this.checkNarratorCatchUp().catch((err) =>
+      console.error('[Server] Narrator catch-up failed:', err)
+    );
 
     // Graceful shutdown handlers
     const shutdown = async () => {
