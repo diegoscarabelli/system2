@@ -561,8 +561,11 @@ export class AgentHost {
         this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
         try {
           await this.resourceLoader?.reload();
-        } catch {
-          // Swallow reload errors to avoid dropping the retry; continue with cached resources
+        } catch (reloadErr) {
+          console.warn(
+            '[AgentHost] Resource reload failed before prompt retry, using cached:',
+            reloadErr
+          );
         }
         await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
       } else if (deliveriesToRetry.length > 0 && this.session) {
@@ -570,8 +573,11 @@ export class AgentHost {
         console.log('[AgentHost] Retrying failed delivery...');
         try {
           await this.resourceLoader?.reload();
-        } catch {
-          // Swallow reload errors to avoid dropping the retry
+        } catch (reloadErr) {
+          console.warn(
+            '[AgentHost] Resource reload failed before delivery retry, using cached:',
+            reloadErr
+          );
         }
         const failed = deliveriesToRetry[0];
         this.session
@@ -813,7 +819,13 @@ export class AgentHost {
         console.log(
           `[AgentHost] Replaying ${deliveriesToRetry.length} pending deliveries with new provider...`
         );
-        this.pendingDeliveries = [...deliveriesToRetry];
+        // Merge: deliveries queued by concurrent deliverMessage() during async
+        // reinit must be preserved (this.session was non-null throughout initialize(),
+        // so new deliverMessage calls could push entries we must not drop).
+        const newDuringReinit = this.pendingDeliveries.filter(
+          (d) => !deliveriesToRetry.includes(d)
+        );
+        this.pendingDeliveries = [...deliveriesToRetry, ...newDuringReinit];
         const session = this.session;
         for (const d of deliveriesToRetry) {
           session
@@ -1008,10 +1020,11 @@ export class AgentHost {
    * Deliver an inter-agent message into this agent's session.
    * Uses sendCustomMessage with customType 'agent_message'.
    *
-   * Fire-and-forget: does NOT await the triggered turn. When the receiver is
-   * idle, sendCustomMessage internally calls agent.prompt() which blocks until
-   * the entire turn completes — awaiting that would deadlock the caller if
-   * agents message each other during their turns.
+   * Returns a Promise that resolves when agent_end confirms the delivery was
+   * processed, or rejects on permanent failure (all providers exhausted, abort,
+   * or send failure). Callers outside agent turns (e.g., scheduler jobs) can
+   * await it; callers inside agent turns should NOT await it to avoid deadlocks
+   * (sendCustomMessage internally calls agent.prompt() when the receiver is idle).
    *
    * @param content LLM-visible message content (includes sender prefix)
    * @param details Metadata for programmatic use (not sent to LLM)
