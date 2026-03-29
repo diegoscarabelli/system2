@@ -21,7 +21,7 @@ describe('ReminderManager', () => {
   });
 
   it('schedules a reminder and fires it after delay', () => {
-    const deliverMessage = vi.fn();
+    const deliverMessage = vi.fn().mockReturnValue(Promise.resolve());
     const registry = makeRegistry({ 1: { deliverMessage } });
     const manager = new ReminderManager(registry);
 
@@ -42,7 +42,9 @@ describe('ReminderManager', () => {
   });
 
   it('assigns incrementing IDs', () => {
-    const registry = makeRegistry({ 1: { deliverMessage: vi.fn() } });
+    const registry = makeRegistry({
+      1: { deliverMessage: vi.fn().mockReturnValue(Promise.resolve()) },
+    });
     const manager = new ReminderManager(registry);
 
     const r1 = manager.schedule(1, 'first', 10);
@@ -53,7 +55,7 @@ describe('ReminderManager', () => {
   });
 
   it('cancels a pending reminder', () => {
-    const deliverMessage = vi.fn();
+    const deliverMessage = vi.fn().mockReturnValue(Promise.resolve());
     const registry = makeRegistry({ 1: { deliverMessage } });
     const manager = new ReminderManager(registry);
 
@@ -67,7 +69,9 @@ describe('ReminderManager', () => {
   });
 
   it('rejects cancel for wrong agent', () => {
-    const registry = makeRegistry({ 1: { deliverMessage: vi.fn() } });
+    const registry = makeRegistry({
+      1: { deliverMessage: vi.fn().mockReturnValue(Promise.resolve()) },
+    });
     const manager = new ReminderManager(registry);
 
     const { id } = manager.schedule(1, 'agent 1 reminder', 5);
@@ -85,8 +89,8 @@ describe('ReminderManager', () => {
 
   it('lists reminders for a specific agent', () => {
     const registry = makeRegistry({
-      1: { deliverMessage: vi.fn() },
-      2: { deliverMessage: vi.fn() },
+      1: { deliverMessage: vi.fn().mockReturnValue(Promise.resolve()) },
+      2: { deliverMessage: vi.fn().mockReturnValue(Promise.resolve()) },
     });
     const manager = new ReminderManager(registry);
 
@@ -104,7 +108,9 @@ describe('ReminderManager', () => {
   });
 
   it('removes reminder from list after firing', () => {
-    const registry = makeRegistry({ 1: { deliverMessage: vi.fn() } });
+    const registry = makeRegistry({
+      1: { deliverMessage: vi.fn().mockReturnValue(Promise.resolve()) },
+    });
     const manager = new ReminderManager(registry);
 
     manager.schedule(1, 'will fire', 5);
@@ -127,7 +133,7 @@ describe('ReminderManager', () => {
   });
 
   it('stop() clears all timers', () => {
-    const deliverMessage = vi.fn();
+    const deliverMessage = vi.fn().mockReturnValue(Promise.resolve());
     const registry = makeRegistry({ 1: { deliverMessage } });
     const manager = new ReminderManager(registry);
 

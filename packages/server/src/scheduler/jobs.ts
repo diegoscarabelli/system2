@@ -424,13 +424,13 @@ function hasActivity(agentActivity: string, dbChanges: string): boolean {
  *
  * Shared by both the cron handler and server catch-up.
  */
-export function buildAndDeliverDailySummary(
+export async function buildAndDeliverDailySummary(
   db: DatabaseClient,
   narratorHost: AgentHost,
   narratorId: number,
   system2Dir: string,
   intervalMinutes: number
-): void {
+): Promise<void> {
   const newRunTs = new Date().toISOString();
   const today = newRunTs.slice(0, 10);
   const summariesDir = join(system2Dir, 'knowledge', 'daily_summaries');
@@ -493,6 +493,7 @@ export function buildAndDeliverDailySummary(
   ) as Array<{ id: number; name: string }>;
 
   const projectDataList: ProjectActivityData[] = [];
+  const deliveries: Promise<void>[] = [];
 
   for (const project of activeProjects) {
     const projectDir = resolveProjectDir(join(system2Dir, 'projects'), project.id, project.name);
@@ -568,11 +569,13 @@ ${allProjectAgentActivity}
 
 ${projectDbChanges}`;
 
-    narratorHost.deliverMessage(projectLogMessage, {
-      sender: 0,
-      receiver: narratorId,
-      timestamp: Date.now(),
-    });
+    deliveries.push(
+      narratorHost.deliverMessage(projectLogMessage, {
+        sender: 0,
+        receiver: narratorId,
+        timestamp: Date.now(),
+      })
+    );
   }
 
   // 6. Build daily summary — grouped by project vs non-project
@@ -593,6 +596,8 @@ ${projectDbChanges}`;
 
   if (!hasProjectChanges && !hasNonProjectChanges) {
     console.log('[Scheduler] No activity since last run, skipping daily-summary');
+    // Await any project-log deliveries that were already queued
+    if (deliveries.length > 0) await Promise.all(deliveries);
     return;
   }
 
@@ -630,11 +635,16 @@ ${dailySummaryContent}`,
   }
 
   // 9. Deliver daily summary
-  narratorHost.deliverMessage(messageParts.join('\n\n'), {
-    sender: 0,
-    receiver: narratorId,
-    timestamp: Date.now(),
-  });
+  deliveries.push(
+    narratorHost.deliverMessage(messageParts.join('\n\n'), {
+      sender: 0,
+      receiver: narratorId,
+      timestamp: Date.now(),
+    })
+  );
+
+  // Wait for the Narrator to finish processing all deliveries
+  await Promise.all(deliveries);
 }
 
 /**
@@ -678,9 +688,9 @@ export function registerNarratorJobs(
       return;
     }
     console.log('[Scheduler] Triggering daily-summary job (project logs + daily summary)');
-    await trackJobExecution(db, 'daily-summary', 'cron', () => {
-      buildAndDeliverDailySummary(db, narratorHost, narratorId, system2Dir, intervalMinutes);
-    });
+    await trackJobExecution(db, 'daily-summary', 'cron', () =>
+      buildAndDeliverDailySummary(db, narratorHost, narratorId, system2Dir, intervalMinutes)
+    );
   });
 
   // Memory update — daily at 11 AM
@@ -690,9 +700,9 @@ export function registerNarratorJobs(
       return;
     }
     console.log('[Scheduler] Triggering memory-update job');
-    await trackJobExecution(db, 'memory-update', 'cron', () => {
-      buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir);
-    });
+    await trackJobExecution(db, 'memory-update', 'cron', () =>
+      buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir)
+    );
   });
 }
 
@@ -700,11 +710,11 @@ export function registerNarratorJobs(
  * Build and deliver a memory-update message to the Narrator.
  * Shared by both the cron handler and server catch-up.
  */
-export function buildAndDeliverMemoryUpdate(
+export async function buildAndDeliverMemoryUpdate(
   narratorHost: AgentHost,
   narratorId: number,
   system2Dir: string
-): void {
+): Promise<void> {
   const newRunTs = new Date().toISOString();
   const memoryFile = join(system2Dir, 'knowledge', 'memory.md');
   const summariesDir = join(system2Dir, 'knowledge', 'daily_summaries');
@@ -747,7 +757,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
 
 ${summaryEntries.join('\n\n')}`;
 
-  narratorHost.deliverMessage(message, {
+  await narratorHost.deliverMessage(message, {
     sender: 0,
     receiver: narratorId,
     timestamp: Date.now(),

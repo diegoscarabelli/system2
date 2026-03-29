@@ -15,7 +15,7 @@ import { oneShotComplete } from '../llm/oneshot.js';
 import { ConversationSummarizer } from './summarizer.js';
 
 function makeGuideHost() {
-  return { deliverMessage: vi.fn() } as unknown as AgentHost;
+  return { deliverMessage: vi.fn().mockReturnValue(Promise.resolve()) } as unknown as AgentHost;
 }
 
 function makeSummarizer(guideAgentId = 1) {

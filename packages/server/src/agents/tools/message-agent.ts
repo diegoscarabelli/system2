@@ -86,11 +86,9 @@ export function createMessageAgentTool(
       const timestamp = Date.now();
 
       try {
-        receiverHost.deliverMessage(
-          content,
-          { sender: selfId, receiver: agent_id, timestamp },
-          urgent
-        );
+        receiverHost
+          .deliverMessage(content, { sender: selfId, receiver: agent_id, timestamp }, urgent)
+          .catch((err) => console.error('[message-agent] delivery failed:', err));
 
         return {
           content: [

@@ -45,6 +45,7 @@ function mockNarratorHost(): AgentHost & { calls: Array<{ content: string; detai
     calls,
     deliverMessage(content: string, details: unknown) {
       calls.push({ content, details });
+      return Promise.resolve();
     },
   } as unknown as AgentHost & { calls: Array<{ content: string; details: unknown }> };
 }
@@ -206,7 +207,7 @@ describe('collectAgentActivity', () => {
 });
 
 describe('buildAndDeliverMemoryUpdate', () => {
-  it('skips delivery when no daily summary files exist', () => {
+  it('skips delivery when no daily summary files exist', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const knowledgeDir = join(dir, 'knowledge');
     mkdirSync(knowledgeDir, { recursive: true });
@@ -216,11 +217,11 @@ describe('buildAndDeliverMemoryUpdate', () => {
     );
 
     const host = mockNarratorHost();
-    buildAndDeliverMemoryUpdate(host, 2, dir);
+    await buildAndDeliverMemoryUpdate(host, 2, dir);
     expect(host.calls).toHaveLength(0);
   });
 
-  it('skips delivery when all summaries are older than last update', () => {
+  it('skips delivery when all summaries are older than last update', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const knowledgeDir = join(dir, 'knowledge');
     const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -232,11 +233,11 @@ describe('buildAndDeliverMemoryUpdate', () => {
     writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Old summary');
 
     const host = mockNarratorHost();
-    buildAndDeliverMemoryUpdate(host, 2, dir);
+    await buildAndDeliverMemoryUpdate(host, 2, dir);
     expect(host.calls).toHaveLength(0);
   });
 
-  it('delivers message with embedded summary content since last update', () => {
+  it('delivers message with embedded summary content since last update', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const knowledgeDir = join(dir, 'knowledge');
     const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -256,7 +257,7 @@ describe('buildAndDeliverMemoryUpdate', () => {
     writeFileSync(join(summariesDir, '2026-03-09.md'), '---\n---\n# Before\nOld narrative.');
 
     const host = mockNarratorHost();
-    buildAndDeliverMemoryUpdate(host, 2, dir);
+    await buildAndDeliverMemoryUpdate(host, 2, dir);
     expect(host.calls).toHaveLength(1);
 
     const msg = host.calls[0].content;
@@ -271,7 +272,7 @@ describe('buildAndDeliverMemoryUpdate', () => {
     expect(msg).toContain('UTC ISO 8601');
   });
 
-  it('includes all summaries when memory.md has no timestamp', () => {
+  it('includes all summaries when memory.md has no timestamp', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const knowledgeDir = join(dir, 'knowledge');
     const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -280,7 +281,7 @@ describe('buildAndDeliverMemoryUpdate', () => {
     writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary\nNarrative content.');
 
     const host = mockNarratorHost();
-    buildAndDeliverMemoryUpdate(host, 2, dir);
+    await buildAndDeliverMemoryUpdate(host, 2, dir);
     expect(host.calls).toHaveLength(1);
     expect(host.calls[0].content).toContain('Narrative content.');
   });
@@ -691,6 +692,7 @@ describe('buildAndDeliverDailySummary', () => {
       calls,
       deliverMessage(content: string, details: unknown) {
         calls.push({ content, details });
+        return Promise.resolve();
       },
     } as unknown as AgentHost & { calls: Array<{ content: string; details: unknown }> };
   }
@@ -708,7 +710,7 @@ describe('buildAndDeliverDailySummary', () => {
     } as unknown as DatabaseClient;
   }
 
-  it('skips when file has content but no new activity', () => {
+  it('skips when file has content but no new activity', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const summariesDir = join(dir, 'knowledge', 'daily_summaries');
     mkdirSync(summariesDir, { recursive: true });
@@ -720,20 +722,20 @@ describe('buildAndDeliverDailySummary', () => {
 
     const host = mockHost();
     const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
-    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
     expect(host.calls).toHaveLength(0);
   });
 
-  it('skips on first run with no activity', () => {
+  it('skips on first run with no activity', async () => {
     const dir = trackTmpDir(makeTmpDir());
 
     const host = mockHost();
     const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
-    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
     expect(host.calls).toHaveLength(0);
   });
 
-  it('delivers when non-project agent has JSONL activity', () => {
+  it('delivers when non-project agent has JSONL activity', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const summariesDir = join(dir, 'knowledge', 'daily_summaries');
     const sessionDir = join(dir, 'sessions', 'guide_1');
@@ -757,13 +759,13 @@ describe('buildAndDeliverDailySummary', () => {
 
     const host = mockHost();
     const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
-    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
 
     expect(host.calls).toHaveLength(1);
     expect(host.calls[0].content).toContain('[Scheduled task: daily-summary]');
   });
 
-  it('delivers when project has DB changes', () => {
+  it('delivers when project has DB changes', async () => {
     const dir = trackTmpDir(makeTmpDir());
 
     const host = mockHost();
@@ -786,14 +788,14 @@ describe('buildAndDeliverDailySummary', () => {
       },
     } as unknown as DatabaseClient;
 
-    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
 
     expect(host.calls.length).toBeGreaterThanOrEqual(1);
     const messages = host.calls.map((c) => c.content);
     expect(messages.some((m) => m.includes('[Scheduled task: daily-summary]'))).toBe(true);
   });
 
-  it('includes existing file content in the delivered message', () => {
+  it('includes existing file content in the delivered message', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const summariesDir = join(dir, 'knowledge', 'daily_summaries');
     const sessionDir = join(dir, 'sessions', 'guide_1');
@@ -816,13 +818,13 @@ describe('buildAndDeliverDailySummary', () => {
 
     const host = mockHost();
     const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
-    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
 
     expect(host.calls).toHaveLength(1);
     expect(host.calls[0].content).toContain('Prior narrative here.');
   });
 
-  it('excludes inactive projects from the message', () => {
+  it('excludes inactive projects from the message', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const sessionDir = join(dir, 'sessions', 'guide_1');
     mkdirSync(sessionDir, { recursive: true });
@@ -854,7 +856,7 @@ describe('buildAndDeliverDailySummary', () => {
       ],
       [{ id: 1, name: 'InactiveProject' }]
     );
-    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
 
     const dailySummaryMsg = host.calls
       .map((c) => c.content)
@@ -865,7 +867,7 @@ describe('buildAndDeliverDailySummary', () => {
     expect(dailySummaryMsg).toContain('## Non-Project Activity');
   });
 
-  it('includes only active projects when multiple exist', () => {
+  it('includes only active projects when multiple exist', async () => {
     const dir = trackTmpDir(makeTmpDir());
 
     const host = mockHost();
@@ -892,7 +894,7 @@ describe('buildAndDeliverDailySummary', () => {
       },
     } as unknown as DatabaseClient;
 
-    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
 
     const dailySummaryMsg = host.calls
       .map((c) => c.content)
@@ -902,7 +904,7 @@ describe('buildAndDeliverDailySummary', () => {
     expect(dailySummaryMsg).not.toContain('IdleProject');
   });
 
-  it('omits Non-Project Activity section when only projects have changes', () => {
+  it('omits Non-Project Activity section when only projects have changes', async () => {
     const dir = trackTmpDir(makeTmpDir());
 
     const host = mockHost();
@@ -925,7 +927,7 @@ describe('buildAndDeliverDailySummary', () => {
       },
     } as unknown as DatabaseClient;
 
-    buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
 
     const dailySummaryMsg = host.calls
       .map((c) => c.content)

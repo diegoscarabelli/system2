@@ -82,7 +82,7 @@ Prompt caching (where supported by the provider) optimizes the static prefix: on
 | Method | Description |
 |--------|-------------|
 | `prompt(content, options?)` | Reload knowledge, then send a user message. Blocks until agent finishes. `options.isSteering` inserts ASAP into the agent loop. |
-| `deliverMessage(content, details, urgent?)` | Reload knowledge, then send inter-agent message via `sendCustomMessage()`. Non-blocking. Reload errors are swallowed to avoid dropping messages. |
+| `deliverMessage(content, details, urgent?)` | Reload knowledge, then send inter-agent message via `sendCustomMessage()`. Returns `Promise<void>` that resolves when the agent finishes processing (on `agent_end`) or rejects on permanent failure. Reload errors are swallowed to avoid dropping messages. Tracked in `pendingDeliveries` for failover replay. |
 | `subscribe(listener)` | Listen to all session events. Returns unsubscribe function. |
 | `abort()` | Cancel current execution. |
 | `getContextUsage()` | Get context window usage stats. |
@@ -113,7 +113,7 @@ Two methods for sending messages, chosen based on the sender:
 | Method | Creates | Used By | Behavior |
 |--------|---------|---------|----------|
 | `prompt()` | `user` message | User -> Guide | Blocking. Streams response back to UI via WebSocket. |
-| `deliverMessage()` | `custom_message` | Agent -> Agent, Scheduler -> Agent | Non-blocking. Queues for delivery. |
+| `deliverMessage()` | `custom_message` | Agent -> Agent, Scheduler -> Agent | Returns `Promise<void>`. Scheduler jobs await completion; inter-agent callers fire-and-forget. |
 
 ### Delivery Modes
 
@@ -157,10 +157,13 @@ Cooldowns are set once: if a key is already in cooldown, subsequent failures ski
 When `AgentHost` detects an API error in a `message_end` event:
 
 1. Categorize the error (see [retry.ts](#retry-logic))
-2. If retriable: wait with exponential backoff, retry with same provider
-3. If retries exhausted or immediate failover: mark key in cooldown, failover to next provider
-4. Reinitialize the session with the new provider (`reinitializeWithProvider()`)
-5. Retry the pending prompt
+2. Set `lastTurnErrored = true` synchronously (prevents `agent_end` from clearing pending state). On successful turns, `agent_end` inspects `event.messages` to count completed delivery messages (`role: 'custom'`, `customType: 'agent_message'`) and only shifts that many from `pendingDeliveries`, avoiding desync when prompt and delivery turns are batched into a single event
+3. Capture `pendingPrompt` and `pendingDeliveries` synchronously (before any `await`)
+4. If retriable: wait with exponential backoff, retry with same provider (re-sends the failed prompt or delivery)
+5. If retries exhausted or immediate failover: mark key in cooldown, failover to next provider
+6. Reinitialize the session with the new provider (`reinitializeWithProvider()`)
+7. Retry the pending prompt and/or replay pending deliveries on the new session
+8. If all providers exhausted: `pendingPrompt` is preserved on the `AgentHost`, but all pending delivery promises are rejected and `pendingDeliveries` is cleared; no automatic replay occurs when a provider later comes out of cooldown
 
 Error details are shown as collapsible system messages in the agent chat. The title shows the error type and action taken, and the collapsible body has provider-specific details. Key rotation: "429 rate limited, rotating to next key". Provider switch: "503 server error, switched to anthropic".
 
@@ -201,9 +204,9 @@ These patterns are intentionally narrow to avoid false positives on rate-limit e
 3. Reinitialize the session from the truncated file and run `compact()` to reduce context to ~5%
 4. Append the tail back and reinitialize again
 
-The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. If no split point below 90% is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
+The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. Pending deliveries (scheduled tasks, inter-agent messages) are replayed on the recovered session via `sendCustomMessage`, preserving them for the agent to process. If no split point below 90% is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
 
-Auto-compaction is also configured to fire earlier (at 90% of the context window instead of the SDK default of ~98%) to reduce the chance of overflow in the first place.
+Auto-compaction is also configured to fire earlier (at ~50% of the context window via `reserveTokens`, instead of the SDK default of ~98%) to reduce the chance of overflow in the first place.
 
 **Last-resort provider recovery:** after all normal recovery paths (retry, failover, context overflow) are exhausted, `handlePotentialError` checks if a different provider is available before giving up. This covers cases where an agent is stuck on a dead fallback provider (e.g., Anthropic with $0 credits returning 400 `client` errors) while the primary provider's cooldown has expired. `getNextProvider()` iterates in provider order (primary first), so agents naturally gravitate back to the primary when it becomes available.
 

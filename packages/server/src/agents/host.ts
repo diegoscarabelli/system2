@@ -149,6 +149,13 @@ export class AgentHost {
   private retryAttempts: Map<string, number> = new Map(); // Track retries per error type
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
+  private pendingDeliveries: Array<{
+    content: string;
+    details: { sender: number; receiver: number; timestamp: number };
+    urgent?: boolean;
+    resolve: () => void;
+    reject: (reason: Error) => void;
+  }> = [];
   private agentRole: string | null = null;
   private agentProject: number | null = null;
   private agentProjectDirName: string | null = null;
@@ -157,6 +164,7 @@ export class AgentHost {
   private chatMaxMessages: number;
   private resourceLoader: DefaultResourceLoader | null = null;
   private busy = false;
+  private lastTurnErrored = false;
   private compactionCount = 0;
   private compactionDepth = 0;
   private isPruning = false;
@@ -428,11 +436,31 @@ export class AgentHost {
       if (this.busy) {
         this.busy = false;
       }
-      // Clear pendingPrompt here — not in prompt() after session.prompt() returns.
-      // When streamingBehavior is 'followUp' or 'steer', session.prompt() queues
-      // the message and returns immediately, so clearing it there would be too early.
-      // Waiting for agent_end ensures the message stays retryable until the turn runs.
-      this.pendingPrompt = null;
+      // On error turns, lastTurnErrored is true (set synchronously in
+      // handlePotentialError before agent_end fires). Skip cleanup so the
+      // failed prompt/delivery stays tracked for retry or failover.
+      if (!this.lastTurnErrored) {
+        const messages =
+          'messages' in event ? (event.messages as Array<Record<string, unknown>>) : null;
+        // Only clear pendingPrompt when a prompt turn (user message) completed.
+        // A delivery-only agent_end (only custom messages) should not clear it,
+        // since a queued prompt may still be waiting to process.
+        if (!messages || messages.some((m) => m.role === 'user')) {
+          this.pendingPrompt = null;
+        }
+        // Count delivery messages that completed in this agent loop. The SDK
+        // batches follow-up turns into a single agent_end, so a prompt turn
+        // followed by queued deliveries produces one event with mixed messages.
+        // Only shift for actual deliveries to avoid desync.
+        const deliveriesCompleted = messages
+          ? messages.filter((m) => m.role === 'custom' && m.customType === 'agent_message').length
+          : 0;
+        for (let i = 0; i < deliveriesCompleted && this.pendingDeliveries.length > 0; i++) {
+          const completed = this.pendingDeliveries.shift()!;
+          completed.resolve();
+        }
+      }
+      this.lastTurnErrored = false;
     }
 
     // Track compaction for pruning
@@ -460,6 +488,11 @@ export class AgentHost {
     // Don't handle errors while already reinitializing (session setup in progress)
     if (this.isReinitializing) return;
 
+    // Flag this turn as errored so agent_end does not clear pendingPrompt
+    // or shift pendingDeliveries. Must be set synchronously (before any await)
+    // because agent_end fires synchronously after message_end.
+    this.lastTurnErrored = true;
+
     const errorMessage = message.errorMessage;
     console.log('[AgentHost] API error detected:', errorMessage);
 
@@ -474,9 +507,11 @@ export class AgentHost {
     const retryKey = `${this.currentProvider}:${category}`;
     const currentAttempts = this.retryAttempts.get(retryKey) ?? 0;
 
-    // Capture before any await — agent_end clears pendingPrompt synchronously, but this
-    // handler yields at the first await. The ?? promptToRetry pattern below restores it.
+    // Capture before any await. With lastTurnErrored, agent_end won't clear these
+    // on error turns, but we still snapshot for the failover path where
+    // reinitializeWithProvider needs the values passed as arguments.
     const promptToRetry = this.pendingPrompt;
+    const deliveriesToRetry = [...this.pendingDeliveries];
 
     // If another agent already put our key in cooldown, skip retries and reinitialize.
     // Uses the tracked key index so we check our actual key, not whatever index
@@ -495,7 +530,13 @@ export class AgentHost {
         console.log(
           `[AgentHost] Key ${this.currentProvider}:${this.currentKeyIndex} already in cooldown`
         );
-        await this.reinitializeWithProvider(nextProvider, promptToRetry, reason, detail);
+        await this.reinitializeWithProvider(
+          nextProvider,
+          promptToRetry,
+          deliveriesToRetry,
+          reason,
+          detail
+        );
         return;
       }
     }
@@ -518,8 +559,46 @@ export class AgentHost {
         // Restore only if nothing newer arrived during sleep — a new prompt() call during the
         // delay would have set pendingPrompt to the newer message; don't overwrite it.
         this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
-        await this.resourceLoader?.reload();
+        try {
+          await this.resourceLoader?.reload();
+        } catch (reloadErr) {
+          console.warn(
+            '[AgentHost] Resource reload failed before prompt retry, using cached:',
+            reloadErr
+          );
+        }
         await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
+      } else if (deliveriesToRetry.length > 0 && this.session) {
+        // Retry the failed delivery (no prompt took priority)
+        console.log('[AgentHost] Retrying failed delivery...');
+        try {
+          await this.resourceLoader?.reload();
+        } catch (reloadErr) {
+          console.warn(
+            '[AgentHost] Resource reload failed before delivery retry, using cached:',
+            reloadErr
+          );
+        }
+        const failed = deliveriesToRetry[0];
+        this.session
+          .sendCustomMessage(
+            {
+              customType: 'agent_message',
+              content: failed.content,
+              display: false,
+              details: failed.details,
+            },
+            {
+              deliverAs: failed.urgent ? 'steer' : 'followUp',
+              triggerTurn: true,
+            }
+          )
+          .catch((error) => {
+            console.error('[AgentHost] Failed to resend delivery after retry:', error);
+            const idx = this.pendingDeliveries.indexOf(failed);
+            if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+            failed.reject(error instanceof Error ? error : new Error(String(error)));
+          });
       }
       return;
     }
@@ -548,12 +627,24 @@ export class AgentHost {
             const reason = `${errorPrefix}, rotating to next key`;
             const detail = `on ${this.currentProvider}, rotating to next key`;
             console.log(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
-            await this.reinitializeWithProvider(nextProvider, promptToRetry, reason, detail);
+            await this.reinitializeWithProvider(
+              nextProvider,
+              promptToRetry,
+              deliveriesToRetry,
+              reason,
+              detail
+            );
           } else {
             const reason = `${errorPrefix}, switched to ${nextProvider}`;
             const detail = `on ${this.currentProvider}, switching to ${nextProvider}`;
             console.log(`[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`);
-            await this.reinitializeWithProvider(nextProvider, promptToRetry, reason, detail);
+            await this.reinitializeWithProvider(
+              nextProvider,
+              promptToRetry,
+              deliveriesToRetry,
+              reason,
+              detail
+            );
           }
           return;
         }
@@ -576,6 +667,34 @@ export class AgentHost {
       if (recovered) {
         // Clear the overflow-causing prompt so a future failover doesn't retry it
         this.pendingPrompt = null;
+        // Replay pending deliveries on the recovered session. Don't clear
+        // pendingDeliveries: agent_end will shift each one as turns succeed.
+        if (this.pendingDeliveries.length > 0 && this.session) {
+          for (const delivery of this.pendingDeliveries) {
+            this.session
+              .sendCustomMessage(
+                {
+                  customType: 'agent_message',
+                  content: delivery.content,
+                  display: false,
+                  details: delivery.details,
+                },
+                {
+                  deliverAs: delivery.urgent ? 'steer' : 'followUp',
+                  triggerTurn: true,
+                }
+              )
+              .catch((error) => {
+                console.error(
+                  '[AgentHost] Failed to replay delivery after context overflow:',
+                  error
+                );
+                const idx = this.pendingDeliveries.indexOf(delivery);
+                if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+                delivery.reject(error instanceof Error ? error : new Error(String(error)));
+              });
+          }
+        }
         return;
       }
       // Recovery was a no-op — reset guard so a future overflow can try again
@@ -591,7 +710,13 @@ export class AgentHost {
       console.log(
         `[AgentHost] Recovery: switching from ${this.currentProvider} to ${nextProvider}`
       );
-      await this.reinitializeWithProvider(nextProvider, promptToRetry, reason, detail);
+      await this.reinitializeWithProvider(
+        nextProvider,
+        promptToRetry,
+        deliveriesToRetry,
+        reason,
+        detail
+      );
       return;
     }
 
@@ -599,6 +724,12 @@ export class AgentHost {
     if (this.busy) {
       this.busy = false;
     }
+
+    // Permanently failed: reject all pending delivery promises
+    for (const delivery of this.pendingDeliveries) {
+      delivery.reject(new Error(`All providers exhausted: ${errorMessage}`));
+    }
+    this.pendingDeliveries = [];
 
     // Reset retry attempts for next error
     this.retryAttempts.clear();
@@ -611,6 +742,13 @@ export class AgentHost {
   private async reinitializeWithProvider(
     provider: LlmProvider,
     promptToRetry?: string | null,
+    deliveriesToRetry?: Array<{
+      content: string;
+      details: { sender: number; receiver: number; timestamp: number };
+      urgent?: boolean;
+      resolve: () => void;
+      reject: (reason: Error) => void;
+    }>,
     reason?: string,
     detail?: string
   ): Promise<void> {
@@ -671,6 +809,45 @@ export class AgentHost {
         // Restore only if nothing newer arrived during reinitialization.
         this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
         await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
+      }
+
+      // Replay pending custom-message deliveries (scheduled tasks, inter-agent messages).
+      // These were queued in the old session which was destroyed during reinit.
+      // Uses sendCustomMessage directly (not deliverMessage) to avoid duplicating
+      // chat cache entries that were already added by the original delivery.
+      if (deliveriesToRetry && deliveriesToRetry.length > 0 && this.session) {
+        console.log(
+          `[AgentHost] Replaying ${deliveriesToRetry.length} pending deliveries with new provider...`
+        );
+        // Merge: deliveries queued by concurrent deliverMessage() during async
+        // reinit must be preserved (this.session was non-null throughout initialize(),
+        // so new deliverMessage calls could push entries we must not drop).
+        const newDuringReinit = this.pendingDeliveries.filter(
+          (d) => !deliveriesToRetry.includes(d)
+        );
+        this.pendingDeliveries = [...deliveriesToRetry, ...newDuringReinit];
+        const session = this.session;
+        for (const d of deliveriesToRetry) {
+          session
+            .sendCustomMessage(
+              {
+                customType: 'agent_message',
+                content: d.content,
+                display: false,
+                details: d.details,
+              },
+              {
+                deliverAs: d.urgent ? 'steer' : 'followUp',
+                triggerTurn: true,
+              }
+            )
+            .catch((error) => {
+              console.error('[AgentHost] Failed to replay delivery after failover:', error);
+              const idx = this.pendingDeliveries.indexOf(d);
+              if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+              d.reject(error instanceof Error ? error : new Error(String(error)));
+            });
+        }
       }
     } catch (error) {
       console.error('[AgentHost] Failed to reinitialize:', error);
@@ -843,10 +1020,11 @@ export class AgentHost {
    * Deliver an inter-agent message into this agent's session.
    * Uses sendCustomMessage with customType 'agent_message'.
    *
-   * Fire-and-forget: does NOT await the triggered turn. When the receiver is
-   * idle, sendCustomMessage internally calls agent.prompt() which blocks until
-   * the entire turn completes — awaiting that would deadlock the caller if
-   * agents message each other during their turns.
+   * Returns a Promise that resolves when agent_end confirms the delivery was
+   * processed, or rejects on permanent failure (all providers exhausted, abort,
+   * or send failure). Callers outside agent turns (e.g., scheduler jobs) can
+   * await it; callers inside agent turns should NOT await it to avoid deadlocks
+   * (sendCustomMessage internally calls agent.prompt() when the receiver is idle).
    *
    * @param content LLM-visible message content (includes sender prefix)
    * @param details Metadata for programmatic use (not sent to LLM)
@@ -856,10 +1034,28 @@ export class AgentHost {
     content: string,
     details: { sender: number; receiver: number; timestamp: number },
     urgent?: boolean
-  ): void {
+  ): Promise<void> {
     if (!this.session) {
-      throw new Error('AgentHost not initialized. Call initialize() first.');
+      return Promise.reject(new Error('AgentHost not initialized. Call initialize() first.'));
     }
+    if (this.isReinitializing) {
+      return Promise.reject(new Error('Agent is reinitializing, delivery rejected'));
+    }
+
+    // Create deferred promise for completion notification. Resolves when
+    // agent_end confirms the delivery was processed, rejects on permanent
+    // failure (all providers exhausted, abort, or send failure).
+    let resolve!: () => void;
+    let reject!: (reason: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+
+    // Track for failover retry. If the session is destroyed during reinitialization,
+    // queued sendCustomMessage calls are lost. This queue lets handlePotentialError
+    // replay them on the new session. Cleared per-turn by agent_end (shift).
+    this.pendingDeliveries.push({ content, details, urgent, resolve, reject });
 
     // Capture delivered message in chat cache for UI history.
     // Inter-agent messages and summaries store full content (tag + body).
@@ -924,7 +1120,20 @@ export class AgentHost {
           }
         )
       )
-      .catch((err) => console.error('[AgentHost] deliverMessage error:', err));
+      .catch((err) => {
+        console.error('[AgentHost] deliverMessage error:', err);
+        // Send itself failed (session destroyed, etc.). The message never
+        // reached the agent, so remove from queue and reject immediately.
+        const idx = this.pendingDeliveries.findIndex((d) => d.resolve === resolve);
+        if (idx !== -1) {
+          this.pendingDeliveries.splice(idx, 1);
+          reject(
+            new Error(`Delivery send failed: ${err instanceof Error ? err.message : String(err)}`)
+          );
+        }
+      });
+
+    return promise;
   }
 
   /**
@@ -933,11 +1142,15 @@ export class AgentHost {
   abort(): void {
     if (this.session) {
       this.session.abort();
-      // abort() may not trigger agent_end, so clear busy and pendingPrompt explicitly
+      // abort() may not trigger agent_end, so clear busy and pending state explicitly
       if (this.busy) {
         this.busy = false;
       }
       this.pendingPrompt = null;
+      for (const delivery of this.pendingDeliveries) {
+        delivery.reject(new Error('Agent session aborted'));
+      }
+      this.pendingDeliveries = [];
     }
   }
 

@@ -16,7 +16,7 @@ function makeAgent(id: number, role: string): Agent {
 }
 
 function setup(selfId: number, agents: Agent[], registeredIds: number[]) {
-  const deliverMessage = vi.fn().mockReturnValue(undefined);
+  const deliverMessage = vi.fn().mockReturnValue(Promise.resolve());
   const db = {
     getAgent: (id: number) => agents.find((a) => a.id === id) ?? null,
   } as unknown as DatabaseClient;

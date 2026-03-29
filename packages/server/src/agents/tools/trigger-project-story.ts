@@ -181,11 +181,13 @@ ${agentActivity}
 
 ${projectDbChanges}`;
 
-        narratorHost.deliverMessage(projectLogMessage, {
-          sender: agentId,
-          receiver: narratorId,
-          timestamp: Date.now(),
-        });
+        narratorHost
+          .deliverMessage(projectLogMessage, {
+            sender: agentId,
+            receiver: narratorId,
+            timestamp: Date.now(),
+          })
+          .catch((err) => console.error('[trigger-project-story] log delivery failed:', err));
 
         // --- Message 2: Project story data ---
         // Full app.db snapshot (not time-windowed)
@@ -252,11 +254,13 @@ Note: This log was captured before your preceding log update. Incorporate what y
 
 ${logContent}`;
 
-        narratorHost.deliverMessage(projectStoryMessage, {
-          sender: agentId,
-          receiver: narratorId,
-          timestamp: Date.now(),
-        });
+        narratorHost
+          .deliverMessage(projectStoryMessage, {
+            sender: agentId,
+            receiver: narratorId,
+            timestamp: Date.now(),
+          })
+          .catch((err) => console.error('[trigger-project-story] story delivery failed:', err));
 
         return {
           content: [

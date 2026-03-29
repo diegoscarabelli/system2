@@ -400,11 +400,13 @@ export class Server {
       const newHost = await this.initializeAgentHost(newAgent.id);
 
       // Deliver the initial message from the caller (fire-and-forget)
-      newHost.deliverMessage(initialMessage, {
-        sender: callerAgentId,
-        receiver: newAgent.id,
-        timestamp: Date.now(),
-      });
+      newHost
+        .deliverMessage(initialMessage, {
+          sender: callerAgentId,
+          receiver: newAgent.id,
+          timestamp: Date.now(),
+        })
+        .catch((err) => console.error('[Server] spawner delivery failed:', err));
 
       return newAgent.id;
     };
@@ -420,11 +422,13 @@ export class Server {
     return async (agentId, callerAgentId, message) => {
       const host = await this.initializeAgentHost(agentId);
 
-      host.deliverMessage(message, {
-        sender: callerAgentId,
-        receiver: agentId,
-        timestamp: Date.now(),
-      });
+      host
+        .deliverMessage(message, {
+          sender: callerAgentId,
+          receiver: agentId,
+          timestamp: Date.now(),
+        })
+        .catch((err) => console.error('[Server] resurrector delivery failed:', err));
     };
   }
 
@@ -639,15 +643,15 @@ export class Server {
           `[Server] Daily summary stale by ${Math.round(staleness / 60000)} min, queuing catch-up`
         );
         try {
-          await trackJobExecution(this.db, 'daily-summary', 'catch-up', () => {
+          await trackJobExecution(this.db, 'daily-summary', 'catch-up', () =>
             buildAndDeliverDailySummary(
               this.db,
               this.narratorHost,
               this.narratorId,
               SYSTEM2_DIR,
               intervalMinutes
-            );
-          });
+            )
+          );
         } catch (error) {
           console.error('[Server] Daily summary catch-up failed:', error);
         }
@@ -666,9 +670,9 @@ export class Server {
           `[Server] Memory stale by ${Math.round(memoryStaleness / 3600000)}h, queuing memory-update catch-up`
         );
         try {
-          await trackJobExecution(this.db, 'memory-update', 'catch-up', () => {
-            buildAndDeliverMemoryUpdate(this.narratorHost, this.narratorId, SYSTEM2_DIR);
-          });
+          await trackJobExecution(this.db, 'memory-update', 'catch-up', () =>
+            buildAndDeliverMemoryUpdate(this.narratorHost, this.narratorId, SYSTEM2_DIR)
+          );
         } catch (error) {
           console.error('[Server] Memory update catch-up failed:', error);
         }
@@ -700,11 +704,13 @@ export class Server {
           `Failed to restore ${agent.role} agent (id=${agent.id}): ${(error as Error).message}. ` +
           `The agent record is still active in the database but has no running session. ` +
           `Investigate and decide whether to retry or archive the agent.`;
-        this.agentHost.deliverMessage(errorMsg, {
-          sender: agent.id,
-          receiver: this.agentHost.agentId,
-          timestamp: Date.now(),
-        });
+        this.agentHost
+          .deliverMessage(errorMsg, {
+            sender: agent.id,
+            receiver: this.agentHost.agentId,
+            timestamp: Date.now(),
+          })
+          .catch((err) => console.error('[Server] restore error delivery failed:', err));
       }
     }
   }
