@@ -170,6 +170,7 @@ export class AgentHost {
   private isPruning = false;
   private contextWindow = 0;
   private contextOverflowHandled = false;
+  private agentModels: Record<string, string> = {};
   private reminderManager?: ReminderManager;
   private unsubscribeSession: (() => void) | null = null;
 
@@ -267,6 +268,7 @@ export class AgentHost {
     const definitionFile = readFileSync(definitionPath, 'utf-8');
     const { data: agentMeta, content: agentPrompt } = matter(definitionFile);
     const agentConfig = agentMeta as AgentDefinition;
+    this.agentModels = agentConfig.models ?? {};
     // Static parts of the system prompt (loaded once)
     const staticPrompt = `${agentsRefContent}\n\n${agentPrompt}`;
 
@@ -635,9 +637,16 @@ export class AgentHost {
               detail
             );
           } else {
+            // Capture before compactForProvider may mutate this.currentProvider
+            const fromProvider = this.currentProvider;
+
+            // Proactive context check: compact before failover if the candidate
+            // model's context window is smaller than the current token count.
+            await this.compactForProvider(nextProvider);
+
             const reason = `${errorPrefix}, switched to ${nextProvider}`;
-            const detail = `on ${this.currentProvider}, switching to ${nextProvider}`;
-            console.log(`[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`);
+            const detail = `on ${fromProvider}, switching to ${nextProvider}`;
+            console.log(`[AgentHost] Failing over from ${fromProvider} to ${nextProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
               promptToRetry,
@@ -705,11 +714,15 @@ export class AgentHost {
     // switch to it. This covers cases like being stuck on a dead fallback provider.
     const nextProvider = this.authResolver.getNextProvider();
     if (nextProvider && nextProvider !== this.currentProvider) {
+      // Capture before compactForProvider may mutate this.currentProvider
+      const fromProvider = this.currentProvider;
+
+      // Proactive context check before last-resort failover
+      await this.compactForProvider(nextProvider);
+
       const reason = `${errorPrefix}, switched to ${nextProvider}`;
-      const detail = `on ${this.currentProvider}, switching to ${nextProvider}`;
-      console.log(
-        `[AgentHost] Recovery: switching from ${this.currentProvider} to ${nextProvider}`
-      );
+      const detail = `on ${fromProvider}, switching to ${nextProvider}`;
+      console.log(`[AgentHost] Recovery: switching from ${fromProvider} to ${nextProvider}`);
       await this.reinitializeWithProvider(
         nextProvider,
         promptToRetry,
@@ -1361,17 +1374,46 @@ export class AgentHost {
   }
 
   /**
+   * Proactive context check before failover: if the current context exceeds the
+   * candidate provider's model context window, compact first so the failover can succeed.
+   */
+  private async compactForProvider(provider: LlmProvider): Promise<void> {
+    const candidateModelId = this.agentModels[provider];
+    if (!candidateModelId) return;
+
+    const candidateModel = this.modelRegistry.find(provider, candidateModelId);
+    if (!candidateModel) return;
+
+    const currentUsage = this.getContextUsage();
+    if (currentUsage?.tokens == null) return;
+
+    if (currentUsage.tokens > candidateModel.contextWindow) {
+      console.log(
+        `[AgentHost] Context (${currentUsage.tokens} tokens) exceeds ${provider}/${candidateModelId} ` +
+          `window (${candidateModel.contextWindow}), compacting before failover`
+      );
+      // Use the target provider for compaction since the current provider may be broken
+      // (e.g., invalid API key, no credits). The truncated context fits within the target
+      // model's window (split at 50%), so the compact() call will succeed.
+      await this.handleContextOverflow(candidateModel.contextWindow, provider);
+    }
+  }
+
+  /**
    * Emergency recovery for context overflow errors.
    *
    * When the context window is exceeded and no API call can succeed, this method:
-   * 1. Splits the active JSONL at the last message entry below 90% of context window
+   * 1. Splits the active JSONL at a safe threshold (50% of the effective context window)
    * 2. Truncates the file to that safe point, reinitializes, and compacts
    * 3. Appends the tail (post-split entries) back and reinitializes again
    *
    * The result is a session with a compact summary of the safe history plus the
    * recent tail, consuming a fraction of the context window.
    */
-  private async handleContextOverflow(): Promise<boolean> {
+  private async handleContextOverflow(
+    targetContextWindow?: number,
+    compactionProvider?: LlmProvider
+  ): Promise<boolean> {
     const sessionDir = this.sessionDir;
     if (!this.session || !sessionDir) {
       console.log('[AgentHost] Context overflow: no session or sessionDir, cannot recover');
@@ -1406,8 +1448,12 @@ export class AgentHost {
         .split('\n')
         .filter((l) => l.trim());
 
-      // Step 2: Find last message entry below 90% of context window
-      const threshold = this.contextWindow * 0.9;
+      // Step 2: Find last message entry below the split threshold.
+      // Split at 50% of the effective context window, matching the SDK's reserveTokens
+      // auto-compaction setting and leaving headroom for system prompt, knowledge files,
+      // and compaction overhead.
+      const effectiveWindow = targetContextWindow ?? this.contextWindow;
+      const threshold = effectiveWindow * 0.5;
       let splitIndex = -1;
       for (let i = lines.length - 1; i >= 0; i--) {
         try {
@@ -1439,8 +1485,12 @@ export class AgentHost {
       writeFileSync(activeFile, `${headLines.join('\n')}\n`, 'utf-8');
       fileTruncated = true;
 
+      // Use the compaction provider if specified (cross-provider failover where
+      // the current provider is broken), otherwise use the current provider.
+      const provider = compactionProvider ?? this.currentProvider;
+
       // Step 5: Reinitialize from truncated file
-      await this.reinitializeWithProvider(this.currentProvider, null);
+      await this.reinitializeWithProvider(provider, null);
 
       // Step 6: Compact to reduce head context to ~5%
       if (this.session) {
@@ -1456,7 +1506,7 @@ export class AgentHost {
         appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
         tailAppended = true;
         console.log('[AgentHost] Context overflow: tail restored, reinitializing...');
-        await this.reinitializeWithProvider(this.currentProvider, null);
+        await this.reinitializeWithProvider(provider, null);
       }
 
       console.log('[AgentHost] Context overflow recovery complete');
