@@ -10,6 +10,7 @@ import {
   buildAndDeliverMemoryUpdate,
   collectAgentActivity,
   formatMarkdownTable,
+  JobSkipped,
   readFrontmatterField,
   readTailChars,
   registerNarratorJobs,
@@ -207,7 +208,7 @@ describe('collectAgentActivity', () => {
 });
 
 describe('buildAndDeliverMemoryUpdate', () => {
-  it('skips delivery when no daily summary files exist', async () => {
+  it('throws JobSkipped when no daily summary files exist', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const knowledgeDir = join(dir, 'knowledge');
     mkdirSync(knowledgeDir, { recursive: true });
@@ -217,11 +218,11 @@ describe('buildAndDeliverMemoryUpdate', () => {
     );
 
     const host = mockNarratorHost();
-    await buildAndDeliverMemoryUpdate(host, 2, dir);
+    await expect(buildAndDeliverMemoryUpdate(host, 2, dir)).rejects.toThrow(JobSkipped);
     expect(host.calls).toHaveLength(0);
   });
 
-  it('skips delivery when all summaries are older than last update', async () => {
+  it('throws JobSkipped when all summaries are older than last update', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const knowledgeDir = join(dir, 'knowledge');
     const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -233,7 +234,7 @@ describe('buildAndDeliverMemoryUpdate', () => {
     writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Old summary');
 
     const host = mockNarratorHost();
-    await buildAndDeliverMemoryUpdate(host, 2, dir);
+    await expect(buildAndDeliverMemoryUpdate(host, 2, dir)).rejects.toThrow(JobSkipped);
     expect(host.calls).toHaveLength(0);
   });
 
@@ -600,30 +601,42 @@ describe('registerNarratorJobs (network guard)', () => {
     };
   }
 
-  it('skips daily-summary when network is unavailable', async () => {
+  it('records skipped status when network is unavailable (daily-summary)', async () => {
     mockIsNetworkAvailable.mockResolvedValueOnce(false);
     const scheduler = mockScheduler();
     const host = mockNarratorHost();
     const dir = trackTmpDir(makeTmpDir());
 
-    registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, {} as DatabaseClient, dir, 30);
+    const mockDb = {
+      createJobExecution: vi.fn(() => ({ id: 1 })),
+      skipJobExecution: vi.fn(),
+    } as unknown as DatabaseClient;
+
+    registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, mockDb, dir, 30);
 
     await scheduler.handlers['daily-summary']();
     expect(host.calls).toHaveLength(0);
-    expect(mockIsNetworkAvailable).toHaveBeenCalledOnce();
+    expect(mockDb.createJobExecution).toHaveBeenCalledWith('daily-summary', 'cron');
+    expect(mockDb.skipJobExecution).toHaveBeenCalledWith(1, 'no network connectivity');
   });
 
-  it('skips memory-update when network is unavailable', async () => {
+  it('records skipped status when network is unavailable (memory-update)', async () => {
     mockIsNetworkAvailable.mockResolvedValueOnce(false);
     const scheduler = mockScheduler();
     const host = mockNarratorHost();
     const dir = trackTmpDir(makeTmpDir());
 
-    registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, {} as DatabaseClient, dir, 30);
+    const mockDb = {
+      createJobExecution: vi.fn(() => ({ id: 1 })),
+      skipJobExecution: vi.fn(),
+    } as unknown as DatabaseClient;
+
+    registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, mockDb, dir, 30);
 
     await scheduler.handlers['memory-update']();
     expect(host.calls).toHaveLength(0);
-    expect(mockIsNetworkAvailable).toHaveBeenCalledOnce();
+    expect(mockDb.createJobExecution).toHaveBeenCalledWith('memory-update', 'cron');
+    expect(mockDb.skipJobExecution).toHaveBeenCalledWith(1, 'no network connectivity');
   });
 
   it('proceeds with daily-summary when network is available', async () => {
@@ -635,8 +648,8 @@ describe('registerNarratorJobs (network guard)', () => {
 
     const mockDb = {
       query: () => [],
-      createJobExecution: () => ({ id: 1 }),
-      completeJobExecution: () => {},
+      createJobExecution: vi.fn(() => ({ id: 1 })),
+      skipJobExecution: vi.fn(),
     } as unknown as DatabaseClient;
 
     registerNarratorJobs(scheduler as unknown as Scheduler, host, 2, mockDb, dir, 30);
@@ -646,8 +659,9 @@ describe('registerNarratorJobs (network guard)', () => {
     // buildAndDeliverDailySummary was reached: it creates today's summary file
     const today = new Date().toISOString().slice(0, 10);
     expect(existsSync(join(dir, 'knowledge', 'daily_summaries', `${today}.md`))).toBe(true);
-    // With no agents/projects and no activity, delivery is correctly skipped
+    // With no agents/projects and no activity, job is skipped (not completed)
     expect(host.calls).toHaveLength(0);
+    expect(mockDb.skipJobExecution).toHaveBeenCalledWith(1, 'no activity since last run');
   });
 
   it('proceeds with memory-update when network is available', async () => {
@@ -710,7 +724,7 @@ describe('buildAndDeliverDailySummary', () => {
     } as unknown as DatabaseClient;
   }
 
-  it('skips when file has content but no new activity', async () => {
+  it('throws JobSkipped when file has content but no new activity', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const summariesDir = join(dir, 'knowledge', 'daily_summaries');
     mkdirSync(summariesDir, { recursive: true });
@@ -722,17 +736,35 @@ describe('buildAndDeliverDailySummary', () => {
 
     const host = mockHost();
     const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
-    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    await expect(buildAndDeliverDailySummary(db, host, 99, dir, 30)).rejects.toThrow(JobSkipped);
     expect(host.calls).toHaveLength(0);
   });
 
-  it('skips on first run with no activity', async () => {
+  it('throws JobSkipped on first run with no activity', async () => {
     const dir = trackTmpDir(makeTmpDir());
 
     const host = mockHost();
     const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
-    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    await expect(buildAndDeliverDailySummary(db, host, 99, dir, 30)).rejects.toThrow(JobSkipped);
     expect(host.calls).toHaveLength(0);
+  });
+
+  it('fails when prior summaries exist but none have timestamps', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    mkdirSync(summariesDir, { recursive: true });
+
+    // A prior summary file with empty frontmatter (no last_narrator_update_ts)
+    writeFileSync(
+      join(summariesDir, '2026-03-10.md'),
+      '---\nlast_narrator_update_ts:\n---\n# Daily Summary\n'
+    );
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    await expect(buildAndDeliverDailySummary(db, host, 99, dir, 30)).rejects.toThrow(
+      'last_narrator_update_ts not found'
+    );
   });
 
   it('delivers when non-project agent has JSONL activity', async () => {
@@ -944,6 +976,7 @@ describe('trackJobExecution', () => {
       createJobExecution: vi.fn(() => ({ id: 42, job_name: 'test-job', status: 'running' })),
       completeJobExecution: vi.fn(() => ({ id: 42, status: 'completed' })),
       failJobExecution: vi.fn(() => ({ id: 42, status: 'failed' })),
+      skipJobExecution: vi.fn(() => ({ id: 42, status: 'skipped' })),
     } as unknown as DatabaseClient;
   }
 
@@ -975,6 +1008,19 @@ describe('trackJobExecution', () => {
       expect.stringContaining('something broke')
     );
     expect(db.completeJobExecution).not.toHaveBeenCalled();
+  });
+
+  it('records skipped status on JobSkipped and does not re-throw', async () => {
+    const db = mockDbForTracking();
+    const handler = vi.fn(() => {
+      throw new JobSkipped('no activity since last run');
+    });
+
+    await trackJobExecution(db, 'test-job', 'cron', handler);
+
+    expect(db.skipJobExecution).toHaveBeenCalledWith(42, 'no activity since last run');
+    expect(db.completeJobExecution).not.toHaveBeenCalled();
+    expect(db.failJobExecution).not.toHaveBeenCalled();
   });
 
   it('re-throws the original error after recording failure', async () => {

@@ -465,6 +465,18 @@ export async function buildAndDeliverDailySummary(
     lastRunTs = readFrontmatterField(memoryPath, 'last_narrator_update_ts');
   }
   if (!lastRunTs) {
+    // If daily summary files already exist, the Narrator should have written
+    // last_narrator_update_ts to their frontmatter. Missing timestamps indicate
+    // a problem (e.g., Narrator failed to update the cursor).
+    const hasExistingSummaries =
+      existsSync(summariesDir) &&
+      readdirSync(summariesDir).some((f) => f.endsWith('.md') && f !== `${today}.md`);
+    if (hasExistingSummaries) {
+      throw new Error(
+        'daily summary files exist but last_narrator_update_ts not found in any frontmatter or memory.md'
+      );
+    }
+    // First run: no prior summaries, fall back to interval window
     lastRunTs = new Date(Date.now() - intervalMinutes * 60_000).toISOString();
   }
 
@@ -595,10 +607,9 @@ ${projectDbChanges}`;
   const hasNonProjectChanges = hasActivity(nonProjectAgentActivity, nonProjectDbChanges);
 
   if (!hasProjectChanges && !hasNonProjectChanges) {
-    console.log('[Scheduler] No activity since last run, skipping daily-summary');
     // Await any project-log deliveries that were already queued
     if (deliveries.length > 0) await Promise.all(deliveries);
-    return;
+    throw new JobSkipped('no activity since last run');
   }
 
   // 8. Assemble daily summary message (only sections with activity)
@@ -648,8 +659,19 @@ ${dailySummaryContent}`,
 }
 
 /**
+ * Thrown by job handlers to signal a deliberate skip (no work to do).
+ * The execution is recorded with status 'skipped' and the reason stored.
+ */
+export class JobSkipped extends Error {
+  constructor(public reason: string) {
+    super(reason);
+    this.name = 'JobSkipped';
+  }
+}
+
+/**
  * Execute a job with execution tracking: inserts a 'running' record,
- * calls the handler, then marks it 'completed' or 'failed'.
+ * calls the handler, then marks it 'completed', 'skipped', or 'failed'.
  */
 export async function trackJobExecution(
   db: DatabaseClient,
@@ -662,6 +684,10 @@ export async function trackJobExecution(
     await handler();
     db.completeJobExecution(execution.id);
   } catch (error) {
+    if (error instanceof JobSkipped) {
+      db.skipJobExecution(execution.id, error.reason);
+      return;
+    }
     const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
     db.failJobExecution(execution.id, message);
     throw error;
@@ -683,26 +709,24 @@ export function registerNarratorJobs(
   const cronPattern = 60 % intervalMinutes === 0 ? `*/${intervalMinutes} * * * *` : '*/30 * * * *';
 
   scheduler.schedule('daily-summary', cronPattern, async () => {
-    if (!(await isNetworkAvailable())) {
-      console.log('[Scheduler] No network connectivity, skipping daily-summary');
-      return;
-    }
-    console.log('[Scheduler] Triggering daily-summary job (project logs + daily summary)');
-    await trackJobExecution(db, 'daily-summary', 'cron', () =>
-      buildAndDeliverDailySummary(db, narratorHost, narratorId, system2Dir, intervalMinutes)
-    );
+    await trackJobExecution(db, 'daily-summary', 'cron', async () => {
+      if (!(await isNetworkAvailable())) {
+        throw new JobSkipped('no network connectivity');
+      }
+      console.log('[Scheduler] Triggering daily-summary job (project logs + daily summary)');
+      await buildAndDeliverDailySummary(db, narratorHost, narratorId, system2Dir, intervalMinutes);
+    });
   });
 
   // Memory update — daily at 11 AM
   scheduler.schedule('memory-update', '0 11 * * *', async () => {
-    if (!(await isNetworkAvailable())) {
-      console.log('[Scheduler] No network connectivity, skipping memory-update');
-      return;
-    }
-    console.log('[Scheduler] Triggering memory-update job');
-    await trackJobExecution(db, 'memory-update', 'cron', () =>
-      buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir)
-    );
+    await trackJobExecution(db, 'memory-update', 'cron', async () => {
+      if (!(await isNetworkAvailable())) {
+        throw new JobSkipped('no network connectivity');
+      }
+      console.log('[Scheduler] Triggering memory-update job');
+      await buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir);
+    });
   });
 }
 
@@ -733,8 +757,7 @@ export async function buildAndDeliverMemoryUpdate(
     : [];
 
   if (summaryFiles.length === 0) {
-    console.log('[Scheduler] No daily summaries to incorporate, skipping memory-update');
-    return;
+    throw new JobSkipped('no daily summaries to incorporate');
   }
 
   // Embed summary content inline so the Narrator doesn't need read tool calls
