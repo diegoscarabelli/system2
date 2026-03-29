@@ -589,6 +589,9 @@ export class AgentHost {
           )
           .catch((error) => {
             console.error('[AgentHost] Failed to resend delivery after retry:', error);
+            const idx = this.pendingDeliveries.indexOf(failed);
+            if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+            failed.reject(error instanceof Error ? error : new Error(String(error)));
           });
       }
       return;
@@ -680,6 +683,9 @@ export class AgentHost {
                   '[AgentHost] Failed to replay delivery after context overflow:',
                   error
                 );
+                const idx = this.pendingDeliveries.indexOf(delivery);
+                if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+                delivery.reject(error instanceof Error ? error : new Error(String(error)));
               });
           }
         }
@@ -825,6 +831,9 @@ export class AgentHost {
             )
             .catch((error) => {
               console.error('[AgentHost] Failed to replay delivery after failover:', error);
+              const idx = this.pendingDeliveries.indexOf(d);
+              if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+              d.reject(error instanceof Error ? error : new Error(String(error)));
             });
         }
       }

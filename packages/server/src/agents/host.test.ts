@@ -694,6 +694,71 @@ describe('AgentHost', () => {
       );
     });
 
+    it('same-provider retry rejects delivery promise when sendCustomMessage fails', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        lastTurnErrored: boolean;
+        session: {
+          prompt: ReturnType<typeof vi.fn>;
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+        };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+        currentKeyIndex: number;
+      };
+
+      const sendError = new Error('session torn down');
+      hostInternal.session = {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        sendCustomMessage: vi.fn().mockRejectedValue(sendError),
+      };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.currentKeyIndex = 0;
+      hostInternal.pendingPrompt = null;
+
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      const rejectFn = vi.fn();
+      hostInternal.pendingDeliveries = [
+        { content: 'project-log', details, urgent: false, resolve: vi.fn(), reject: rejectFn },
+      ];
+
+      hostInternal.retryAttempts = new Map();
+      hostInternal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      await hostInternal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
+      });
+
+      // Wait for the .catch() microtask to run
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(rejectFn).toHaveBeenCalledWith(sendError);
+      expect(hostInternal.pendingDeliveries).toHaveLength(0);
+    });
+
     it('pendingPrompt persists if session.prompt() throws', async () => {
       const host = new AgentHost({
         db: makeDbStub(),
