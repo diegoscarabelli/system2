@@ -32,13 +32,22 @@ function isProcessRunning(pid: number): boolean {
 
 /**
  * Kill a process. Uses taskkill on Windows, signals on Unix.
+ * Treats ESRCH (process already exited) as success.
  */
 async function killProcess(pid: number, force: boolean): Promise<void> {
-  if (IS_WINDOWS) {
-    const flag = force ? '/F' : '';
-    await execAsync(`taskkill /PID ${pid} ${flag}`.trim());
-  } else {
-    process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
+  try {
+    if (IS_WINDOWS) {
+      const flag = force ? '/F' : '';
+      await execAsync(`taskkill /PID ${pid} ${flag}`.trim());
+    } else {
+      process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
+    }
+  } catch (err: unknown) {
+    // Process already exited between our check and the kill signal: that's fine
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'ESRCH') {
+      return;
+    }
+    throw err;
   }
 }
 
@@ -99,12 +108,15 @@ async function findListenerPid(port: number): Promise<number | undefined> {
 export async function stop(): Promise<void> {
   let stopped = false;
   let pidFromFile: number | undefined;
+  let hadPidFile = false;
 
   // Strategy 1: PID file
   if (existsSync(PID_FILE)) {
-    pidFromFile = parseInt(readFileSync(PID_FILE, 'utf-8'), 10);
+    hadPidFile = true;
+    const raw = parseInt(readFileSync(PID_FILE, 'utf-8'), 10);
+    pidFromFile = Number.isNaN(raw) ? undefined : raw;
 
-    if (isProcessRunning(pidFromFile)) {
+    if (pidFromFile && isProcessRunning(pidFromFile)) {
       try {
         await stopProcess(pidFromFile, 'System2');
         stopped = true;
@@ -117,17 +129,21 @@ export async function stop(): Promise<void> {
     unlinkSync(PID_FILE);
   }
 
-  // Strategy 2: check port for orphaned processes the PID file missed
-  const listenerPid = await findListenerPid(DEFAULT_PORT);
+  // Strategy 2: check port for orphaned processes the PID file missed.
+  // Only runs when a PID file existed (evidence system2 was running), to avoid
+  // killing unrelated services that happen to use the same port.
+  if (hadPidFile) {
+    const listenerPid = await findListenerPid(DEFAULT_PORT);
 
-  if (listenerPid && listenerPid !== pidFromFile) {
-    console.log(`Found orphaned System2 process on port ${DEFAULT_PORT} (PID: ${listenerPid})`);
-    try {
-      await stopProcess(listenerPid, 'orphaned process');
-      stopped = true;
-    } catch {
-      console.error(`Failed to stop orphaned process (PID: ${listenerPid}). Kill it manually.`);
-      process.exit(1);
+    if (listenerPid && listenerPid !== pidFromFile) {
+      console.log(`Found orphaned System2 process on port ${DEFAULT_PORT} (PID: ${listenerPid})`);
+      try {
+        await stopProcess(listenerPid, 'orphaned process');
+        stopped = true;
+      } catch {
+        console.error(`Failed to stop orphaned process (PID: ${listenerPid}). Kill it manually.`);
+        process.exit(1);
+      }
     }
   }
 
