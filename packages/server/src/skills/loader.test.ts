@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -117,6 +117,12 @@ describe('parseSkillFile', () => {
     });
     const skill = parseSkillFile(path, 'user');
     expect(skill?.meta.name).toBe('deploy-pipeline');
+  });
+
+  it('returns null for whitespace-only name', () => {
+    const path = join(tempDir, 'spaces.md');
+    writeFileSync(path, '---\nname: "   "\ndescription: Blank name\n---\n\nContent\n');
+    expect(parseSkillFile(path, 'user')).toBeNull();
   });
 
   it('returns null for invalid roles type (number)', () => {
@@ -318,10 +324,11 @@ describe('compileSkillsXml', () => {
   });
 
   it('replaces home directory with ~ in paths', () => {
+    const home = homedir();
     const skills: Skill[] = [
       {
         meta: { name: 'test', description: 'Test', roles: [] },
-        path: join(process.env.HOME ?? '/home/user', '.system2', 'skills', 'test.md'),
+        path: join(home, '.system2', 'skills', 'test.md'),
         source: 'user',
       },
     ];
@@ -330,7 +337,7 @@ describe('compileSkillsXml', () => {
   });
 
   it('does not replace home directory when it appears mid-path', () => {
-    const home = process.env.HOME ?? '/home/user';
+    const home = homedir();
     const skills: Skill[] = [
       {
         meta: { name: 'test', description: 'Test', roles: [] },

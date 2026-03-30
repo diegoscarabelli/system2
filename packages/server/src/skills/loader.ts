@@ -57,6 +57,10 @@ export function parseSkillFile(filePath: string, source: 'builtin' | 'user'): Sk
 
   // Normalize name: lowercase and trim for consistent merge key matching.
   const name = data.name.trim().toLowerCase();
+  if (!name) {
+    console.warn(`[Skills] Empty 'name' after normalization in ${filePath}, skipping`);
+    return null;
+  }
 
   // Normalize roles: omitted/undefined/empty = all roles (empty array).
   // String value is coerced to single-element array.
