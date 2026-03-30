@@ -28,25 +28,31 @@ describe('set_reminder tool', () => {
     expect((result.content[0] as { text: string }).text).toContain('5 minute(s)');
   });
 
-  it('rejects delay_minutes < 1 (including fractional sub-minute values)', async () => {
+  it('accepts 0.5 minutes (30 seconds) as minimum delay', async () => {
     const { tool, reminderManager } = setup();
 
-    const result0 = await exec(tool, { delay_minutes: 0, message: 'bad' });
-    expect(reminderManager.schedule).not.toHaveBeenCalled();
-    expect((result0.content[0] as { text: string }).text).toContain('must be between 1 and');
+    const result = await exec(tool, { delay_minutes: 0.5, message: 'quick check' });
 
-    const result05 = await exec(tool, { delay_minutes: 0.5, message: 'bad' });
-    expect(reminderManager.schedule).not.toHaveBeenCalled();
-    expect((result05.content[0] as { text: string }).text).toContain('must be between 1 and');
+    expect(reminderManager.schedule).toHaveBeenCalledWith(1, 'quick check', 0.5);
+    expect((result.content[0] as { text: string }).text).toContain('Reminder #1 set');
   });
 
-  it('rejects delay_minutes exceeding setTimeout limit (~24.8 days)', async () => {
+  it('rejects delay_minutes below minimum (0.5)', async () => {
     const { tool, reminderManager } = setup();
 
-    const result = await exec(tool, { delay_minutes: 40_000, message: 'too far' });
+    const result = await exec(tool, { delay_minutes: 0.1, message: 'bad' });
 
     expect(reminderManager.schedule).not.toHaveBeenCalled();
-    expect((result.content[0] as { text: string }).text).toContain('must be between 1 and');
+    expect((result.content[0] as { text: string }).text).toContain('must be between');
+  });
+
+  it('rejects delay_minutes exceeding 7 days', async () => {
+    const { tool, reminderManager } = setup();
+
+    const result = await exec(tool, { delay_minutes: 10_081, message: 'too far' });
+
+    expect(reminderManager.schedule).not.toHaveBeenCalled();
+    expect((result.content[0] as { text: string }).text).toContain('must be between');
   });
 
   it('handles manager errors gracefully', async () => {

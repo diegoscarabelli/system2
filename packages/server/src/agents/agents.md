@@ -62,7 +62,7 @@ The **Guide** is the primary user-facing agent. However, the user may choose to 
 | `terminate_agent` | Archive an agent — abort its session, unregister, mark archived | Guide, Conductors |
 | `resurrect_agent` | Bring back an archived agent — resume its session from persisted JSONL, re-register | Guide, Conductors |
 | `trigger_project_story` | Signal project completion: server creates story task, collects data, delivers to Narrator | Guide, Conductors |
-| `set_reminder` | Schedule a delayed follow-up message to yourself (1 to ~24.8 days). Non-blocking. | All agents |
+| `set_reminder` | Schedule a delayed follow-up message to yourself (30s to 7 days). Non-blocking. | All agents |
 | `cancel_reminder` | Cancel a pending reminder by ID | All agents |
 | `list_reminders` | List your active pending reminders | All agents |
 | `web_search` | Search the web via Brave Search API | All agents (when configured) |
