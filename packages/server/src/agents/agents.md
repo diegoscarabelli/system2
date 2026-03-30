@@ -79,6 +79,74 @@ The **Guide** is the primary user-facing agent. However, the user may choose to 
 - `web_search` is only available when a Brave Search API key is configured.
 - `show_artifact` is available to all agents. Any agent can display a file in the user's UI. Accepts an absolute path (or `~/`-prefixed). If the artifact is registered in the database, its title is used for the tab label; otherwise the filename is used. Only one artifact is watched per client connection at a time (for live reload).
 
+## Skills
+
+Skills are reusable workflow instructions stored as SKILL.md files. They capture multi-step procedures that go beyond a single tool call but do not belong in the knowledge base (which stores facts and accumulated state, not procedures).
+
+**The litmus test:** "Am I writing down a fact, or a workflow I'd want to follow again?" If it is a fact, it is knowledge. If it is a procedure, it is a skill.
+
+| Concept | What it is | Example |
+| ------- | ---------- | ------- |
+| **Tool** | A single action you can invoke | `bash`, `read`, `write`, `read_system2_db` |
+| **Knowledge** | Accumulated facts and state | infrastructure.md, user.md, memory.md |
+| **Skill** | A reusable multi-step workflow | How to set up a data pipeline, how to run a code review |
+
+### How Skills Work
+
+Your system prompt includes an XML index of skills filtered to your role:
+
+```xml
+<available_skills>
+<skill name="deploy-pipeline" path="~/.system2/skills/deploy-pipeline.md" description="Deploy a data pipeline to DiegoTower" />
+</available_skills>
+```
+
+When a skill is relevant to your current task, use `read` to load the full SKILL.md at the given `path`. Follow the instructions as written unless you have a specific reason to deviate (in which case, note the deviation and your reasoning).
+
+Do not read skills preemptively. Read a skill only when you are about to perform the workflow it describes.
+
+### SKILL.md Format
+
+Each skill is a single `.md` file with YAML frontmatter:
+
+```yaml
+---
+name: skill-name
+description: One-line summary of when and why to use this skill
+roles: [conductor, reviewer]
+---
+
+# Skill Name
+
+Step-by-step instructions...
+```
+
+- `name` (required): lowercase, hyphenated identifier
+- `description` (required): concise summary (used to decide relevance, so be specific)
+- `roles` (optional): list of agent roles that can use this skill. Omit or leave empty for skills available to all roles.
+
+### Skill Sources and Precedence
+
+- **Built-in skills** ship with System2 and are available to all installations
+- **User skills** live in `~/.system2/skills/` and are created by agents or the user
+- When a user skill has the same `name` as a built-in skill, the user skill takes precedence
+
+### Creating Skills
+
+**Guide and Conductor agents** should proactively create skills in `~/.system2/skills/` when they recognize reusable patterns. Create a skill when:
+
+- You have performed the same multi-step workflow more than once
+- You are explaining a procedure to another agent that could be standardized
+- Information you are about to write to a knowledge file is really a procedure, not a fact
+- A task or project reveals a workflow that will recur
+
+To create a skill:
+
+1. Choose a descriptive name (lowercase, hyphenated)
+2. Write the SKILL.md file using `write` with `commit_message` to `~/.system2/skills/{name}.md`
+3. Set `roles` to restrict to specific agent roles, or omit for all roles
+4. Keep instructions concrete and actionable (tool names, file paths, exact commands)
+
 ## The Database
 
 `~/.system2/app.db` is a SQLite database and the **single source of truth** for all work management. Query it with `read_system2_db` (SELECT only) and write to it with `write_system2_db` (named operations).

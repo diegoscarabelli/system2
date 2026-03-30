@@ -6,7 +6,8 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked f
 - `packages/server/src/knowledge/init.ts`: directory initialization
 - `packages/server/src/knowledge/templates.ts`: default file templates
 - `packages/server/src/knowledge/git.ts`: git repo setup
-- `packages/server/src/agents/host.ts`: `loadKnowledgeContext()` method
+- `packages/server/src/agents/host.ts`: `loadKnowledgeContext()` and `loadSkillsContext()` methods
+- `packages/server/src/skills/loader.ts`: skill discovery, parsing, and XML index compilation
 
 ## Knowledge Directory
 
@@ -109,6 +110,10 @@ SYSTEM PROMPT (rebuilt on every LLM call):
        ---
        ### ~/.system2/knowledge/daily_summaries/2026-03-11.md
        [content]
+  4. ## Available Skills (dynamic, re-read every call)
+       <available_skills>
+       <skill name="..." path="..." description="..." />
+       </available_skills>
        ---
        Conversation history follows.
 
@@ -144,6 +149,10 @@ SYSTEM PROMPT (rebuilt on every LLM call):
        ---
        ### ~/.system2/projects/1_linkedin-campaign/log.md
        [content]
+  4. ## Available Skills (dynamic, re-read every call)
+       <available_skills>
+       <skill name="..." path="..." description="..." />
+       </available_skills>
        ---
        Conversation history follows.
 
