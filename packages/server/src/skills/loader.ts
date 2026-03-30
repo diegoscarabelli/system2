@@ -7,7 +7,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import matter from 'gray-matter';
 
 export interface SkillMeta {
@@ -55,21 +55,33 @@ export function parseSkillFile(filePath: string, source: 'builtin' | 'user'): Sk
     return null;
   }
 
+  // Normalize name: lowercase and trim for consistent merge key matching.
+  const name = data.name.trim().toLowerCase();
+
   // Normalize roles: omitted/undefined/empty = all roles (empty array).
   // String value is coerced to single-element array.
+  // Invalid types or arrays with no valid string entries reject the file.
   let roles: string[] = [];
   if (data.roles != null) {
     if (typeof data.roles === 'string') {
       roles = [data.roles.toLowerCase()];
     } else if (Array.isArray(data.roles)) {
-      roles = data.roles
+      const stringRoles = data.roles
         .filter((r): r is string => typeof r === 'string')
         .map((r) => r.toLowerCase());
+      if (stringRoles.length === 0 && data.roles.length > 0) {
+        console.warn(`[Skills] Invalid 'roles' entries in ${filePath}, skipping`);
+        return null;
+      }
+      roles = stringRoles;
+    } else {
+      console.warn(`[Skills] Invalid 'roles' type in ${filePath}, skipping`);
+      return null;
     }
   }
 
   return {
-    meta: { name: data.name, description: data.description, roles },
+    meta: { name, description: data.description, roles },
     path: filePath,
     source,
   };
@@ -82,7 +94,13 @@ export function parseSkillFile(filePath: string, source: 'builtin' | 'user'): Sk
 export function scanDirectory(dirPath: string, source: 'builtin' | 'user'): Skill[] {
   if (!existsSync(dirPath)) return [];
 
-  const files = readdirSync(dirPath).filter((f) => f.endsWith('.md') && f !== 'README.md');
+  let files: string[];
+  try {
+    files = readdirSync(dirPath).filter((f) => f.endsWith('.md') && f !== 'README.md');
+  } catch {
+    console.warn(`[Skills] Could not read directory ${dirPath}, skipping`);
+    return [];
+  }
   const skills: Skill[] = [];
 
   for (const file of files) {
@@ -132,7 +150,9 @@ export function compileSkillsXml(skills: Skill[]): string {
   const sorted = [...skills].sort((a, b) => a.meta.name.localeCompare(b.meta.name));
 
   const entries = sorted.map((s) => {
-    const displayPath = s.path.replace(home, '~').replace(/\\/g, '/');
+    const displayPath = (
+      s.path.startsWith(home + sep) ? `~${s.path.slice(home.length)}` : s.path
+    ).replace(/\\/g, '/');
     return `<skill name="${escapeXml(s.meta.name)}" path="${escapeXml(displayPath)}" description="${escapeXml(s.meta.description)}" />`;
   });
 

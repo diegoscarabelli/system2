@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'tsup';
@@ -45,11 +45,15 @@ export default defineConfig({
     const srcSkills = join(srcAgents, 'skills');
     const destSkills = join(destAgents, 'skills');
     mkdirSync(destSkills, { recursive: true });
-    const skillFiles = readdirSync(srcSkills).filter((f) => f.endsWith('.md'));
-    for (const file of skillFiles) {
-      copyFileSync(join(srcSkills, file), join(destSkills, file));
+    if (existsSync(srcSkills)) {
+      const skillFiles = readdirSync(srcSkills).filter((f) => f.endsWith('.md'));
+      for (const file of skillFiles) {
+        copyFileSync(join(srcSkills, file), join(destSkills, file));
+      }
+      console.log(`✓ Copied ${skillFiles.length} skill files to dist/`);
+    } else {
+      console.log('✓ No built-in skills directory found, skipping');
     }
-    console.log(`✓ Copied ${skillFiles.length} skill files to dist/`);
 
     // Copy schema.sql to dist/db/
     const srcDb = join(__dirname, 'src', 'db');

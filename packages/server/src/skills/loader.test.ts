@@ -109,6 +109,30 @@ describe('parseSkillFile', () => {
     const skill = parseSkillFile(path, 'user');
     expect(skill?.meta.roles).toEqual([]);
   });
+
+  it('normalizes name to lowercase and trims whitespace', () => {
+    const path = writeSkill(tempDir, 'cased.md', {
+      name: '  Deploy-Pipeline ',
+      description: 'Cased name',
+    });
+    const skill = parseSkillFile(path, 'user');
+    expect(skill?.meta.name).toBe('deploy-pipeline');
+  });
+
+  it('returns null for invalid roles type (number)', () => {
+    const path = join(tempDir, 'bad-roles.md');
+    writeFileSync(path, '---\nname: bad\ndescription: Bad roles\nroles: 42\n---\n\nContent\n');
+    expect(parseSkillFile(path, 'user')).toBeNull();
+  });
+
+  it('returns null for roles array with only non-string entries', () => {
+    const path = join(tempDir, 'bad-array.md');
+    writeFileSync(
+      path,
+      '---\nname: bad\ndescription: Bad array\nroles:\n  - 1\n  - 2\n---\n\nContent\n'
+    );
+    expect(parseSkillFile(path, 'user')).toBeNull();
+  });
 });
 
 describe('scanDirectory', () => {
@@ -175,6 +199,14 @@ describe('loadSkills', () => {
     expect(skills).toHaveLength(1);
     expect(skills[0].meta.description).toBe('User deploy');
     expect(skills[0].source).toBe('user');
+  });
+
+  it('user skill overrides built-in regardless of name casing', () => {
+    writeSkill(builtinDir, 'deploy.md', { name: 'deploy', description: 'Built-in' });
+    writeSkill(userDir, 'deploy.md', { name: 'Deploy', description: 'User' });
+    const skills = loadSkills(builtinDir, userDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0].meta.description).toBe('User');
   });
 
   it('handles empty directories', () => {
@@ -295,5 +327,19 @@ describe('compileSkillsXml', () => {
     ];
     const xml = compileSkillsXml(skills);
     expect(xml).toContain('~/.system2/skills/test.md');
+  });
+
+  it('does not replace home directory when it appears mid-path', () => {
+    const home = process.env.HOME ?? '/home/user';
+    const skills: Skill[] = [
+      {
+        meta: { name: 'test', description: 'Test', roles: [] },
+        path: `/other${home}/skills/test.md`,
+        source: 'builtin',
+      },
+    ];
+    const xml = compileSkillsXml(skills);
+    expect(xml).not.toContain('path="~');
+    expect(xml).toContain(`/other${home}/skills/test.md`);
   });
 });
