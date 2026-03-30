@@ -305,7 +305,9 @@ Your full context on every LLM call is assembled as follows. The system prompt i
 SYSTEM PROMPT (rebuilt on every LLM call):
   1. agents.md — shared reference (static)
   2. library/guide.md — Guide role instructions (static)
-  3. ## Knowledge Base (dynamic, re-read every call)
+  3. ## Your Identity (dynamic)
+       Your agent ID is 1. Your role is guide.
+  4. ## Knowledge Base (dynamic, re-read every call)
        ### ~/.system2/knowledge/infrastructure.md
        [content]
        ---
@@ -340,7 +342,9 @@ CURRENT TURN:
 SYSTEM PROMPT (rebuilt on every LLM call):
   1. agents.md — shared reference (static)
   2. library/conductor.md — Conductor role instructions (static)
-  3. ## Knowledge Base (dynamic, re-read every call)
+  3. ## Your Identity (dynamic)
+       Your agent ID is 3. Your role is conductor. Your project ID is 1.
+  4. ## Knowledge Base (dynamic, re-read every call)
        ### ~/.system2/knowledge/infrastructure.md
        [content]
        ---
@@ -449,7 +453,7 @@ These rules govern how you operate. They exist because violations have concrete 
     SELECT t.id, t.title, t.status, t.priority, p.name AS project_name
     FROM task t
     JOIN project p ON t.project = p.id
-    WHERE t.assignee = <your_agent_id>
+    WHERE t.assignee = <your agent ID>
       AND t.status IN ('todo', 'in progress')
     ORDER BY t.priority DESC, t.start_at ASC
     ```

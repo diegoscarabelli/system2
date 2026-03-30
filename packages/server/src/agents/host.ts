@@ -363,8 +363,10 @@ export class AgentHost {
       agentDir: SYSTEM2_DIR,
       // Static agent instructions (from package) + dynamic knowledge files (from ~/.system2/).
       // Knowledge files are re-read on every LLM call via reload() before each prompt.
-      systemPromptOverride: () =>
-        `${staticPrompt}${this.loadKnowledgeContext()}\n\n---\n\nConversation history follows.`,
+      systemPromptOverride: () => {
+        const identity = `\n\n## Your Identity\n\nYour agent ID is **${agentRecord.id}**. Your role is **${agentRecord.role}**.${agentRecord.project ? ` Your project ID is **${agentRecord.project}**.` : ''}`;
+        return `${staticPrompt}${identity}${this.loadKnowledgeContext()}\n\n---\n\nConversation history follows.`;
+      },
       // Disable default resource discovery (we manage our own)
       noExtensions: true,
       noSkills: true,
