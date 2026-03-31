@@ -20,7 +20,7 @@ export function createSetReminderTool(agentId: number, reminderManager: Reminder
     name: 'set_reminder',
     label: 'Set Reminder',
     description:
-      'Schedule a delayed reminder for yourself. After the specified delay, you will receive a follow-up message with your reminder text. Use this to defer actions: set the timer, continue your current work, and handle the reminder when it arrives.',
+      'Schedule a delayed reminder for yourself. After the specified delay, you will receive a follow-up message with your reminder text. Use this to defer actions: set the timer, continue your current work, and handle the reminder when it arrives. Write reminder messages as instructions to your future self, including agent IDs, task IDs, and the action to take. Reminders are in-memory only and do not survive server restarts; for longer delays, prefer a task comment and a check-on-startup pattern.',
     parameters: params,
     execute: async (_toolCallId, args) => {
       const { delay_minutes, message } = args;

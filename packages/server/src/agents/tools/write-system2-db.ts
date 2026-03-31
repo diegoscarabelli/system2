@@ -52,7 +52,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
       ],
       {
         description:
-          'Operation to perform. createProject/updateProject manage projects. createTask/updateTask manage tasks. claimTask atomically claims an unassigned todo task (pull model, secondary to assignment). createTaskLink/deleteTaskLink manage task relationships. createTaskComment/deleteTaskComment manage task comments. createArtifact/updateArtifact/deleteArtifact manage artifact metadata (file_path is absolute).',
+          'Operation to perform. createProject (Guide only) / updateProject (Guide and Conductor, own project) manage projects. createTask / updateTask manage tasks (project-scoped; assignee field restricted to Guide and Conductor). claimTask atomically claims an unassigned todo task (pull model, secondary to assignment). createTaskLink / deleteTaskLink manage task relationships (project-scoped). createTaskComment / deleteTaskComment manage task comments (project-scoped; author auto-filled). createArtifact / updateArtifact / deleteArtifact manage artifact metadata (file_path is absolute; deleteArtifact removes DB record only).',
       }
     ),
     // Shared: ID for updates/deletes
