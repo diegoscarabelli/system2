@@ -22,6 +22,7 @@ For installation and usage, see the [project README](../README.md).
 - [Database](database.md): The SQLite schema that stores projects, tasks, agents, and comments, with table definitions, indices, and common query patterns.
 - [WebSocket Protocol](websocket-protocol.md): The message format between the UI and server, covering how chat messages, tool calls, and agent events are exchanged in real time.
 - [Knowledge System](knowledge-system.md): How agents persist and share memory, including knowledge files, daily summaries, project logs, project stories, and git tracking of `~/.system2/`.
+- [Skills](skills.md): Reusable workflow instructions for agents, including the SKILL.md format, discovery from built-in and user directories, role filtering, and XML index injection.
 - [Scheduler](scheduler.md): The background job system, covering what runs on schedule (daily summaries, memory updates), how missed jobs are caught up, and how to add new ones.
 
 ## Reference

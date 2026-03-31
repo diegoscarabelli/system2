@@ -6,7 +6,8 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked f
 - `packages/server/src/knowledge/init.ts`: directory initialization
 - `packages/server/src/knowledge/templates.ts`: default file templates
 - `packages/server/src/knowledge/git.ts`: git repo setup
-- `packages/server/src/agents/host.ts`: `loadKnowledgeContext()` method
+- `packages/server/src/agents/host.ts`: `loadKnowledgeContext()` method and SDK skill wiring via `additionalSkillPaths`/`skillsOverride`
+- `packages/server/src/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`)
 
 ## Knowledge Directory
 
@@ -81,7 +82,7 @@ Project-scoped files live outside `knowledge/`:
    - **System-wide agents** (Guide, Narrator): loads the 2 most recent daily summary files (sorted by filename, chronological order)
 5. Returns all content under a `## Knowledge Base` header, separated by `---`
 
-Each section is prefixed with a `### ~/.system2/...` heading so agents can identify the source of each piece of context. The block ends with `---\n\nConversation history follows.` to mark the boundary between instructions and the messages array.
+Each section is prefixed with a `### ~/.system2/...` heading so agents can identify the source of each piece of context. After the knowledge block, the SDK appends the skills XML index (filtered by role) and current date/working directory metadata.
 
 ### Examples
 
@@ -109,8 +110,15 @@ SYSTEM PROMPT (rebuilt on every LLM call):
        ---
        ### ~/.system2/knowledge/daily_summaries/2026-03-11.md
        [content]
-       ---
-       Conversation history follows.
+  4. Skills XML index (SDK-appended, filtered by role)
+       <available_skills>
+         <skill>
+           <name>...</name>
+           <description>...</description>
+           <location>...</location>
+         </skill>
+       </available_skills>
+  5. Current date and working directory (SDK-appended)
 
 MESSAGES (from JSONL session, ~/.system2/sessions/guide_1/):
   [turn 1] user: ...
@@ -144,8 +152,15 @@ SYSTEM PROMPT (rebuilt on every LLM call):
        ---
        ### ~/.system2/projects/1_linkedin-campaign/log.md
        [content]
-       ---
-       Conversation history follows.
+  4. Skills XML index (SDK-appended, filtered by role)
+       <available_skills>
+         <skill>
+           <name>...</name>
+           <description>...</description>
+           <location>...</location>
+         </skill>
+       </available_skills>
+  5. Current date and working directory (SDK-appended)
 
 MESSAGES (from JSONL session, ~/.system2/sessions/conductor_3/):
   [turn 1] user: [Message from guide agent (id=1)] Here is your project...
@@ -156,7 +171,7 @@ CURRENT TURN:
   [inbound agent message / task assignment]
 ```
 
-Empty files are skipped. If no knowledge files have content, the `## Knowledge Base` block is omitted but `Conversation history follows.` is still appended. The `user` role in agent JSONL is used for all inbound messages: from the user, other agents, or the scheduler.
+Empty files are skipped. If no knowledge files have content, the `## Knowledge Base` block is omitted. The `user` role in agent JSONL is used for all inbound messages: from the user, other agents, or the scheduler.
 
 ## memory.md
 

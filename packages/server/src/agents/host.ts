@@ -33,6 +33,7 @@ import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js';
 import type { ReminderManager } from '../reminders/manager.js';
+import { filterByRole } from '../skills/loader.js';
 import { AuthResolver } from './auth-resolver.js';
 import type { AgentRegistry } from './registry.js';
 import {
@@ -360,17 +361,22 @@ export class AgentHost {
       compaction: { reserveTokens: Math.floor(model.contextWindow * 0.5) },
     });
 
-    // Create resource loader with custom system prompt
+    // Create resource loader with custom system prompt.
+    // Knowledge files are re-read on every LLM call via reload() before each prompt.
+    // Skills are discovered by the SDK from our two directories, then filtered by agent role.
     this.resourceLoader = new DefaultResourceLoader({
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
-      // Static agent instructions (from package) + dynamic knowledge files (from ~/.system2/).
-      // Knowledge files are re-read on every LLM call via reload() before each prompt.
-      systemPromptOverride: () =>
-        `${staticPrompt}${this.loadKnowledgeContext()}\n\n---\n\nConversation history follows.`,
-      // Disable default resource discovery (we manage our own)
-      noExtensions: true,
+      systemPromptOverride: () => `${staticPrompt}${this.loadKnowledgeContext()}`,
+      // Suppress SDK default skill directories (~/.pi/agent/skills/, .pi/skills/)
+      // but provide our own paths. User dir first for first-wins precedence.
       noSkills: true,
+      additionalSkillPaths: [join(SYSTEM2_DIR, 'skills'), join(AGENT_DIR, 'skills')],
+      skillsOverride: ({ skills, diagnostics }) => ({
+        skills: filterByRole(skills, this.agentRole ?? ''),
+        diagnostics,
+      }),
+      noExtensions: true,
       noPromptTemplates: true,
       noThemes: true,
     });
