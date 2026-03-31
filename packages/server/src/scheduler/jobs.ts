@@ -663,8 +663,6 @@ ${projectDbChanges}`;
   const hasNonProjectChanges = hasActivity(nonProjectAgentActivity, nonProjectDbChanges);
 
   if (!hasProjectChanges && !hasNonProjectChanges) {
-    // Await any project-log deliveries that were already queued
-    if (deliveries.length > 0) await Promise.all(deliveries);
     // Advance cursor even on skip to prevent re-scanning an empty window
     advanceFrontmatterCursors(filePath, projectDataList, newRunTs);
     throw new JobSkipped('no activity since last run');
