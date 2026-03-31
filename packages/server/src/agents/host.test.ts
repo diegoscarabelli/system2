@@ -201,7 +201,7 @@ describe('AgentHost', () => {
       expect(hostInternal.pendingPrompt).toBeNull();
     });
 
-    it('tracks pendingDeliveries and shifts on agent_end only for delivery turns', () => {
+    it('tracks pendingDeliveries and resolves on agent_end using deliverySendCount', () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -217,6 +217,7 @@ describe('AgentHost', () => {
           resolve: () => void;
           reject: (reason: Error) => void;
         }>;
+        deliverySendCount: number;
         handleSessionEvent: (event: Record<string, unknown>) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
         handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -246,36 +247,30 @@ describe('AgentHost', () => {
       hostInternal.pendingDeliveries[0].resolve = resolve1;
       hostInternal.pendingDeliveries[1].resolve = resolve2;
 
-      // Prompt-only agent_end does NOT shift deliveries
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'user', content: 'hello' }],
-      });
+      // agent_end with deliverySendCount=0 does NOT shift deliveries
+      hostInternal.deliverySendCount = 0;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingDeliveries).toHaveLength(2);
 
-      // Delivery agent_end shifts the matching delivery
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'msg1' }],
-      });
+      // agent_end with deliverySendCount=1 shifts one delivery
+      hostInternal.deliverySendCount = 1;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingDeliveries).toHaveLength(1);
       expect(hostInternal.pendingDeliveries[0].content).toBe('msg2');
       expect(resolve1).toHaveBeenCalledOnce();
+      expect(hostInternal.deliverySendCount).toBe(0); // reset after agent_end
 
-      // Second delivery agent_end clears the queue
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'msg2' }],
-      });
+      // agent_end with deliverySendCount=1 clears the remaining delivery
+      hostInternal.deliverySendCount = 1;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
       expect(resolve2).toHaveBeenCalledOnce();
 
-      // Extra agent_end on empty queue is a no-op
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'x' }],
-      });
+      // Extra agent_end on empty queue is a no-op (counter clamped to queue length)
+      hostInternal.deliverySendCount = 5;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
+      expect(hostInternal.deliverySendCount).toBe(0);
     });
 
     it('lastTurnErrored prevents cleanup on error turns', () => {
@@ -295,6 +290,7 @@ describe('AgentHost', () => {
           resolve: () => void;
           reject: (reason: Error) => void;
         }>;
+        deliverySendCount: number;
         lastTurnErrored: boolean;
         handleSessionEvent: (event: Record<string, unknown>) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
@@ -319,10 +315,8 @@ describe('AgentHost', () => {
 
       // Simulate error turn: handlePotentialError sets the flag before agent_end fires
       hostInternal.lastTurnErrored = true;
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'delivery1' }],
-      });
+      hostInternal.deliverySendCount = 1;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
 
       // Neither pendingPrompt nor pendingDeliveries should be cleaned up
       expect(hostInternal.pendingPrompt).toBe('user message');
@@ -333,17 +327,12 @@ describe('AgentHost', () => {
       expect(resolveDelivery).not.toHaveBeenCalled();
       expect(rejectDelivery).not.toHaveBeenCalled();
 
-      // Flag is reset after agent_end
+      // Flag is reset after agent_end, but deliverySendCount preserved for retry
       expect(hostInternal.lastTurnErrored).toBe(false);
 
-      // Next successful agent_end with user + delivery messages cleans up normally
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [
-          { role: 'user', content: 'user message' },
-          { role: 'custom', customType: 'agent_message', content: 'delivery1' },
-        ],
-      });
+      // Next successful agent_end with deliverySendCount=1 cleans up normally
+      hostInternal.deliverySendCount = 1;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingPrompt).toBeNull();
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
       expect(resolveDelivery).toHaveBeenCalledOnce();
@@ -361,6 +350,7 @@ describe('AgentHost', () => {
         session: { sendCustomMessage: ReturnType<typeof vi.fn> };
         _chatCache: null;
         _sessionDir: string | null;
+        deliverySendCount: number;
         handleSessionEvent: (event: Record<string, unknown>) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
         handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -378,16 +368,16 @@ describe('AgentHost', () => {
         timestamp: Date.now(),
       });
 
-      // Fire agent_end with a delivery message to resolve the promise
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'msg1' }],
-      });
+      // Simulate the send counter being incremented (normally done by .then() on sendCustomMessage)
+      hostInternal.deliverySendCount = 1;
+
+      // Fire agent_end to resolve the promise using the send counter
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
 
       await expect(promise).resolves.toBeUndefined();
     });
 
-    it('agent_end resolves delivery promises in order', () => {
+    it('agent_end resolves delivery promises in order using send counter', () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -403,6 +393,7 @@ describe('AgentHost', () => {
           resolve: () => void;
           reject: (reason: Error) => void;
         }>;
+        deliverySendCount: number;
         handleSessionEvent: (event: Record<string, unknown>) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
         handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -420,18 +411,14 @@ describe('AgentHost', () => {
         { content: 'second', details, resolve: resolve2, reject: vi.fn() },
       ];
 
-      // agent_end with 2 delivery messages resolves both in order
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [
-          { role: 'custom', customType: 'agent_message', content: 'first' },
-          { role: 'custom', customType: 'agent_message', content: 'second' },
-        ],
-      });
+      // agent_end with deliverySendCount=2 resolves both in order
+      hostInternal.deliverySendCount = 2;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
 
       expect(resolve1).toHaveBeenCalledOnce();
       expect(resolve2).toHaveBeenCalledOnce();
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
+      expect(hostInternal.deliverySendCount).toBe(0);
     });
 
     it('captures deliveriesToRetry and replays them on failover', async () => {
@@ -757,6 +744,150 @@ describe('AgentHost', () => {
 
       expect(rejectFn).toHaveBeenCalledWith(sendError);
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
+    });
+
+    it('same-provider retry resends ALL pending deliveries, not just the first', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        lastTurnErrored: boolean;
+        session: {
+          prompt: ReturnType<typeof vi.fn>;
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+        };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+        currentKeyIndex: number;
+      };
+
+      hostInternal.session = {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.currentKeyIndex = 0;
+      hostInternal.pendingPrompt = null;
+
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      hostInternal.pendingDeliveries = [
+        { content: 'project-log-A', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+        { content: 'project-log-B', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+        { content: 'daily-summary', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+      ];
+
+      hostInternal.retryAttempts = new Map();
+      hostInternal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      await hostInternal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
+      });
+
+      // All 3 deliveries should have been resent
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledTimes(3);
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'project-log-A' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'project-log-B' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'daily-summary' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+    });
+
+    it('same-provider retry resends deliveries even when prompt is also retried', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        lastTurnErrored: boolean;
+        session: {
+          prompt: ReturnType<typeof vi.fn>;
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+        };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+        currentKeyIndex: number;
+        resourceLoader: { reload: ReturnType<typeof vi.fn> } | null;
+      };
+
+      hostInternal.session = {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      hostInternal.resourceLoader = { reload: vi.fn().mockResolvedValue(undefined) };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.currentKeyIndex = 0;
+      hostInternal.pendingPrompt = 'user question';
+
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      hostInternal.pendingDeliveries = [
+        { content: 'project-log', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+      ];
+
+      hostInternal.retryAttempts = new Map();
+      hostInternal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      await hostInternal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 503: service unavailable' },
+      });
+
+      // Prompt should have been retried
+      expect(hostInternal.session.prompt).toHaveBeenCalledWith('user question', {
+        streamingBehavior: 'followUp',
+      });
+
+      // Delivery should ALSO have been resent (not dropped by the old else-if)
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'project-log' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
     });
 
     it('pendingPrompt persists if session.prompt() throws', async () => {

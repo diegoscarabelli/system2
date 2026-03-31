@@ -37,6 +37,45 @@ export function readFrontmatterField(filePath: string, field: string): string | 
 }
 
 /**
+ * Write a YAML frontmatter field in a file.
+ * If the field exists, its value is replaced. If the frontmatter block exists
+ * but the field is missing, the field is inserted after the opening `---`.
+ */
+export function writeFrontmatterField(filePath: string, field: string, value: string): void {
+  if (!existsSync(filePath)) return;
+  const content = readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n');
+
+  // Find frontmatter boundaries
+  if (lines[0]?.trim() !== '---') return;
+  let endIdx = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') {
+      endIdx = i;
+      break;
+    }
+  }
+  if (endIdx === -1) return;
+
+  // Try to replace existing field
+  let replaced = false;
+  for (let i = 1; i < endIdx; i++) {
+    if (lines[i].match(new RegExp(`^${field}:`))) {
+      lines[i] = `${field}: ${value}`;
+      replaced = true;
+      break;
+    }
+  }
+
+  // Insert if not found
+  if (!replaced) {
+    lines.splice(1, 0, `${field}: ${value}`);
+  }
+
+  writeFileSync(filePath, lines.join('\n'), 'utf-8');
+}
+
+/**
  * Read the last N characters of a file.
  */
 export function readTailChars(filePath: string, n: number): string {
@@ -297,6 +336,7 @@ export function formatMarkdownTable(rows: Record<string, unknown>[]): string {
 interface ProjectActivityData {
   projectId: number;
   projectName: string;
+  logFile: string;
   agentActivity: string;
   dbChanges: string;
   hasChanges: boolean;
@@ -415,6 +455,22 @@ function hasActivity(agentActivity: string, dbChanges: string): boolean {
 }
 
 /**
+ * Advance last_narrator_update_ts in the daily summary file and all project log files.
+ */
+function advanceFrontmatterCursors(
+  dailySummaryPath: string,
+  projectDataList: ProjectActivityData[],
+  newRunTs: string
+): void {
+  writeFrontmatterField(dailySummaryPath, 'last_narrator_update_ts', newRunTs);
+  for (const pd of projectDataList) {
+    if (pd.logFile) {
+      writeFrontmatterField(pd.logFile, 'last_narrator_update_ts', newRunTs);
+    }
+  }
+}
+
+/**
  * Build and deliver project logs and daily summary to the Narrator.
  *
  * For each active project (conductor not archived), a project-log message is
@@ -465,9 +521,9 @@ export async function buildAndDeliverDailySummary(
     lastRunTs = readFrontmatterField(memoryPath, 'last_narrator_update_ts');
   }
   if (!lastRunTs) {
-    // If daily summary files already exist, the Narrator should have written
-    // last_narrator_update_ts to their frontmatter. Missing timestamps indicate
-    // a problem (e.g., Narrator failed to update the cursor).
+    // If daily summary files already exist, the server should have written
+    // last_narrator_update_ts to their frontmatter after delivery. Missing
+    // timestamps indicate a problem (e.g., server crashed before cursor update).
     const hasExistingSummaries =
       existsSync(summariesDir) &&
       readdirSync(summariesDir).some((f) => f.endsWith('.md') && f !== `${today}.md`);
@@ -551,6 +607,7 @@ export async function buildAndDeliverDailySummary(
     projectDataList.push({
       projectId: project.id,
       projectName: project.name,
+      logFile,
       agentActivity: projectScopedActivity,
       dbChanges: projectDbChanges,
       hasChanges: hasActivity(projectScopedActivity, projectDbChanges),
@@ -567,7 +624,6 @@ file: ${logFile}
 last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
-IMPORTANT: After writing the log entry, you MUST set last_narrator_update_ts to exactly "${newRunTs}" (UTC ISO 8601) in the frontmatter of ${logFile}. This advances the cursor for the next run.
 IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
 
 ## Most recent log.md content
@@ -607,8 +663,8 @@ ${projectDbChanges}`;
   const hasNonProjectChanges = hasActivity(nonProjectAgentActivity, nonProjectDbChanges);
 
   if (!hasProjectChanges && !hasNonProjectChanges) {
-    // Await any project-log deliveries that were already queued
-    if (deliveries.length > 0) await Promise.all(deliveries);
+    // Advance cursor even on skip to prevent re-scanning an empty window
+    advanceFrontmatterCursors(filePath, projectDataList, newRunTs);
     throw new JobSkipped('no activity since last run');
   }
 
@@ -620,7 +676,6 @@ file: ${filePath}
 last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
-IMPORTANT: After writing the summary, you MUST set last_narrator_update_ts to exactly "${newRunTs}" (UTC ISO 8601) in the frontmatter of ${filePath}. This advances the cursor for the next run.
 IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
 
 ## Current daily summary file content
@@ -656,6 +711,11 @@ ${dailySummaryContent}`,
 
   // Wait for the Narrator to finish processing all deliveries
   await Promise.all(deliveries);
+
+  // Server-side cursor advancement: update frontmatter so the next cron run
+  // starts from newRunTs. Previously delegated to the LLM, but compaction
+  // could wipe the instruction, causing stale cursors and repeated deliveries.
+  advanceFrontmatterCursors(filePath, projectDataList, newRunTs);
 }
 
 /**
@@ -773,7 +833,6 @@ memory_file: ${memoryFile}
 last_narrator_update_ts: ${lastTs ?? '(none)'}
 new_run_ts: ${newRunTs}
 
-IMPORTANT: After writing memory.md, you MUST set last_narrator_update_ts to exactly "${newRunTs}" (UTC ISO 8601) in the frontmatter of ${memoryFile}. This advances the cursor for the next run.
 IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
 
 ## Daily summaries to incorporate
@@ -785,4 +844,7 @@ ${summaryEntries.join('\n\n')}`;
     receiver: narratorId,
     timestamp: Date.now(),
   });
+
+  // Server-side cursor advancement for memory.md
+  writeFrontmatterField(memoryFile, 'last_narrator_update_ts', newRunTs);
 }
