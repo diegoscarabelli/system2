@@ -1,179 +1,73 @@
 /**
- * Skill Loader
+ * Skill Role Filter
  *
- * Discovers, parses, and merges SKILL.md files from built-in and user directories.
- * Compiles a compact XML index filtered by agent role for system prompt injection.
+ * Extracts the `roles` frontmatter field from skill files and filters
+ * SDK-discovered skills by agent role. Discovery, parsing, XML compilation,
+ * and prompt injection are handled by the pi-coding-agent SDK.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, sep } from 'node:path';
+import { readFileSync } from 'node:fs';
+import type { Skill } from '@mariozechner/pi-coding-agent';
 import matter from 'gray-matter';
 
-export interface SkillMeta {
-  name: string;
-  description: string;
-  /** Agent roles that can use this skill. Empty array = all roles. */
-  roles: string[];
-}
-
-export interface Skill {
-  meta: SkillMeta;
-  /** Absolute path to the SKILL.md file (agents read on demand). */
-  path: string;
-  source: 'builtin' | 'user';
-}
-
 /**
- * Parse a single SKILL.md file. Returns null if the file is invalid or unreadable.
+ * Extract the normalized `roles` array from a skill file's YAML frontmatter.
+ * Returns an empty array (meaning "all roles") if:
+ * - The file is unreadable or has no/invalid frontmatter
+ * - The `roles` field is omitted or an empty array
+ *
+ * Returns null if `roles` is present but entirely invalid (e.g. a number,
+ * or an array with no valid string entries), signalling the skill should
+ * be excluded.
  */
-export function parseSkillFile(filePath: string, source: 'builtin' | 'user'): Skill | null {
+export function extractRoles(filePath: string): string[] | null {
   let raw: string;
   try {
     raw = readFileSync(filePath, 'utf-8');
   } catch {
-    console.warn(`[Skills] Could not read ${filePath}, skipping`);
-    return null;
+    return [];
   }
 
   let parsed: matter.GrayMatterFile<string>;
   try {
     parsed = matter(raw);
   } catch {
-    console.warn(`[Skills] Invalid frontmatter in ${filePath}, skipping`);
-    return null;
-  }
-
-  const { data } = parsed;
-
-  if (!data.name || typeof data.name !== 'string') {
-    console.warn(`[Skills] Missing or invalid 'name' in ${filePath}, skipping`);
-    return null;
-  }
-  if (!data.description || typeof data.description !== 'string') {
-    console.warn(`[Skills] Missing or invalid 'description' in ${filePath}, skipping`);
-    return null;
-  }
-
-  // Normalize name: lowercase and trim for consistent merge key matching.
-  const name = data.name.trim().toLowerCase();
-  if (!name) {
-    console.warn(`[Skills] Empty 'name' after normalization in ${filePath}, skipping`);
-    return null;
-  }
-
-  // Normalize roles: omitted/undefined/empty = all roles (empty array).
-  // String value is coerced to single-element array.
-  // Mixed arrays (e.g. ["guide", 123]) silently drop non-string entries.
-  // Arrays with no valid string entries reject the file.
-  let roles: string[] = [];
-  if (data.roles != null) {
-    if (typeof data.roles === 'string') {
-      const trimmed = data.roles.trim().toLowerCase();
-      if (!trimmed) {
-        console.warn(`[Skills] Empty 'roles' string in ${filePath}, skipping`);
-        return null;
-      }
-      roles = [trimmed];
-    } else if (Array.isArray(data.roles)) {
-      const stringRoles = data.roles
-        .filter((r): r is string => typeof r === 'string')
-        .map((r) => r.trim().toLowerCase())
-        .filter((r) => r !== '');
-      if (stringRoles.length === 0 && data.roles.length > 0) {
-        console.warn(`[Skills] Invalid 'roles' entries in ${filePath}, skipping`);
-        return null;
-      }
-      roles = stringRoles;
-    } else {
-      console.warn(`[Skills] Invalid 'roles' type in ${filePath}, skipping`);
-      return null;
-    }
-  }
-
-  return {
-    meta: { name, description: data.description, roles },
-    path: filePath,
-    source,
-  };
-}
-
-/**
- * Scan a directory for .md skill files (flat, non-recursive).
- * Returns an empty array if the directory does not exist.
- */
-export function scanDirectory(dirPath: string, source: 'builtin' | 'user'): Skill[] {
-  if (!existsSync(dirPath)) return [];
-
-  let files: string[];
-  try {
-    files = readdirSync(dirPath).filter((f) => f.endsWith('.md') && f !== 'README.md');
-  } catch {
-    console.warn(`[Skills] Could not read directory ${dirPath}, skipping`);
     return [];
   }
-  const skills: Skill[] = [];
 
-  for (const file of files) {
-    const skill = parseSkillFile(join(dirPath, file), source);
-    if (skill) skills.push(skill);
+  const { roles } = parsed.data;
+
+  if (roles == null) return [];
+
+  if (typeof roles === 'string') {
+    const trimmed = roles.trim().toLowerCase();
+    return trimmed ? [trimmed] : null;
   }
 
-  return skills;
+  if (Array.isArray(roles)) {
+    const valid = roles
+      .filter((r): r is string => typeof r === 'string')
+      .map((r) => r.trim().toLowerCase())
+      .filter((r) => r !== '');
+    if (valid.length === 0 && roles.length > 0) return null;
+    return valid;
+  }
+
+  // Invalid type (number, boolean, object, etc.)
+  return null;
 }
 
 /**
- * Load skills from both directories, with user skills overriding built-in by name.
+ * Filter SDK Skill objects to those eligible for a given agent role.
+ * Skills whose frontmatter has no `roles` (or empty roles) are available to all roles.
+ * Skills with invalid `roles` metadata are excluded.
  */
-export function loadSkills(builtinDir: string, userDir: string): Skill[] {
-  const builtinSkills = scanDirectory(builtinDir, 'builtin');
-  const userSkills = scanDirectory(userDir, 'user');
-
-  // Built-in first, then user overwrites on name collision
-  const merged = new Map<string, Skill>();
-  for (const skill of builtinSkills) {
-    merged.set(skill.meta.name, skill);
-  }
-  for (const skill of userSkills) {
-    merged.set(skill.meta.name, skill);
-  }
-
-  return Array.from(merged.values());
-}
-
-/**
- * Filter skills to those eligible for a given agent role.
- * Skills with an empty roles array are available to all roles.
- */
-export function filterSkillsByRole(skills: Skill[], role: string): Skill[] {
+export function filterByRole(skills: Skill[], role: string): Skill[] {
+  if (!role) return skills;
   const normalizedRole = role.toLowerCase();
-  return skills.filter((s) => s.meta.roles.length === 0 || s.meta.roles.includes(normalizedRole));
-}
-
-/**
- * Compile a compact XML index of skills for system prompt injection.
- * Returns an empty string if there are no skills.
- */
-export function compileSkillsXml(skills: Skill[]): string {
-  if (skills.length === 0) return '';
-
-  const home = homedir();
-  const sorted = [...skills].sort((a, b) => a.meta.name.localeCompare(b.meta.name));
-
-  const entries = sorted.map((s) => {
-    const displayPath = (
-      s.path.startsWith(home + sep) ? `~${s.path.slice(home.length)}` : s.path
-    ).replace(/\\/g, '/');
-    return `<skill name="${escapeXml(s.meta.name)}" path="${escapeXml(displayPath)}" description="${escapeXml(s.meta.description)}" />`;
+  return skills.filter((skill) => {
+    const roles = extractRoles(skill.filePath);
+    if (roles === null) return false;
+    return roles.length === 0 || roles.includes(normalizedRole);
   });
-
-  return `<available_skills>\n${entries.join('\n')}\n</available_skills>`;
-}
-
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }

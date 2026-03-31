@@ -33,7 +33,7 @@ import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js';
 import type { ReminderManager } from '../reminders/manager.js';
-import { compileSkillsXml, filterSkillsByRole, loadSkills } from '../skills/loader.js';
+import { filterByRole } from '../skills/loader.js';
 import { AuthResolver } from './auth-resolver.js';
 import type { AgentRegistry } from './registry.js';
 import {
@@ -360,17 +360,22 @@ export class AgentHost {
       compaction: { reserveTokens: Math.floor(model.contextWindow * 0.5) },
     });
 
-    // Create resource loader with custom system prompt
+    // Create resource loader with custom system prompt.
+    // Knowledge files are re-read on every LLM call via reload() before each prompt.
+    // Skills are discovered by the SDK from our two directories, then filtered by agent role.
     this.resourceLoader = new DefaultResourceLoader({
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
-      // Static agent instructions (from package) + dynamic context (from ~/.system2/).
-      // Knowledge files and skills index are re-read on every LLM call via reload() before each prompt.
-      systemPromptOverride: () =>
-        `${staticPrompt}${this.loadKnowledgeContext()}${this.loadSkillsContext()}\n\n---\n\nConversation history follows.`,
-      // Disable default resource discovery (we manage our own)
-      noExtensions: true,
+      systemPromptOverride: () => `${staticPrompt}${this.loadKnowledgeContext()}`,
+      // Suppress SDK default skill directories (~/.pi/agent/skills/, .pi/skills/)
+      // but provide our own paths. User dir first for first-wins precedence.
       noSkills: true,
+      additionalSkillPaths: [join(SYSTEM2_DIR, 'skills'), join(AGENT_DIR, 'skills')],
+      skillsOverride: ({ skills, diagnostics }) => ({
+        skills: filterByRole(skills, this.agentRole ?? ''),
+        diagnostics,
+      }),
+      noExtensions: true,
       noPromptTemplates: true,
       noThemes: true,
     });
@@ -938,22 +943,6 @@ export class AgentHost {
 
     if (sections.length === 0) return '';
     return `\n\n## Knowledge Base\n\n${sections.join('\n\n---\n\n')}`;
-  }
-
-  /**
-   * Load skills from built-in and user directories, filter by role,
-   * and return a compact XML index for system prompt injection.
-   * Re-read on every turn so newly created skills are picked up immediately.
-   */
-  private loadSkillsContext(): string {
-    if (!this.agentRole) return '';
-    const builtinDir = join(AGENT_DIR, 'skills');
-    const userDir = join(SYSTEM2_DIR, 'skills');
-    const allSkills = loadSkills(builtinDir, userDir);
-    const eligible = filterSkillsByRole(allSkills, this.agentRole);
-    const xml = compileSkillsXml(eligible);
-    if (!xml) return '';
-    return `\n\n## Available Skills\n\n${xml}`;
   }
 
   /**

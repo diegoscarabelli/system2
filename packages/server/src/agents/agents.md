@@ -97,11 +97,15 @@ Your system prompt includes an XML index of skills filtered to your role:
 
 ```xml
 <available_skills>
-<skill name="deploy-pipeline" path="~/.system2/skills/deploy-pipeline.md" description="Deploy a data pipeline to DiegoTower" />
+  <skill>
+    <name>deploy-pipeline</name>
+    <description>Deploy a data pipeline to DiegoTower</description>
+    <location>~/.system2/skills/deploy-pipeline.md</location>
+  </skill>
 </available_skills>
 ```
 
-When a skill is relevant to your current task, use `read` to load the full SKILL.md at the given `path`. Follow the instructions as written unless you have a specific reason to deviate (in which case, note the deviation and your reasoning).
+When a skill is relevant to your current task, use `read` to load the full skill file at the given `location`. Follow the instructions as written unless you have a specific reason to deviate (in which case, note the deviation and your reasoning).
 
 Do not read skills preemptively. Read a skill only when you are about to perform the workflow it describes.
 
@@ -445,8 +449,9 @@ SYSTEM PROMPT (rebuilt on every LLM call):
        ---
        ### ~/.system2/knowledge/daily_summaries/2026-03-11.md
        [content]
-       ---
-       Conversation history follows.
+  4. Skills XML index (SDK-appended, filtered by role)
+       <available_skills>...</available_skills>
+  5. Current date and working directory (SDK-appended)
 
 MESSAGES (from JSONL session, ~/.system2/sessions/guide_1/):
   [turn 1] user: ...
@@ -477,8 +482,9 @@ SYSTEM PROMPT (rebuilt on every LLM call):
        ---
        ### ~/.system2/projects/1_linkedin-campaign/log.md
        [content]
-       ---
-       Conversation history follows.
+  4. Skills XML index (SDK-appended, filtered by role)
+       <available_skills>...</available_skills>
+  5. Current date and working directory (SDK-appended)
 
 MESSAGES (from JSONL session, ~/.system2/sessions/conductor_3/):
   [turn 1] user: [Message from guide agent (id=1)] Here is your project...

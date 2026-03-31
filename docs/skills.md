@@ -3,8 +3,8 @@
 Skills are reusable workflow instructions stored as `.md` files (one per skill) in the skills directories. They fill the gap between tools (single actions) and knowledge (accumulated facts) by capturing multi-step procedures that agents can follow when performing recurring tasks.
 
 **Key source files:**
-- `packages/server/src/skills/loader.ts`: skill discovery, parsing, merging, filtering, and XML compilation
-- `packages/server/src/agents/host.ts`: `loadSkillsContext()` method and prompt integration
+- `packages/server/src/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`)
+- `packages/server/src/agents/host.ts`: SDK wiring via `additionalSkillPaths` and `skillsOverride`
 - `packages/server/src/agents/agents.md`: agent-facing documentation (## Skills section)
 - `packages/server/src/knowledge/init.ts`: `~/.system2/skills/` directory creation
 
@@ -49,25 +49,27 @@ The `~/.system2/skills/` directory is created automatically during server initia
 
 ## Discovery and Injection
 
-On every LLM call, `AgentHost.loadSkillsContext()`:
+Skill discovery, frontmatter parsing, XML compilation, and prompt injection are delegated to the pi-coding-agent SDK. The server configures the SDK with two custom skill paths via `additionalSkillPaths` (user directory listed first for precedence) and a `skillsOverride` callback that filters skills by agent role.
 
-1. Scans both directories for `.md` files (flat, non-recursive)
-2. Parses YAML frontmatter with `gray-matter`
-3. Merges skills by name (user overrides built-in)
-4. Filters to skills eligible for the current agent's role
-5. Compiles a compact XML index
-6. Returns the index under a `## Available Skills` heading
+On every LLM call, the SDK:
 
-The XML is appended to the system prompt after the Knowledge Base section:
+1. Scans both directories for `.md` files
+2. Parses YAML frontmatter (name, description)
+3. Merges skills by name (first path wins, so user overrides built-in)
+4. Calls `skillsOverride`, where `filterByRole` removes skills not eligible for the current agent's role
+5. Appends a compact XML index to the system prompt after the custom prompt sections
 
 ```xml
 <available_skills>
-<skill name="deploy-pipeline" path="~/.system2/skills/deploy-pipeline.md" description="Deploy a data pipeline to DiegoTower with validation" />
-<skill name="code-review" path="/path/to/dist/agents/skills/code-review.md" description="Run a structured code review" />
+  <skill>
+    <name>deploy-pipeline</name>
+    <description>Deploy a data pipeline to DiegoTower with validation</description>
+    <location>~/.system2/skills/deploy-pipeline.md</location>
+  </skill>
 </available_skills>
 ```
 
-Agents use the `read` tool to load the full SKILL.md content when a skill is relevant to their current task. Skills are not read preemptively.
+Agents use the `read` tool to load the full skill content at the given `location` when a skill is relevant to their current task. Skills are not read preemptively.
 
 ## Skill Creation by Agents
 

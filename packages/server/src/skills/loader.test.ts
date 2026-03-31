@@ -1,15 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Skill } from '@mariozechner/pi-coding-agent';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  compileSkillsXml,
-  filterSkillsByRole,
-  loadSkills,
-  parseSkillFile,
-  type Skill,
-  scanDirectory,
-} from './loader.js';
+import { extractRoles, filterByRole } from './loader.js';
 
 let tempDir: string;
 
@@ -21,368 +15,226 @@ afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
-function writeSkill(dir: string, filename: string, frontmatter: Record<string, unknown>): string {
-  const fm = Object.entries(frontmatter)
-    .map(([k, v]) => {
-      if (Array.isArray(v)) return `${k}: [${v.map((i) => `"${i}"`).join(', ')}]`;
-      return `${k}: "${v}"`;
-    })
-    .join('\n');
-  const content = `---\n${fm}\n---\n\n# ${frontmatter.name ?? 'Test'}\n\nInstructions here.\n`;
+function writeSkillFile(dir: string, filename: string, content: string): string {
   const filePath = join(dir, filename);
   writeFileSync(filePath, content, 'utf-8');
   return filePath;
 }
 
-describe('parseSkillFile', () => {
-  it('parses a valid skill file', () => {
-    const path = writeSkill(tempDir, 'deploy.md', {
-      name: 'deploy',
-      description: 'Deploy to production',
-      roles: ['conductor'],
-    });
-    const skill = parseSkillFile(path, 'user');
-    expect(skill).not.toBeNull();
-    expect(skill?.meta.name).toBe('deploy');
-    expect(skill?.meta.description).toBe('Deploy to production');
-    expect(skill?.meta.roles).toEqual(['conductor']);
-    expect(skill?.source).toBe('user');
-    expect(skill?.path).toBe(path);
+function makeSdkSkill(overrides: Partial<Skill> & { filePath: string }): Skill {
+  return {
+    name: 'test',
+    description: 'Test skill',
+    baseDir: '/fake',
+    sourceInfo: { type: 'path' },
+    disableModelInvocation: false,
+    ...overrides,
+  } as Skill;
+}
+
+describe('extractRoles', () => {
+  it('returns roles array from valid frontmatter', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'deploy.md',
+      '---\nname: deploy\ndescription: Deploy\nroles: [conductor]\n---\n\nContent\n'
+    );
+    expect(extractRoles(path)).toEqual(['conductor']);
   });
 
-  it('returns null for missing name', () => {
-    const path = writeSkill(tempDir, 'bad.md', {
-      description: 'No name here',
-    });
-    expect(parseSkillFile(path, 'builtin')).toBeNull();
+  it('normalizes roles to lowercase', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\nroles: [Conductor, REVIEWER]\n---\n\nContent\n'
+    );
+    expect(extractRoles(path)).toEqual(['conductor', 'reviewer']);
   });
 
-  it('returns null for missing description', () => {
-    const path = writeSkill(tempDir, 'bad.md', {
-      name: 'no-desc',
-    });
-    expect(parseSkillFile(path, 'builtin')).toBeNull();
-  });
-
-  it('returns null for non-existent file', () => {
-    expect(parseSkillFile(join(tempDir, 'nope.md'), 'user')).toBeNull();
-  });
-
-  it('returns null for file with no frontmatter', () => {
-    const path = join(tempDir, 'plain.md');
-    writeFileSync(path, '# Just markdown\n\nNo frontmatter here.\n', 'utf-8');
-    expect(parseSkillFile(path, 'user')).toBeNull();
-  });
-
-  it('normalizes roles string to array', () => {
-    const path = writeSkill(tempDir, 'single-role.md', {
-      name: 'single',
-      description: 'Single role',
-      roles: 'Guide',
-    });
-    const skill = parseSkillFile(path, 'user');
-    expect(skill?.meta.roles).toEqual(['guide']);
-  });
-
-  it('normalizes roles array to lowercase', () => {
-    const path = writeSkill(tempDir, 'mixed.md', {
-      name: 'mixed',
-      description: 'Mixed case roles',
-      roles: ['Conductor', 'REVIEWER'],
-    });
-    const skill = parseSkillFile(path, 'builtin');
-    expect(skill?.meta.roles).toEqual(['conductor', 'reviewer']);
-  });
-
-  it('treats omitted roles as empty array (all roles)', () => {
-    const path = writeSkill(tempDir, 'all.md', {
-      name: 'all-roles',
-      description: 'For everyone',
-    });
-    const skill = parseSkillFile(path, 'user');
-    expect(skill?.meta.roles).toEqual([]);
-  });
-
-  it('treats empty roles array as all roles', () => {
-    const path = join(tempDir, 'empty-roles.md');
-    writeFileSync(path, '---\nname: empty\ndescription: Empty roles\nroles: []\n---\n\nContent\n');
-    const skill = parseSkillFile(path, 'user');
-    expect(skill?.meta.roles).toEqual([]);
-  });
-
-  it('normalizes name to lowercase and trims whitespace', () => {
-    const path = writeSkill(tempDir, 'cased.md', {
-      name: '  Deploy-Pipeline ',
-      description: 'Cased name',
-    });
-    const skill = parseSkillFile(path, 'user');
-    expect(skill?.meta.name).toBe('deploy-pipeline');
-  });
-
-  it('returns null for whitespace-only name', () => {
-    const path = join(tempDir, 'spaces.md');
-    writeFileSync(path, '---\nname: "   "\ndescription: Blank name\n---\n\nContent\n');
-    expect(parseSkillFile(path, 'user')).toBeNull();
+  it('coerces string roles to single-element array', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\nroles: Guide\n---\n\nContent\n'
+    );
+    expect(extractRoles(path)).toEqual(['guide']);
   });
 
   it('trims whitespace from roles string', () => {
-    const path = writeSkill(tempDir, 'trim-role.md', {
-      name: 'trim',
-      description: 'Trimmed role',
-      roles: ' conductor ',
-    });
-    const skill = parseSkillFile(path, 'user');
-    expect(skill?.meta.roles).toEqual(['conductor']);
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\nroles: " conductor "\n---\n\nContent\n'
+    );
+    expect(extractRoles(path)).toEqual(['conductor']);
   });
 
   it('trims whitespace from roles array entries', () => {
-    const path = join(tempDir, 'trim-array.md');
-    writeFileSync(
-      path,
-      '---\nname: trim\ndescription: Trimmed array\nroles:\n  - " guide "\n  - " reviewer "\n---\n\nContent\n'
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\nroles:\n  - " guide "\n  - " reviewer "\n---\n\nContent\n'
     );
-    const skill = parseSkillFile(path, 'user');
-    expect(skill?.meta.roles).toEqual(['guide', 'reviewer']);
+    expect(extractRoles(path)).toEqual(['guide', 'reviewer']);
+  });
+
+  it('returns empty array when roles is omitted', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\n---\n\nContent\n'
+    );
+    expect(extractRoles(path)).toEqual([]);
+  });
+
+  it('returns empty array for empty roles array', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\nroles: []\n---\n\nContent\n'
+    );
+    expect(extractRoles(path)).toEqual([]);
   });
 
   it('returns null for whitespace-only roles string', () => {
-    const path = join(tempDir, 'ws-role.md');
-    writeFileSync(path, '---\nname: ws\ndescription: WS role\nroles: "   "\n---\n\nContent\n');
-    expect(parseSkillFile(path, 'user')).toBeNull();
-  });
-
-  it('filters out empty-string roles from array after trimming', () => {
-    const path = join(tempDir, 'empty-entry.md');
-    writeFileSync(
-      path,
-      '---\nname: mixed\ndescription: Mixed\nroles:\n  - "guide"\n  - "   "\n---\n\nContent\n'
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\nroles: "   "\n---\n\nContent\n'
     );
-    const skill = parseSkillFile(path, 'user');
-    expect(skill?.meta.roles).toEqual(['guide']);
+    expect(extractRoles(path)).toBeNull();
   });
 
   it('returns null for invalid roles type (number)', () => {
-    const path = join(tempDir, 'bad-roles.md');
-    writeFileSync(path, '---\nname: bad\ndescription: Bad roles\nroles: 42\n---\n\nContent\n');
-    expect(parseSkillFile(path, 'user')).toBeNull();
-  });
-
-  it('returns null for roles array with only non-string entries', () => {
-    const path = join(tempDir, 'bad-array.md');
-    writeFileSync(
-      path,
-      '---\nname: bad\ndescription: Bad array\nroles:\n  - 1\n  - 2\n---\n\nContent\n'
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\nroles: 42\n---\n\nContent\n'
     );
-    expect(parseSkillFile(path, 'user')).toBeNull();
-  });
-});
-
-describe('scanDirectory', () => {
-  it('returns empty array for non-existent directory', () => {
-    expect(scanDirectory(join(tempDir, 'nope'), 'user')).toEqual([]);
+    expect(extractRoles(path)).toBeNull();
   });
 
-  it('returns empty array for empty directory', () => {
-    const dir = join(tempDir, 'empty');
-    mkdirSync(dir);
-    expect(scanDirectory(dir, 'builtin')).toEqual([]);
-  });
-
-  it('scans valid skill files', () => {
-    writeSkill(tempDir, 'a.md', { name: 'alpha', description: 'Alpha skill' });
-    writeSkill(tempDir, 'b.md', { name: 'beta', description: 'Beta skill' });
-    const skills = scanDirectory(tempDir, 'user');
-    expect(skills).toHaveLength(2);
-    expect(skills.map((s) => s.meta.name).sort()).toEqual(['alpha', 'beta']);
-  });
-
-  it('skips invalid files and includes valid ones', () => {
-    writeSkill(tempDir, 'good.md', { name: 'good', description: 'Good one' });
-    writeFileSync(join(tempDir, 'bad.md'), '# No frontmatter\n', 'utf-8');
-    const skills = scanDirectory(tempDir, 'builtin');
-    expect(skills).toHaveLength(1);
-    expect(skills[0].meta.name).toBe('good');
-  });
-
-  it('skips README.md', () => {
-    writeFileSync(
-      join(tempDir, 'README.md'),
-      '---\nname: readme\ndescription: Should be skipped\n---\n'
+  it('returns null for array with only non-string entries', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\nroles:\n  - 1\n  - 2\n---\n\nContent\n'
     );
-    writeSkill(tempDir, 'real.md', { name: 'real', description: 'Real skill' });
-    const skills = scanDirectory(tempDir, 'builtin');
-    expect(skills).toHaveLength(1);
-    expect(skills[0].meta.name).toBe('real');
+    expect(extractRoles(path)).toBeNull();
+  });
+
+  it('filters out empty-string entries from mixed array', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\nroles:\n  - "guide"\n  - "   "\n---\n\nContent\n'
+    );
+    expect(extractRoles(path)).toEqual(['guide']);
+  });
+
+  it('silently drops non-string entries from mixed array', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'test.md',
+      '---\nname: test\ndescription: Test\nroles:\n  - guide\n  - 123\n---\n\nContent\n'
+    );
+    expect(extractRoles(path)).toEqual(['guide']);
+  });
+
+  it('returns empty array for non-existent file', () => {
+    expect(extractRoles(join(tempDir, 'nope.md'))).toEqual([]);
+  });
+
+  it('returns empty array for file with no frontmatter', () => {
+    const path = writeSkillFile(tempDir, 'plain.md', '# Just markdown\n\nNo frontmatter.\n');
+    expect(extractRoles(path)).toEqual([]);
   });
 });
 
-describe('loadSkills', () => {
-  let builtinDir: string;
-  let userDir: string;
+describe('filterByRole', () => {
+  function skillAt(filePath: string): Skill {
+    return makeSdkSkill({ filePath });
+  }
 
-  beforeEach(() => {
-    builtinDir = join(tempDir, 'builtin');
-    userDir = join(tempDir, 'user');
-    mkdirSync(builtinDir);
-    mkdirSync(userDir);
-  });
-
-  it('merges skills from both directories', () => {
-    writeSkill(builtinDir, 'a.md', { name: 'alpha', description: 'Built-in alpha' });
-    writeSkill(userDir, 'b.md', { name: 'beta', description: 'User beta' });
-    const skills = loadSkills(builtinDir, userDir);
-    expect(skills).toHaveLength(2);
-  });
-
-  it('user skill overrides built-in with same name', () => {
-    writeSkill(builtinDir, 'deploy.md', { name: 'deploy', description: 'Built-in deploy' });
-    writeSkill(userDir, 'deploy.md', { name: 'deploy', description: 'User deploy' });
-    const skills = loadSkills(builtinDir, userDir);
-    expect(skills).toHaveLength(1);
-    expect(skills[0].meta.description).toBe('User deploy');
-    expect(skills[0].source).toBe('user');
-  });
-
-  it('user skill overrides built-in regardless of name casing', () => {
-    writeSkill(builtinDir, 'deploy.md', { name: 'deploy', description: 'Built-in' });
-    writeSkill(userDir, 'deploy.md', { name: 'Deploy', description: 'User' });
-    const skills = loadSkills(builtinDir, userDir);
-    expect(skills).toHaveLength(1);
-    expect(skills[0].meta.description).toBe('User');
-  });
-
-  it('handles empty directories', () => {
-    expect(loadSkills(builtinDir, userDir)).toEqual([]);
-  });
-
-  it('handles non-existent directories', () => {
-    expect(loadSkills(join(tempDir, 'nope1'), join(tempDir, 'nope2'))).toEqual([]);
-  });
-});
-
-describe('filterSkillsByRole', () => {
-  const allRolesSkill: Skill = {
-    meta: { name: 'shared', description: 'For all', roles: [] },
-    path: '/fake/shared.md',
-    source: 'builtin',
-  };
-  const conductorSkill: Skill = {
-    meta: { name: 'deploy', description: 'Deploy', roles: ['conductor'] },
-    path: '/fake/deploy.md',
-    source: 'user',
-  };
-  const guideReviewerSkill: Skill = {
-    meta: { name: 'review', description: 'Review', roles: ['guide', 'reviewer'] },
-    path: '/fake/review.md',
-    source: 'builtin',
-  };
-
-  it('includes all-role skills for any role', () => {
-    const result = filterSkillsByRole([allRolesSkill], 'narrator');
+  it('includes skills with no roles restriction (all roles)', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'all.md',
+      '---\nname: all\ndescription: For all\n---\n\nContent\n'
+    );
+    const result = filterByRole([skillAt(path)], 'narrator');
     expect(result).toHaveLength(1);
   });
 
-  it('includes role-specific skill for matching role', () => {
-    const result = filterSkillsByRole([conductorSkill], 'conductor');
+  it('includes skills matching the agent role', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'deploy.md',
+      '---\nname: deploy\ndescription: Deploy\nroles: [conductor]\n---\n\nContent\n'
+    );
+    const result = filterByRole([skillAt(path)], 'conductor');
     expect(result).toHaveLength(1);
   });
 
-  it('excludes role-specific skill for non-matching role', () => {
-    const result = filterSkillsByRole([conductorSkill], 'guide');
+  it('excludes skills not matching the agent role', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'deploy.md',
+      '---\nname: deploy\ndescription: Deploy\nroles: [conductor]\n---\n\nContent\n'
+    );
+    const result = filterByRole([skillAt(path)], 'guide');
     expect(result).toHaveLength(0);
   });
 
-  it('handles mixed skills correctly', () => {
-    const all = [allRolesSkill, conductorSkill, guideReviewerSkill];
-    expect(filterSkillsByRole(all, 'conductor')).toHaveLength(2); // shared + deploy
-    expect(filterSkillsByRole(all, 'guide')).toHaveLength(2); // shared + review
-    expect(filterSkillsByRole(all, 'reviewer')).toHaveLength(2); // shared + review
-    expect(filterSkillsByRole(all, 'narrator')).toHaveLength(1); // shared only
+  it('excludes skills with invalid roles metadata', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'bad.md',
+      '---\nname: bad\ndescription: Bad\nroles: 42\n---\n\nContent\n'
+    );
+    const result = filterByRole([skillAt(path)], 'conductor');
+    expect(result).toHaveLength(0);
   });
 
   it('normalizes role comparison to lowercase', () => {
-    const result = filterSkillsByRole([conductorSkill], 'Conductor');
+    const path = writeSkillFile(
+      tempDir,
+      'deploy.md',
+      '---\nname: deploy\ndescription: Deploy\nroles: [conductor]\n---\n\nContent\n'
+    );
+    const result = filterByRole([skillAt(path)], 'Conductor');
     expect(result).toHaveLength(1);
   });
-});
 
-describe('compileSkillsXml', () => {
-  it('returns empty string for no skills', () => {
-    expect(compileSkillsXml([])).toBe('');
+  it('handles mixed skills correctly', () => {
+    const allPath = writeSkillFile(
+      tempDir,
+      'all.md',
+      '---\nname: all\ndescription: For all\n---\n\nContent\n'
+    );
+    const conductorPath = writeSkillFile(
+      tempDir,
+      'deploy.md',
+      '---\nname: deploy\ndescription: Deploy\nroles: [conductor]\n---\n\nContent\n'
+    );
+    const guidePath = writeSkillFile(
+      tempDir,
+      'review.md',
+      '---\nname: review\ndescription: Review\nroles: [guide, reviewer]\n---\n\nContent\n'
+    );
+    const all = [skillAt(allPath), skillAt(conductorPath), skillAt(guidePath)];
+    expect(filterByRole(all, 'conductor')).toHaveLength(2); // all + deploy
+    expect(filterByRole(all, 'guide')).toHaveLength(2); // all + review
+    expect(filterByRole(all, 'narrator')).toHaveLength(1); // all only
   });
 
-  it('produces valid XML structure', () => {
-    const skills: Skill[] = [
-      {
-        meta: { name: 'deploy', description: 'Deploy to prod', roles: [] },
-        path: '/home/user/skills/deploy.md',
-        source: 'user',
-      },
-    ];
-    const xml = compileSkillsXml(skills);
-    expect(xml).toContain('<available_skills>');
-    expect(xml).toContain('</available_skills>');
-    expect(xml).toContain('name="deploy"');
-    expect(xml).toContain('description="Deploy to prod"');
-  });
-
-  it('sorts skills alphabetically by name', () => {
-    const skills: Skill[] = [
-      {
-        meta: { name: 'zeta', description: 'Z', roles: [] },
-        path: '/tmp/zeta.md',
-        source: 'builtin',
-      },
-      {
-        meta: { name: 'alpha', description: 'A', roles: [] },
-        path: '/tmp/alpha.md',
-        source: 'builtin',
-      },
-    ];
-    const xml = compileSkillsXml(skills);
-    const alphaIdx = xml.indexOf('name="alpha"');
-    const zetaIdx = xml.indexOf('name="zeta"');
-    expect(alphaIdx).toBeLessThan(zetaIdx);
-  });
-
-  it('escapes XML special characters', () => {
-    const skills: Skill[] = [
-      {
-        meta: { name: 'test', description: 'Uses <bash> & "quotes"', roles: [] },
-        path: '/tmp/test.md',
-        source: 'builtin',
-      },
-    ];
-    const xml = compileSkillsXml(skills);
-    expect(xml).toContain('&lt;bash&gt;');
-    expect(xml).toContain('&amp;');
-    expect(xml).toContain('&quot;quotes&quot;');
-  });
-
-  it('replaces home directory with ~ in paths', () => {
-    const home = homedir();
-    const skills: Skill[] = [
-      {
-        meta: { name: 'test', description: 'Test', roles: [] },
-        path: join(home, '.system2', 'skills', 'test.md'),
-        source: 'user',
-      },
-    ];
-    const xml = compileSkillsXml(skills);
-    expect(xml).toContain('~/.system2/skills/test.md');
-  });
-
-  it('does not replace home directory when it appears mid-path', () => {
-    const home = homedir();
-    const skills: Skill[] = [
-      {
-        meta: { name: 'test', description: 'Test', roles: [] },
-        path: `/other${home}/skills/test.md`,
-        source: 'builtin',
-      },
-    ];
-    const xml = compileSkillsXml(skills);
-    expect(xml).not.toContain('path="~');
-    expect(xml).toContain(`/other${home}/skills/test.md`);
+  it('returns all skills when role is empty', () => {
+    const path = writeSkillFile(
+      tempDir,
+      'deploy.md',
+      '---\nname: deploy\ndescription: Deploy\nroles: [conductor]\n---\n\nContent\n'
+    );
+    const result = filterByRole([skillAt(path)], '');
+    expect(result).toHaveLength(1);
   });
 });
