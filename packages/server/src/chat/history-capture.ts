@@ -13,13 +13,18 @@ import type { MessageHistory } from './history.js';
 /**
  * Create a subscriber function that captures agent events into the chat cache.
  *
+ * Accepts a getter so the cache is resolved lazily on the first event, not at
+ * subscription time. This is important because subscriptions are set up before
+ * AgentHost.initialize() (to avoid missing events), but chatCache is only
+ * available after initialize() creates the MessageHistory instance.
+ *
  * Accumulates thinking blocks and tool calls as turn events, then persists
  * the complete assistant message on message_end. Tool-only turns (thinking +
  * tool calls without text) are also persisted. Compaction events are recorded
  * as system messages.
  */
 export function createHistoryCaptureSubscriber(
-  chatCache: MessageHistory
+  getChatCache: () => MessageHistory
 ): (event: AgentSessionEvent) => void {
   let currentAssistantText = '';
   let activeThinkingContent = '';
@@ -60,7 +65,7 @@ export function createHistoryCaptureSubscriber(
             timestamp: Date.now(),
             turnEvents: currentTurnEvents.length > 0 ? [...currentTurnEvents] : undefined,
           };
-          chatCache.push(assistantMsg);
+          getChatCache().push(assistantMsg);
           currentAssistantText = '';
           currentTurnEvents = [];
         }
@@ -138,7 +143,7 @@ export function createHistoryCaptureSubscriber(
 
       case 'compaction_start':
       case 'compaction_end':
-        chatCache.push({
+        getChatCache().push({
           id: `msg-${Date.now()}`,
           role: 'system',
           content:

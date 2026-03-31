@@ -438,7 +438,7 @@ export class Server {
    * then persists the complete assistant message on message_end.
    */
   private subscribeForHistoryCapture(agentHost: AgentHost): void {
-    agentHost.subscribe(createHistoryCaptureSubscriber(agentHost.chatCache));
+    agentHost.subscribe(createHistoryCaptureSubscriber(() => agentHost.chatCache));
   }
 
   async start(): Promise<void> {

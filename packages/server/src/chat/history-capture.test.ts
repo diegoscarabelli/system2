@@ -48,7 +48,7 @@ function toolEnd(toolName: string, result?: string, isError = false): AgentSessi
 describe('createHistoryCaptureSubscriber', () => {
   it('captures text-only assistant turn', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(cache as unknown as MessageHistory);
+    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
     sub(textDelta('Hello '));
     sub(textDelta('world'));
@@ -63,7 +63,7 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('captures tool-only turn (no text)', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(cache as unknown as MessageHistory);
+    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
     sub(thinkingDelta('Let me think...'));
     sub(toolStart('read_file', { path: '/tmp/foo' }));
@@ -85,7 +85,7 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('does not push when message_end fires with no content or events', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(cache as unknown as MessageHistory);
+    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
     sub(messageEnd());
 
@@ -94,7 +94,7 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('captures compaction_start as system message', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(cache as unknown as MessageHistory);
+    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
     sub({ type: 'compaction_start' } as unknown as AgentSessionEvent);
 
@@ -106,7 +106,7 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('captures compaction_end as system message', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(cache as unknown as MessageHistory);
+    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
     sub({ type: 'compaction_end' } as unknown as AgentSessionEvent);
 
@@ -118,7 +118,7 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('captures text + tool calls in the same turn', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(cache as unknown as MessageHistory);
+    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
     sub(thinkingDelta('Thinking...'));
     sub(toolStart('bash', 'ls'));
@@ -142,7 +142,7 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('marks tool error results with Error prefix', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(cache as unknown as MessageHistory);
+    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
     sub(toolStart('bash', 'bad-cmd'));
     sub(toolEnd('bash', 'command not found', true));
