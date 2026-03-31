@@ -8,7 +8,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 - `packages/server/src/agents/auth-resolver.ts`: AuthResolver
 - `packages/server/src/agents/library/`: agent identity and system instructions (Markdown + YAML frontmatter)
 - `packages/server/src/agents/agents.md`: shared reference prepended to all system prompts
-- `packages/server/src/skills/loader.ts`: skill discovery, parsing, and XML index compilation
+- `packages/server/src/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`); discovery and XML injection are handled by the pi-coding-agent SDK
 
 ## Agent Roles
 
@@ -58,7 +58,7 @@ Each agent's system prompt is assembled from five layers:
 | Role-aware context | Project log (`projects/{id}_{name}/log.md`) for project-scoped agents, or last 2 daily summaries for system-wide agents | **Every LLM call** |
 | Skills index | Built-in (`agents/skills/`) + user (`~/.system2/skills/`), filtered by role, compiled as XML | **Every LLM call** |
 
-The static layers are concatenated into `staticPrompt`. The dynamic layers are loaded via `loadKnowledgeContext()` and `loadSkillsContext()`, which are called from the `systemPromptOverride` callback passed to the Pi SDK's `DefaultResourceLoader`. Since the SDK only invokes this callback during `reload()` (not on every `prompt()` call), `AgentHost` explicitly calls `resourceLoader.reload()` before each prompt to ensure knowledge files and skills are re-read. This means knowledge and skill updates take effect immediately without server restarts.
+The static layers are concatenated into `staticPrompt`. Knowledge is loaded via `loadKnowledgeContext()`, called from the `systemPromptOverride` callback passed to the Pi SDK's `DefaultResourceLoader`. Skills are wired through the SDK via `additionalSkillPaths` (providing both skill directories) and `skillsOverride` (filtering by agent role). Since the SDK only invokes these callbacks during `reload()` (not on every `prompt()` call), `AgentHost` explicitly calls `resourceLoader.reload()` before each prompt to ensure knowledge files and skills are re-read. This means knowledge and skill updates take effect immediately without server restarts.
 
 Empty files are skipped.
 
