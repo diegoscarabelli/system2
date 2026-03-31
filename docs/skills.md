@@ -45,7 +45,7 @@ Skills are loaded from two directories:
 
 When a user skill has the same `name` as a built-in skill, the user skill takes precedence. This allows users (or agents) to override or customize built-in workflows.
 
-The `~/.system2/skills/` directory is created automatically during server initialization and is git-tracked in the `~/.system2` repository.
+The `~/.system2/skills/` directory is created automatically during server initialization. Skill files placed here are tracked by the `~/.system2` git repository once they exist (git does not track empty directories).
 
 ## Discovery and Injection
 

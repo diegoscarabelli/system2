@@ -64,15 +64,16 @@ export function parseSkillFile(filePath: string, source: 'builtin' | 'user'): Sk
 
   // Normalize roles: omitted/undefined/empty = all roles (empty array).
   // String value is coerced to single-element array.
-  // Invalid types or arrays with no valid string entries reject the file.
+  // Mixed arrays (e.g. ["guide", 123]) silently drop non-string entries.
+  // Arrays with no valid string entries reject the file.
   let roles: string[] = [];
   if (data.roles != null) {
     if (typeof data.roles === 'string') {
-      roles = [data.roles.toLowerCase()];
+      roles = [data.roles.trim().toLowerCase()];
     } else if (Array.isArray(data.roles)) {
       const stringRoles = data.roles
         .filter((r): r is string => typeof r === 'string')
-        .map((r) => r.toLowerCase());
+        .map((r) => r.trim().toLowerCase());
       if (stringRoles.length === 0 && data.roles.length > 0) {
         console.warn(`[Skills] Invalid 'roles' entries in ${filePath}, skipping`);
         return null;

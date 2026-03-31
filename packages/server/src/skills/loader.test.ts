@@ -125,6 +125,26 @@ describe('parseSkillFile', () => {
     expect(parseSkillFile(path, 'user')).toBeNull();
   });
 
+  it('trims whitespace from roles string', () => {
+    const path = writeSkill(tempDir, 'trim-role.md', {
+      name: 'trim',
+      description: 'Trimmed role',
+      roles: ' conductor ',
+    });
+    const skill = parseSkillFile(path, 'user');
+    expect(skill?.meta.roles).toEqual(['conductor']);
+  });
+
+  it('trims whitespace from roles array entries', () => {
+    const path = join(tempDir, 'trim-array.md');
+    writeFileSync(
+      path,
+      '---\nname: trim\ndescription: Trimmed array\nroles:\n  - " guide "\n  - " reviewer "\n---\n\nContent\n'
+    );
+    const skill = parseSkillFile(path, 'user');
+    expect(skill?.meta.roles).toEqual(['guide', 'reviewer']);
+  });
+
   it('returns null for invalid roles type (number)', () => {
     const path = join(tempDir, 'bad-roles.md');
     writeFileSync(path, '---\nname: bad\ndescription: Bad roles\nroles: 42\n---\n\nContent\n');

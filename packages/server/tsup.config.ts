@@ -50,7 +50,7 @@ export default defineConfig({
       for (const file of skillFiles) {
         copyFileSync(join(srcSkills, file), join(destSkills, file));
       }
-      console.log(`✓ Copied ${skillFiles.length} skill files to dist/`);
+      console.log(`✓ Copied ${skillFiles.length} skill files to dist/agents/skills/`);
     } else {
       console.log('✓ No built-in skills directory found, skipping');
     }
