@@ -64,6 +64,7 @@ Each project log is a single continuous file per project lifetime (unlike daily 
    - **Project Activity:** included only for projects that have agent JSONL entries or DB changes in the window; inactive projects are omitted entirely. The entire section is omitted when no project has changes.
    - **Non-Project Activity:** Guide JSONL (via `dailySummarySystemAgents`, which excludes Narrator to prevent recursive embedding of its own `custom_message` injections) and DB changes not tied to any active project. Omitted when there is no non-project activity.
 6. **Deliver:** send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
+7. **Advance cursors:** after all deliveries complete (or on skip), the server writes `newRunTs` to `last_narrator_update_ts` in the daily summary file and each project's `log.md` frontmatter. This runs after `agent_end`, so the Narrator has already finished editing the files. On skip (no activity), the cursor still advances to prevent re-scanning the same empty window.
 
 The Narrator synthesizes each section into narrative summaries, avoiding repetition of project-specific content already covered in project-log entries (which are processed first).
 
@@ -76,6 +77,7 @@ The Narrator synthesizes each section into narrative summaries, avoiding repetit
 3. Read each file and embed its content inline in the message
 4. Deliver to Narrator via `deliverMessage()` with all summary content included
 5. Narrator incorporates summaries into `memory.md`, clears processed Notes
+6. Server advances `last_narrator_update_ts` in `memory.md` frontmatter after delivery completes
 
 ## Catch-Up on Startup
 
