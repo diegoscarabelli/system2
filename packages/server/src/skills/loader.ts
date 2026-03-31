@@ -69,11 +69,17 @@ export function parseSkillFile(filePath: string, source: 'builtin' | 'user'): Sk
   let roles: string[] = [];
   if (data.roles != null) {
     if (typeof data.roles === 'string') {
-      roles = [data.roles.trim().toLowerCase()];
+      const trimmed = data.roles.trim().toLowerCase();
+      if (!trimmed) {
+        console.warn(`[Skills] Empty 'roles' string in ${filePath}, skipping`);
+        return null;
+      }
+      roles = [trimmed];
     } else if (Array.isArray(data.roles)) {
       const stringRoles = data.roles
         .filter((r): r is string => typeof r === 'string')
-        .map((r) => r.trim().toLowerCase());
+        .map((r) => r.trim().toLowerCase())
+        .filter((r) => r !== '');
       if (stringRoles.length === 0 && data.roles.length > 0) {
         console.warn(`[Skills] Invalid 'roles' entries in ${filePath}, skipping`);
         return null;

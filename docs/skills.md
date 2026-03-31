@@ -1,6 +1,6 @@
 # Skills
 
-Skills are reusable workflow instructions stored as SKILL.md files. They fill the gap between tools (single actions) and knowledge (accumulated facts) by capturing multi-step procedures that agents can follow when performing recurring tasks.
+Skills are reusable workflow instructions stored as `.md` files (one per skill) in the skills directories. They fill the gap between tools (single actions) and knowledge (accumulated facts) by capturing multi-step procedures that agents can follow when performing recurring tasks.
 
 **Key source files:**
 - `packages/server/src/skills/loader.ts`: skill discovery, parsing, merging, filtering, and XML compilation

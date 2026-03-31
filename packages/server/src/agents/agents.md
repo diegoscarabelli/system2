@@ -81,7 +81,7 @@ The **Guide** is the primary user-facing agent. However, the user may choose to 
 
 ## Skills
 
-Skills are reusable workflow instructions stored as SKILL.md files. They capture multi-step procedures that go beyond a single tool call but do not belong in the knowledge base (which stores facts and accumulated state, not procedures).
+Skills are reusable workflow instructions stored as `.md` files (one per skill) in the skills directories. They capture multi-step procedures that go beyond a single tool call but do not belong in the knowledge base (which stores facts and accumulated state, not procedures).
 
 **The litmus test:** "Am I writing down a fact, or a workflow I'd want to follow again?" If it is a fact, it is knowledge. If it is a procedure, it is a skill.
 

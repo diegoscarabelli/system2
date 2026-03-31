@@ -145,6 +145,22 @@ describe('parseSkillFile', () => {
     expect(skill?.meta.roles).toEqual(['guide', 'reviewer']);
   });
 
+  it('returns null for whitespace-only roles string', () => {
+    const path = join(tempDir, 'ws-role.md');
+    writeFileSync(path, '---\nname: ws\ndescription: WS role\nroles: "   "\n---\n\nContent\n');
+    expect(parseSkillFile(path, 'user')).toBeNull();
+  });
+
+  it('filters out empty-string roles from array after trimming', () => {
+    const path = join(tempDir, 'empty-entry.md');
+    writeFileSync(
+      path,
+      '---\nname: mixed\ndescription: Mixed\nroles:\n  - "guide"\n  - "   "\n---\n\nContent\n'
+    );
+    const skill = parseSkillFile(path, 'user');
+    expect(skill?.meta.roles).toEqual(['guide']);
+  });
+
   it('returns null for invalid roles type (number)', () => {
     const path = join(tempDir, 'bad-roles.md');
     writeFileSync(path, '---\nname: bad\ndescription: Bad roles\nroles: 42\n---\n\nContent\n');
