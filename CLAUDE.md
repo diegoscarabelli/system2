@@ -31,6 +31,7 @@ The [`docs/`](docs/) directory contains in-depth documentation. Start with [`doc
 | [`database.md`](docs/database.md) | SQLite schema, WAL mode, better-sqlite3 usage |
 | [`websocket-protocol.md`](docs/websocket-protocol.md) | Real-time UI–server communication protocol |
 | [`knowledge-system.md`](docs/knowledge-system.md) | Persistent knowledge files, git-tracked, dynamic prompt injection |
+| [`skills.md`](docs/skills.md) | Reusable agent workflow instructions, SKILL.md format, discovery and injection |
 | [`scheduler.md`](docs/scheduler.md) | Cron-based Narrator jobs via Croner |
 | [`configuration.md`](docs/configuration.md) | `config.toml` settings and API keys |
 | [`packages/cli.md`](docs/packages/cli.md) | CLI: onboarding, daemon management, status |

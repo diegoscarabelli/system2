@@ -33,6 +33,7 @@ import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js';
 import type { ReminderManager } from '../reminders/manager.js';
+import { filterByRole } from '../skills/loader.js';
 import { AuthResolver } from './auth-resolver.js';
 import type { AgentRegistry } from './registry.js';
 import {
@@ -165,11 +166,13 @@ export class AgentHost {
   private resourceLoader: DefaultResourceLoader | null = null;
   private busy = false;
   private lastTurnErrored = false;
+  private deliverySendCount = 0;
   private compactionCount = 0;
   private compactionDepth = 0;
   private isPruning = false;
   private contextWindow = 0;
   private contextOverflowHandled = false;
+  private agentModels: Record<string, string> = {};
   private reminderManager?: ReminderManager;
   private unsubscribeSession: (() => void) | null = null;
 
@@ -267,6 +270,7 @@ export class AgentHost {
     const definitionFile = readFileSync(definitionPath, 'utf-8');
     const { data: agentMeta, content: agentPrompt } = matter(definitionFile);
     const agentConfig = agentMeta as AgentDefinition;
+    this.agentModels = agentConfig.models ?? {};
     // Static parts of the system prompt (loaded once)
     const staticPrompt = `${agentsRefContent}\n\n${agentPrompt}`;
 
@@ -357,19 +361,25 @@ export class AgentHost {
       compaction: { reserveTokens: Math.floor(model.contextWindow * 0.5) },
     });
 
-    // Create resource loader with custom system prompt
+    // Create resource loader with custom system prompt.
+    // Knowledge files are re-read on every LLM call via reload() before each prompt.
+    // Skills are discovered by the SDK from our two directories, then filtered by agent role.
     this.resourceLoader = new DefaultResourceLoader({
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
-      // Static agent instructions (from package) + dynamic knowledge files (from ~/.system2/).
-      // Knowledge files are re-read on every LLM call via reload() before each prompt.
       systemPromptOverride: () => {
         const identity = `\n\n## Your Identity\n\nYour agent ID is **${agentRecord.id}**. Your role is **${agentRecord.role}**.${agentRecord.project ? ` Your project ID is **${agentRecord.project}**.` : ''}`;
         return `${staticPrompt}${identity}${this.loadKnowledgeContext()}\n\n---\n\nConversation history follows.`;
       },
-      // Disable default resource discovery (we manage our own)
-      noExtensions: true,
+      // Suppress SDK default skill directories (~/.pi/agent/skills/, .pi/skills/)
+      // but provide our own paths. User dir first for first-wins precedence.
       noSkills: true,
+      additionalSkillPaths: [join(SYSTEM2_DIR, 'skills'), join(AGENT_DIR, 'skills')],
+      skillsOverride: ({ skills, diagnostics }) => ({
+        skills: filterByRole(skills, this.agentRole ?? ''),
+        diagnostics,
+      }),
+      noExtensions: true,
       noPromptTemplates: true,
       noThemes: true,
     });
@@ -442,25 +452,20 @@ export class AgentHost {
       // handlePotentialError before agent_end fires). Skip cleanup so the
       // failed prompt/delivery stays tracked for retry or failover.
       if (!this.lastTurnErrored) {
-        const messages =
-          'messages' in event ? (event.messages as Array<Record<string, unknown>>) : null;
-        // Only clear pendingPrompt when a prompt turn (user message) completed.
-        // A delivery-only agent_end (only custom messages) should not clear it,
-        // since a queued prompt may still be waiting to process.
-        if (!messages || messages.some((m) => m.role === 'user')) {
-          this.pendingPrompt = null;
+        // Clear pendingPrompt: one agent_end fires after ALL turns (prompt +
+        // follow-ups) are processed, so it's always safe to clear here.
+        this.pendingPrompt = null;
+        // Resolve delivery promises using the send counter. The SDK's
+        // agent_end.messages excludes the initial prompt (which is how
+        // sendCustomMessage delivers to an idle agent), so counting messages
+        // there always under-counts by 1. The send counter tracks how many
+        // sendCustomMessage calls completed since the last agent_end.
+        const toResolve = Math.min(this.deliverySendCount, this.pendingDeliveries.length);
+        for (let i = 0; i < toResolve; i++) {
+          const completed = this.pendingDeliveries.shift();
+          if (completed) completed.resolve();
         }
-        // Count delivery messages that completed in this agent loop. The SDK
-        // batches follow-up turns into a single agent_end, so a prompt turn
-        // followed by queued deliveries produces one event with mixed messages.
-        // Only shift for actual deliveries to avoid desync.
-        const deliveriesCompleted = messages
-          ? messages.filter((m) => m.role === 'custom' && m.customType === 'agent_message').length
-          : 0;
-        for (let i = 0; i < deliveriesCompleted && this.pendingDeliveries.length > 0; i++) {
-          const completed = this.pendingDeliveries.shift()!;
-          completed.resolve();
-        }
+        this.deliverySendCount = 0;
       }
       this.lastTurnErrored = false;
     }
@@ -514,6 +519,10 @@ export class AgentHost {
     // reinitializeWithProvider needs the values passed as arguments.
     const promptToRetry = this.pendingPrompt;
     const deliveriesToRetry = [...this.pendingDeliveries];
+    // Reset the send counter: any .then() callbacks from the failed turn's
+    // sendCustomMessage calls have already run, and their increments are stale.
+    // The retry/failover path will re-send and re-increment as needed.
+    this.deliverySendCount = 0;
 
     // If another agent already put our key in cooldown, skip retries and reinitialize.
     // Uses the tracked key index so we check our actual key, not whatever index
@@ -570,37 +579,51 @@ export class AgentHost {
           );
         }
         await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
-      } else if (deliveriesToRetry.length > 0 && this.session) {
-        // Retry the failed delivery (no prompt took priority)
-        console.log('[AgentHost] Retrying failed delivery...');
-        try {
-          await this.resourceLoader?.reload();
-        } catch (reloadErr) {
-          console.warn(
-            '[AgentHost] Resource reload failed before delivery retry, using cached:',
-            reloadErr
-          );
+      }
+
+      // Resend ALL pending deliveries (not just the first). The prompt retry
+      // above (if any) queued a turn; deliveries queue as follow-ups behind it.
+      // Without this, deliveries beyond [0] stay in pendingDeliveries forever
+      // and their promises never resolve, blocking trackJobExecution.
+      if (deliveriesToRetry.length > 0 && this.session) {
+        console.log(
+          `[AgentHost] Resending ${deliveriesToRetry.length} pending delivery(ies) after retry...`
+        );
+        if (!promptToRetry) {
+          try {
+            await this.resourceLoader?.reload();
+          } catch (reloadErr) {
+            console.warn(
+              '[AgentHost] Resource reload failed before delivery retry, using cached:',
+              reloadErr
+            );
+          }
         }
-        const failed = deliveriesToRetry[0];
-        this.session
-          .sendCustomMessage(
-            {
-              customType: 'agent_message',
-              content: failed.content,
-              display: false,
-              details: failed.details,
-            },
-            {
-              deliverAs: failed.urgent ? 'steer' : 'followUp',
-              triggerTurn: true,
-            }
-          )
-          .catch((error) => {
-            console.error('[AgentHost] Failed to resend delivery after retry:', error);
-            const idx = this.pendingDeliveries.indexOf(failed);
-            if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
-            failed.reject(error instanceof Error ? error : new Error(String(error)));
-          });
+        const session = this.session;
+        for (const d of deliveriesToRetry) {
+          session
+            .sendCustomMessage(
+              {
+                customType: 'agent_message',
+                content: d.content,
+                display: false,
+                details: d.details,
+              },
+              {
+                deliverAs: d.urgent ? 'steer' : 'followUp',
+                triggerTurn: true,
+              }
+            )
+            .then(() => {
+              this.deliverySendCount++;
+            })
+            .catch((error) => {
+              console.error('[AgentHost] Failed to resend delivery after retry:', error);
+              const idx = this.pendingDeliveries.indexOf(d);
+              if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+              d.reject(error instanceof Error ? error : new Error(String(error)));
+            });
+        }
       }
       return;
     }
@@ -637,9 +660,16 @@ export class AgentHost {
               detail
             );
           } else {
+            // Capture before compactForProvider may mutate this.currentProvider
+            const fromProvider = this.currentProvider;
+
+            // Proactive context check: compact before failover if the candidate
+            // model's context window is smaller than the current token count.
+            await this.compactForProvider(nextProvider);
+
             const reason = `${errorPrefix}, switched to ${nextProvider}`;
-            const detail = `on ${this.currentProvider}, switching to ${nextProvider}`;
-            console.log(`[AgentHost] Failing over from ${this.currentProvider} to ${nextProvider}`);
+            const detail = `on ${fromProvider}, switching to ${nextProvider}`;
+            console.log(`[AgentHost] Failing over from ${fromProvider} to ${nextProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
               promptToRetry,
@@ -669,6 +699,7 @@ export class AgentHost {
       if (recovered) {
         // Clear the overflow-causing prompt so a future failover doesn't retry it
         this.pendingPrompt = null;
+        this.deliverySendCount = 0;
         // Replay pending deliveries on the recovered session. Don't clear
         // pendingDeliveries: agent_end will shift each one as turns succeed.
         if (this.pendingDeliveries.length > 0 && this.session) {
@@ -686,6 +717,9 @@ export class AgentHost {
                   triggerTurn: true,
                 }
               )
+              .then(() => {
+                this.deliverySendCount++;
+              })
               .catch((error) => {
                 console.error(
                   '[AgentHost] Failed to replay delivery after context overflow:',
@@ -707,11 +741,15 @@ export class AgentHost {
     // switch to it. This covers cases like being stuck on a dead fallback provider.
     const nextProvider = this.authResolver.getNextProvider();
     if (nextProvider && nextProvider !== this.currentProvider) {
+      // Capture before compactForProvider may mutate this.currentProvider
+      const fromProvider = this.currentProvider;
+
+      // Proactive context check before last-resort failover
+      await this.compactForProvider(nextProvider);
+
       const reason = `${errorPrefix}, switched to ${nextProvider}`;
-      const detail = `on ${this.currentProvider}, switching to ${nextProvider}`;
-      console.log(
-        `[AgentHost] Recovery: switching from ${this.currentProvider} to ${nextProvider}`
-      );
+      const detail = `on ${fromProvider}, switching to ${nextProvider}`;
+      console.log(`[AgentHost] Recovery: switching from ${fromProvider} to ${nextProvider}`);
       await this.reinitializeWithProvider(
         nextProvider,
         promptToRetry,
@@ -804,6 +842,8 @@ export class AgentHost {
       // Re-arm error handling before retrying the prompt. Errors from the new
       // provider need normal failover, not the isReinitializing early-return.
       this.isReinitializing = false;
+      // Reset the send counter: old session's sends are gone, new session starts fresh
+      this.deliverySendCount = 0;
 
       // Retry the pending prompt with the new provider
       if (promptToRetry && this.session) {
@@ -843,6 +883,9 @@ export class AgentHost {
                 triggerTurn: true,
               }
             )
+            .then(() => {
+              this.deliverySendCount++;
+            })
             .catch((error) => {
               console.error('[AgentHost] Failed to replay delivery after failover:', error);
               const idx = this.pendingDeliveries.indexOf(d);
@@ -1122,6 +1165,14 @@ export class AgentHost {
           }
         )
       )
+      .then(() => {
+        // Track successful send for agent_end resolution. Incremented here
+        // (after sendCustomMessage resolves) so only actually-sent messages
+        // are counted. The SDK processes all queued messages (prompt +
+        // follow-ups) in one turn and fires a single agent_end, so the
+        // counter accumulates correctly across the batch.
+        this.deliverySendCount++;
+      })
       .catch((err) => {
         console.error('[AgentHost] deliverMessage error:', err);
         // Send itself failed (session destroyed, etc.). The message never
@@ -1149,6 +1200,7 @@ export class AgentHost {
         this.busy = false;
       }
       this.pendingPrompt = null;
+      this.deliverySendCount = 0;
       for (const delivery of this.pendingDeliveries) {
         delivery.reject(new Error('Agent session aborted'));
       }
@@ -1363,17 +1415,46 @@ export class AgentHost {
   }
 
   /**
+   * Proactive context check before failover: if the current context exceeds the
+   * candidate provider's model context window, compact first so the failover can succeed.
+   */
+  private async compactForProvider(provider: LlmProvider): Promise<void> {
+    const candidateModelId = this.agentModels[provider];
+    if (!candidateModelId) return;
+
+    const candidateModel = this.modelRegistry.find(provider, candidateModelId);
+    if (!candidateModel) return;
+
+    const currentUsage = this.getContextUsage();
+    if (currentUsage?.tokens == null) return;
+
+    if (currentUsage.tokens > candidateModel.contextWindow) {
+      console.log(
+        `[AgentHost] Context (${currentUsage.tokens} tokens) exceeds ${provider}/${candidateModelId} ` +
+          `window (${candidateModel.contextWindow}), compacting before failover`
+      );
+      // Use the target provider for compaction since the current provider may be broken
+      // (e.g., invalid API key, no credits). The truncated context fits within the target
+      // model's window (split at 50%), so the compact() call will succeed.
+      await this.handleContextOverflow(candidateModel.contextWindow, provider);
+    }
+  }
+
+  /**
    * Emergency recovery for context overflow errors.
    *
    * When the context window is exceeded and no API call can succeed, this method:
-   * 1. Splits the active JSONL at the last message entry below 90% of context window
+   * 1. Splits the active JSONL at a safe threshold (50% of the effective context window)
    * 2. Truncates the file to that safe point, reinitializes, and compacts
    * 3. Appends the tail (post-split entries) back and reinitializes again
    *
    * The result is a session with a compact summary of the safe history plus the
    * recent tail, consuming a fraction of the context window.
    */
-  private async handleContextOverflow(): Promise<boolean> {
+  private async handleContextOverflow(
+    targetContextWindow?: number,
+    compactionProvider?: LlmProvider
+  ): Promise<boolean> {
     const sessionDir = this.sessionDir;
     if (!this.session || !sessionDir) {
       console.log('[AgentHost] Context overflow: no session or sessionDir, cannot recover');
@@ -1408,8 +1489,12 @@ export class AgentHost {
         .split('\n')
         .filter((l) => l.trim());
 
-      // Step 2: Find last message entry below 90% of context window
-      const threshold = this.contextWindow * 0.9;
+      // Step 2: Find last message entry below the split threshold.
+      // Split at 50% of the effective context window, matching the SDK's reserveTokens
+      // auto-compaction setting and leaving headroom for system prompt, knowledge files,
+      // and compaction overhead.
+      const effectiveWindow = targetContextWindow ?? this.contextWindow;
+      const threshold = effectiveWindow * 0.5;
       let splitIndex = -1;
       for (let i = lines.length - 1; i >= 0; i--) {
         try {
@@ -1441,8 +1526,12 @@ export class AgentHost {
       writeFileSync(activeFile, `${headLines.join('\n')}\n`, 'utf-8');
       fileTruncated = true;
 
+      // Use the compaction provider if specified (cross-provider failover where
+      // the current provider is broken), otherwise use the current provider.
+      const provider = compactionProvider ?? this.currentProvider;
+
       // Step 5: Reinitialize from truncated file
-      await this.reinitializeWithProvider(this.currentProvider, null);
+      await this.reinitializeWithProvider(provider, null);
 
       // Step 6: Compact to reduce head context to ~5%
       if (this.session) {
@@ -1458,7 +1547,7 @@ export class AgentHost {
         appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
         tailAppended = true;
         console.log('[AgentHost] Context overflow: tail restored, reinitializing...');
-        await this.reinitializeWithProvider(this.currentProvider, null);
+        await this.reinitializeWithProvider(provider, null);
       }
 
       console.log('[AgentHost] Context overflow recovery complete');

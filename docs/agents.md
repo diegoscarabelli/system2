@@ -8,6 +8,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 - `packages/server/src/agents/auth-resolver.ts`: AuthResolver
 - `packages/server/src/agents/library/`: agent identity and system instructions (Markdown + YAML frontmatter)
 - `packages/server/src/agents/agents.md`: shared reference prepended to all system prompts
+- `packages/server/src/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`); discovery and XML injection are handled by the pi-coding-agent SDK
 
 ## Agent Roles
 
@@ -47,16 +48,17 @@ The `models` map specifies which model to use for each LLM provider.
 
 ## System Prompt Construction
 
-Each agent's system prompt is assembled from four layers:
+Each agent's system prompt is assembled from five layers:
 
 | Layer | Source | Loaded |
-|-------|--------|--------|
+| ----- | ------ | ------ |
 | Shared reference | `agents/agents.md` | Once at init |
 | Agent instructions | `agents/library/{role}.md` (body after frontmatter) | Once at init |
 | Knowledge files | `~/.system2/knowledge/` (infrastructure.md, user.md, memory.md) | **Every LLM call** |
 | Role-aware context | Project log (`projects/{id}_{name}/log.md`) for project-scoped agents, or last 2 daily summaries for system-wide agents | **Every LLM call** |
+| Skills index | Built-in (`agents/skills/`) + user (`~/.system2/skills/`), filtered by role, compiled as XML | **Every LLM call** |
 
-The static layers are concatenated into `staticPrompt`. The dynamic layers are loaded via `loadKnowledgeContext()`, which is called from the `systemPromptOverride` callback passed to the Pi SDK's `DefaultResourceLoader`. Since the SDK only invokes this callback during `reload()` (not on every `prompt()` call), `AgentHost` explicitly calls `resourceLoader.reload()` before each prompt to ensure knowledge files are re-read. This means knowledge updates take effect immediately without server restarts.
+The static layers are concatenated into `staticPrompt`. Knowledge is loaded via `loadKnowledgeContext()`, called from the `systemPromptOverride` callback passed to the Pi SDK's `DefaultResourceLoader`. Skills are wired through the SDK via `additionalSkillPaths` (providing both skill directories) and `skillsOverride` (filtering by agent role). Since the SDK only invokes these callbacks during `reload()` (not on every `prompt()` call), `AgentHost` explicitly calls `resourceLoader.reload()` before each prompt to ensure knowledge files and skills are re-read. This means knowledge and skill updates take effect immediately without server restarts.
 
 Empty files are skipped.
 
@@ -157,9 +159,9 @@ Cooldowns are set once: if a key is already in cooldown, subsequent failures ski
 When `AgentHost` detects an API error in a `message_end` event:
 
 1. Categorize the error (see [retry.ts](#retry-logic))
-2. Set `lastTurnErrored = true` synchronously (prevents `agent_end` from clearing pending state). On successful turns, `agent_end` inspects `event.messages` to count completed delivery messages (`role: 'custom'`, `customType: 'agent_message'`) and only shifts that many from `pendingDeliveries`, avoiding desync when prompt and delivery turns are batched into a single event
+2. Set `lastTurnErrored = true` synchronously (prevents `agent_end` from clearing pending state). On successful turns, `agent_end` resolves `min(deliverySendCount, pendingDeliveries.length)` promises from the queue and resets the counter. `deliverySendCount` is incremented each time `sendCustomMessage` succeeds in `deliverMessage`, so it tracks how many deliveries were sent in the current turn regardless of whether they entered as the initial prompt or as follow-ups
 3. Capture `pendingPrompt` and `pendingDeliveries` synchronously (before any `await`)
-4. If retriable: wait with exponential backoff, retry with same provider (re-sends the failed prompt or delivery)
+4. If retriable: wait with exponential backoff, retry with same provider (re-sends the failed prompt and/or all pending deliveries)
 5. If retries exhausted or immediate failover: mark key in cooldown, failover to next provider
 6. Reinitialize the session with the new provider (`reinitializeWithProvider()`)
 7. Retry the pending prompt and/or replay pending deliveries on the new session
@@ -197,14 +199,16 @@ Rate limit retries are tuned so that cumulative wait exceeds 60s before failover
 
 These patterns are intentionally narrow to avoid false positives on rate-limit errors that also mention "token" or "limit" (e.g., "token per minute limit exceeded"). New providers can be supported by adding a regex to `isContextOverflow()` in `retry.ts`.
 
-**Context overflow recovery:** this can happen when a single large delivery (e.g., a scheduled Narrator job) causes the context to jump past the auto-compaction threshold in one step. Recovery is one-shot: the guard is armed on the first overflow and re-arms only after recovery completes (successfully or as a no-op). It does not reset on provider failover or re-initialization, so the guard stays active throughout the entire recovery sequence:
+**Proactive context check during failover:** before switching to a fallback provider, the system looks up the candidate model's `contextWindow` (from the SDK's model registry) and compares it against the current token count. If the context exceeds the candidate's window, `handleContextOverflow()` runs first to compact the conversation, then failover proceeds. This prevents cryptic failures from providers that return bare status codes without error bodies (e.g., Cerebras returning `400` with no message when context is too large). The check runs in both the normal failover path and the last-resort provider recovery path.
 
-1. Find the last JSONL message entry where `entry.message.usage.input < contextWindow * 0.90` (message entries store token usage under `entry.message.usage`)
+**Context overflow recovery:** this can happen reactively (when the API returns a context overflow error) or proactively (when `compactForProvider()` detects that the context exceeds a failover candidate's window). Recovery is one-shot: the guard is armed on the first overflow and re-arms only after recovery completes (successfully or as a no-op). It does not reset on provider failover or re-initialization, so the guard stays active throughout the entire recovery sequence:
+
+1. Find the last JSONL message entry where `entry.message.usage.input < targetContextWindow * 0.50` (message entries store token usage under `entry.message.usage`). The target context window defaults to the current model's window but can be overridden during cross-provider failover to use the candidate model's smaller window.
 2. Truncate the active session file at that point, saving the remainder as a "tail"
 3. Reinitialize the session from the truncated file and run `compact()` to reduce context to ~5%
 4. Append the tail back and reinitialize again
 
-The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. Pending deliveries (scheduled tasks, inter-agent messages) are replayed on the recovered session via `sendCustomMessage`, preserving them for the agent to process. If no split point below 90% is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
+The 50% split threshold matches the `reserveTokens` auto-compaction setting, leaving headroom for the system prompt, knowledge files, and compaction overhead. The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. Pending deliveries (scheduled tasks, inter-agent messages) are replayed on the recovered session via `sendCustomMessage`, preserving them for the agent to process. If no split point below the threshold is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
 
 Auto-compaction is also configured to fire earlier (at ~50% of the context window via `reserveTokens`, instead of the SDK default of ~98%) to reduce the chance of overflow in the first place.
 

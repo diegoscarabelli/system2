@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +17,7 @@ import {
   resolveDailySummaryTimestamp,
   stripSessionEntry,
   trackJobExecution,
+  writeFrontmatterField,
 } from './jobs.js';
 import type { Scheduler } from './scheduler.js';
 
@@ -84,6 +85,47 @@ describe('readFrontmatterField', () => {
     const file = join(dir, 'test.md');
     writeFileSync(file, '---\nlast_narrator_update_ts:\n---\n');
     expect(readFrontmatterField(file, 'last_narrator_update_ts')).toBeNull();
+  });
+});
+
+describe('writeFrontmatterField', () => {
+  it('replaces an existing field value', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const file = join(dir, 'test.md');
+    writeFileSync(file, '---\nlast_narrator_update_ts: old-value\n---\n# Body');
+    writeFrontmatterField(file, 'last_narrator_update_ts', '2026-03-30T00:00:00Z');
+    expect(readFrontmatterField(file, 'last_narrator_update_ts')).toBe('2026-03-30T00:00:00Z');
+    expect(readFileSync(file, 'utf-8')).toContain('# Body');
+  });
+
+  it('replaces an empty field value', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const file = join(dir, 'test.md');
+    writeFileSync(file, '---\nlast_narrator_update_ts:\n---\n');
+    writeFrontmatterField(file, 'last_narrator_update_ts', '2026-03-30T00:00:00Z');
+    expect(readFrontmatterField(file, 'last_narrator_update_ts')).toBe('2026-03-30T00:00:00Z');
+  });
+
+  it('inserts field if not found in frontmatter', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const file = join(dir, 'test.md');
+    writeFileSync(file, '---\ntitle: Test\n---\n# Body');
+    writeFrontmatterField(file, 'last_narrator_update_ts', '2026-03-30T00:00:00Z');
+    expect(readFrontmatterField(file, 'last_narrator_update_ts')).toBe('2026-03-30T00:00:00Z');
+    expect(readFileSync(file, 'utf-8')).toContain('title: Test');
+  });
+
+  it('no-ops on missing file', () => {
+    writeFrontmatterField('/nonexistent/file.md', 'field', 'value');
+    // No throw
+  });
+
+  it('no-ops on file without frontmatter', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const file = join(dir, 'test.md');
+    writeFileSync(file, '# No frontmatter');
+    writeFrontmatterField(file, 'field', 'value');
+    expect(readFileSync(file, 'utf-8')).toBe('# No frontmatter');
   });
 });
 
@@ -270,7 +312,6 @@ describe('buildAndDeliverMemoryUpdate', () => {
     expect(msg).not.toContain('Old narrative.');
     expect(msg).not.toContain('2026-03-09.md');
     expect(msg).toContain('IMPORTANT');
-    expect(msg).toContain('UTC ISO 8601');
   });
 
   it('includes all summaries when memory.md has no timestamp', async () => {
@@ -967,6 +1008,65 @@ describe('buildAndDeliverDailySummary', () => {
     expect(dailySummaryMsg).toBeDefined();
     expect(dailySummaryMsg).toContain('## Project Activity');
     expect(dailySummaryMsg).not.toContain('## Non-Project Activity');
+  });
+
+  it('advances frontmatter cursor on successful delivery', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+
+    // Seed with a recent timestamp for the time window
+    const lastRunTs = new Date(Date.now() - 10 * 60_000).toISOString();
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+
+    writeFileSync(
+      join(summariesDir, '2026-03-15.md'),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary\n`
+    );
+
+    // Create JSONL activity within the time window
+    const entry = JSON.stringify({
+      type: 'message',
+      timestamp: entryTs,
+      message: { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+    });
+    writeFileSync(join(sessionDir, 'session.jsonl'), entry);
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
+
+    // Server should have advanced the cursor in today's file (not relying on LLM)
+    const today = new Date().toISOString().slice(0, 10);
+    const todayFile = join(summariesDir, `${today}.md`);
+    const cursor = readFrontmatterField(todayFile, 'last_narrator_update_ts');
+    expect(cursor).not.toBeNull();
+    expect(cursor).not.toBe(lastRunTs);
+  });
+
+  it('advances frontmatter cursor even on skip (no activity)', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    mkdirSync(summariesDir, { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 10 * 60_000).toISOString();
+    writeFileSync(
+      join(summariesDir, '2026-03-15.md'),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary\n`
+    );
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    await expect(buildAndDeliverDailySummary(db, host, 99, dir, 30)).rejects.toThrow(JobSkipped);
+
+    // Cursor should still advance in today's file to prevent re-scanning the same window
+    const today = new Date().toISOString().slice(0, 10);
+    const todayFile = join(summariesDir, `${today}.md`);
+    const cursor = readFrontmatterField(todayFile, 'last_narrator_update_ts');
+    expect(cursor).not.toBeNull();
+    expect(cursor).not.toBe(lastRunTs);
   });
 });
 

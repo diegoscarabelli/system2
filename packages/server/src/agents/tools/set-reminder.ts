@@ -2,13 +2,13 @@ import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import type { ReminderManager } from '../../reminders/manager.js';
 
-// Node.js setTimeout clamps delays > 2^31-1 ms, causing them to fire immediately.
-const MAX_DELAY_MINUTES = 35_791; // ~24.8 days
+const MIN_DELAY_MINUTES = 0.5; // 30 seconds
+const MAX_DELAY_MINUTES = 10_080; // 7 days
 
 export function createSetReminderTool(agentId: number, reminderManager: ReminderManager) {
   const params = Type.Object({
     delay_minutes: Type.Number({
-      description: `How many minutes from now the reminder should fire. Must be between 1 and ${MAX_DELAY_MINUTES} (~24.8 days).`,
+      description: `How many minutes from now the reminder should fire. Must be between ${MIN_DELAY_MINUTES} (30 seconds) and ${MAX_DELAY_MINUTES} (7 days). Accepts fractional values (e.g. 0.5 for 30s, 1.5 for 90s).`,
     }),
     message: Type.String({
       description:
@@ -25,12 +25,12 @@ export function createSetReminderTool(agentId: number, reminderManager: Reminder
     execute: async (_toolCallId, args) => {
       const { delay_minutes, message } = args;
 
-      if (delay_minutes < 1 || delay_minutes > MAX_DELAY_MINUTES) {
+      if (delay_minutes < MIN_DELAY_MINUTES || delay_minutes > MAX_DELAY_MINUTES) {
         return {
           content: [
             {
               type: 'text' as const,
-              text: `Error: delay_minutes must be between 1 and ${MAX_DELAY_MINUTES} (~24.8 days).`,
+              text: `Error: delay_minutes must be between ${MIN_DELAY_MINUTES} (30 seconds) and ${MAX_DELAY_MINUTES} (7 days).`,
             },
           ],
           details: { error: 'invalid_delay' },

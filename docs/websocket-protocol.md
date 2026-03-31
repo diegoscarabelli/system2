@@ -140,7 +140,7 @@ User messages are broadcast to other tabs: when tab A sends a message, the handl
 
 ## History Capture
 
-Each `AgentHost` owns its own `MessageHistory` (chat cache) stored at `~/.system2/sessions/{role}_{id}/chat-cache.json`. Assistant message history is captured by a **single subscriber** registered in `Server` per agent (not per-handler), preventing duplicate entries when multiple tabs are open. User messages are captured by the handler that receives them (one per user action).
+Each `AgentHost` owns its own `MessageHistory` (chat cache) stored at `~/.system2/sessions/{role}_{id}/chat-cache.json`. Assistant message history is captured by a **single subscriber** registered in `Server` per agent (not per-handler), preventing duplicate entries when multiple tabs are open. User messages are captured by the handler that receives them (one per user action). Tool-only turns (thinking + tool calls with no text output) are also persisted, and compaction events (`compaction_start`/`compaction_end`) are recorded as system messages in the cache.
 
 ## WebSocketHandler (`handler.ts`)
 

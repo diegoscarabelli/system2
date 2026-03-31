@@ -201,7 +201,7 @@ describe('AgentHost', () => {
       expect(hostInternal.pendingPrompt).toBeNull();
     });
 
-    it('tracks pendingDeliveries and shifts on agent_end only for delivery turns', () => {
+    it('tracks pendingDeliveries and resolves on agent_end using deliverySendCount', () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -217,6 +217,7 @@ describe('AgentHost', () => {
           resolve: () => void;
           reject: (reason: Error) => void;
         }>;
+        deliverySendCount: number;
         handleSessionEvent: (event: Record<string, unknown>) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
         handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -246,36 +247,30 @@ describe('AgentHost', () => {
       hostInternal.pendingDeliveries[0].resolve = resolve1;
       hostInternal.pendingDeliveries[1].resolve = resolve2;
 
-      // Prompt-only agent_end does NOT shift deliveries
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'user', content: 'hello' }],
-      });
+      // agent_end with deliverySendCount=0 does NOT shift deliveries
+      hostInternal.deliverySendCount = 0;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingDeliveries).toHaveLength(2);
 
-      // Delivery agent_end shifts the matching delivery
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'msg1' }],
-      });
+      // agent_end with deliverySendCount=1 shifts one delivery
+      hostInternal.deliverySendCount = 1;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingDeliveries).toHaveLength(1);
       expect(hostInternal.pendingDeliveries[0].content).toBe('msg2');
       expect(resolve1).toHaveBeenCalledOnce();
+      expect(hostInternal.deliverySendCount).toBe(0); // reset after agent_end
 
-      // Second delivery agent_end clears the queue
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'msg2' }],
-      });
+      // agent_end with deliverySendCount=1 clears the remaining delivery
+      hostInternal.deliverySendCount = 1;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
       expect(resolve2).toHaveBeenCalledOnce();
 
-      // Extra agent_end on empty queue is a no-op
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'x' }],
-      });
+      // Extra agent_end on empty queue is a no-op (counter clamped to queue length)
+      hostInternal.deliverySendCount = 5;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
+      expect(hostInternal.deliverySendCount).toBe(0);
     });
 
     it('lastTurnErrored prevents cleanup on error turns', () => {
@@ -295,6 +290,7 @@ describe('AgentHost', () => {
           resolve: () => void;
           reject: (reason: Error) => void;
         }>;
+        deliverySendCount: number;
         lastTurnErrored: boolean;
         handleSessionEvent: (event: Record<string, unknown>) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
@@ -319,10 +315,8 @@ describe('AgentHost', () => {
 
       // Simulate error turn: handlePotentialError sets the flag before agent_end fires
       hostInternal.lastTurnErrored = true;
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'delivery1' }],
-      });
+      hostInternal.deliverySendCount = 1;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
 
       // Neither pendingPrompt nor pendingDeliveries should be cleaned up
       expect(hostInternal.pendingPrompt).toBe('user message');
@@ -333,17 +327,12 @@ describe('AgentHost', () => {
       expect(resolveDelivery).not.toHaveBeenCalled();
       expect(rejectDelivery).not.toHaveBeenCalled();
 
-      // Flag is reset after agent_end
+      // Flag is reset after agent_end, but deliverySendCount preserved for retry
       expect(hostInternal.lastTurnErrored).toBe(false);
 
-      // Next successful agent_end with user + delivery messages cleans up normally
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [
-          { role: 'user', content: 'user message' },
-          { role: 'custom', customType: 'agent_message', content: 'delivery1' },
-        ],
-      });
+      // Next successful agent_end with deliverySendCount=1 cleans up normally
+      hostInternal.deliverySendCount = 1;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
       expect(hostInternal.pendingPrompt).toBeNull();
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
       expect(resolveDelivery).toHaveBeenCalledOnce();
@@ -361,6 +350,7 @@ describe('AgentHost', () => {
         session: { sendCustomMessage: ReturnType<typeof vi.fn> };
         _chatCache: null;
         _sessionDir: string | null;
+        deliverySendCount: number;
         handleSessionEvent: (event: Record<string, unknown>) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
         handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -378,16 +368,16 @@ describe('AgentHost', () => {
         timestamp: Date.now(),
       });
 
-      // Fire agent_end with a delivery message to resolve the promise
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [{ role: 'custom', customType: 'agent_message', content: 'msg1' }],
-      });
+      // Simulate the send counter being incremented (normally done by .then() on sendCustomMessage)
+      hostInternal.deliverySendCount = 1;
+
+      // Fire agent_end to resolve the promise using the send counter
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
 
       await expect(promise).resolves.toBeUndefined();
     });
 
-    it('agent_end resolves delivery promises in order', () => {
+    it('agent_end resolves delivery promises in order using send counter', () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -403,6 +393,7 @@ describe('AgentHost', () => {
           resolve: () => void;
           reject: (reason: Error) => void;
         }>;
+        deliverySendCount: number;
         handleSessionEvent: (event: Record<string, unknown>) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
         handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -420,18 +411,14 @@ describe('AgentHost', () => {
         { content: 'second', details, resolve: resolve2, reject: vi.fn() },
       ];
 
-      // agent_end with 2 delivery messages resolves both in order
-      hostInternal.handleSessionEvent({
-        type: 'agent_end',
-        messages: [
-          { role: 'custom', customType: 'agent_message', content: 'first' },
-          { role: 'custom', customType: 'agent_message', content: 'second' },
-        ],
-      });
+      // agent_end with deliverySendCount=2 resolves both in order
+      hostInternal.deliverySendCount = 2;
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
 
       expect(resolve1).toHaveBeenCalledOnce();
       expect(resolve2).toHaveBeenCalledOnce();
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
+      expect(hostInternal.deliverySendCount).toBe(0);
     });
 
     it('captures deliveriesToRetry and replays them on failover', async () => {
@@ -757,6 +744,150 @@ describe('AgentHost', () => {
 
       expect(rejectFn).toHaveBeenCalledWith(sendError);
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
+    });
+
+    it('same-provider retry resends ALL pending deliveries, not just the first', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        lastTurnErrored: boolean;
+        session: {
+          prompt: ReturnType<typeof vi.fn>;
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+        };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+        currentKeyIndex: number;
+      };
+
+      hostInternal.session = {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.currentKeyIndex = 0;
+      hostInternal.pendingPrompt = null;
+
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      hostInternal.pendingDeliveries = [
+        { content: 'project-log-A', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+        { content: 'project-log-B', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+        { content: 'daily-summary', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+      ];
+
+      hostInternal.retryAttempts = new Map();
+      hostInternal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      await hostInternal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
+      });
+
+      // All 3 deliveries should have been resent
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledTimes(3);
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'project-log-A' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'project-log-B' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'daily-summary' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+    });
+
+    it('same-provider retry resends deliveries even when prompt is also retried', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        lastTurnErrored: boolean;
+        session: {
+          prompt: ReturnType<typeof vi.fn>;
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+        };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+        currentKeyIndex: number;
+        resourceLoader: { reload: ReturnType<typeof vi.fn> } | null;
+      };
+
+      hostInternal.session = {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      hostInternal.resourceLoader = { reload: vi.fn().mockResolvedValue(undefined) };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.currentKeyIndex = 0;
+      hostInternal.pendingPrompt = 'user question';
+
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      hostInternal.pendingDeliveries = [
+        { content: 'project-log', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+      ];
+
+      hostInternal.retryAttempts = new Map();
+      hostInternal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      await hostInternal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 503: service unavailable' },
+      });
+
+      // Prompt should have been retried
+      expect(hostInternal.session.prompt).toHaveBeenCalledWith('user question', {
+        streamingBehavior: 'followUp',
+      });
+
+      // Delivery should ALSO have been resent (not dropped by the old else-if)
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'project-log' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
     });
 
     it('pendingPrompt persists if session.prompt() throws', async () => {
@@ -2267,7 +2398,10 @@ describe('AgentHost', () => {
       compactionCount: number;
       compactionDepth: number;
       currentProvider: string;
-      handleContextOverflow: () => Promise<boolean>;
+      handleContextOverflow: (
+        targetContextWindow?: number,
+        compactionProvider?: string
+      ) => Promise<boolean>;
       handleCompactionTracking: ReturnType<typeof vi.fn>;
       reinitializeWithProvider: ReturnType<typeof vi.fn>;
       writeCompactionCount: ReturnType<typeof vi.fn>;
@@ -2305,11 +2439,11 @@ describe('AgentHost', () => {
     }
 
     it('truncates JSONL at split point, reinitializes, compacts, appends tail, reinitializes again', async () => {
-      // 3 messages: first two below 90% threshold, third above
+      // contextWindow is 1M, 50% = 500K. First two entries below threshold, third above.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } }, // below 90% (900K)
-        { type: 'message', message: { role: 'assistant', usage: { input: 850_000, output: 100 } } }, // below 90%
+        { type: 'message', message: { role: 'assistant', usage: { input: 300_000, output: 100 } } }, // below 50% (500K)
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } }, // below 50% → split here (last below)
         {
           type: 'message',
           message: { role: 'assistant', usage: { input: 1_100_000, output: 100 } },
@@ -2340,12 +2474,13 @@ describe('AgentHost', () => {
       });
     });
 
-    it('splits at the last message below 90% when multiple candidates exist', async () => {
+    it('splits at the last message below 50% when multiple candidates exist', async () => {
+      // contextWindow is 1M, 50% = 500K.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
-        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } }, // last below 90% → split here
-        { type: 'message', message: { role: 'assistant', usage: { input: 950_000, output: 100 } } }, // above 90%
+        { type: 'message', message: { role: 'assistant', usage: { input: 200_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } }, // last below 50% → split here
+        { type: 'message', message: { role: 'assistant', usage: { input: 700_000, output: 100 } } }, // above 50%
         {
           type: 'message',
           message: { role: 'assistant', usage: { input: 1_050_000, output: 100 } },
@@ -2360,7 +2495,7 @@ describe('AgentHost', () => {
     });
 
     it('returns early without reinitializing when no split point exists', async () => {
-      // All messages are above 90%
+      // All messages are above 50%
       const entries = [
         { type: 'session', version: 3 },
         { type: 'message', message: { role: 'assistant', usage: { input: 950_000, output: 100 } } },
@@ -2393,9 +2528,10 @@ describe('AgentHost', () => {
 
     it('skips tail append and second reinit when tail is empty', async () => {
       // Only entries below threshold — no tail
+      // contextWindow is 1M, 50% = 500K. Entry at 400K is below threshold.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } },
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
       const { internal } = makeHostForRecovery();
@@ -2407,9 +2543,10 @@ describe('AgentHost', () => {
     });
 
     it('restores tail to file when compact throws mid-recovery', async () => {
+      // contextWindow is 1M, 50% = 500K. Entry at 400K is below threshold.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } },
         { type: 'tool_call', name: 'bash' }, // becomes the tail
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
@@ -2433,9 +2570,10 @@ describe('AgentHost', () => {
     });
 
     it('does not double-append tail when second reinit fails after tail was already written', async () => {
+      // contextWindow is 1M, 50% = 500K. Entry at 400K is below threshold.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } },
         { type: 'tool_call', name: 'bash' }, // becomes the tail
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
@@ -2464,9 +2602,10 @@ describe('AgentHost', () => {
     });
 
     it('guard resets after successful recovery, allowing a second recovery on the same session', async () => {
+      // contextWindow is 1M, 50% = 500K. Entry at 400K is below threshold.
       const entries = [
         { type: 'session', version: 3 },
-        { type: 'message', message: { role: 'assistant', usage: { input: 500_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } },
       ];
       writeJsonlFile('session.jsonl', entries, new Date());
       const { internal } = makeHostForRecovery();
@@ -2480,6 +2619,143 @@ describe('AgentHost', () => {
       writeJsonlFile('session.jsonl', entries, new Date());
       await internal.handleContextOverflow();
       expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
+    });
+
+    it('uses targetContextWindow for split threshold when provided', async () => {
+      // contextWindow is 1M, but targetContextWindow is 131K (e.g. Cerebras)
+      // 50% of 131K = 65.5K. Entry at 60K is below, entry at 100K is above.
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', message: { role: 'assistant', usage: { input: 60_000, output: 100 } } }, // below 50% of 131K
+        { type: 'message', message: { role: 'assistant', usage: { input: 100_000, output: 100 } } }, // above 50% of 131K, below 50% of 1M
+        { type: 'message', message: { role: 'assistant', usage: { input: 148_000, output: 100 } } }, // above 131K
+      ];
+      const filePath = writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      await internal.handleContextOverflow(131_000);
+
+      // Split at entry with 60K (last below 65.5K), tail has 2 entries
+      const remaining = readFileSync(filePath, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
+      // Both tail entries (100K and 148K) should be restored
+      expect(remaining.at(-1)).toMatchObject({
+        type: 'message',
+        message: { usage: { input: 148_000 } },
+      });
+    });
+
+    it('falls back to this.contextWindow with 50% threshold when targetContextWindow is not provided', async () => {
+      // contextWindow is 1M, 50% = 500K. Entry at 400K is below, entry at 800K is above.
+      const entries = [
+        { type: 'session', version: 3 },
+        { type: 'message', message: { role: 'assistant', usage: { input: 400_000, output: 100 } } },
+        { type: 'message', message: { role: 'assistant', usage: { input: 800_000, output: 100 } } },
+      ];
+      writeJsonlFile('session.jsonl', entries, new Date());
+      const { internal } = makeHostForRecovery();
+
+      await internal.handleContextOverflow();
+
+      // Split at 400K entry, tail has 1 entry (800K) → 2 reinitializations
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('compactForProvider', () => {
+    let testDir: string;
+
+    beforeEach(() => {
+      testDir = join(
+        tmpdir(),
+        `system2-compact-provider-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      );
+      mkdirSync(testDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    type CompactProviderInternal = {
+      compactForProvider: (provider: string) => Promise<void>;
+      handleContextOverflow: ReturnType<typeof vi.fn>;
+      agentModels: Record<string, string>;
+      modelRegistry: {
+        find: ReturnType<typeof vi.fn>;
+      };
+      session: {
+        getContextUsage: ReturnType<typeof vi.fn>;
+      } | null;
+    };
+
+    function makeHostForCompactProvider() {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const internal = host as unknown as CompactProviderInternal;
+      internal.handleContextOverflow = vi.fn().mockResolvedValue(true);
+      internal.agentModels = { cerebras: 'zai-glm-4.7', google: 'gemini-2.5-flash' };
+      internal.modelRegistry = {
+        find: vi.fn().mockImplementation((provider: string) => {
+          if (provider === 'cerebras') return { contextWindow: 131_000 };
+          if (provider === 'google') return { contextWindow: 1_000_000 };
+          return null;
+        }),
+      };
+      internal.session = {
+        getContextUsage: vi.fn().mockReturnValue({ tokens: 148_000, percent: 15 }),
+      };
+      return { host, internal };
+    }
+
+    it('triggers handleContextOverflow when context exceeds candidate model window', async () => {
+      const { internal } = makeHostForCompactProvider();
+
+      await internal.compactForProvider('cerebras');
+
+      expect(internal.handleContextOverflow).toHaveBeenCalledWith(131_000, 'cerebras');
+    });
+
+    it('does not compact when context fits within candidate model window', async () => {
+      const { internal } = makeHostForCompactProvider();
+
+      await internal.compactForProvider('google');
+
+      expect(internal.handleContextOverflow).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when candidate model is not in agent models', async () => {
+      const { internal } = makeHostForCompactProvider();
+
+      await internal.compactForProvider('openai');
+
+      expect(internal.handleContextOverflow).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when model registry returns null for candidate', async () => {
+      const { internal } = makeHostForCompactProvider();
+      internal.agentModels = { mistral: 'mistral-large-latest' };
+      internal.modelRegistry.find = vi.fn().mockReturnValue(null);
+
+      await internal.compactForProvider('mistral');
+
+      expect(internal.handleContextOverflow).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when context usage is not available', async () => {
+      const { internal } = makeHostForCompactProvider();
+      internal.session = { getContextUsage: vi.fn().mockReturnValue(null) };
+
+      await internal.compactForProvider('cerebras');
+
+      expect(internal.handleContextOverflow).not.toHaveBeenCalled();
     });
   });
 });
