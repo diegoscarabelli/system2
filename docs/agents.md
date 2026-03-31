@@ -157,7 +157,7 @@ Cooldowns are set once: if a key is already in cooldown, subsequent failures ski
 When `AgentHost` detects an API error in a `message_end` event:
 
 1. Categorize the error (see [retry.ts](#retry-logic))
-2. Set `lastTurnErrored = true` synchronously (prevents `agent_end` from clearing pending state). On successful turns, `agent_end` inspects `event.messages` to count completed delivery messages (`role: 'custom'`, `customType: 'agent_message'`) and only shifts that many from `pendingDeliveries`, avoiding desync when prompt and delivery turns are batched into a single event
+2. Set `lastTurnErrored = true` synchronously (prevents `agent_end` from clearing pending state). On successful turns, `agent_end` resolves `min(deliverySendCount, pendingDeliveries.length)` promises from the queue and resets the counter. `deliverySendCount` is incremented each time `sendCustomMessage` succeeds in `deliverMessage`, so it tracks how many deliveries were sent in the current turn regardless of whether they entered as the initial prompt or as follow-ups
 3. Capture `pendingPrompt` and `pendingDeliveries` synchronously (before any `await`)
 4. If retriable: wait with exponential backoff, retry with same provider (re-sends the failed prompt or delivery)
 5. If retries exhausted or immediate failover: mark key in cooldown, failover to next provider

@@ -468,8 +468,9 @@ export class Server {
             activeThinkingContent = '';
           }
 
-          // Capture completed assistant message in history
-          if (currentAssistantText) {
+          // Capture completed assistant message in history.
+          // Push when there's text OR tool-only turns (thinking + tool calls without text).
+          if (currentAssistantText || currentTurnEvents.length > 0) {
             const assistantMsg: ChatMessage = {
               id: `msg-${Date.now()}`,
               role: 'assistant',
@@ -553,6 +554,19 @@ export class Server {
           });
           break;
         }
+
+        case 'compaction_start':
+        case 'compaction_end':
+          agentHost.chatCache.push({
+            id: `msg-${Date.now()}`,
+            role: 'system',
+            content:
+              event.type === 'compaction_start'
+                ? 'Context compaction started'
+                : 'Context compacted',
+            timestamp: Date.now(),
+          });
+          break;
       }
     });
   }

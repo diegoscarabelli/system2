@@ -165,6 +165,7 @@ export class AgentHost {
   private resourceLoader: DefaultResourceLoader | null = null;
   private busy = false;
   private lastTurnErrored = false;
+  private deliverySendCount = 0;
   private compactionCount = 0;
   private compactionDepth = 0;
   private isPruning = false;
@@ -442,25 +443,20 @@ export class AgentHost {
       // handlePotentialError before agent_end fires). Skip cleanup so the
       // failed prompt/delivery stays tracked for retry or failover.
       if (!this.lastTurnErrored) {
-        const messages =
-          'messages' in event ? (event.messages as Array<Record<string, unknown>>) : null;
-        // Only clear pendingPrompt when a prompt turn (user message) completed.
-        // A delivery-only agent_end (only custom messages) should not clear it,
-        // since a queued prompt may still be waiting to process.
-        if (!messages || messages.some((m) => m.role === 'user')) {
-          this.pendingPrompt = null;
+        // Clear pendingPrompt: one agent_end fires after ALL turns (prompt +
+        // follow-ups) are processed, so it's always safe to clear here.
+        this.pendingPrompt = null;
+        // Resolve delivery promises using the send counter. The SDK's
+        // agent_end.messages excludes the initial prompt (which is how
+        // sendCustomMessage delivers to an idle agent), so counting messages
+        // there always under-counts by 1. The send counter tracks how many
+        // sendCustomMessage calls completed since the last agent_end.
+        const toResolve = Math.min(this.deliverySendCount, this.pendingDeliveries.length);
+        for (let i = 0; i < toResolve; i++) {
+          const completed = this.pendingDeliveries.shift();
+          if (completed) completed.resolve();
         }
-        // Count delivery messages that completed in this agent loop. The SDK
-        // batches follow-up turns into a single agent_end, so a prompt turn
-        // followed by queued deliveries produces one event with mixed messages.
-        // Only shift for actual deliveries to avoid desync.
-        const deliveriesCompleted = messages
-          ? messages.filter((m) => m.role === 'custom' && m.customType === 'agent_message').length
-          : 0;
-        for (let i = 0; i < deliveriesCompleted && this.pendingDeliveries.length > 0; i++) {
-          const completed = this.pendingDeliveries.shift()!;
-          completed.resolve();
-        }
+        this.deliverySendCount = 0;
       }
       this.lastTurnErrored = false;
     }
@@ -514,6 +510,10 @@ export class AgentHost {
     // reinitializeWithProvider needs the values passed as arguments.
     const promptToRetry = this.pendingPrompt;
     const deliveriesToRetry = [...this.pendingDeliveries];
+    // Reset the send counter: any .then() callbacks from the failed turn's
+    // sendCustomMessage calls have already run, and their increments are stale.
+    // The retry/failover path will re-send and re-increment as needed.
+    this.deliverySendCount = 0;
 
     // If another agent already put our key in cooldown, skip retries and reinitialize.
     // Uses the tracked key index so we check our actual key, not whatever index
@@ -595,6 +595,9 @@ export class AgentHost {
               triggerTurn: true,
             }
           )
+          .then(() => {
+            this.deliverySendCount++;
+          })
           .catch((error) => {
             console.error('[AgentHost] Failed to resend delivery after retry:', error);
             const idx = this.pendingDeliveries.indexOf(failed);
@@ -676,6 +679,7 @@ export class AgentHost {
       if (recovered) {
         // Clear the overflow-causing prompt so a future failover doesn't retry it
         this.pendingPrompt = null;
+        this.deliverySendCount = 0;
         // Replay pending deliveries on the recovered session. Don't clear
         // pendingDeliveries: agent_end will shift each one as turns succeed.
         if (this.pendingDeliveries.length > 0 && this.session) {
@@ -693,6 +697,9 @@ export class AgentHost {
                   triggerTurn: true,
                 }
               )
+              .then(() => {
+                this.deliverySendCount++;
+              })
               .catch((error) => {
                 console.error(
                   '[AgentHost] Failed to replay delivery after context overflow:',
@@ -815,6 +822,8 @@ export class AgentHost {
       // Re-arm error handling before retrying the prompt. Errors from the new
       // provider need normal failover, not the isReinitializing early-return.
       this.isReinitializing = false;
+      // Reset the send counter: old session's sends are gone, new session starts fresh
+      this.deliverySendCount = 0;
 
       // Retry the pending prompt with the new provider
       if (promptToRetry && this.session) {
@@ -854,6 +863,9 @@ export class AgentHost {
                 triggerTurn: true,
               }
             )
+            .then(() => {
+              this.deliverySendCount++;
+            })
             .catch((error) => {
               console.error('[AgentHost] Failed to replay delivery after failover:', error);
               const idx = this.pendingDeliveries.indexOf(d);
@@ -1133,6 +1145,14 @@ export class AgentHost {
           }
         )
       )
+      .then(() => {
+        // Track successful send for agent_end resolution. Incremented here
+        // (after sendCustomMessage resolves) so only actually-sent messages
+        // are counted. The SDK processes all queued messages (prompt +
+        // follow-ups) in one turn and fires a single agent_end, so the
+        // counter accumulates correctly across the batch.
+        this.deliverySendCount++;
+      })
       .catch((err) => {
         console.error('[AgentHost] deliverMessage error:', err);
         // Send itself failed (session destroyed, etc.). The message never
@@ -1160,6 +1180,7 @@ export class AgentHost {
         this.busy = false;
       }
       this.pendingPrompt = null;
+      this.deliverySendCount = 0;
       for (const delivery of this.pendingDeliveries) {
         delivery.reject(new Error('Agent session aborted'));
       }
