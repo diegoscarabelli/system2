@@ -521,9 +521,9 @@ export async function buildAndDeliverDailySummary(
     lastRunTs = readFrontmatterField(memoryPath, 'last_narrator_update_ts');
   }
   if (!lastRunTs) {
-    // If daily summary files already exist, the Narrator should have written
-    // last_narrator_update_ts to their frontmatter. Missing timestamps indicate
-    // a problem (e.g., Narrator failed to update the cursor).
+    // If daily summary files already exist, the server should have written
+    // last_narrator_update_ts to their frontmatter after delivery. Missing
+    // timestamps indicate a problem (e.g., server crashed before cursor update).
     const hasExistingSummaries =
       existsSync(summariesDir) &&
       readdirSync(summariesDir).some((f) => f.endsWith('.md') && f !== `${today}.md`);
