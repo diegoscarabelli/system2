@@ -746,6 +746,150 @@ describe('AgentHost', () => {
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
     });
 
+    it('same-provider retry resends ALL pending deliveries, not just the first', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        lastTurnErrored: boolean;
+        session: {
+          prompt: ReturnType<typeof vi.fn>;
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+        };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+        currentKeyIndex: number;
+      };
+
+      hostInternal.session = {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.currentKeyIndex = 0;
+      hostInternal.pendingPrompt = null;
+
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      hostInternal.pendingDeliveries = [
+        { content: 'project-log-A', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+        { content: 'project-log-B', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+        { content: 'daily-summary', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+      ];
+
+      hostInternal.retryAttempts = new Map();
+      hostInternal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      await hostInternal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
+      });
+
+      // All 3 deliveries should have been resent
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledTimes(3);
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'project-log-A' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'project-log-B' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'daily-summary' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+    });
+
+    it('same-provider retry resends deliveries even when prompt is also retried', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        lastTurnErrored: boolean;
+        session: {
+          prompt: ReturnType<typeof vi.fn>;
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+        };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+        currentKeyIndex: number;
+        resourceLoader: { reload: ReturnType<typeof vi.fn> } | null;
+      };
+
+      hostInternal.session = {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      hostInternal.resourceLoader = { reload: vi.fn().mockResolvedValue(undefined) };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.currentKeyIndex = 0;
+      hostInternal.pendingPrompt = 'user question';
+
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      hostInternal.pendingDeliveries = [
+        { content: 'project-log', details, urgent: false, resolve: vi.fn(), reject: vi.fn() },
+      ];
+
+      hostInternal.retryAttempts = new Map();
+      hostInternal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      await hostInternal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 503: service unavailable' },
+      });
+
+      // Prompt should have been retried
+      expect(hostInternal.session.prompt).toHaveBeenCalledWith('user question', {
+        streamingBehavior: 'followUp',
+      });
+
+      // Delivery should ALSO have been resent (not dropped by the old else-if)
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'project-log' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+    });
+
     it('pendingPrompt persists if session.prompt() throws', async () => {
       const host = new AgentHost({
         db: makeDbStub(),

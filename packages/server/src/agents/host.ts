@@ -570,40 +570,51 @@ export class AgentHost {
           );
         }
         await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
-      } else if (deliveriesToRetry.length > 0 && this.session) {
-        // Retry the failed delivery (no prompt took priority)
-        console.log('[AgentHost] Retrying failed delivery...');
-        try {
-          await this.resourceLoader?.reload();
-        } catch (reloadErr) {
-          console.warn(
-            '[AgentHost] Resource reload failed before delivery retry, using cached:',
-            reloadErr
-          );
+      }
+
+      // Resend ALL pending deliveries (not just the first). The prompt retry
+      // above (if any) queued a turn; deliveries queue as follow-ups behind it.
+      // Without this, deliveries beyond [0] stay in pendingDeliveries forever
+      // and their promises never resolve, blocking trackJobExecution.
+      if (deliveriesToRetry.length > 0 && this.session) {
+        console.log(
+          `[AgentHost] Resending ${deliveriesToRetry.length} pending delivery(ies) after retry...`
+        );
+        if (!promptToRetry) {
+          try {
+            await this.resourceLoader?.reload();
+          } catch (reloadErr) {
+            console.warn(
+              '[AgentHost] Resource reload failed before delivery retry, using cached:',
+              reloadErr
+            );
+          }
         }
-        const failed = deliveriesToRetry[0];
-        this.session
-          .sendCustomMessage(
-            {
-              customType: 'agent_message',
-              content: failed.content,
-              display: false,
-              details: failed.details,
-            },
-            {
-              deliverAs: failed.urgent ? 'steer' : 'followUp',
-              triggerTurn: true,
-            }
-          )
-          .then(() => {
-            this.deliverySendCount++;
-          })
-          .catch((error) => {
-            console.error('[AgentHost] Failed to resend delivery after retry:', error);
-            const idx = this.pendingDeliveries.indexOf(failed);
-            if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
-            failed.reject(error instanceof Error ? error : new Error(String(error)));
-          });
+        const session = this.session;
+        for (const d of deliveriesToRetry) {
+          session
+            .sendCustomMessage(
+              {
+                customType: 'agent_message',
+                content: d.content,
+                display: false,
+                details: d.details,
+              },
+              {
+                deliverAs: d.urgent ? 'steer' : 'followUp',
+                triggerTurn: true,
+              }
+            )
+            .then(() => {
+              this.deliverySendCount++;
+            })
+            .catch((error) => {
+              console.error('[AgentHost] Failed to resend delivery after retry:', error);
+              const idx = this.pendingDeliveries.indexOf(d);
+              if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+              d.reject(error instanceof Error ? error : new Error(String(error)));
+            });
+        }
       }
       return;
     }
