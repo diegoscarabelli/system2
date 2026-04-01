@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'tsup';
@@ -41,16 +41,22 @@ export default defineConfig({
 
     console.log('✓ Copied agent library files to dist/');
 
-    // Copy built-in skill files to dist/agents/skills/
+    // Copy built-in skill subdirectories to dist/agents/skills/
+    // Each skill is a subdirectory containing SKILL.md (Agent Skills standard)
     const srcSkills = join(srcAgents, 'skills');
     const destSkills = join(destAgents, 'skills');
     mkdirSync(destSkills, { recursive: true });
     if (existsSync(srcSkills)) {
-      const skillFiles = readdirSync(srcSkills).filter((f) => f.endsWith('.md'));
-      for (const file of skillFiles) {
-        copyFileSync(join(srcSkills, file), join(destSkills, file));
+      const entries = readdirSync(srcSkills);
+      let copied = 0;
+      for (const entry of entries) {
+        const entryPath = join(srcSkills, entry);
+        if (statSync(entryPath).isDirectory() && existsSync(join(entryPath, 'SKILL.md'))) {
+          cpSync(entryPath, join(destSkills, entry), { recursive: true });
+          copied++;
+        }
       }
-      console.log(`✓ Copied ${skillFiles.length} skill files to dist/agents/skills/`);
+      console.log(`✓ Copied ${copied} skill(s) to dist/agents/skills/`);
     } else {
       console.log('✓ No built-in skills directory found, skipping');
     }
