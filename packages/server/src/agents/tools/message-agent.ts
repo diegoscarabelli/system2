@@ -36,7 +36,7 @@ export function createMessageAgentTool(
     name: 'message_agent',
     label: 'Message Agent',
     description:
-      "Send a message to another agent in the system. The message appears in the receiver's context and triggers processing. Use read_system2_db to look up available agents by role.",
+      "Send a message to another agent in the system. The message appears in the receiver's context and triggers processing. Two delivery modes: default waits for the receiver to finish its current turn, urgent (urgent: true) interrupts mid-turn for time-sensitive corrections or priority changes. Use read_system2_db to look up available agents by role.",
     parameters: params,
     execute: async (_toolCallId, args, signal) => {
       if (signal?.aborted) {

@@ -164,19 +164,19 @@ All timestamps are UTC ISO 8601. See the [Schema Reference](#schema-reference) a
 │          │         │          │
 │          │1──┐     └──────────┘
 └──────────┘   │
-               │     ┌──────────┐
-               ├────N│   task   │◄──┐ parent (self-ref)
-               │     │          │───┘
-               │     │          │N──1 agent (assignee)
-               │     └──┬───┬──┘
-               │        │   │
-               │       1│   │1
-               │        │   │
-               │        N   N
+               │     ┌─────────────────────────┐
+               ├────N│          task            │◄──┐ parent (self-ref)
+               │     │                          │───┘
+               │     │                          │N──1 agent (assignee)
+               │     └───┬─────────────────┬────┘
+               │         │                 │
+               │        1│                1│
+               │         │                 │
+               │         N                 N
                │  ┌──────────────┐  ┌──────────────┐
                │  │  task_link   │  │ task_comment  │
                │  │ source→task  │  │ author→agent  │
-               │  │ target→task  │  │              │
+               │  │ target→task  │  │               │
                │  └──────────────┘  └──────────────┘
                │
                ├────N┌──────────┐
@@ -189,7 +189,7 @@ All timestamps are UTC ISO 8601. See the [Schema Reference](#schema-reference) a
                      └──────────────┘
 ```
 
-**Sessions.** Conversation history is persisted as JSONL in `sessions/{role}_{id}/`. The SDK auto-compacts older messages when context approaches model limits, replacing them with a summary. Session files rotate at 10 MB. You can read other agents' session files when useful for context, but never read your own. Be mindful of context when reading large files (roughly 1 byte = 0.25 tokens).
+**Sessions.** Conversation history is persisted as JSONL in `sessions/{role}_{id}/`. Auto-compaction fires at 50% context usage, summarizing older messages to free space. Pruning compaction triggers periodically after a configured number of auto-compactions: it drops information that predates the oldest summary in the current window, creating a sliding window so the context does not dilute over time. Session files rotate at 10 MB. You can read other agents' session files when useful for context, but never read your own (your own turns are already in your context or compaction summary). Be mindful of context when reading large files (roughly 1 byte = 0.25 tokens). See [Context Assembly](#context-assembly) for how sessions fit into your full prompt.
 
 ### Background Processes
 
@@ -267,7 +267,7 @@ Your system prompt is built from these layers on every LLM call:
 4. **Activity context**: project log (if project-scoped) or 2 most recent daily summaries (if system-wide).
 5. **Skills**: XML index of available skills, filtered by your role. Re-scanned on every call. Read a skill file with the `read` tool when relevant to your current task.
 
-Your conversation history follows the system prompt as JSONL messages. The SDK auto-compacts older messages when context grows large, replacing them with a summary. Your context may be compacted at any time.
+Your conversation history follows the system prompt as JSONL messages. Auto-compaction fires at 50% context usage, replacing older messages with a summary. Pruning periodically drops stale information so the summary does not grow unboundedly. Your context may be compacted at any time.
 
 ---
 
@@ -349,6 +349,7 @@ When a Conductor reports project completion: the Guide gets user confirmation, t
 - Read the full file before editing any knowledge file. Restructure for clarity; do not just append.
 - Prefer shared files when information is relevant to multiple roles.
 - When deciding where to persist something, consult the [What Goes Where](#what-goes-where) table.
+- **Skills are procedures, not facts.** If you find yourself writing a multi-step workflow to a knowledge file, it belongs in a skill instead. Create new skills with `write` at `~/.system2/skills/{name}/SKILL.md`; update existing ones with `edit`. Always pass `commit_message`. The same file hygiene applies: read before editing, restructure for clarity, keep instructions concrete (tool names, file paths, exact commands).
 
 ### File and Database Hygiene
 
