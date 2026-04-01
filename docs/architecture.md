@@ -75,7 +75,8 @@ All runtime state lives in `~/.system2/`:
 │       └── YYYY-MM-DD.md
 ├── artifacts/                       Project-free reports, dashboards, exports
 ├── skills/                          Reusable workflow instructions
-│   └── {skill-name}.md              Frontmatter (name, description, roles) + steps
+│   └── {skill-name}/
+│       └── SKILL.md                 Frontmatter (name, description, roles) + steps
 ├── projects/                        Project workspaces
 │   └── {id}_{name}/
 │       ├── log.md                   Continuous project log (Narrator)

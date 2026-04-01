@@ -1,6 +1,6 @@
 # Skills
 
-Skills are reusable workflow instructions stored as `.md` files (one per skill) in the skills directories. They fill the gap between tools (single actions) and knowledge (accumulated facts) by capturing multi-step procedures that agents can follow when performing recurring tasks.
+Skills are reusable workflow instructions following the [Agent Skills standard](https://agentskills.io/specification). Each skill is a subdirectory containing a `SKILL.md` file. They fill the gap between tools (single actions) and knowledge (accumulated facts) by capturing multi-step procedures that agents can follow when performing recurring tasks.
 
 **Key source files:**
 - `packages/server/src/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`)
@@ -8,9 +8,21 @@ Skills are reusable workflow instructions stored as `.md` files (one per skill) 
 - `packages/server/src/agents/agents.md`: agent-facing documentation (## Skills section)
 - `packages/server/src/knowledge/init.ts`: `~/.system2/skills/` directory creation
 
-## SKILL.md Format
+## Skill Structure
 
-Each skill is a single `.md` file with YAML frontmatter:
+Each skill is a subdirectory named after the skill, containing a `SKILL.md` file:
+
+```text
+skills/
+  deploy-pipeline/
+    SKILL.md              # Required: frontmatter + instructions
+    scripts/              # Optional: helper scripts
+    references/           # Optional: reference docs
+```
+
+### SKILL.md Format
+
+`SKILL.md` uses YAML frontmatter followed by the skill instructions:
 
 ```yaml
 ---
@@ -26,11 +38,13 @@ roles: [conductor]
 3. ...
 ```
 
+The `name` field must match the parent directory name (e.g., `deploy-pipeline/SKILL.md` must have `name: deploy-pipeline`).
+
 ### Frontmatter Fields
 
 | Field | Required | Type | Description |
 | ----- | -------- | ---- | ----------- |
-| `name` | Yes | string | Lowercase, hyphenated identifier. Used for override matching. |
+| `name` | Yes | string | Lowercase, hyphenated identifier. Must match parent directory name. |
 | `description` | Yes | string | One-line summary. Agents read this to decide relevance. |
 | `roles` | No | string[] | Agent roles that can use this skill. Omit or leave empty for all roles. Values are case-insensitive. |
 
@@ -45,7 +59,7 @@ Skills are loaded from two directories:
 
 When a user skill has the same `name` as a built-in skill, the user skill takes precedence. This allows users (or agents) to override or customize built-in workflows.
 
-The `~/.system2/skills/` directory is created automatically during server initialization. Skill files placed here are tracked by the `~/.system2` git repository once they exist (git does not track empty directories).
+The `~/.system2/skills/` directory is created automatically during server initialization. Skill subdirectories placed here are tracked by the `~/.system2` git repository.
 
 ## Discovery and Injection
 
@@ -53,7 +67,7 @@ Skill discovery, frontmatter parsing, XML compilation, and prompt injection are 
 
 On every LLM call, the SDK:
 
-1. Scans both directories for `.md` files
+1. Scans both directories for subdirectories containing `SKILL.md`
 2. Parses YAML frontmatter (name, description)
 3. Merges skills by name (first path wins, so user overrides built-in)
 4. Calls `skillsOverride`, where `filterByRole` removes skills not eligible for the current agent's role
@@ -64,7 +78,7 @@ On every LLM call, the SDK:
   <skill>
     <name>deploy-pipeline</name>
     <description>Deploy a data pipeline to DiegoTower with validation</description>
-    <location>~/.system2/skills/deploy-pipeline.md</location>
+    <location>~/.system2/skills/deploy-pipeline/SKILL.md</location>
   </skill>
 </available_skills>
 ```
@@ -73,13 +87,13 @@ Agents use the `read` tool to load the full skill content at the given `location
 
 ## Skill Creation by Agents
 
-Guide and Conductor agents are instructed to proactively create skills in `~/.system2/skills/` when they recognize reusable patterns. They use the `write` tool with `commit_message` to create the file, which auto-commits to the `~/.system2` git repository.
+Guide and Conductor agents are instructed to proactively create skills in `~/.system2/skills/` when they recognize reusable patterns. They create a subdirectory named after the skill and write a `SKILL.md` file inside it, using the `write` tool with `commit_message` to auto-commit to the `~/.system2` git repository.
 
 The litmus test agents apply: "Am I writing down a fact, or a workflow I'd want to follow again?" Facts go in knowledge files; procedures become skills.
 
 ## Build Configuration
 
-Built-in skill files are copied from `src/agents/skills/` to `dist/agents/skills/` during the tsup build (`packages/server/tsup.config.ts`). The copy is dynamic (reads the directory at build time), so adding a new built-in skill only requires placing the file in the source directory.
+Built-in skill subdirectories are copied from `src/agents/skills/` to `dist/agents/skills/` during the tsup build (`packages/server/tsup.config.ts`). The copy is dynamic (reads the directory at build time), so adding a new built-in skill only requires creating a `skill-name/SKILL.md` subdirectory in the source directory.
 
 ## See Also
 

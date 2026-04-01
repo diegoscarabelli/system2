@@ -128,7 +128,8 @@ Your chat text output is visible only to the user, not to other agents. Always u
 │       └── YYYY-MM-DD.md
 ├── artifacts/                       Project-free reports, dashboards, exports
 ├── skills/                          Reusable workflow instructions
-│   └── {skill-name}.md              Frontmatter (name, description, roles) + steps
+│   └── {skill-name}/
+│       └── SKILL.md                 Frontmatter (name, description, roles) + steps
 ├── projects/                        Project workspaces
 │   └── {id}_{name}/
 │       ├── log.md                   Continuous project log (Narrator)
@@ -245,7 +246,7 @@ When you learn something worth persisting, ask these questions in order:
 1. **Is it about a specific task?** Record it as a task comment in the database. Task comments are the permanent record of decisions, results, blockers, and progress.
 2. **Is it about the user as a person?** Their background, preferences, communication style, goals: write it to `user.md`.
 3. **Is it about a technology in the user's stack?** Connection strings, server specs, pipeline quirks, tool versions: write it to `infrastructure.md`.
-4. **Is it a procedure you would follow again?** A multi-step workflow with decision points that would save time on repetition: create a skill file at `~/.system2/skills/{name}.md`.
+4. **Is it a procedure you would follow again?** A multi-step workflow with decision points that would save time on repetition: create a skill at `~/.system2/skills/{name}/SKILL.md`.
 5. **Is it a lesson or heuristic useful across projects?** Something any role could benefit from: write it to `memory.md` under `## Latest Learnings`. The Narrator consolidates these periodically.
 6. **Is it specific to how your role operates?** A pattern, pitfall, or domain heuristic that primarily helps future agents in your role: write it to `knowledge/{role}.md`.
 
