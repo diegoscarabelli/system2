@@ -47,14 +47,48 @@ System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/b
                            │ WebSocket
 ┌──────────────────────────▼──────────────────────────────┐
 │  UI (React on port 3001 dev, served by server in prod)  │
-│  - Chat interface with streaming                        │
-│  - Artifact display (sandboxed iframe)                  │
+│  - Multi-agent chat with streaming                      │
+│  - Kanban board (live task dashboard per project)       │
+│  - Artifact viewer (tabbed sandboxed iframes)           │
+│  - Agent pane, artifact catalog, cron jobs panel        │
 └─────────────────────────────────────────────────────────┘
 ```
 
 See [Agents](agents.md) for agent roles, lifecycle, permissions, and tool access.
 
-All runtime state lives in `~/.system2/`. See [Configuration](configuration.md) for the full directory layout.
+All runtime state lives in `~/.system2/`:
+
+```
+~/.system2/
+├── config.toml                      Settings and API keys (0600, gitignored)
+├── app.db                           SQLite database (gitignored)
+├── server.pid                       PID file when server is running
+├── knowledge/                       Persistent knowledge (injected into prompts)
+│   ├── infrastructure.md            Data stack, tools, environments
+│   ├── user.md                      User profile, preferences, goals
+│   ├── memory.md                    Long-term memory (Narrator-maintained)
+│   ├── guide.md                     Guide role-specific knowledge
+│   ├── conductor.md                 Conductor role-specific knowledge
+│   ├── narrator.md                  Narrator role-specific knowledge
+│   ├── reviewer.md                  Reviewer role-specific knowledge
+│   └── daily_summaries/             Daily activity logs
+│       └── YYYY-MM-DD.md
+├── artifacts/                       Project-free reports, dashboards, exports
+├── skills/                          Reusable workflow instructions
+│   └── {skill-name}.md              Frontmatter (name, description, roles) + steps
+├── projects/                        Project workspaces
+│   └── {id}_{name}/
+│       ├── log.md                   Continuous project log (Narrator)
+│       ├── project_story.md         Final narrative (Narrator)
+│       └── artifacts/               Project-scoped artifacts
+├── sessions/                        Conversation history as JSONL (gitignored)
+│   └── {role}_{id}/
+└── logs/                            Server logs (gitignored)
+```
+
+Most content is git-tracked. `app.db`, `sessions/`, `logs/`, and `config.toml` are gitignored.
+
+See [Configuration](configuration.md) for `config.toml` settings and API keys.
 
 ## Monorepo Structure
 

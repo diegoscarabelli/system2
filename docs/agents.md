@@ -17,7 +17,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 | **Guide** | Primary user-facing agent. Helps brainstorm and plan, starts projects, interfaces with the multi-agent system, and relays updates. Users may also interact directly with other active agents; Guide mediation is preferred in most cases. | Singleton, persistent | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
 | **Narrator** | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. [Schedule-driven](scheduler.md). | Singleton, persistent | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
 | **Conductor** | Orchestrates and executes work within a project: breaks it into tasks, spawns specialist agents or executes directly, and coordinates with the Reviewer before reporting completion. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
-| **Reviewer** | Critically assesses work before it is considered complete. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
+| **Reviewer** | Reviews code before push, assesses data analysis for reasoning fallacies (Kahneman's System 2 lens), and evaluates statistical quality of findings. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
 
 **Guide and Narrator** are singletons created at server startup. Their sessions persist indefinitely across restarts.
 

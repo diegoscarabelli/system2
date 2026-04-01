@@ -130,21 +130,16 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 
 ## Application Directory
 
+Config-relevant paths within `~/.system2/` (see [Architecture](architecture.md#runtime-architecture) for the full directory layout):
+
 ```
 ~/.system2/
-├── .git/                  # Version control for text files
-├── config.toml            # Settings and credentials (0600)
-├── app.db                 # SQLite database
+├── config.toml            # Settings and credentials (0600, gitignored)
+├── app.db                 # SQLite database (gitignored)
 ├── server.pid             # PID file when server is running
-├── knowledge/
-│   ├── infrastructure.md  # Data stack details (Guide)
-│   ├── user.md            # User profile (Guide)
-│   ├── memory.md          # Long-term memory (Narrator)
-│   └── daily_summaries/   # Activity summaries (Narrator)
-├── sessions/              # Agent JSONL session files
-├── projects/              # Project workspaces ({id}_{name}/ per project)
-└── logs/
-    ├── system2.log        # Server logs
+├── sessions/              # Agent JSONL session files (gitignored)
+└── logs/                  # Server logs (gitignored)
+    ├── system2.log
     └── system2.log.N      # Rotated archives (1-5)
 ```
 
