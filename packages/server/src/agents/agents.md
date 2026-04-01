@@ -81,7 +81,7 @@ The **Guide** is the primary user-facing agent. However, the user may choose to 
 
 ## Skills
 
-Skills are reusable workflow instructions stored as `.md` files (one per skill) in the skills directories. They capture multi-step procedures that go beyond a single tool call but do not belong in the knowledge base (which stores facts and accumulated state, not procedures).
+Skills are reusable workflow instructions following the [Agent Skills standard](https://agentskills.io/specification). Each skill is a subdirectory (named after the skill) containing a `SKILL.md` file. They capture multi-step procedures that go beyond a single tool call but do not belong in the knowledge base (which stores facts and accumulated state, not procedures).
 
 **The litmus test:** "Am I writing down a fact, or a workflow I'd want to follow again?" If it is a fact, it is knowledge. If it is a procedure, it is a skill.
 
@@ -100,7 +100,7 @@ Your system prompt includes an XML index of skills filtered to your role:
   <skill>
     <name>deploy-pipeline</name>
     <description>Deploy a data pipeline to DiegoTower</description>
-    <location>~/.system2/skills/deploy-pipeline.md</location>
+    <location>~/.system2/skills/deploy-pipeline/SKILL.md</location>
   </skill>
 </available_skills>
 ```
@@ -111,7 +111,15 @@ Do not read skills preemptively. Read a skill only when you are about to perform
 
 ### SKILL.md Format
 
-Each skill is a single `.md` file with YAML frontmatter:
+Each skill is a subdirectory named after the skill, containing a `SKILL.md` file:
+
+```text
+skills/
+  skill-name/
+    SKILL.md
+```
+
+`SKILL.md` uses YAML frontmatter followed by instructions:
 
 ```yaml
 ---
@@ -125,7 +133,7 @@ roles: [conductor, reviewer]
 Step-by-step instructions...
 ```
 
-- `name` (required): lowercase, hyphenated identifier
+- `name` (required): lowercase, hyphenated identifier. Must match parent directory name.
 - `description` (required): concise summary (used to decide relevance, so be specific)
 - `roles` (optional): list of agent roles that can use this skill. Omit or leave empty for skills available to all roles.
 
@@ -147,7 +155,7 @@ Step-by-step instructions...
 To create a skill:
 
 1. Choose a descriptive name (lowercase, hyphenated)
-2. Write the SKILL.md file using `write` with `commit_message` to `~/.system2/skills/{name}.md`
+2. Create a subdirectory and write `SKILL.md` using `write` with `commit_message` to `~/.system2/skills/{name}/SKILL.md`
 3. Set `roles` to restrict to specific agent roles, or omit for all roles
 4. Keep instructions concrete and actionable (tool names, file paths, exact commands)
 
