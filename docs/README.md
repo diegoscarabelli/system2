@@ -20,6 +20,7 @@ For installation and usage, see the [project README](../README.md).
 - [Agents](agents.md): How the four agent roles (Guide, Conductor, Narrator, Reviewer) work together, including their lifecycles, how system prompts are assembled, how LLM failover is handled, and how compaction pruning prevents context bloat in long-running agents.
 - [Tools](tools.md): The tools available to agents, including what each one does, how they are registered, and how permissions are enforced.
 - [Database](database.md): The SQLite schema that stores projects, tasks, agents, and comments, with table definitions, indices, and common query patterns.
+- [Artifacts](artifacts.md): What artifacts are (published analytical outputs), where they live on disk, database registration, UI rendering (iframes, markdown, live reload), and the postMessage bridge for interactive dashboards.
 - [WebSocket Protocol](websocket-protocol.md): The message format between the UI and server, covering how chat messages, tool calls, and agent events are exchanged in real time.
 - [Knowledge System](knowledge-system.md): How agents persist and share memory, including knowledge files, daily summaries, project logs, project stories, and git tracking of `~/.system2/`.
 - [Skills](skills.md): Reusable workflow instructions for agents, including the SKILL.md format, discovery from built-in and user directories, role filtering, and XML index injection.

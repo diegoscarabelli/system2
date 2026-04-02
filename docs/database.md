@@ -93,7 +93,7 @@ Agent-authored comments on tasks.
 
 ### `artifact`
 
-File artifacts created by agents, displayed in the UI.
+File artifacts created by agents, displayed in the UI. See [Artifacts](artifacts.md) for the full artifact system documentation.
 
 | Column | Type | Description |
 |--------|------|-------------|

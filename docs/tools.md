@@ -142,7 +142,7 @@ Routes through `AgentRegistry` to find the target `AgentHost`, then calls `deliv
 
 ### `show_artifact`
 
-Display an artifact file in the UI panel. **Guide-only**: the Guide is the only agent that interacts with the user via the UI. Supports tabbed display (multiple artifacts open at once).
+Display an artifact file in the UI panel. **Guide-only**: the Guide is the only agent that interacts with the user via the UI. Supports tabbed display (multiple artifacts open at once). See [Artifacts](artifacts.md) for the full artifact system documentation.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|

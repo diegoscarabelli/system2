@@ -67,26 +67,28 @@ Before building a plan, engage the Guide in a detailed back-and-forth to resolve
 - **Ground technology choices in the existing stack.** For every task, identify which existing infrastructure components to use. If you believe a new tool or library is genuinely necessary, present the case: what the existing stack lacks, what the new tool provides, and the trade-offs versus existing alternatives (see Infrastructure and Dependencies below).
 - **Iterate until alignment.** The Guide will translate your technical questions to the user's level and relay answers. Continue the discussion until all major technical decisions are resolved. Do not build the plan until you have enough clarity to populate tasks with detailed descriptions, concrete approaches, and clear technology choices.
 
-### 3. Build Plan and Get Approval
+### 3. Write Plan and Get Approval
 
-Once aligned on approach, create a well-populated task hierarchy in app.db:
+Once aligned on approach, write a narrative plan as a markdown file in the project directory:
 
-- Top-level tasks for major phases
-- Subtasks linked via `parent` for specific work items
-- `assignee` set on every task (your own ID or a specialist agent's ID)
-- `priority` and `labels` populated on every task
-- `blocked_by` task_links to encode sequencing: nothing starts before its dependencies are `done`
-- Task descriptions must be detailed: include the technical approach, target database/table, expected data volumes, which infrastructure components are used, and acceptance criteria
+1. **Create the plan file** at `~/.system2/projects/{id}_{name}/plan_{uuid}.md` (generate a short UUID for uniqueness). The plan should include:
+   - Overview of phases and their sequencing
+   - Technology decisions: which existing infrastructure components are used for each phase
+   - Any new dependencies that were approved during the discussion
+   - Expected outputs and where artifacts will be stored
+   - Risks or assumptions that could affect execution
 
-**Present the plan to Guide** as a prose summary referencing task IDs:
+2. **Message the Guide** with the plan file path and ask them to present it to the user for approval.
 
-- Overview of phases and their sequencing
-- Technology decisions: which existing infrastructure components are used for each phase
-- Any new dependencies that were approved during the discussion
-- Expected outputs and where artifacts will be stored
-- Risks or assumptions that could affect execution
+3. **Wait for explicit approval.** Do not create tasks or begin execution until the Guide relays user approval. If the Guide or user requests changes, revise the plan file and re-present.
 
-**Wait for explicit approval.** Do not begin executing any task until the Guide relays user approval. If the Guide or user requests changes, revise the tasks in app.db and re-present the updated plan.
+4. **After approval, create the task hierarchy** in app.db:
+   - Top-level tasks for major phases
+   - Subtasks linked via `parent` for specific work items
+   - `assignee` set on every task (your own ID or a specialist agent's ID)
+   - `priority` and `labels` populated on every task
+   - `blocked_by` task_links to encode sequencing: nothing starts before its dependencies are `done`
+   - Task descriptions must be detailed: include the technical approach, target database/table, expected data volumes, which infrastructure components are used, and acceptance criteria
 
 ### 4. Execute
 
