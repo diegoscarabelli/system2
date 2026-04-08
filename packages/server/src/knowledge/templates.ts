@@ -10,16 +10,68 @@ export const INFRASTRUCTURE_TEMPLATE = `# Infrastructure
 > Data stack details. Updated by the Guide during onboarding and as infrastructure evolves.
 > References to code directories, documentation, and URLs are encouraged.
 
+## Overview
+
+> A few paragraphs describing the user's data stack at a high level: what they have, what
+> they want, the methods and conventions they've adopted (e.g. ELT vs ETL, batch vs streaming,
+> notebook-driven exploration vs production pipelines). This is the human-readable summary
+> the rest of the document elaborates on.
+
 ## Databases
 
+> One subsection per database. Each starts with a JSON block describing connection details,
+> followed by prose covering schemas, tables of interest, retention, conventions, and quirks.
+> Add JSON fields as needed (e.g. \`tunnel\`, \`read_replica\`, \`tls\`).
+
+### example_db
+
+\`\`\`json
+{
+  "engine": "postgresql",
+  "version": "16",
+  "host": "localhost",
+  "port": 5432,
+  "database": "example",
+  "auth": "trust",
+  "deployment": "local"
+}
+\`\`\`
+
+Prose describing what lives in this database, important schemas, retention policies,
+gotchas, and how System2 typically queries it.
+
+## Data Repositories
+
+> Non-database data sources: object stores, data lakes, file shares, API-accessible datasets.
+> Same JSON-then-prose pattern. Add fields as the medium requires.
 
 ## Pipeline Orchestrator
 
+> Which orchestrator (Prefect, Airflow, Dagster, cron, none), where it runs, how to access
+> the UI, where flows/DAGs live, conventions for naming and structure. Prose is fine here;
+> add a JSON block if connection details warrant it.
 
-## Git Repositories
+## Code Repositories
 
+> JSON dictionary of repositories System2 should know about, keyed by short name. Add fields
+> as needed (e.g. \`default_branch\`, \`package_manager\`, \`language\`).
+
+\`\`\`json
+{
+  "system2_data_pipelines": {
+    "local_path": "~/repos/system2_data_pipelines",
+    "remote": "git@github.com:user/system2_data_pipelines.git",
+    "purpose": "Pipeline definitions and shared data utilities"
+  }
+}
+\`\`\`
+
+Prose describing each repo's role, key directories, and conventions.
 
 ## Other Tools
+
+> Visualization (Superset, Metabase, Grafana), notebook environments, scheduling, monitoring,
+> anything else relevant to the data stack. JSON blocks where useful.
 
 `;
 
