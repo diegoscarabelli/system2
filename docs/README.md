@@ -21,6 +21,7 @@ For installation and usage, see the [project README](../README.md).
 - [Tools](tools.md): The tools available to agents, including what each one does, how they are registered, and how permissions are enforced.
 - [Database](database.md): The SQLite schema that stores projects, tasks, agents, and comments, with table definitions, indices, and common query patterns.
 - [Artifacts](artifacts.md): What artifacts are (published analytical outputs), where they live on disk, database registration, UI rendering (iframes, markdown, live reload), and the postMessage bridge for interactive dashboards.
+- [Scratchpad](scratchpad.md): The working area for exploration, prototyping, and debugging, including project-scoped and project-free locations, recommendations for intermediate data formats and notebook workflows, and the promotion path to artifacts.
 - [WebSocket Protocol](websocket-protocol.md): The message format between the UI and server, covering how chat messages, tool calls, and agent events are exchanged in real time.
 - [Knowledge System](knowledge-system.md): How agents persist and share memory, including knowledge files, daily summaries, project logs, project stories, and git tracking of `~/.system2/`.
 - [Skills](skills.md): Reusable workflow instructions for agents, including the SKILL.md format, discovery from built-in and user directories, role filtering, and XML index injection.
