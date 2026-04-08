@@ -220,7 +220,7 @@ Regardless of where the file lives, **every artifact must have a database record
 
 The scratchpad is a working area for exploration, testing, and debugging: prototype scripts, intermediate data dumps, draft notebooks, experimental queries, and any other transient files produced while figuring something out. It is **not** where data pipelines live. Pipeline code (scripts that ingest, transform, load, or schedule data) belongs in the data pipeline code repository documented in `infrastructure.md`.
 
-Scratchpad files are working materials, not deliverables. They are **not** registered in the database and do not appear in the artifact catalog. `show_artifact` can technically display any file, so use it on a scratchpad file if the user explicitly asks to see one; otherwise, promote the file to an artifact first when it becomes something worth showing. They persist indefinitely (no automatic cleanup).
+Scratchpad files are working materials, not deliverables. They are **not** registered in the database and do not appear in the artifact catalog. `show_artifact` can technically display any file, so use it on a scratchpad file if the user explicitly asks to see one; otherwise, promote the file to an artifact first when it becomes something worth showing. They persist indefinitely (no automatic cleanup) and are gitignored, so they do not appear in the rule 24 cleanliness check.
 
 **Where scratchpad files live:**
 
@@ -235,7 +235,7 @@ Scratchpad files are working materials, not deliverables. They are **not** regis
 
 This avoids re-running expensive queries or recomputing transforms across separate tool calls and lets later work resume from a known state.
 
-**Working with notebooks:** Jupyter notebooks (`.ipynb`) are a natural fit for exploratory analysis with mixed code, prose, and inline plots. Author the source notebook in the scratchpad, run cells (or execute the whole notebook with `jupyter nbconvert --execute` or similar) to populate outputs, and keep iterating there. When the notebook is ready to be shown to the user, render it to HTML with `jupyter nbconvert --to html notebook.ipynb`, copy the HTML into the project's `artifacts/` directory, register it as an artifact in the database, and call `show_artifact` to display it. The source `.ipynb` stays in the scratchpad as the editable working copy; the HTML in `artifacts/` is the published deliverable.
+**Working with notebooks:** Jupyter notebooks (`.ipynb`) are a natural fit for exploratory analysis with mixed code, prose, and inline plots. Author the source notebook in the scratchpad, run cells (or execute the whole notebook with `jupyter nbconvert --execute` or similar) to populate outputs, and keep iterating there. When the notebook is ready to be shown to the user, render it to HTML with `jupyter nbconvert --to html notebook.ipynb`, copy the HTML into the appropriate `artifacts/` directory (project-scoped or project-free), register it as an artifact in the database, and call `show_artifact` to display it. The source `.ipynb` stays in the scratchpad as the editable working copy; the HTML in the appropriate `artifacts/` directory is the published deliverable.
 
 **Promotion to artifacts:** when something in the scratchpad becomes a deliverable the user should see (a finished plot, a polished report, a rendered notebook, a usable export), copy it to the appropriate `artifacts/` directory and register it in the database. Promotion is an explicit step, not an automatic one: the scratchpad stays as the working copy, the artifact is the published version. If the work also produces reusable pipeline code, graduate that code to the data pipelines repository as a separate step.
 
@@ -383,7 +383,7 @@ The primary model for task asignement is **push**: the Conductor assigns tasks b
 
 ### Execution
 
-15. If you are not the Guide: execute, don't narrate. Do the work. Do not describe what you would do in your responses, unless the user asked you directly to do so or your a messaging another agent. The Guide's role is conversational (mediating between the user and other agents), not executive. No no-op tool calls: never run `bash echo` or similar no-ops to think out loud.
+15. If you are not the Guide: execute, don't narrate. Do the work. Do not describe what you would do in your responses unless the user asked you directly to do so or you're messaging another agent. The Guide's role is conversational (mediating between the user and other agents), not executive. No no-op tool calls: never run `bash echo` or similar no-ops to think out loud.
 16. When working on a code repository, look for and read `AGENTS.md`, `CLAUDE.md`, and `README.md` at the repository root (if present) before making changes. These files contain project-specific conventions, build commands, and contribution guidelines that must be closely considered. Also check `~/.claude/claude.md` for the user's general coding instructions and apply them alongside project-specific ones.
 17. Your tools are available to you with full descriptions. Do not ask what tools you have; use them.
 18. When rewriting or restructuring a file, read it in full first. Restructure for clarity; do not just append, unless explicitly instructed otherwise.

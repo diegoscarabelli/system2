@@ -31,7 +31,7 @@ Scratchpad files live under `~/.system2/`:
 | `~/.system2/projects/{id}_{name}/scratchpad/` | Working files tied to a specific project. Default for any work happening inside a project. |
 | `~/.system2/scratchpad/` | Working files not associated with any project (one-off explorations, system-wide experiments, generic prototypes). |
 
-There are no subdirectory conventions: agents organize the contents of these directories as they see fit for the work at hand. There is no automatic cleanup; files persist indefinitely.
+There are no subdirectory conventions: agents organize the contents of these directories as they see fit for the work at hand. There is no automatic cleanup; files persist indefinitely. Both directories are gitignored by the default `.gitignore` template installed in `~/.system2/` (see `packages/server/src/knowledge/git.ts`), so scratchpad files do not appear in `git -C ~/.system2 status` and never get committed to the knowledge repo.
 
 ## Recommendations for Intermediate Data
 
@@ -50,11 +50,11 @@ Jupyter notebooks (`.ipynb`) are a natural fit for exploratory analysis with mix
 1. Author the source `.ipynb` in the scratchpad (project-scoped or project-free as appropriate).
 2. Run cells iteratively, or execute the whole notebook with `jupyter nbconvert --execute notebook.ipynb` (or similar) to populate outputs.
 3. When the notebook is ready to be shown to the user, render it to HTML with `jupyter nbconvert --to html notebook.ipynb`.
-4. Copy the HTML into the project's `artifacts/` directory.
-5. Register it as an artifact in the database (`createArtifact` via the `write_system2_db` tool).
+4. Copy the HTML into the appropriate `artifacts/` directory (project-scoped or project-free).
+5. Register it as an artifact in the database (`createArtifact` via the `write_system2_db` tool), using an absolute `file_path`.
 6. Display it with `show_artifact` for the user.
 
-The source `.ipynb` stays in the scratchpad as the editable working copy; the HTML in `artifacts/` is the published deliverable. This separation lets the agent keep iterating on the source without disturbing the published version, and lets the user see the rendered output without needing a Jupyter server.
+The source `.ipynb` stays in the scratchpad as the editable working copy; the HTML in the appropriate `artifacts/` directory is the published deliverable. This separation lets the agent keep iterating on the source without disturbing the published version, and lets the user see the rendered output without needing a Jupyter server.
 
 ## Promotion to Artifacts
 
