@@ -21,9 +21,10 @@ export const INFRASTRUCTURE_TEMPLATE = `# Infrastructure
 
 > One subsection per database. Each starts with a JSON block describing connection details,
 > followed by prose covering schemas, tables of interest, retention, conventions, and quirks.
-> Add JSON fields as needed (e.g. \`tunnel\`, \`read_replica\`, \`tls\`). The \`auth\` field
-> should describe the mechanism (e.g. \`password\`, \`scram-sha-256\`, \`iam\`, \`peer\`),
-> never the credential itself: secrets belong in a credentials manager, not in this file.
+> Add JSON fields as needed (e.g. \`tunnel\`, \`read_replica\`, \`tls\`). Use \`auth\` to
+> describe the mechanism (e.g. \`password\`, \`scram-sha-256\`, \`iam\`, \`peer\`), and
+> \`credentials\` to point at where the secret lives on disk (e.g. \`~/.pgpass\`, \`.env\`,
+> OS keychain entry name). Never paste the secret itself into this file: it is git-tracked.
 
 ### example_db
 
@@ -35,6 +36,7 @@ export const INFRASTRUCTURE_TEMPLATE = `# Infrastructure
   "port": 5432,
   "database": "example",
   "auth": "scram-sha-256",
+  "credentials": "~/.pgpass",
   "deployment": "local"
 }
 \`\`\`
