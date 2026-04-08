@@ -53,7 +53,7 @@ On receiving your initial message from Guide:
 - Read your project record from app.db (`read_system2_db`)
 - Create your project workspace directory at `~/.system2/projects/{id}_{name}/` (lowercase, slugified name, e.g. `1_linkedin-campaign`) with `artifacts/` and `scratchpad/` subdirectories inside it
 - **Consult infrastructure.md** in your Knowledge Base to understand the available data stack (databases, orchestrator, pipeline repo, installed tools, deployment workflow). This file is already in your system prompt; you do not need to read it with a tool.
-- Inspect the data pipeline code repository (path in infrastructure.md; defaults to `~/repos/data_pipelines`) to understand existing DAG patterns, file structure, naming conventions, and code style
+- Inspect the data pipeline code repository (path in infrastructure.md; defaults to `~/repos/system2_data_pipelines`) to understand existing DAG patterns, file structure, naming conventions, and code style
 - Research the problem domain independently: explore data sources, check APIs and documentation, assess file formats and data volumes, examine schemas
 - Identify technical questions, unknowns, and decision points that affect implementation
 
@@ -175,7 +175,7 @@ This applies to: new Python/Node packages, new databases or extensions, new CLI 
 
 ## Standards
 
-Follow conventions found in the data pipeline code repository (path in infrastructure.md; defaults to `~/repos/data_pipelines`):
+Follow conventions found in the data pipeline code repository (path in infrastructure.md; defaults to `~/repos/system2_data_pipelines`):
 
 - File structure and naming
 - SQL style: comments explaining business logic, consistent naming
