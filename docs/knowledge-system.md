@@ -54,7 +54,8 @@ Project-scoped files live outside `knowledge/`:
 └── {id}_{name}/           # e.g. 1_linkedin-campaign (Conductor creates)
     ├── log.md             # Continuous project log (Narrator, append-only)
     ├── project_story.md   # Final narrative (Narrator, on completion)
-    └── artifacts/         # Reports, dashboards, data exports
+    ├── artifacts/         # Reports, dashboards, data exports
+    └── scratchpad/        # Working files for exploration and prototyping
 ```
 
 ## File Ownership

@@ -2,7 +2,7 @@
 
 Artifacts are files produced as published results of analytical work: EDA notebooks, dashboards, plots, PDFs, markdown reports, and similar deliverables meant for the user to read and see. They are the tangible outputs of projects.
 
-Pipeline code, utility scripts, intermediate data files, and other working materials are **not** artifacts. The distinction is intent: artifacts are created for the user to consume, not for agents to execute.
+Pipeline code, utility scripts, intermediate data files, and other working materials are **not** artifacts. The distinction is intent: artifacts are created for the user to consume, not for agents to execute. Working files used during exploration, prototyping, and debugging belong in the [Scratchpad](scratchpad.md), which is the companion working area where source notebooks, intermediate data dumps, and prototype scripts live before anything is published as an artifact.
 
 **Key source files:**
 - `packages/server/src/agents/tools/show-artifact.ts`: Guide-only tool to display artifacts in the UI
@@ -26,7 +26,7 @@ Examples of artifacts:
 
 Not artifacts:
 - Python scripts, pipeline code, SQL files (these are working tools, not deliverables)
-- Intermediate data files (staging CSVs, temp parquet files)
+- Intermediate data files (staging CSVs, temp parquet files): these belong in the [Scratchpad](scratchpad.md)
 - Configuration files, logs, knowledge files
 
 ## File Storage
@@ -139,6 +139,7 @@ The same message type is sent on live reload (with a cache-busting `&t=<timestam
 
 ## See Also
 
+- [Scratchpad](scratchpad.md): the working area for exploration, prototyping, and intermediate data; source files and drafts that may eventually be promoted to artifacts
 - [Database](database.md#artifact): full column definitions and indices
 - [Tools](tools.md#show_artifact): `show_artifact` tool parameters and behavior
 - [WebSocket Protocol](websocket-protocol.md): artifact message type and live reload events

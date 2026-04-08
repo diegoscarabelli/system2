@@ -74,6 +74,7 @@ All runtime state lives in `~/.system2/`:
 │   └── daily_summaries/             Daily activity logs
 │       └── YYYY-MM-DD.md
 ├── artifacts/                       Project-free reports, dashboards, exports
+├── scratchpad/                      Project-free working files (exploration, debugging)
 ├── skills/                          Reusable workflow instructions
 │   └── {skill-name}/
 │       └── SKILL.md                 Frontmatter (name, description, roles) + steps
@@ -81,7 +82,8 @@ All runtime state lives in `~/.system2/`:
 │   └── {id}_{name}/
 │       ├── log.md                   Continuous project log (Narrator)
 │       ├── project_story.md         Final narrative (Narrator)
-│       └── artifacts/               Project-scoped artifacts
+│       ├── artifacts/               Project-scoped artifacts
+│       └── scratchpad/              Project-scoped working files (exploration, debugging)
 ├── sessions/                        Conversation history as JSONL (gitignored)
 │   └── {role}_{id}/
 └── logs/                            Server logs (gitignored)
