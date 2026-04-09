@@ -160,7 +160,7 @@ Agents query the database via the `read_system2_db` tool (SELECT only). Interact
 
 ### Write access
 
-Agents write to the database via the `write_system2_db` tool, which exposes structured named operations (`createProject`, `updateProject`, `createTask`, `updateTask`, `createTaskLink`, `deleteTaskLink`, `createTaskComment`, `deleteTaskComment`, `createArtifact`, `updateArtifact`, `deleteArtifact`). These delegate to `DatabaseClient` methods, ensuring `updated_at` is always maintained and `task_comment.author` is auto-filled from the calling agent's ID. See [Tools](tools.md#write_system2_db).
+Agents write to the database via the `write_system2_db` tool, which exposes structured named operations (`createProject`, `updateProject`, `createTask`, `updateTask`, `createTaskLink`, `deleteTaskLink`, `createTaskComment`, `updateTaskComment`, `deleteTaskComment`, `createArtifact`, `updateArtifact`, `deleteArtifact`). These delegate to `DatabaseClient` methods, ensuring `updated_at` is always maintained and `task_comment.author` is auto-filled from the calling agent's ID. `updateTaskComment` is restricted to the original author so attribution stays honest. See [Tools](tools.md#write_system2_db).
 
 For ad-hoc SQL not covered by the tool (bulk updates, complex transactions), agents can use `bash` with `sqlite3 ~/.system2/app.db`.
 

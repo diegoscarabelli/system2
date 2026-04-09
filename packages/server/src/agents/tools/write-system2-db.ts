@@ -45,6 +45,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
         Type.Literal('createTaskLink'),
         Type.Literal('deleteTaskLink'),
         Type.Literal('createTaskComment'),
+        Type.Literal('updateTaskComment'),
         Type.Literal('deleteTaskComment'),
         Type.Literal('createArtifact'),
         Type.Literal('updateArtifact'),
@@ -52,14 +53,14 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
       ],
       {
         description:
-          'Operation to perform. createProject (Guide only) / updateProject (Guide and Conductor, own project) manage projects. createTask / updateTask manage tasks (project-scoped; assignee field restricted to Guide and Conductor). claimTask atomically claims an unassigned todo task (pull model, secondary to assignment). createTaskLink / deleteTaskLink manage task relationships (project-scoped). createTaskComment / deleteTaskComment manage task comments (project-scoped; author auto-filled). createArtifact / updateArtifact / deleteArtifact manage artifact metadata (file_path is absolute; deleteArtifact removes DB record only).',
+          'Operation to perform. createProject (Guide only) / updateProject (Guide and Conductor, own project) manage projects. createTask / updateTask manage tasks (project-scoped; assignee field restricted to Guide and Conductor). claimTask atomically claims an unassigned todo task (pull model, secondary to assignment). createTaskLink / deleteTaskLink manage task relationships (project-scoped). createTaskComment / updateTaskComment / deleteTaskComment manage task comments (project-scoped; author auto-filled on create; updateTaskComment is restricted to the original author and only replaces the content). createArtifact / updateArtifact / deleteArtifact manage artifact metadata (file_path is absolute; deleteArtifact removes DB record only).',
       }
     ),
     // Shared: ID for updates/deletes
     id: Type.Optional(
       Type.Number({
         description:
-          'Record ID — required for updateProject, updateTask, deleteTaskLink, deleteTaskComment, updateArtifact, deleteArtifact.',
+          'Record ID — required for updateProject, updateTask, deleteTaskLink, updateTaskComment, deleteTaskComment, updateArtifact, deleteArtifact.',
       })
     ),
     // Project / Task shared fields
@@ -108,7 +109,10 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
     // Task comment fields
     task: Type.Optional(Type.Number({ description: 'Task ID — required for createTaskComment.' })),
     content: Type.Optional(
-      Type.String({ description: 'Comment content — required for createTaskComment.' })
+      Type.String({
+        description:
+          'Comment content — required for createTaskComment and updateTaskComment. On update, replaces the entire comment body.',
+      })
     ),
     // Artifact fields
     file_path: Type.Optional(
@@ -345,6 +349,29 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
               content: params.content,
             });
 
+            return ok(result);
+          }
+
+          case 'updateTaskComment': {
+            if (params.id === undefined) return err('updateTaskComment requires: id');
+            if (!params.content) return err('updateTaskComment requires: content');
+            const updateComment = db.getTaskComment(params.id);
+            if (!updateComment) return err(`No task comment found with id ${params.id}`);
+            const updateCommentTask = db.getTask(updateComment.task);
+            if (updateCommentTask) {
+              const updateCommentScopeErr = checkProjectScope(
+                self.project,
+                updateCommentTask.project
+              );
+              if (updateCommentScopeErr) return err(updateCommentScopeErr);
+            }
+            if (updateComment.author !== agentId) {
+              return err(
+                `Only the original author can update a task comment. Comment ${params.id} was authored by agent ${updateComment.author}; you are agent ${agentId}. Post a new comment instead.`
+              );
+            }
+            const result = db.updateTaskComment(params.id, params.content);
+            if (!result) return err(`No task comment found with id ${params.id}`);
             return ok(result);
           }
 

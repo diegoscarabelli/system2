@@ -115,6 +115,7 @@ Executes against `~/.system2/app.db` using structured named operations that dele
 | `createTaskLink` | `source`, `target`, `relationship` | — | Project-scoped (checked via source task). `relationship`: `blocked_by` \| `relates_to` \| `duplicates` |
 | `deleteTaskLink` | `id` | — | Project-scoped (checked via source task) |
 | `createTaskComment` | `task`, `content` | — | Project-scoped. `author` auto-filled from agent ID. |
+| `updateTaskComment` | `id`, `content` | — | Project-scoped. **Author-only:** only the original author can update their own comment. Replaces the entire comment body. |
 | `deleteTaskComment` | `id` | — | Project-scoped |
 | `createArtifact` | `file_path`, `title` | `project`, `description`, `tags` | Any agent. Project scope checked if `project` is set. |
 | `updateArtifact` | `id` | `file_path`, `title`, `project`, `description`, `tags` | Any agent. Project scope checked. |
@@ -126,6 +127,7 @@ Valid `priority` values: `"low"`, `"medium"`, `"high"`
 **Permission model:**
 
 - **Role checks:** `createProject` is Guide-only. `updateProject` is Guide and Conductor only (Conductors restricted to their own project). Setting `assignee` on tasks is Guide and Conductor only.
+- **Author checks:** `updateTaskComment` is restricted to the original author. Other agents must post a new comment instead of editing someone else's attributed content.
 - **Project scope:** if the calling agent is assigned to a project, it can only create/update/delete records belonging to that same project. Agents with no project assignment (Guide, Narrator) and records with no project association are unrestricted.
 
 ### `message_agent`
