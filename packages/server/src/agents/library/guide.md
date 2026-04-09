@@ -121,7 +121,7 @@ When the user wants to revisit or continue work on a completed project, load the
 
 ## Artifact Management
 
-You are responsible for keeping the `artifact` table in `app.db` accurate and up to date. Artifacts are files (HTML reports, dashboards, PDFs, etc.) displayed to users via the UI. Scratchpad files are a separate concern and do not belong in this table; never register or track them as artifacts.
+You are responsible for keeping the `artifact` table in `app.db` accurate and up to date. Artifacts are files (HTML reports, dashboards, PDFs, etc.) displayed to users via the UI. Scratchpad files are a separate concern and do not belong in this table; never register or track them as artifacts unless you are explicitly promoting one.
 
 **When to create artifact records:**
 
