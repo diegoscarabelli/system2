@@ -130,6 +130,7 @@ export interface AgentHostConfig {
   /** Shared AuthResolver for cross-agent rate limit awareness. Falls back to creating a local instance. */
   authResolver?: AuthResolver;
   reminderManager?: ReminderManager;
+  knowledgeBudgetChars?: number;
 }
 
 export class AgentHost {
@@ -174,6 +175,7 @@ export class AgentHost {
   private contextOverflowHandled = false;
   private agentModels: Record<string, string> = {};
   private reminderManager?: ReminderManager;
+  private knowledgeBudgetChars: number;
   private unsubscribeSession: (() => void) | null = null;
 
   constructor(config: AgentHostConfig) {
@@ -186,6 +188,7 @@ export class AgentHost {
     this.resurrector = config.resurrector;
     this.chatMaxMessages = config.chatMaxMessages ?? 1000;
     this.reminderManager = config.reminderManager;
+    this.knowledgeBudgetChars = config.knowledgeBudgetChars ?? 20_000;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -918,11 +921,22 @@ export class AgentHost {
 
   /**
    * Load knowledge files and return as context string for the system prompt.
-   * Empty files (0 lines) are skipped.
+   * Empty files (0 lines) are skipped. Files exceeding MAX_KNOWLEDGE_CHARS are
+   * truncated at the tail; the Narrator condenses them on its next scheduled run.
    */
   private loadKnowledgeContext(): string {
+    const MAX_KNOWLEDGE_CHARS = this.knowledgeBudgetChars;
     const knowledgeDir = join(SYSTEM2_DIR, 'knowledge');
     const sections: string[] = [];
+
+    const readWithBudget = (filePath: string): string => {
+      const raw = readFileSync(filePath, 'utf-8');
+      if (raw.length <= MAX_KNOWLEDGE_CHARS) return raw;
+      return (
+        raw.slice(0, MAX_KNOWLEDGE_CHARS) +
+        `\n\n[...truncated: file exceeds ${MAX_KNOWLEDGE_CHARS.toLocaleString()} char budget — the Narrator will condense it during the next memory-update]`
+      );
+    };
 
     const addSection = (filePath: string, content: string) => {
       if (content.trim().split('\n').length > 0) {
@@ -934,14 +948,14 @@ export class AgentHost {
     for (const file of ['infrastructure.md', 'user.md', 'memory.md']) {
       const filePath = join(knowledgeDir, file);
       if (existsSync(filePath)) {
-        addSection(filePath, readFileSync(filePath, 'utf-8'));
+        addSection(filePath, readWithBudget(filePath));
       }
     }
 
     // Role-specific knowledge file (guide.md, conductor.md, narrator.md, reviewer.md)
     const roleKnowledgePath = join(knowledgeDir, `${this.agentRole}.md`);
     if (existsSync(roleKnowledgePath)) {
-      addSection(roleKnowledgePath, readFileSync(roleKnowledgePath, 'utf-8'));
+      addSection(roleKnowledgePath, readWithBudget(roleKnowledgePath));
     }
 
     // Role-aware activity context:
@@ -949,7 +963,7 @@ export class AgentHost {
     if (this.agentProject !== null && this.agentProjectDirName) {
       const projectLogPath = join(SYSTEM2_DIR, 'projects', this.agentProjectDirName, 'log.md');
       if (existsSync(projectLogPath)) {
-        addSection(projectLogPath, readFileSync(projectLogPath, 'utf-8'));
+        addSection(projectLogPath, readWithBudget(projectLogPath));
       }
     } else {
       const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -962,7 +976,7 @@ export class AgentHost {
           .reverse(); // chronological order
         for (const file of summaryFiles) {
           const filePath = join(summariesDir, file);
-          addSection(filePath, readFileSync(filePath, 'utf-8'));
+          addSection(filePath, readWithBudget(filePath));
         }
       }
     }

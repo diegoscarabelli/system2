@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import type {
   ChatConfig,
   JobExecution,
+  KnowledgeConfig,
   LlmConfig,
   SchedulerConfig,
   ServicesConfig,
@@ -59,6 +60,7 @@ export interface ServerConfig {
   toolsConfig?: ToolsConfig;
   schedulerConfig?: SchedulerConfig;
   chatConfig?: ChatConfig;
+  knowledgeConfig?: KnowledgeConfig;
 }
 
 export class Server {
@@ -113,6 +115,7 @@ export class Server {
       chatMaxMessages,
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
+      knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
 
@@ -129,6 +132,7 @@ export class Server {
       chatMaxMessages,
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
+      knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
 
@@ -481,7 +485,8 @@ export class Server {
       this.narratorId,
       this.db,
       SYSTEM2_DIR,
-      intervalMinutes
+      intervalMinutes,
+      this.config.knowledgeConfig?.budget_chars
     );
 
     // Check if narrator needs catch-up after sleep/shutdown.
@@ -559,7 +564,12 @@ export class Server {
         );
         try {
           await trackJobExecution(this.db, 'memory-update', 'catch-up', () =>
-            buildAndDeliverMemoryUpdate(this.narratorHost, this.narratorId, SYSTEM2_DIR)
+            buildAndDeliverMemoryUpdate(
+              this.narratorHost,
+              this.narratorId,
+              SYSTEM2_DIR,
+              this.config.knowledgeConfig?.budget_chars
+            )
           );
         } catch (error) {
           console.error('[Server] Memory update catch-up failed:', error);
