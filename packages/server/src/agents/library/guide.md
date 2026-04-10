@@ -200,14 +200,5 @@ Task management dashboard displayed in the Artifact Viewer. Shows:
 
 - **Filter toolbar**: keyword search, priority dropdown, assignee dropdown (agents listed as `role_id`, e.g. `conductor_3`)
 - **Swimlanes**: one row per project, with columns for Todo, In Progress, Review, and Done
-- **Task cards**: show title, priority (color-coded left border), labels, and assignee (`role_id`). Click opens the Task Detail Modal.
+- **Task cards**: show title, priority (color-coded left border), labels, and assignee (`role_id`). Clicking a card opens a detail modal with all fields, description, related task links, and comments.
 - Progress bar per project showing completion ratio.
-
-### Task Detail Modal
-
-Opens when the user clicks a task card. Displays all fields in a labeled grid:
-
-- Status, Priority, Assignee (`role_id`), Project, Labels, Started (date/time), Completed (date/time)
-- Description (markdown)
-- Links to related tasks (clickable, navigates within the modal)
-- Comments with author (`role_id`), timestamp, and markdown content
