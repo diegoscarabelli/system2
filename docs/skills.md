@@ -91,6 +91,17 @@ Guide and Conductor agents are instructed to proactively create skills in `~/.sy
 
 The litmus test agents apply: "Am I writing down a fact, or a workflow I'd want to follow again?" Facts go in knowledge files; procedures become skills.
 
+## Built-in Skills
+
+System2 ships with four built-in skills in `packages/server/src/agents/skills/`. All are Guide-only (`roles: [guide]`):
+
+| Skill | Description |
+| ----- | ----------- |
+| `system2-onboarding` | First-launch setup: greets the user, learns about them, detects the system, configures the data stack, sets up the development environment, and captures interaction preferences. Triggered when `infrastructure.md` is still the unedited template, or when the user explicitly asks to re-onboard. |
+| `project-creation` | Delegating complex work to a new project: gathers preliminary requirements with the user, creates the project in app.db, spawns a Conductor and Reviewer, introduces them to each other, and schedules a follow-up reminder so a silent Conductor is noticed. |
+| `project-completion` | Finalizing a completed project: confirms with the user, tells the Conductor to close the project, waits for the close-project report (including the Narrator's project story), then terminates the Conductor and Reviewer and marks the project done. |
+| `project-restart` | Revisiting a completed project: helps the user weigh resurrection against a new project, then resurrects the original Conductor and Reviewer with their context intact and reopens the project record. |
+
 ## Build Configuration
 
 Built-in skill subdirectories are copied from `src/agents/skills/` to `dist/agents/skills/` during the tsup build (`packages/server/tsup.config.ts`). The copy is dynamic (reads the directory at build time), so adding a new built-in skill only requires creating a `skill-name/SKILL.md` subdirectory in the source directory.

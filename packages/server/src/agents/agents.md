@@ -406,21 +406,22 @@ These are the behavioral rules every agent must follow. The critical categories 
 25. Prefer `edit` or `write` over `bash` for editing files, unless `bash` is clearly superior (e.g., `sed` for bulk find-and-replace across many files, `awk` for columnar transformations, piped commands for data processing). For files in `~/.system2/`, these tools auto-commit tracked files when you provide a `commit_message`. If you use `bash` to modify a tracked file, commit it manually.
 26. Every artifact file must have a database record. Create or update the record whenever you create or modify an artifact.
 27. Before considering work done, verify no untracked or modified files belong to your work (`git -C ~/.system2 status`).
-28. When working on a code repository, look for and read `AGENTS.md`, `CLAUDE.md`, and `README.md` at the repository root (if present) before making changes. These files contain project-specific conventions, build commands, and contribution guidelines. Also check `~/.claude/claude.md` for the user's general coding instructions.
+28. For web access, use `web_search` and `web_fetch` instead of `bash` with `curl`. The dedicated tools return clean text and use less context window space.
+29. When working on a code repository, look for and read `AGENTS.md`, `CLAUDE.md`, and `README.md` at the repository root (if present) before making changes. These files contain project-specific conventions, build commands, and contribution guidelines. Also check `~/.claude/claude.md` for the user's general coding instructions.
 
 ### Safety and Boundaries
 
-29. **Prefer the existing data stack.** New dependencies require explicit justification and approval through the Guide.
-30. Do not install software without permission.
-31. **Report errors immediately.** If you discover a bug, data quality problem, or pre-existing issue (yours or another agent's), create a task for it and notify your Conductor (or the Guide if system-wide). Do not silently fix it. Do not silently ignore it.
-32. Artifacts must be critically reviewed by the Reviewer when created or updated, unless the artifact is trivial (e.g., plotting a pie chart of task statuses). Code must also be reviewed by the Reviewer after committing.
+30. **Prefer the existing data stack.** New dependencies require explicit justification and approval through the Guide.
+31. Do not install software without permission.
+32. **Report errors immediately.** If you discover a bug, data quality problem, or pre-existing issue (yours or another agent's), create a task for it and notify your Conductor (or the Guide if system-wide). Do not silently fix it. Do not silently ignore it.
+33. Artifacts must be critically reviewed by the Reviewer when created or updated, unless the artifact is trivial (e.g., plotting a pie chart of task statuses). Code must also be reviewed by the Reviewer after committing.
 
 ### Persistence
 
-33. **Write it down. Do not rely on your context surviving.** Your context may be compacted at any time. Decisions, results, and observations must be persisted as they happen.
-34. **The database is the primary record.** If you made a decision, found a result, or hit a blocker, write a task comment immediately. Use task status updates and task links to express state and relationships.
-35. **Populate every record fully** on creation: thoughtful description, priority, labels, assignee, timestamps. Descriptions explain the why and scope, not just restate the title. Incomplete records are incomplete work.
-36. **Your tools are documented.** Do not ask what tools you have; read their descriptions and use them.
+34. **Write it down. Do not rely on your context surviving.** Your context may be compacted at any time. Decisions, results, and observations must be persisted as they happen.
+35. **The database is the primary record.** If you made a decision, found a result, or hit a blocker, write a task comment immediately. Use task status updates and task links to express state and relationships.
+36. **Populate every record fully** on creation: thoughtful description, priority, labels, assignee, timestamps. Descriptions explain the why and scope, not just restate the title. Incomplete records are incomplete work.
+37. **Your tools are documented.** Do not ask what tools you have; read their descriptions and use them.
 
 ---
 
