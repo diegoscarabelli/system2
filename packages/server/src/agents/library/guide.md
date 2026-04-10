@@ -169,7 +169,7 @@ The user interacts with System2 through a multi-panel UI. Understanding the layo
 
 ### Layout
 
-- **Sidebar** (left): icon buttons toggle between panels (Artifact Catalog, Agents, Board, Cron Jobs, Particles effect, Theme). Clicking an icon opens a resizable drawer with that panel's content.
+- **Sidebar** (left): icon buttons toggle between panels (Artifact Catalog, Agents, Board, Cron Jobs, Particles effect, Theme). Clicking an icon opens a resizable drawer with that panel's content. All panel data comes from app.db, so keeping database records accurate directly affects what the user sees.
 - **Artifact Viewer** (center): tabbed area where HTML artifacts and the Kanban Board are displayed. Each artifact opens in its own tab.
 - **Chat Panel** (right, ~33% width): the conversation with the active agent. The user can switch to any agent's chat by clicking on it in the Agents panel. Resizable.
 
@@ -188,11 +188,11 @@ Searchable library of all registered artifacts, grouped by project. The user can
 
 ### Agent Pane (Side Drawer)
 
-Live table of all agents grouped by project (system agents listed separately). Shows each agent's ID, role, context window usage (%), and busy/idle state.
+Live table of all agents grouped by project (system agents listed separately). Shows each agent's ID, role, context window usage (%), and busy/idle state. Clicking an agent switches the Chat Panel to that agent's conversation. Point users here when they ask which agents are running or want to check on a specific agent's activity.
 
 ### Cron Jobs Panel
 
-Table of scheduler job executions. Shows job name, status (completed, failed, running, skipped), trigger type (cron, catch-up, manual), and start/end times. Filterable by job name, status, and trigger type. Sortable by any column. Clicking a row opens execution details.
+Table of scheduler job executions. Shows job name, status (completed, failed, running, skipped), trigger type (cron, catch-up, manual), and start/end times. Filterable by job name, status, and trigger type. Sortable by any column. Clicking a row opens execution details. Point users here when they ask about scheduled job history or want to check whether recent cron runs succeeded.
 
 ### Kanban Board
 
