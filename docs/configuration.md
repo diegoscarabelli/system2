@@ -75,6 +75,9 @@ daily_summary_interval_minutes = 30  # Narrator summary frequency
 
 [chat]
 max_history_messages = 1000  # Max messages in chat history ring buffer
+
+[knowledge]
+budget_chars = 20000  # Max chars per knowledge file (~5,000 tokens); Narrator condenses overruns
 ```
 
 ## Sections
@@ -89,6 +92,7 @@ max_history_messages = 1000  # Max messages in chat history ring buffer
 | `[logs]` | Log rotation threshold and archive count | -- |
 | `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
 | `[chat]` | Chat history settings | `ChatConfig` |
+| `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
 
 ## LLM Providers
 
@@ -149,5 +153,5 @@ Auto-backups: `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`
 
 - [CLI](packages/cli.md): `system2 onboard` creates the config
 - [Agents](agents.md): how LLM config drives provider selection
-- [Knowledge System](knowledge-system.md): knowledge directory details
+- [Knowledge System](knowledge-system.md): knowledge directory details and file size budget
 - [Scheduler](scheduler.md): `daily_summary_interval_minutes`

@@ -71,13 +71,28 @@ Project-scoped files live outside `knowledge/`:
 | `projects/{id}_{name}/log.md` | Narrator | Every 30 minutes (same cron as daily summary) |
 | `projects/{id}_{name}/project_story.md` | Narrator | Once, when Conductor calls `trigger_project_story` at project completion |
 
+## File Size Budget
+
+Knowledge files have a configurable character budget (default: 20,000 characters, roughly 5,000 tokens). The budget applies to `infrastructure.md`, `user.md`, `memory.md`, and all role notes.
+
+**Hard cap in loader:** `loadKnowledgeContext()` truncates any file exceeding the budget at the tail and appends a brief notice. Agents see the truncated version in their system prompt.
+
+**Narrator enforcement:** `buildAndDeliverMemoryUpdate()` (the 11 AM memory-update job) scans all knowledge files except `memory.md` for budget overruns. When found, it embeds the full file content in the Narrator's task message under a `## Knowledge Files Requiring Condensation` section, and the Narrator condenses each file to under 18,000 characters and writes it back. This also fires the job when there are no daily summaries but oversized files exist.
+
+**Configuration:** Set `budget_chars` in `config.toml` (see [Configuration](configuration.md)):
+
+```toml
+[knowledge]
+budget_chars = 20000  # default; comment out to use the default
+```
+
 ## How Knowledge Enters System Prompts
 
 `AgentHost.loadKnowledgeContext()` runs on every LLM call (via `resourceLoader.reload()` called before each prompt, which invokes the `systemPromptOverride` callback):
 
 1. Reads `infrastructure.md`, `user.md`, `memory.md`
 2. Reads `{role}.md` for the agent's role (guide.md, conductor.md, narrator.md, reviewer.md)
-3. Skips empty files
+3. Skips empty files; files exceeding the character budget are truncated at the tail with a note that the Narrator will condense them
 4. Loads role-aware context based on the agent's project assignment:
    - **Project-scoped agents** (Conductor, Reviewer, specialists): loads `projects/{id}_{name}/log.md`
    - **System-wide agents** (Guide, Narrator): loads the 2 most recent daily summary files (sorted by filename, chronological order)
