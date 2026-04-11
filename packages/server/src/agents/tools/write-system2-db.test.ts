@@ -685,6 +685,32 @@ describe('write_system2_db tool', () => {
       expect((result.content[0] as { text: string }).text).toContain('blocks DDL');
     });
 
+    it('blocks DDL preceded by SQL comments', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: '-- comment\nCREATE TABLE test (id INTEGER)',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('blocks DDL');
+    });
+
+    it('blocks DDL preceded by block comments', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: '/* bypass */ DROP TABLE task',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('blocks DDL');
+    });
+
     it('returns error when sql is missing', async () => {
       const db = createMockDb();
       addAgent(db, 1, 'guide', null);
@@ -757,6 +783,20 @@ describe('write_system2_db tool', () => {
       } as WriteDbParams);
 
       expect(onWrite).toHaveBeenCalledWith('unknown');
+    });
+
+    it('does not fire for rawSql SELECT', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const onWrite = vi.fn();
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, onWrite);
+
+      await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'SELECT count(*) AS count FROM task',
+      } as WriteDbParams);
+
+      expect(onWrite).not.toHaveBeenCalled();
     });
 
     it('does not fire on error', async () => {

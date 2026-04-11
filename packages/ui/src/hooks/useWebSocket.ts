@@ -43,7 +43,14 @@ export function useWebSocket() {
       console.log('WebSocket connected');
       const state = useChatStore.getState();
       state.setConnected(true);
-      // On reconnect, re-subscribe to the active agent if it's not the Guide
+      // On reconnect, bump all push version counters so UI panels refetch
+      // any changes that may have been missed during the disconnect
+      const push = usePushStore.getState();
+      push.bumpBoard();
+      push.bumpAgents();
+      push.bumpArtifacts();
+      push.bumpJobs();
+      // Re-subscribe to the active agent if it's not the Guide
       if (
         state.activeAgentId !== null &&
         state.guideAgentId !== null &&

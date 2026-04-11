@@ -123,6 +123,18 @@ describe('bash tool', () => {
       expect((result.content[0] as { text: string }).text).toContain('blocked');
     });
 
+    it('blocks rm -rf "$HOME"', async () => {
+      const result = await exec('rm -rf "$HOME"');
+      expect((result.content[0] as { text: string }).text).toContain('blocked');
+    });
+
+    it('blocks rm -rf with curly-brace HOME variable', async () => {
+      // eslint-disable-next-line -- literal ${HOME} is intentional, not a template placeholder
+      const cmd = 'rm -rf $' + '{HOME}';
+      const result = await exec(cmd);
+      expect((result.content[0] as { text: string }).text).toContain('blocked');
+    });
+
     it('blocks rm --recursive /', async () => {
       const result = await exec('rm --recursive /');
       expect((result.content[0] as { text: string }).text).toContain('blocked');

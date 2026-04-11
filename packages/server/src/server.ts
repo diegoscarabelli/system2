@@ -22,7 +22,7 @@ import type { Api, Model } from '@mariozechner/pi-ai';
 import { type AgentSessionEvent, ModelRegistry } from '@mariozechner/pi-coding-agent';
 import express from 'express';
 import matter from 'gray-matter';
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import { AuthResolver } from './agents/auth-resolver.js';
 import { AgentHost } from './agents/host.js';
 import { AgentRegistry } from './agents/registry.js';
@@ -732,7 +732,7 @@ export class Server {
   private broadcastToAll(message: ServerMessage): void {
     const data = JSON.stringify(message);
     for (const client of this.wss.clients) {
-      if (client.readyState === 1 /* WebSocket.OPEN */) {
+      if (client.readyState === WebSocket.OPEN) {
         client.send(data);
       }
     }

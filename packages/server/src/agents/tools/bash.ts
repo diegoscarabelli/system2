@@ -26,7 +26,8 @@ export const BLOCKED_BASH_PATTERNS: { pattern: RegExp; reason: string }[] = [
     reason: 'Recursive deletion of home directory (~) is blocked',
   },
   {
-    pattern: /\brm\b[^;|&]*(--recursive|-[a-zA-Z]*[rR])[^;|&]*\s+\$HOME\/?(\s|$|\*)/,
+    pattern:
+      /\brm\b[^;|&]*(--recursive|-[a-zA-Z]*[rR])[^;|&]*\s+"?(?:\$HOME|\$\{HOME\})\/?"?(\s|$|\*)/,
     reason: 'Recursive deletion of home directory ($HOME) is blocked',
   },
   {

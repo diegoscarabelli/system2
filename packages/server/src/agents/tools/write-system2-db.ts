@@ -33,8 +33,9 @@ export type WriteEntityType =
 /** Callback fired after every successful write_system2_db operation. */
 export type OnDatabaseWrite = (entityType: WriteEntityType) => void;
 
-/** Blocked SQL patterns: DDL, PRAGMA, ATTACH/DETACH. */
-const BLOCKED_SQL_PATTERNS = /^\s*(CREATE|ALTER|DROP|PRAGMA|ATTACH|DETACH)\b/i;
+/** Blocked SQL patterns: DDL, PRAGMA, ATTACH/DETACH (strips leading SQL comments). */
+const BLOCKED_SQL_PATTERNS =
+  /^(?:\s|--[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)*(CREATE|ALTER|DROP|PRAGMA|ATTACH|DETACH)\b/i;
 
 function checkProjectScope(
   agentProject: number | null,
@@ -472,7 +473,14 @@ export function createWriteSystem2DbTool(
               );
             }
             const result = db.runSql(params.sql);
-            return ok(result, 'unknown');
+            // Only fire onWrite for statements that modified data
+            if (result.changes > 0) {
+              return ok(result, 'unknown');
+            }
+            return {
+              content: [{ type: 'text', text: JSON.stringify(result) }],
+              details: result,
+            };
           }
 
           default:
