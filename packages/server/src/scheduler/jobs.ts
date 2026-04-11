@@ -801,6 +801,7 @@ export async function buildAndDeliverMemoryUpdate(
   system2Dir: string,
   knowledgeBudgetChars = 20_000
 ): Promise<void> {
+  knowledgeBudgetChars = Math.max(knowledgeBudgetChars, 5_000);
   const newRunTs = new Date().toISOString();
   const memoryFile = join(system2Dir, 'knowledge', 'memory.md');
   const summariesDir = join(system2Dir, 'knowledge', 'daily_summaries');

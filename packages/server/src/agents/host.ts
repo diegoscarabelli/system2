@@ -188,7 +188,7 @@ export class AgentHost {
     this.resurrector = config.resurrector;
     this.chatMaxMessages = config.chatMaxMessages ?? 1000;
     this.reminderManager = config.reminderManager;
-    this.knowledgeBudgetChars = config.knowledgeBudgetChars ?? 20_000;
+    this.knowledgeBudgetChars = Math.max(config.knowledgeBudgetChars ?? 20_000, 5_000);
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;

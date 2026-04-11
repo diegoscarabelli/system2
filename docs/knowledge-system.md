@@ -77,7 +77,7 @@ Knowledge files have a configurable character budget (default: 20,000 characters
 
 **Hard cap in loader:** `loadKnowledgeContext()` truncates any file exceeding the budget at the tail and appends a brief notice. Agents see the truncated version in their system prompt.
 
-**Narrator enforcement:** `buildAndDeliverMemoryUpdate()` (the 11 AM memory-update job) scans all knowledge files except `memory.md` for budget overruns. When found, it embeds the full file content in the Narrator's task message under a `## Knowledge Files Requiring Condensation` section, and the Narrator condenses each file to under 18,000 characters and writes it back. This also fires the job when there are no daily summaries but oversized files exist.
+**Narrator enforcement:** `buildAndDeliverMemoryUpdate()` (the 11 AM memory-update job) scans all knowledge files except `memory.md` for budget overruns. When found, it embeds the full file content in the Narrator's task message under a `## Knowledge Files Requiring Condensation` section, and the Narrator condenses each file to below the budget and writes it back. This also fires the job when there are no daily summaries but oversized files exist.
 
 **Configuration:** Set `budget_chars` in `config.toml` (see [Configuration](configuration.md)):
 
