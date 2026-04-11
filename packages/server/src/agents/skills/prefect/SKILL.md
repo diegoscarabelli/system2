@@ -13,7 +13,7 @@ Pipeline code belongs in the data pipeline repository documented in `infrastruct
 
 **Flows** (`@flow`): the top-level unit of work. Key params: `name`, `retries`, `retry_delay_seconds`, `timeout_seconds`, `log_prints`, `task_runner`, `validate_parameters`.
 
-**Tasks** (`@task`): discrete units within a flow. Key params: `name`, `retries`, `retry_delay_seconds`, `timeout_seconds`, `tags`, `cache_policy`, `cache_expiration`, `log_prints`.
+**Tasks** (`@task`): discrete units within a flow. Key params: `name`, `retries`, `retry_delay_seconds`, `timeout_seconds`, `tags`, `cache_policy`, `cache_expiration`, `log_prints`. Each `@task` has overhead from state tracking and API calls, so don't wrap trivially cheap operations. Use raw Python functions for sub-millisecond work within a task.
 
 **Deployments**: where/when/how a flow runs. Two approaches:
 - `flow.serve()`: runs in-process, no worker needed. Good for dev. If the process dies, scheduled runs stop.
@@ -22,6 +22,8 @@ Pipeline code belongs in the data pipeline repository documented in `infrastruct
 **Work pools**: bridge between orchestration and infrastructure (Hybrid/Push/Managed).
 
 **Workers**: lightweight polling services that pick up runs from work pools. Poll every 15s by default.
+
+**Events and Automations**: Prefect emits events for every state change (flow/task started, completed, failed, etc.). Automations are reactive rules that trigger actions (send notifications, pause deployments, run flows, cancel runs) in response to event patterns. Configure via the UI or `prefect automation create`. Use automations instead of in-flow alerting for cross-deployment concerns like SLA monitoring or cascading failure response.
 
 ## Critical Gotchas
 
@@ -335,9 +337,37 @@ def test_extract_logic():
 | `MissingContextError` | Use `.fn()` or `disable_run_logger()` |
 | Stale state | Function-scoped fixture |
 
-## Task Granularity
+## Debugging
 
-Each `@task` has overhead from state tracking and API calls. Don't wrap trivially cheap operations. Group related micro-operations. Use raw Python functions for sub-millisecond work within a task.
+```bash
+# List recent flow runs with state
+prefect flow-run ls
+
+# Inspect a specific flow run (logs, task states, parameters)
+prefect flow-run inspect <flow-run-id>
+
+# List deployments and their schedules
+prefect deployment ls
+
+# Inspect deployment configuration
+prefect deployment inspect <deployment-name>/<flow-name>
+
+# Check worker health and active work pools
+prefect work-pool ls
+prefect worker ls
+
+# View server/client config
+prefect config view
+
+# Check connectivity to API
+prefect version
+```
+
+**Flow run stuck in "Pending"**: no worker polling the work pool, or the work pool is paused. Check `prefect work-pool ls` and `prefect worker ls`.
+
+**Flow run stuck in "Running"**: worker may have crashed without reporting. Check worker logs. Runs exceeding `timeout_seconds` are eventually marked as failed.
+
+**Tasks not visible in UI**: ensure they use `@task` decorator (plain function calls are not tracked). Check that `log_prints=True` is set if expecting print output.
 
 ## Configuration Hierarchy
 
@@ -348,3 +378,16 @@ Highest precedence first:
 3. Profiles (`~/.prefect/profiles.toml`)
 
 Key settings: `PREFECT_API_URL`, `PREFECT_API_KEY`, `PREFECT_RESULTS_PERSIST_BY_DEFAULT`, `PREFECT_LOGGING_LOG_PRINTS`, `PREFECT_TASK_DEFAULT_RETRIES`, `PREFECT_WORKER_QUERY_SECONDS`.
+
+## Production Checklist
+
+- **API server**: Prefect Cloud or self-hosted Prefect server (never rely on ephemeral mode)
+- **Work pool type**: Docker or Kubernetes for isolation, process pool for simple setups
+- **Result storage**: remote (S3/GCS/Azure), never local filesystem in containers
+- **Timeouts**: `timeout_seconds` on all flows and tasks
+- **Retries**: `retries` + `retry_delay_seconds` on tasks that call external systems
+- **Concurrency limits**: global concurrency limits on rate-limited APIs
+- **Automations**: failure notifications, SLA alerts, deployment pause on repeated failures
+- **Logging**: `log_prints=True` on flows, structured logging for observability
+- **Health checks**: monitor worker processes, work pool queue depth
+- **Flow versioning**: flows in Git, deployed via CI/CD with `prefect deploy`
