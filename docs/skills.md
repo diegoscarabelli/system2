@@ -93,7 +93,7 @@ The litmus test agents apply: "Am I writing down a fact, or a workflow I'd want 
 
 ## Built-in Skills
 
-System2 ships with six built-in skills in `packages/server/src/agents/skills/`:
+Built-in skills live in `packages/server/src/agents/skills/`:
 
 | Skill | Description |
 | ----- | ----------- |
@@ -103,6 +103,10 @@ System2 ships with six built-in skills in `packages/server/src/agents/skills/`:
 | `project-restart` | Revisiting a completed project: helps the user weigh resurrection against a new project, then resurrects the original Conductor and Reviewer with their context intact and reopens the project record. |
 | `ui-reference` | UI layout and panel reference: describes the sidebar, artifact viewer, chat panel, agent pane, cron jobs panel, and kanban board so the Guide can give accurate directions when the user asks about the interface. |
 | `db-schema-reference` | Column-level schema details for all seven app.db tables: column names, types, constraints, and indexes for writing queries or managing records. Available to all roles. |
+| `airflow` | Apache Airflow v3 workflow orchestration: DAG design, TaskFlow API, dynamic task mapping, connections/secrets, scheduling, error handling, debugging, and production checklist. |
+| `prefect` | Prefect v3 data pipelines: flows, tasks, deployments, work pools, concurrency, error handling, testing, events/automations, and production checklist. |
+| `timescaledb` | TimescaleDB time-series database: hypertables, chunk sizing, compression (segmentby/orderby), continuous aggregates, retention policies, ingestion performance, and monitoring. |
+| `sql-schema-modeling` | SQL schema design: normalization (1NF-BCNF), dimensional modeling (star schema, SCD types), JSON/JSONB columns with indexing, primary key strategy, indexing patterns, naming conventions, and anti-patterns (EAV, polymorphic associations). |
 
 ## Build Configuration
 

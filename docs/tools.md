@@ -7,7 +7,7 @@ Agents interact with the system through custom tools defined in `packages/server
 Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts`):
 
 - Eight tools are always included: `bash`, `read`, `edit`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `web_fetch`
-- `show_artifact` is Guide-only: the Guide is the only agent that interacts with the user via the UI
+- `show_artifact` is included for all agents: any agent can display files in the UI artifact viewer
 - `set_reminder`, `cancel_reminder`, and `list_reminders` are included for all agents when a `ReminderManager` is provided
 - `spawn_agent`, `terminate_agent`, and `trigger_project_story` are conditional: only agents that receive a spawner callback (Guide and Conductors) get these tools
 - `resurrect_agent` is Guide-only: only the Guide receives a resurrector callback

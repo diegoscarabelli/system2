@@ -27,6 +27,7 @@ sessions/
 
 # Scratchpad (transient working files: parquet, pickle, draft notebooks, prototype scripts)
 scratchpad/
+projects/**/scratchpad/
 `;
 
 /**

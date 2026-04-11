@@ -371,7 +371,7 @@ export class AgentHost {
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
       systemPromptOverride: () => {
-        const identity = `\n\n## Your Identity\n\nYour agent ID is **${agentRecord.id}**. Your role is **${agentRecord.role}**.${agentRecord.project ? ` Your project ID is **${agentRecord.project}**.` : ''}`;
+        const identity = `\n\n## Your Identity\n\nYour agent ID is **${agentRecord.id}**. Your role is **${agentRecord.role}**.${agentRecord.project != null ? ` Your project ID is **${agentRecord.project}**.` : ''}`;
         return `${staticPrompt}${identity}${this.loadKnowledgeContext()}\n\n---\n\nConversation history follows.`;
       },
       // Suppress SDK default skill directories (~/.pi/agent/skills/, .pi/skills/)

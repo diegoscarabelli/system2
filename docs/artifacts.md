@@ -63,11 +63,11 @@ Every artifact must have a record in the `artifact` table. The UI artifact catal
 - `updateArtifact`: update any metadata field by record `id`
 - `deleteArtifact`: removes the database record only (not the file itself)
 
-Project-scoped agents can only manage artifacts within their own project.
+Project-scoped agents can only manage artifacts within their own project. Agents without a project (e.g., the Guide) can also access artifacts that have no project association.
 
 ## Displaying Artifacts
 
-The `show_artifact` tool (Guide-only) displays a file in the artifact viewer panel. It accepts an absolute file path (supports `~/` prefix), looks up the title from the database (falls back to filename if unregistered), and streams the file to the UI.
+The `show_artifact` tool displays a file in the artifact viewer panel. It accepts an absolute file path (supports `~/` prefix), looks up the title from the database (falls back to filename if unregistered), and streams the file to the UI.
 
 The tool technically accepts any file path, not just registered artifacts. This is an intentional escape hatch for one-off viewing, but the primary workflow is: create the file, register it as an artifact in the database, then show it. Unregistered files lack titles, descriptions, and tags, and will not appear in the artifact catalog.
 

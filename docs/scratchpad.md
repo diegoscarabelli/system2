@@ -31,7 +31,7 @@ Scratchpad files live under `~/.system2/`:
 | `~/.system2/projects/{id}_{name}/scratchpad/` | Working files tied to a specific project. Default for any work happening inside a project. |
 | `~/.system2/scratchpad/` | Working files not associated with any project (one-off explorations, system-wide experiments, generic prototypes). |
 
-There are no subdirectory conventions: agents organize the contents of these directories as they see fit for the work at hand. There is no automatic cleanup; files persist indefinitely. Both directories are gitignored by the default `.gitignore` template installed in `~/.system2/` (see `packages/server/src/knowledge/git.ts`), so scratchpad files do not appear in `git -C ~/.system2 status` and never get committed to the knowledge repo.
+There are no subdirectory conventions: agents organize the contents of these directories as they see fit for the work at hand. There is no automatic cleanup; files persist indefinitely. Both directories are gitignored by the default `.gitignore` template installed in `~/.system2/` (see `packages/server/src/knowledge/git.ts`): the top-level `scratchpad/` entry covers the global scratchpad, and `projects/**/scratchpad/` covers per-project scratchpads. Scratchpad files do not appear in `git -C ~/.system2 status` and never get committed to the knowledge repo.
 
 ## Recommendations for Intermediate Data
 
