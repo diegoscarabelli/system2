@@ -23,11 +23,13 @@ Pipeline code belongs in the data pipeline repository documented in `infrastruct
 
 **Connection**: an Airflow-managed credential record (host, port, login, password, extras JSON). Referenced by `conn_id` in operators and hooks. Lookup order: secrets backend > environment variables > metadata database.
 
-**XCom (Cross-Communication)**: mechanism for tasks to pass small data. TaskFlow API uses XComs implicitly (return values). Traditional operators use `ti.xcom_push()` / `ti.xcom_pull()`. Stored in the metadata database by default.
+**XCom (Cross-Communication)**: mechanism for tasks to pass small data. TaskFlow API uses XComs implicitly (return values). Traditional operators use `ti.xcom_push()` / `ti.xcom_pull()`. Stored in the metadata database by default. Not suitable for large data (see gotcha #4).
 
 **Task Group**: visual grouping of tasks in the UI, replacing the deprecated SubDagOperator. No execution semantics; just a namespace and UI convenience.
 
-**Dataset**: a URI representing a logical dataset. Tasks declare `outlets=[Dataset("...")]` to signal they produce data; DAGs can use `schedule=[Dataset("...")]` to trigger when that dataset is updated. Enables data-aware scheduling.
+**Dataset**: a URI representing a logical dataset. Tasks declare `outlets=[Dataset("...")]` to signal they produce data; DAGs can use `schedule=[Dataset("...")]` to trigger when that dataset is updated. Enables data-aware scheduling (Airflow 2.4+).
+
+**Trigger rules**: control when a task runs based on upstream task states. Default is `all_success`. Key alternatives: `none_failed` (run if no upstream failed, skips are OK), `all_done` (run regardless of upstream state), `one_success` (run as soon as one upstream succeeds), `none_skipped` (run if no upstream was skipped). Set via `trigger_rule` parameter on any operator.
 
 ## Critical Gotchas
 
@@ -45,7 +47,7 @@ If `start_date` is far in the past and `catchup=True` (the default), the schedul
 
 ### 4. XCom is not for large data
 
-The default XCom backend stores data in the metadata database. Pushing large DataFrames bloats the DB and slows the scheduler. Write large data to object storage or a shared filesystem and pass only the path via XCom.
+The default XCom backend stores data in the metadata database. Pushing large DataFrames bloats the DB and slows the scheduler. The solution: write large data to object storage or a shared filesystem and pass only the path via XCom. For systematic large-data passing, implement a custom XCom backend that transparently stores values in S3/GCS and keeps only the reference in the metadata DB.
 
 ### 5. Dynamic tasks at parse time vs runtime
 
@@ -61,7 +63,7 @@ DAG files are not run as packages. The scheduler adds `dags_folder` to `sys.path
 
 ### 8. AirflowSkipException does not fail the DAG
 
-Raising `AirflowSkipException` marks the task as "skipped" (not failed). The default `trigger_rule` is `all_success`, so downstream tasks of a skipped task are also skipped. Use `trigger_rule="none_failed"` if you want downstream tasks to run regardless.
+Raising `AirflowSkipException` marks the task as "skipped" (not failed). The default `trigger_rule` is `all_success`, so downstream tasks of a skipped task are also skipped. Use `trigger_rule="none_failed"` or `trigger_rule="all_done"` on downstream tasks if they should run regardless.
 
 ### 9. Template fields must be declared on the operator
 
@@ -89,12 +91,12 @@ Create a function that returns a configured DAG from parameters. This keeps DAG 
 from airflow.models import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 
-def create_pipeline(dag_id, schedule, process_fn):
+def create_pipeline(dag_id, schedule, extract_fn, transform_fn):
     dag = DAG(dag_id=dag_id, schedule=schedule, catchup=False, ...)
     with dag:
-        ingest = PythonOperator(task_id="ingest", python_callable=ingest_fn)
-        process = PythonOperator(task_id="process", python_callable=process_fn)
-        ingest >> process
+        extract = PythonOperator(task_id="extract", python_callable=extract_fn)
+        transform = PythonOperator(task_id="transform", python_callable=transform_fn)
+        extract >> transform
     return dag
 ```
 
@@ -110,7 +112,8 @@ def create_pipeline(dag_id, schedule, process_fn):
 ### TaskFlow API (`@task` decorator)
 
 ```python
-from airflow.sdk import dag, task
+from datetime import datetime
+from airflow.decorators import dag, task
 
 @dag(start_date=datetime(2024, 1, 1), schedule="@daily")
 def my_pipeline():
@@ -133,8 +136,14 @@ Dependencies are inferred from function calls. XCom passing is implicit (return 
 ### Traditional operators
 
 ```python
+from airflow.providers.standard.operators.python import PythonOperator
+
 def extract_fn(**context):
     context["ti"].xcom_push(key="data", value=[1, 2, 3])
+
+def transform_fn(**context):
+    data = context["ti"].xcom_pull(task_ids="extract", key="data")
+    context["ti"].xcom_push(key="result", value=[x * 2 for x in data])
 
 t1 = PythonOperator(task_id="extract", python_callable=extract_fn)
 t2 = PythonOperator(task_id="transform", python_callable=transform_fn)
@@ -148,6 +157,8 @@ Explicit control over XCom keys. Works naturally with non-Python operators and d
 ## Dynamic Task Mapping (Airflow 2.3+)
 
 ```python
+from airflow.decorators import task
+
 @task
 def get_file_list() -> list[str]:
     return ["file1.csv", "file2.csv", "file3.csv"]
@@ -176,6 +187,8 @@ The number of mapped instances is resolved at runtime based on upstream output. 
 ### Retries and timeouts
 
 ```python
+from datetime import timedelta
+
 default_args = {
     "retries": 3,
     "retry_delay": timedelta(minutes=5),
@@ -193,10 +206,12 @@ Set retries at the DAG level via `default_args`, override per-task on individual
 from airflow.exceptions import AirflowSkipException, AirflowFailException
 
 def my_task(**context):
-    if no_work_to_do:
+    files = list(Path("/data/inbox").glob("*.csv"))
+    if not files:
         raise AirflowSkipException("No files found")
-    if unrecoverable_error:
-        raise AirflowFailException("Data integrity violation, retries won't help")
+
+    if not validate_schema(files):
+        raise AirflowFailException("Schema violation, retries won't help")
 ```
 
 `AirflowSkipException`: marks task as skipped, no retry. `AirflowFailException`: immediate failure, no retry.
@@ -205,7 +220,9 @@ def my_task(**context):
 
 ```python
 def on_failure(context):
-    send_alert(f"Task {context['task_instance'].task_id} failed: {context['exception']}")
+    task_id = context["task_instance"].task_id
+    error = context.get("exception", "unknown")
+    send_alert(f"Task {task_id} failed: {error}")
 
 default_args = {
     "on_failure_callback": on_failure,
@@ -213,6 +230,34 @@ default_args = {
     "on_retry_callback": on_retry,
 }
 ```
+
+## Connections and Secrets
+
+### Defining connections
+
+**UI**: Admin > Connections. Simplest for development.
+
+**Environment variables**: `AIRFLOW_CONN_{CONN_ID}` with the conn_id uppercased and hyphens replaced by underscores:
+
+```bash
+AIRFLOW_CONN_MY_POSTGRES="postgresql://user:pass@host:5432/db"
+```
+
+**Secrets backend**: plug in HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager, etc.:
+
+```ini
+[secrets]
+backend = airflow.providers.hashicorp.secrets.vault.VaultBackend
+backend_kwargs = {"connections_path": "airflow/connections", "url": "http://vault:8200"}
+```
+
+### Lookup order
+
+1. Secrets backend (if configured)
+2. Environment variables
+3. Metadata database
+
+For production, use a secrets backend. Avoid storing passwords in environment variables that appear in docker-compose files or version-controlled `.env` files.
 
 ## Scheduling
 
@@ -227,15 +272,15 @@ Presets: `@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`, `@once`. `schedu
 ### Data-aware scheduling with Datasets (Airflow 2.4+)
 
 ```python
-from airflow.sdk import Asset
+from airflow.datasets import Dataset
 
-# Producer DAG
-@task(outlets=[Asset("s3://bucket/processed_data")])
+# Producer DAG: declare dataset as outlet
+@task(outlets=[Dataset("s3://bucket/processed_data")])
 def produce():
     ...
 
 # Consumer DAG: triggers when the dataset is updated
-@dag(schedule=[Asset("s3://bucket/processed_data")])
+@dag(schedule=[Dataset("s3://bucket/processed_data")])
 def consumer_dag():
     ...
 ```
@@ -268,10 +313,13 @@ def test_dag_has_tasks():
 Test Python functions independently, mocking Airflow context:
 
 ```python
+from unittest.mock import MagicMock
+
 def test_extract():
-    context = {"ti": MagicMock(), "dag_run": MagicMock()}
-    result = extract(config=test_config, **context)
-    assert result is not None
+    ti = MagicMock()
+    context = {"ti": ti, "dag_run": MagicMock()}
+    extract_fn(**context)
+    ti.xcom_push.assert_called_once()
 ```
 
 ### End-to-end (Airflow 2.5+)
