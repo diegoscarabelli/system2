@@ -120,7 +120,7 @@ Executes against `~/.system2/app.db` using structured named operations that dele
 | `createArtifact` | `file_path`, `title` | `project`, `description`, `tags` | Any agent. Project scope checked if `project` is set. |
 | `updateArtifact` | `id` | `file_path`, `title`, `project`, `description`, `tags` | Any agent. Project scope checked. |
 | `deleteArtifact` | `id` | — | Any agent. Project scope checked. DB row only (does not delete the file). |
-| `rawSql` | `sql` | — | Execute arbitrary DML (INSERT/UPDATE/DELETE) or SELECT. DDL (CREATE/ALTER/DROP), PRAGMA, and ATTACH/DETACH are blocked. |
+| `rawSql` | `sql` | — | Execute DML (INSERT/UPDATE/DELETE/REPLACE) or SELECT (including WITH/CTE). DDL (CREATE/ALTER/DROP), PRAGMA, ATTACH/DETACH, and maintenance statements (VACUUM, REINDEX, ANALYZE) are blocked. |
 
 Valid `status` values: `"todo"`, `"in progress"`, `"review"`, `"done"`, `"abandoned"`
 Valid `priority` values: `"low"`, `"medium"`, `"high"`

@@ -84,7 +84,7 @@ type ServerMessage =
 | `job_executions_changed` | Broadcast when a scheduler job execution is created, completed, failed, or skipped. UI panels refetch `/api/job-executions`. |
 | `agent_busy_changed` | Broadcast when an agent's busy state changes (message processing start/end). Includes `agentId`, `busy`, and `contextPercent`. |
 
-All database writes by agents go through `write_system2_db`, which fires an `onWrite` callback that the server maps to the appropriate push notification. Agents are instructed to never use `bash`/`sqlite3` to modify `app.db`, ensuring all changes are captured. REST endpoints are used for the initial data load on page open. On WebSocket reconnect, the UI bumps all push version counters so every panel refetches, recovering any changes missed during the disconnect.
+All database writes by agents go through `write_system2_db`, which fires an `onWrite` callback that the server maps to the appropriate push notification. Agents are instructed to never use `bash`/`sqlite3` to modify `app.db`, ensuring all changes are captured. REST endpoints are used for the initial data load on page open. On WebSocket reconnect, the UI clears stale `agentBusy` state (which may have drifted during the disconnect) and bumps all push version counters so every panel refetches from the server.
 
 ## Message Flow
 

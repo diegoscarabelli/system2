@@ -191,9 +191,9 @@ Create or update records via named operations. `updated_at` is maintained automa
 | `createArtifact` | `file_path`, `title` | `project`, `description`, `tags` | Any agent. Project scope checked if `project` is set. |
 | `updateArtifact` | `id` | `file_path`, `title`, `project`, `description`, `tags` | Any agent. Project scope checked. |
 | `deleteArtifact` | `id` | — | Any agent. Project scope checked. DB row only. |
-| `rawSql` | `sql` | — | Execute arbitrary DML/SELECT. DDL, PRAGMA, ATTACH blocked. |
+| `rawSql` | `sql` | — | Execute DML (INSERT/UPDATE/DELETE/REPLACE) or SELECT (including WITH/CTE). DDL, PRAGMA, ATTACH, and maintenance statements blocked. |
 
-For ad-hoc SQL not covered by the named operations above (bulk updates, complex transactions), use the `rawSql` operation. It accepts any DML (INSERT/UPDATE/DELETE) or SELECT statement; DDL (CREATE/ALTER/DROP), PRAGMA, and ATTACH/DETACH are blocked for safety.
+For ad-hoc SQL not covered by the named operations above (bulk updates, complex transactions), use the `rawSql` operation. It accepts DML (INSERT/UPDATE/DELETE/REPLACE) and SELECT statements (including WITH/CTE prefixes). DDL (CREATE/ALTER/DROP), PRAGMA, ATTACH/DETACH, and maintenance statements (VACUUM, REINDEX, ANALYZE) are blocked.
 
 **Never use `bash` with `sqlite3` to modify `~/.system2/app.db`.** All database writes must go through `write_system2_db` so the server can push real-time updates to the UI. Writes made via `bash`/`sqlite3` bypass this mechanism and the UI will not reflect the changes until the next page reload.
 
