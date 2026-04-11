@@ -8,6 +8,11 @@
 
 import { create } from 'zustand';
 
+interface AgentBusyState {
+  busy: boolean;
+  contextPercent: number | null;
+}
+
 interface PushStore {
   /** Incremented on board_changed (projects/tasks/links/comments). */
   boardVersion: number;
@@ -17,11 +22,15 @@ interface PushStore {
   artifactsVersion: number;
   /** Incremented on job_executions_changed. */
   jobsVersion: number;
+  /** Per-agent busy state updated inline from agent_busy_changed (no refetch needed). */
+  agentBusy: Map<number, AgentBusyState>;
 
   bumpBoard: () => void;
   bumpAgents: () => void;
   bumpArtifacts: () => void;
   bumpJobs: () => void;
+  bumpAll: () => void;
+  setAgentBusy: (agentId: number, busy: boolean, contextPercent: number | null) => void;
 }
 
 export const usePushStore = create<PushStore>((set) => ({
@@ -29,9 +38,23 @@ export const usePushStore = create<PushStore>((set) => ({
   agentsVersion: 0,
   artifactsVersion: 0,
   jobsVersion: 0,
+  agentBusy: new Map(),
 
   bumpBoard: () => set((s) => ({ boardVersion: s.boardVersion + 1 })),
   bumpAgents: () => set((s) => ({ agentsVersion: s.agentsVersion + 1 })),
   bumpArtifacts: () => set((s) => ({ artifactsVersion: s.artifactsVersion + 1 })),
   bumpJobs: () => set((s) => ({ jobsVersion: s.jobsVersion + 1 })),
+  bumpAll: () =>
+    set((s) => ({
+      boardVersion: s.boardVersion + 1,
+      agentsVersion: s.agentsVersion + 1,
+      artifactsVersion: s.artifactsVersion + 1,
+      jobsVersion: s.jobsVersion + 1,
+    })),
+  setAgentBusy: (agentId, busy, contextPercent) =>
+    set((s) => {
+      const next = new Map(s.agentBusy);
+      next.set(agentId, { busy, contextPercent });
+      return { agentBusy: next };
+    }),
 }));

@@ -37,6 +37,27 @@ export type OnDatabaseWrite = (entityType: WriteEntityType) => void;
 const BLOCKED_SQL_PATTERNS =
   /^(?:\s|--[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)*(CREATE|ALTER|DROP|PRAGMA|ATTACH|DETACH)\b/i;
 
+/** Strip leading SQL comments (line and block) to find the actual statement keyword. */
+function stripLeadingSqlComments(sql: string): string {
+  let remaining = sql;
+  for (;;) {
+    const trimmed = remaining.trimStart();
+    if (trimmed.startsWith('--')) {
+      const nl = trimmed.indexOf('\n');
+      remaining = nl === -1 ? '' : trimmed.slice(nl + 1);
+      continue;
+    }
+    if (trimmed.startsWith('/*')) {
+      const end = trimmed.indexOf('*/');
+      remaining = end === -1 ? '' : trimmed.slice(end + 2);
+      continue;
+    }
+    return trimmed;
+  }
+}
+
+const ALLOWED_RAW_SQL = /^(SELECT|INSERT|UPDATE|DELETE|WITH|REPLACE)\b/i;
+
 function checkProjectScope(
   agentProject: number | null,
   recordProject: number | null
@@ -332,16 +353,7 @@ export function createWriteSystem2DbTool(
               };
             }
 
-            notify('task');
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: JSON.stringify({ claimed: true, task: result.task }, null, 2),
-                },
-              ],
-              details: { result: { claimed: true, task: result.task } },
-            };
+            return ok({ claimed: true, task: result.task }, 'task');
           }
 
           case 'createTaskLink': {
@@ -472,6 +484,12 @@ export function createWriteSystem2DbTool(
                 'rawSql blocks DDL (CREATE/ALTER/DROP), PRAGMA, and ATTACH/DETACH statements. Only DML (INSERT/UPDATE/DELETE) and SELECT are allowed.'
               );
             }
+            const stripped = stripLeadingSqlComments(params.sql);
+            if (!ALLOWED_RAW_SQL.test(stripped)) {
+              return err(
+                'rawSql only allows SELECT, INSERT, UPDATE, DELETE, WITH, and REPLACE statements.'
+              );
+            }
             const result = db.runSql(params.sql);
             // Only fire onWrite for statements that modified data
             if (result.changes > 0) {
@@ -479,7 +497,7 @@ export function createWriteSystem2DbTool(
             }
             return {
               content: [{ type: 'text', text: JSON.stringify(result) }],
-              details: result,
+              details: { result },
             };
           }
 

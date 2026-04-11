@@ -406,7 +406,7 @@ export class Server {
       const newHost = await this.initializeAgentHost(newAgent.id);
 
       // Notify UI that agent list changed
-      this.broadcastToAll({ type: 'agents_changed' });
+      this.debouncedBroadcast({ type: 'agents_changed' });
 
       // Deliver the initial message from the caller (fire-and-forget)
       newHost
@@ -432,7 +432,7 @@ export class Server {
       const host = await this.initializeAgentHost(agentId);
 
       // Notify UI that agent list changed
-      this.broadcastToAll({ type: 'agents_changed' });
+      this.debouncedBroadcast({ type: 'agents_changed' });
 
       host
         .deliverMessage(message, {
@@ -487,7 +487,7 @@ export class Server {
 
     // Start scheduled jobs
     const intervalMinutes = this.config.schedulerConfig?.daily_summary_interval_minutes ?? 30;
-    const onJobChange = () => this.broadcastToAll({ type: 'job_executions_changed' });
+    const onJobChange = () => this.debouncedBroadcast({ type: 'job_executions_changed' });
     registerNarratorJobs(
       this.scheduler,
       this.narratorHost,
@@ -533,7 +533,7 @@ export class Server {
     }
 
     const intervalMinutes = this.config.schedulerConfig?.daily_summary_interval_minutes ?? 30;
-    const onJobChange = () => this.broadcastToAll({ type: 'job_executions_changed' });
+    const onJobChange = () => this.debouncedBroadcast({ type: 'job_executions_changed' });
 
     // Daily summary catch-up
     const { lastRunTs } = resolveDailySummaryTimestamp(SYSTEM2_DIR, intervalMinutes);
@@ -738,6 +738,32 @@ export class Server {
     }
   }
 
+  /**
+   * Debounced broadcast: coalesces rapid successive pushes of the same message type
+   * into a single broadcast (e.g., creating 10 tasks triggers one board_changed).
+   * agent_busy_changed is sent immediately since it carries per-message payload.
+   */
+  private pendingBroadcasts = new Map<string, ReturnType<typeof setTimeout>>();
+  private static readonly BROADCAST_DEBOUNCE_MS = 50;
+
+  private debouncedBroadcast(message: ServerMessage): void {
+    // Messages with per-event payload must be sent immediately
+    if (message.type === 'agent_busy_changed') {
+      this.broadcastToAll(message);
+      return;
+    }
+    const key = message.type;
+    const existing = this.pendingBroadcasts.get(key);
+    if (existing) clearTimeout(existing);
+    this.pendingBroadcasts.set(
+      key,
+      setTimeout(() => {
+        this.pendingBroadcasts.delete(key);
+        this.broadcastToAll(message);
+      }, Server.BROADCAST_DEBOUNCE_MS)
+    );
+  }
+
   /** Map a write_system2_db entity type to the appropriate push notification(s). */
   private handleDatabaseWrite(entityType: WriteEntityType): void {
     switch (entityType) {
@@ -745,15 +771,17 @@ export class Server {
       case 'task':
       case 'task_link':
       case 'task_comment':
-        this.broadcastToAll({ type: 'board_changed' });
+        this.debouncedBroadcast({ type: 'board_changed' });
         break;
       case 'artifact':
-        this.broadcastToAll({ type: 'artifacts_changed' });
+        this.debouncedBroadcast({ type: 'artifacts_changed' });
         break;
       case 'unknown':
-        // rawSql: we don't know what changed, broadcast both
-        this.broadcastToAll({ type: 'board_changed' });
-        this.broadcastToAll({ type: 'artifacts_changed' });
+        // rawSql: we don't know what changed, invalidate all UI panels
+        this.debouncedBroadcast({ type: 'board_changed' });
+        this.debouncedBroadcast({ type: 'artifacts_changed' });
+        this.debouncedBroadcast({ type: 'agents_changed' });
+        this.debouncedBroadcast({ type: 'job_executions_changed' });
         break;
     }
   }
@@ -763,8 +791,8 @@ export class Server {
     return {
       onDatabaseWrite: (entityType: WriteEntityType) => this.handleDatabaseWrite(entityType),
       onBusyChange: (agentId: number, busy: boolean, contextPercent: number | null) =>
-        this.broadcastToAll({ type: 'agent_busy_changed', agentId, busy, contextPercent }),
-      onAgentTerminate: () => this.broadcastToAll({ type: 'agents_changed' }),
+        this.debouncedBroadcast({ type: 'agent_busy_changed', agentId, busy, contextPercent }),
+      onAgentTerminate: () => this.debouncedBroadcast({ type: 'agents_changed' }),
     };
   }
 

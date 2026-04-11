@@ -19,6 +19,7 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
   const prevAgentRef = useRef<number | null>(null);
+  const hasConnectedOnce = useRef(false);
 
   // Send switch_agent when activeAgentId changes (user-initiated switch via AgentPane)
   useEffect(() => {
@@ -43,13 +44,13 @@ export function useWebSocket() {
       console.log('WebSocket connected');
       const state = useChatStore.getState();
       state.setConnected(true);
-      // On reconnect, bump all push version counters so UI panels refetch
-      // any changes that may have been missed during the disconnect
-      const push = usePushStore.getState();
-      push.bumpBoard();
-      push.bumpAgents();
-      push.bumpArtifacts();
-      push.bumpJobs();
+      if (hasConnectedOnce.current) {
+        // On reconnect, bump all push version counters so UI panels refetch
+        // any changes that may have been missed during the disconnect
+        const push = usePushStore.getState();
+        push.bumpAll();
+      }
+      hasConnectedOnce.current = true;
       // Re-subscribe to the active agent if it's not the Guide
       if (
         state.activeAgentId !== null &&
@@ -222,8 +223,10 @@ export function useWebSocket() {
           break;
 
         case 'agent_busy_changed':
-          // Bump agents version so AgentPane refetches (includes busy + contextPercent)
-          usePushStore.getState().bumpAgents();
+          // Update busy state inline (no refetch needed)
+          usePushStore
+            .getState()
+            .setAgentBusy(message.agentId, message.busy, message.contextPercent);
           break;
 
         case 'error': {

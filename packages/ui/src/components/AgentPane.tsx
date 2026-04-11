@@ -59,6 +59,18 @@ export function AgentPane() {
   const initialized = useRef(false);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
   const agentsVersion = usePushStore((s) => s.agentsVersion);
+  const agentBusy = usePushStore((s) => s.agentBusy);
+
+  // Overlay real-time busy state from push store onto fetched agent data
+  const agentsWithBusy = useMemo(
+    () =>
+      agents.map((a) => {
+        const live = agentBusy.get(a.id);
+        if (!live) return a;
+        return { ...a, busy: live.busy, contextPercent: live.contextPercent ?? a.contextPercent };
+      }),
+    [agents, agentBusy]
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: agentsVersion is an intentional trigger to refetch on push
   useEffect(() => {
@@ -95,10 +107,10 @@ export function AgentPane() {
   const grouped = useMemo(() => {
     const groups = new Map<string, AgentInfo[]>();
 
-    const system = agents.filter((a) => a.project === null);
+    const system = agentsWithBusy.filter((a) => a.project === null);
     if (system.length > 0) groups.set('System', system);
 
-    const projectAgents = agents.filter((a) => a.project !== null);
+    const projectAgents = agentsWithBusy.filter((a) => a.project !== null);
     for (const agent of projectAgents) {
       const key = agent.project_name || `Project #${agent.project}`;
       const list = groups.get(key) || [];
@@ -107,7 +119,7 @@ export function AgentPane() {
     }
 
     return groups;
-  }, [agents]);
+  }, [agentsWithBusy]);
 
   return (
     <Box
