@@ -55,7 +55,7 @@ export interface System2Config {
     maxHistoryMessages: number;
   };
   knowledge: {
-    /** Maximum characters per knowledge file before truncation (default: 20000, ~5,000 tokens) */
+    /** Maximum characters per knowledge file before truncation (default: 20000) */
     budgetChars: number;
   };
 }
@@ -339,6 +339,7 @@ export function buildConfigToml(options: {
   logs?: System2Config['logs'];
   scheduler?: System2Config['scheduler'];
   chat?: System2Config['chat'];
+  knowledge?: System2Config['knowledge'];
 }): string {
   const lines: string[] = [
     '# System2 Configuration',
@@ -444,6 +445,12 @@ export function buildConfigToml(options: {
   lines.push('[chat]');
   lines.push(`# Maximum number of chat messages to keep in UI history`);
   lines.push(`max_history_messages = ${chat.maxHistoryMessages}`);
+  lines.push('');
+
+  const knowledge = options.knowledge ?? DEFAULT_OPERATIONAL.knowledge;
+  lines.push('[knowledge]');
+  lines.push(`# Maximum characters per knowledge file before truncation`);
+  lines.push(`budget_chars = ${knowledge.budgetChars}`);
   lines.push('');
 
   return lines.join('\n');

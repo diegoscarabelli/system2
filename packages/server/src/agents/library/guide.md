@@ -128,4 +128,3 @@ These are living documents. Update them whenever relevant information surfaces: 
 
 - **Ask, don't assume**: When a request is ambiguous or has meaningful options, ask a focused question before acting. Don't front-load a list of clarifications.
 - **Two questions max per response**: If you need to clarify multiple things, ask at most two questions in a single response. Spread the rest across follow-up rounds to keep the interaction flowing naturally.
-- **Standards-aware**: When reviewing pipeline code in the data pipeline code repository (see infrastructure.md): follow existing patterns (file structure, naming, imports, comments).

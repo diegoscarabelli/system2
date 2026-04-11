@@ -921,8 +921,8 @@ export class AgentHost {
 
   /**
    * Load knowledge files and return as context string for the system prompt.
-   * Empty files (0 lines) are skipped. Files exceeding MAX_KNOWLEDGE_CHARS are
-   * truncated at the tail; the Narrator condenses them on its next scheduled run.
+   * Empty files (0 lines) are skipped. Files exceeding the knowledge budget are
+   * truncated at the tail.
    */
   private loadKnowledgeContext(): string {
     const MAX_KNOWLEDGE_CHARS = this.knowledgeBudgetChars;
@@ -934,7 +934,7 @@ export class AgentHost {
       if (raw.length <= MAX_KNOWLEDGE_CHARS) return raw;
       return (
         raw.slice(0, MAX_KNOWLEDGE_CHARS) +
-        `\n\n[...truncated: file exceeds ${MAX_KNOWLEDGE_CHARS.toLocaleString()} char budget — the Narrator will condense it during the next memory-update]`
+        `\n\n[...truncated: file exceeds ${MAX_KNOWLEDGE_CHARS.toLocaleString()} char budget]`
       );
     };
 

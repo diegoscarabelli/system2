@@ -73,7 +73,7 @@ Project-scoped files live outside `knowledge/`:
 
 ## File Size Budget
 
-Knowledge files have a configurable character budget (default: 20,000 characters, roughly 5,000 tokens). The budget applies to `infrastructure.md`, `user.md`, `memory.md`, and all role notes.
+Knowledge files have a configurable character budget (default: 20,000 characters). The budget applies to `infrastructure.md`, `user.md`, `memory.md`, and all role notes.
 
 **Hard cap in loader:** `loadKnowledgeContext()` truncates any file exceeding the budget at the tail and appends a brief notice. Agents see the truncated version in their system prompt.
 
@@ -92,7 +92,7 @@ budget_chars = 20000  # default; comment out to use the default
 
 1. Reads `infrastructure.md`, `user.md`, `memory.md`
 2. Reads `{role}.md` for the agent's role (guide.md, conductor.md, narrator.md, reviewer.md)
-3. Skips empty files; files exceeding the character budget are truncated at the tail with a note that the Narrator will condense them
+3. Skips empty files; files exceeding the character budget are truncated at the tail with a notice. For knowledge files (`knowledge/*.md`), the Narrator condenses oversized files during the next memory-update run. Daily summaries and project logs are not condensed (they are append-only).
 4. Loads role-aware context based on the agent's project assignment:
    - **Project-scoped agents** (Conductor, Reviewer, specialists): loads `projects/{id}_{name}/log.md`
    - **System-wide agents** (Guide, Narrator): loads the 2 most recent daily summary files (sorted by filename, chronological order)

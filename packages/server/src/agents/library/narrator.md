@@ -136,7 +136,7 @@ The message contains the memory file path, timestamps, and the full content of e
 
 **CRITICAL: you MUST update `last_narrator_update_ts` to `new_run_ts` in the frontmatter. If you skip this, the next scheduled job will re-collect the same time window, producing duplicate data that grows with every run. This is the mechanism that advances the cursor: no update means unbounded re-processing.**
 
-**Condensation (if applicable):** If the message contains a `## Knowledge Files Requiring Condensation` section, condense each listed file. The full current content is already embedded in the message — no need to use the `read` tool. For each file: write a condensed version back to the same path using `write` with `commit_message: "knowledge: condense <filename>"`. Target under 18,000 characters. Preserve all structure and frontmatter. Drop outdated, redundant, or low-value content; merge similar entries; tighten prose.
+**Condensation (if applicable):** If the message contains a `## Knowledge Files Requiring Condensation` section, condense each listed file to the target size specified in the message. The full current content is already embedded — no need to use the `read` tool. For each file: write a condensed version back to the same path using `write` with `commit_message: "knowledge: condense <filename>"`. Preserve all structure and frontmatter. Drop outdated, redundant, or low-value content; merge similar entries; tighten prose.
 
 ## Project Story Task
 

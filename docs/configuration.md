@@ -77,7 +77,7 @@ daily_summary_interval_minutes = 30  # Narrator summary frequency
 max_history_messages = 1000  # Max messages in chat history ring buffer
 
 [knowledge]
-budget_chars = 20000  # Max chars per knowledge file (~5,000 tokens); Narrator condenses overruns
+budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overruns
 ```
 
 ## Sections

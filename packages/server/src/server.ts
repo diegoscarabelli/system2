@@ -378,6 +378,7 @@ export class Server {
       chatMaxMessages,
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
+      knowledgeBudgetChars: this.config.knowledgeConfig?.budget_chars,
     });
 
     // Subscribe for chat cache capture before initialize() so no events are missed
