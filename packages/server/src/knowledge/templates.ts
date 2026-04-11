@@ -81,15 +81,29 @@ Prose describing each repo's role, key directories, and conventions.
 
 export const USER_TEMPLATE = `# User Profile
 
-> Facts about the user for personalized assistance. Updated by the Guide.
+> Who the user is and how they prefer to work. Updated by the Guide during onboarding
+> and as new preferences or context surface. This file is injected into every agent's
+> context, so keep it concise and current.
 
 ## Background
 
-
-## Preferences
-
+> Role, domain expertise, and technical level. This helps agents calibrate the depth
+> and vocabulary of their explanations.
 
 ## Goals
+
+> What the user wants to accomplish with System2: ongoing objectives, areas of interest,
+> types of analysis or pipelines they care about.
+
+## Communication Preferences
+
+> How the user likes to interact: preferred level of detail, whether they want options
+> presented or decisions made, tone, feedback style.
+
+## Working Patterns
+
+> Observable patterns: how the user iterates (small increments vs large batches),
+> whether they prefer to review intermediate work or see final results.
 
 `;
 
