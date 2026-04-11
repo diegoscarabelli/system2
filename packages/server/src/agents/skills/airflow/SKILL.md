@@ -1,9 +1,9 @@
 ---
 name: airflow
-description: Use when building, debugging, scheduling, or testing data pipelines with Apache Airflow v2. Trigger on any code importing airflow, DAG definitions, operator usage, or user mentioning DAGs/tasks/operators/sensors/scheduling.
+description: Use when building, debugging, scheduling, or testing data pipelines with Apache Airflow v3. Trigger on any code importing airflow, DAG definitions, operator usage, or user mentioning DAGs/tasks/operators/sensors/scheduling.
 ---
 
-# Apache Airflow v2
+# Apache Airflow v3
 
 Official docs: https://airflow.apache.org/docs/apache-airflow/stable/
 
@@ -11,7 +11,7 @@ Pipeline code belongs in the data pipeline repository documented in `infrastruct
 
 ## Core Concepts
 
-**DAG (Directed Acyclic Graph)**: a Python file defining tasks with dependencies. The scheduler parses all `.py` files in the `dags_folder` looking for module-level `DAG` objects or `@dag`-decorated functions. Files must contain the string `airflow` or `DAG` to pass safe-mode discovery.
+**DAG (Directed Acyclic Graph)**: a Python file defining tasks with dependencies. The scheduler parses all `.py` files in the `dags_folder` looking for module-level `DAG` objects or `@dag`-decorated functions. Import DAG and decorators from `airflow.sdk`: `from airflow.sdk import DAG, dag, task`.
 
 **Task**: a unit of work within a DAG. Implemented via operators (traditional) or `@task`-decorated functions (TaskFlow API). A task instance is a specific run of a task for a given data interval.
 
@@ -25,9 +25,9 @@ Pipeline code belongs in the data pipeline repository documented in `infrastruct
 
 **XCom (Cross-Communication)**: mechanism for tasks to pass small data. TaskFlow API uses XComs implicitly (return values). Traditional operators use `ti.xcom_push()` / `ti.xcom_pull()`. Stored in the metadata database by default. Not suitable for large data (see gotcha #4).
 
-**Task Group**: visual grouping of tasks in the UI, replacing the deprecated SubDagOperator. No execution semantics; just a namespace and UI convenience.
+**Task Group**: visual grouping of tasks in the UI. No execution semantics; just a namespace and UI convenience.
 
-**Dataset**: a URI representing a logical dataset. Tasks declare `outlets=[Dataset("...")]` to signal they produce data; DAGs can use `schedule=[Dataset("...")]` to trigger when that dataset is updated. Enables data-aware scheduling (Airflow 2.4+).
+**Asset**: a URI representing a logical data asset (renamed from `Dataset` in Airflow 2.x). Tasks declare `outlets=[Asset("...")]` to signal they produce data; DAGs can use `schedule=[Asset("...")]` to trigger when that asset is updated. Import from `airflow.sdk`: `from airflow.sdk import Asset`.
 
 **Trigger rules**: control when a task runs based on upstream task states. Default is `all_success`. Key alternatives: `none_failed` (run if no upstream failed, skips are OK), `all_done` (run regardless of upstream state), `one_success` (run as soon as one upstream succeeds), `none_skipped` (run if no upstream was skipped). Set via `trigger_rule` parameter on any operator.
 
@@ -51,7 +51,7 @@ The default XCom backend stores data in the metadata database. Pushing large Dat
 
 ### 5. Dynamic tasks at parse time vs runtime
 
-Dynamically generating tasks inside a DAG (looping to create operators) happens at parse time, so the loop input must be available when the scheduler parses the file. For runtime-dynamic fanout, use `.expand()` (dynamic task mapping, Airflow 2.3+).
+Dynamically generating tasks inside a DAG (looping to create operators) happens at parse time, so the loop input must be available when the scheduler parses the file. For runtime-dynamic fanout, use `.expand()` (dynamic task mapping).
 
 ### 6. execution_timeout vs dagrun_timeout
 
@@ -73,11 +73,19 @@ Only fields listed in the operator's `template_fields` are Jinja-rendered. Passi
 
 If you modify a connection's credentials, running tasks that already loaded the connection keep using the old value until the worker process restarts. This bites people who rotate passwords during a DAG run.
 
-### 11. SubDagOperator is deprecated and dangerous
+### 11. SubDagOperator was removed in Airflow 3
 
-Replaced by TaskGroups. SubDags run on their own executor, creating deadlock risk with limited worker slots. Never use them.
+Use TaskGroups for visual grouping, or Assets with data-aware scheduling to trigger separate DAGs.
 
-### 12. depends_on_past creates serial execution across runs
+### 12. DAG code cannot access the metadata database directly
+
+In Airflow 3, tasks communicate with the API server via the Task Execution Interface instead of accessing the metadata DB. Use Task Context, the REST API, or the Python Client for any data that was previously fetched from the DB.
+
+### 13. Legacy import paths are deprecated
+
+`airflow.models.dag.DAG`, `airflow.decorators.task`, and `airflow.datasets.Dataset` still work but emit deprecation warnings and will be removed in a future version. Use `airflow.sdk` for all new code. Run `ruff check --select AIR30 --preview` to flag deprecated imports.
+
+### 14. depends_on_past creates serial execution across runs
 
 `depends_on_past=True` prevents a task from running if the same task in the previous DAG run has not succeeded. Combined with `catchup=True`, all runs execute serially. This is rarely what you want.
 
@@ -88,7 +96,7 @@ Replaced by TaskGroups. SubDags run on their own executor, creating deadlock ris
 Create a function that returns a configured DAG from parameters. This keeps DAG definition DRY and consistent across pipelines.
 
 ```python
-from airflow.models import DAG
+from airflow.sdk import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 
 def create_pipeline(dag_id, schedule, extract_fn, transform_fn):
@@ -113,7 +121,7 @@ def create_pipeline(dag_id, schedule, extract_fn, transform_fn):
 
 ```python
 from datetime import datetime
-from airflow.decorators import dag, task
+from airflow.sdk import dag, task
 
 @dag(start_date=datetime(2024, 1, 1), schedule="@daily")
 def my_pipeline():
@@ -154,10 +162,10 @@ Explicit control over XCom keys. Works naturally with non-Python operators and d
 
 **When to use which**: TaskFlow for simple Python-only pipelines. Traditional operators when you need dynamic task mapping (`.partial().expand()`), mixed operator types, or explicit XCom serialization control.
 
-## Dynamic Task Mapping (Airflow 2.3+)
+## Dynamic Task Mapping
 
 ```python
-from airflow.decorators import task
+from airflow.sdk import task
 
 @task
 def get_file_list() -> list[str]:
@@ -269,25 +277,25 @@ DAG(dag_id="my_dag", schedule="0 6 * * *")  # 6 AM UTC daily
 
 Presets: `@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`, `@once`. `schedule=None` for manual-trigger-only DAGs.
 
-### Data-aware scheduling with Datasets (Airflow 2.4+)
+### Data-aware scheduling with Assets
 
 ```python
-from airflow.datasets import Dataset
+from airflow.sdk import Asset, dag, task
 
-# Producer DAG: declare dataset as outlet
-@task(outlets=[Dataset("s3://bucket/processed_data")])
+# Producer DAG: declare asset as outlet
+@task(outlets=[Asset("s3://bucket/processed_data")])
 def produce():
     ...
 
-# Consumer DAG: triggers when the dataset is updated
-@dag(schedule=[Dataset("s3://bucket/processed_data")])
+# Consumer DAG: triggers when the asset is updated
+@dag(schedule=[Asset("s3://bucket/processed_data")])
 def consumer_dag():
     ...
 ```
 
-Multiple datasets can be combined: `schedule=[Dataset("a"), Dataset("b")]` triggers when ALL are updated.
+Multiple assets can be combined: `schedule=[Asset("a"), Asset("b")]` triggers when ALL are updated.
 
-### Timetables (Airflow 2.2+)
+### Timetables
 
 For schedules cron cannot express (business days, irregular intervals), implement a custom timetable by subclassing `Timetable`.
 
@@ -322,7 +330,7 @@ def test_extract():
     ti.xcom_push.assert_called_once()
 ```
 
-### End-to-end (Airflow 2.5+)
+### End-to-end
 
 ```python
 dag.test()  # Runs DAG in a single process, no scheduler needed
