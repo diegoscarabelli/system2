@@ -38,6 +38,12 @@ cooldown_hours = 24
 # Maximum number of automatic backups to keep
 max_backups = 3
 
+[knowledge]
+# Maximum characters per knowledge file before truncation by the agent loader.
+# The Narrator will condense files that exceed this budget during its next memory-update run.
+# Approximate token equivalent: budget_chars / 4 (e.g. 20000 chars ≈ 5000 tokens).
+# budget_chars = 20000
+
 [session]
 # Session file size threshold for rotation in MB
 rotation_threshold_mb = 10

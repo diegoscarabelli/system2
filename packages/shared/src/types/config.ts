@@ -58,3 +58,7 @@ export interface SchedulerConfig {
 export interface ChatConfig {
   max_history_messages: number;
 }
+
+export interface KnowledgeConfig {
+  budget_chars: number;
+}

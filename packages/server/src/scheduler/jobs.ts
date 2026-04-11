@@ -763,7 +763,8 @@ export function registerNarratorJobs(
   narratorId: number,
   db: DatabaseClient,
   system2Dir: string,
-  intervalMinutes: number
+  intervalMinutes: number,
+  knowledgeBudgetChars?: number
 ): void {
   // Daily summary — configurable interval
   const cronPattern = 60 % intervalMinutes === 0 ? `*/${intervalMinutes} * * * *` : '*/30 * * * *';
@@ -785,7 +786,7 @@ export function registerNarratorJobs(
         throw new JobSkipped('no network connectivity');
       }
       console.log('[Scheduler] Triggering memory-update job');
-      await buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir);
+      await buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir, knowledgeBudgetChars);
     });
   });
 }
@@ -797,11 +798,14 @@ export function registerNarratorJobs(
 export async function buildAndDeliverMemoryUpdate(
   narratorHost: AgentHost,
   narratorId: number,
-  system2Dir: string
+  system2Dir: string,
+  knowledgeBudgetChars = 20_000
 ): Promise<void> {
+  knowledgeBudgetChars = Math.max(knowledgeBudgetChars, 5_000);
   const newRunTs = new Date().toISOString();
   const memoryFile = join(system2Dir, 'knowledge', 'memory.md');
   const summariesDir = join(system2Dir, 'knowledge', 'daily_summaries');
+  const knowledgeDir = join(system2Dir, 'knowledge');
 
   // Read last_narrator_update_ts from memory.md
   const lastTs = readFrontmatterField(memoryFile, 'last_narrator_update_ts');
@@ -816,16 +820,44 @@ export async function buildAndDeliverMemoryUpdate(
         .map((f) => join(summariesDir, f))
     : [];
 
-  if (summaryFiles.length === 0) {
-    throw new JobSkipped('no daily summaries to incorporate');
+  // Identify knowledge files (excluding memory.md) that exceed the budget
+  const oversizedFiles = (
+    existsSync(knowledgeDir)
+      ? readdirSync(knowledgeDir)
+          .filter((f) => f.endsWith('.md') && f !== 'memory.md')
+          .map((f) => ({
+            path: join(knowledgeDir, f),
+            content: readFileSync(join(knowledgeDir, f), 'utf-8'),
+          }))
+      : []
+  ).filter(({ content }) => content.length > knowledgeBudgetChars);
+
+  if (summaryFiles.length === 0 && oversizedFiles.length === 0) {
+    throw new JobSkipped('no daily summaries to incorporate and no oversized knowledge files');
   }
 
-  // Embed summary content inline so the Narrator doesn't need read tool calls
-  const summaryEntries = summaryFiles.map((f) => {
-    const content = readFileSync(f, 'utf-8');
-    const filename = basename(f);
-    return `### ${filename}\n\n${content}`;
-  });
+  const messageParts: string[] = [];
+
+  if (summaryFiles.length > 0) {
+    // Embed summary content inline so the Narrator doesn't need read tool calls
+    const summaryEntries = summaryFiles.map((f) => {
+      const content = readFileSync(f, 'utf-8');
+      const filename = basename(f);
+      return `### ${filename}\n\n${content}`;
+    });
+    messageParts.push(`## Daily summaries to incorporate\n\n${summaryEntries.join('\n\n')}`);
+  }
+
+  if (oversizedFiles.length > 0) {
+    const condensationEntries = oversizedFiles.map(({ path: f, content }) => {
+      const label = f.replace(system2Dir, '~/.system2');
+      const overage = content.length - knowledgeBudgetChars;
+      return `### ${label}\n\nCurrent size: ${content.length.toLocaleString()} chars (+${overage.toLocaleString()} over ${knowledgeBudgetChars.toLocaleString()} char budget)\n\n${content}`;
+    });
+    messageParts.push(
+      `## Knowledge Files Requiring Condensation\n\nThe following files exceed the ${knowledgeBudgetChars.toLocaleString()} character budget and are being truncated in agent contexts. For each: condense its content to under ${(knowledgeBudgetChars - 2_000).toLocaleString()} characters and write it back to the same path with \`commit_message: "knowledge: condense <filename>"\`. Preserve all structure and frontmatter. Drop outdated, redundant, or low-value content; merge similar entries; tighten prose. The full current content is provided below — no need to read the files separately.\n\n${condensationEntries.join('\n\n')}`
+    );
+  }
 
   const message = `[Scheduled task: memory-update]
 
@@ -835,9 +867,7 @@ new_run_ts: ${newRunTs}
 
 IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
 
-## Daily summaries to incorporate
-
-${summaryEntries.join('\n\n')}`;
+${messageParts.join('\n\n')}`;
 
   await narratorHost.deliverMessage(message, {
     sender: 0,

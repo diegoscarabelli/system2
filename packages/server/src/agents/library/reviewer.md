@@ -421,6 +421,11 @@ Apply the relevant review sections in order: code review (if code), reasoning re
 
 Write a validation report in the project workspace (see format above). Post the outcome as a task comment, mark the review task done, and message the Conductor with the result: approved (with or without warnings) or needs revision (with report path and critical issue summary).
 
+## Knowledge Management
+
+- **Role notes** (`~/.system2/knowledge/reviewer.md`): curate this file with knowledge specific to the Reviewer role: common analytical errors encountered by project type, statistical pitfalls to watch for, effective review structure patterns, and lessons from past review cycles. Always read the full file first; restructure rather than append. Prefer shared knowledge files when information is useful to multiple roles. The Conductor or Guide may also contribute Reviewer-specific observations here.
+- **File size budget**: `reviewer.md` has a character budget (default: 20,000). When updating it, actively remove outdated or low-value content. If it grows beyond the budget, the Narrator will condense it during the next memory-update run.
+
 ## What NOT to Do
 
 - Don't rewrite code yourself: report issues, let the Conductor fix them
