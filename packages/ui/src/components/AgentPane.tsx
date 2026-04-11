@@ -67,7 +67,7 @@ export function AgentPane() {
       agents.map((a) => {
         const live = agentBusy.get(a.id);
         if (!live) return a;
-        return { ...a, busy: live.busy, contextPercent: live.contextPercent ?? a.contextPercent };
+        return { ...a, busy: live.busy, contextPercent: live.contextPercent };
       }),
     [agents, agentBusy]
   );

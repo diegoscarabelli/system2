@@ -575,7 +575,13 @@ export class DatabaseClient {
 
     if (stmt.reader) {
       const rows = stmt.all();
-      return { changes: 0, rows };
+      // DML with RETURNING is a reader (returns rows) but still mutates data.
+      // Check if the SQL is DML and query changes() to get the actual mutation count.
+      const isDml = /^\s*(?:WITH\b[\s\S]*?\)\s*)?(?:INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql);
+      const changes = isDml
+        ? (this.db.prepare('SELECT changes() AS changes').get() as { changes: number }).changes
+        : 0;
+      return { changes, rows };
     }
 
     const result = stmt.run();
