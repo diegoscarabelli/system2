@@ -185,6 +185,11 @@ describe('bash tool', () => {
       expect((result.content[0] as { text: string }).text).toContain('blocked');
     });
 
+    it('blocks sqlite3 with backslash path separators', async () => {
+      const result = await exec('sqlite3 C:\\Users\\me\\.system2\\app.db ".tables"');
+      expect((result.content[0] as { text: string }).text).toContain('blocked');
+    });
+
     it('allows rm -rf on specific directories', async () => {
       const dir = trackDir(makeTmpDir());
       const result = await exec(`rm -rf ${dir}`);
