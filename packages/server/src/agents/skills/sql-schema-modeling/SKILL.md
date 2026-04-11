@@ -44,6 +44,11 @@ CREATE TABLE zip_codes (
     zip_code TEXT PRIMARY KEY,
     city     TEXT
 );
+
+CREATE TABLE customers (
+    customer_id INT PRIMARY KEY,
+    zip_code    TEXT REFERENCES zip_codes(zip_code)
+);
 ```
 
 **BCNF**: for every functional dependency X -> Y, X must be a superkey. Stricter than 3NF; handles edge cases with overlapping candidate keys.
@@ -82,7 +87,7 @@ Provide descriptive context (who, what, where, when). In a star schema, dimensio
 ```sql
 CREATE TABLE dim_customer (
     customer_key    INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    customer_id     TEXT NOT NULL UNIQUE,  -- natural/business key
+    customer_id     TEXT NOT NULL,  -- natural/business key (not unique: SCD Type 2 creates multiple rows per customer)
     full_name       TEXT NOT NULL,
     email           TEXT,
     city            TEXT,
@@ -95,7 +100,7 @@ CREATE TABLE dim_customer (
 );
 ```
 
-Use integer surrogate keys on all dimension tables. Store natural/business keys as regular attributes with UNIQUE constraints.
+Use integer surrogate keys on all dimension tables. Store natural/business keys as regular attributes. For SCD Type 1 dimensions (no history), add a UNIQUE constraint on the natural key. For SCD Type 2 (historical rows), the natural key is not unique; use a composite unique on `(customer_id, effective_date)` instead.
 
 ### Star vs snowflake
 
