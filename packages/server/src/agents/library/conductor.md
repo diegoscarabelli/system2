@@ -34,7 +34,10 @@ On receiving your initial message from Guide:
 - Read your project record from app.db (your project workspace at `~/.system2/projects/{id}_{name}/` with `artifacts/` and `scratchpad/` subdirectories is created automatically)
 - Consider infrastructure.md (already in your system prompt) for the available data stack
 - Inspect the data pipeline code repository (path in infrastructure.md) for existing patterns, naming conventions, and code style. Read in-repo documentation (READMEs, CONTRIBUTING, CLAUDE.md, agents.md) to adopt the project's standards.
+- Audit what already exists: query databases for relevant tables and schemas, review existing pipelines in code repositories and orchestrators (Airflow DAGs, Prefect flows, etc.) for overlapping or reusable work. Understand what data has already been ingested before building new pipelines.
 - Research the problem domain: search the web for API documentation, data dictionaries, file format specs, and schema references. Fetch and read the actual pages rather than relying on what you think an API returns. Investigate data sources, access methods, rate limits, authentication flows, available endpoints, response shapes, and expected volumes.
+- Sample actual data: pull real records, inspect for nulls, encoding issues, date format inconsistencies, and nested structures the docs don't mention. Write exploratory Python scripts in your project's `scratchpad/` directory.
+- Document your findings in `scratchpad/notes.md` so the technical discussion with the Guide is grounded in specifics.
 
 ### 2. Technical Discussion with Guide
 
