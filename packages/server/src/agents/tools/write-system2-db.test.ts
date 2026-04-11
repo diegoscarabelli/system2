@@ -1,5 +1,5 @@
 import type { Agent, Artifact, Project, Task, TaskComment, TaskLink } from '@dscarabelli/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseClient } from '../../db/client.js';
 import { createWriteSystem2DbTool } from './write-system2-db.js';
 
@@ -92,6 +92,13 @@ function createMockDb() {
       return a;
     },
     deleteArtifact: (id: number) => artifacts.delete(id),
+    runSql: (sql: string) => {
+      const trimmed = sql.trim().toUpperCase();
+      if (trimmed.startsWith('SELECT')) {
+        return { changes: 0, rows: [{ count: 42 }] };
+      }
+      return { changes: 1 };
+    },
   };
 }
 
@@ -571,5 +578,233 @@ describe('write_system2_db tool', () => {
     } as unknown as WriteDbParams);
 
     expect((result.content[0] as { text: string }).text).toContain('Unknown operation');
+  });
+
+  describe('rawSql', () => {
+    it('executes a SELECT query', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'SELECT count(*) AS count FROM task',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('42');
+    });
+
+    it('executes a DML statement', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: "UPDATE task SET status = 'done' WHERE id = 1",
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('changes');
+    });
+
+    it('blocks CREATE statements', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'CREATE TABLE test (id INTEGER)',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('blocks DDL');
+    });
+
+    it('blocks ALTER statements', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'ALTER TABLE task ADD COLUMN new_col TEXT',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('blocks DDL');
+    });
+
+    it('blocks DROP statements', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'DROP TABLE task',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('blocks DDL');
+    });
+
+    it('blocks PRAGMA statements', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'PRAGMA journal_mode=DELETE',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('blocks DDL');
+    });
+
+    it('blocks ATTACH statements', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: "ATTACH DATABASE '/tmp/other.db' AS other",
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('blocks DDL');
+    });
+
+    it('blocks DETACH statements', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'DETACH DATABASE other',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('blocks DDL');
+    });
+
+    it('returns error when sql is missing', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('requires: sql');
+    });
+  });
+
+  describe('onWrite callback', () => {
+    it('fires with "project" for createProject', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const onWrite = vi.fn();
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, onWrite);
+
+      await tool.execute('test', {
+        operation: 'createProject',
+        name: 'Test',
+        description: 'Desc',
+      } as WriteDbParams);
+
+      expect(onWrite).toHaveBeenCalledWith('project');
+    });
+
+    it('fires with "task" for createTask', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const onWrite = vi.fn();
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, onWrite);
+
+      await tool.execute('test', {
+        operation: 'createTask',
+        project: 10,
+        title: 'Task',
+        description: 'Desc',
+      } as WriteDbParams);
+
+      expect(onWrite).toHaveBeenCalledWith('task');
+    });
+
+    it('fires with "artifact" for createArtifact', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const onWrite = vi.fn();
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, onWrite);
+
+      await tool.execute('test', {
+        operation: 'createArtifact',
+        file_path: '/tmp/report.html',
+        title: 'Report',
+      } as WriteDbParams);
+
+      expect(onWrite).toHaveBeenCalledWith('artifact');
+    });
+
+    it('fires with "unknown" for rawSql', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const onWrite = vi.fn();
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, onWrite);
+
+      await tool.execute('test', {
+        operation: 'rawSql',
+        sql: "UPDATE task SET status = 'done' WHERE id = 1",
+      } as WriteDbParams);
+
+      expect(onWrite).toHaveBeenCalledWith('unknown');
+    });
+
+    it('does not fire on error', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const onWrite = vi.fn();
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, onWrite);
+
+      await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'CREATE TABLE nope (id INTEGER)',
+      } as WriteDbParams);
+
+      expect(onWrite).not.toHaveBeenCalled();
+    });
+
+    it('fires with "task_link" for createTaskLink', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      addTask(db, 50, 10);
+      addTask(db, 51, 10);
+      const onWrite = vi.fn();
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1, onWrite);
+
+      await tool.execute('test', {
+        operation: 'createTaskLink',
+        source: 50,
+        target: 51,
+        relationship: 'relates_to',
+      } as WriteDbParams);
+
+      expect(onWrite).toHaveBeenCalledWith('task_link');
+    });
+
+    it('fires with "task_comment" for createTaskComment', async () => {
+      const db = createMockDb();
+      addAgent(db, 2, 'conductor', 10);
+      addTask(db, 50, 10);
+      const onWrite = vi.fn();
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2, onWrite);
+
+      await tool.execute('test', {
+        operation: 'createTaskComment',
+        task: 50,
+        content: 'Hello',
+      } as WriteDbParams);
+
+      expect(onWrite).toHaveBeenCalledWith('task_comment');
+    });
   });
 });

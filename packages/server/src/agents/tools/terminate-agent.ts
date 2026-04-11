@@ -19,7 +19,8 @@ import type { AgentRegistry } from '../registry.js';
 export function createTerminateAgentTool(
   db: DatabaseClient,
   agentId: number,
-  registry: AgentRegistry
+  registry: AgentRegistry,
+  onTerminate?: () => void
 ) {
   const params = Type.Object({
     agent_id: Type.Number({
@@ -119,6 +120,8 @@ export function createTerminateAgentTool(
         targetHost.abort();
         registry.unregister(params.agent_id);
       }
+
+      onTerminate?.();
 
       return {
         content: [

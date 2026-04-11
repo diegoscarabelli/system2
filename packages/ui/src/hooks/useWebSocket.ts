@@ -11,6 +11,7 @@ import type { ClientMessage, ServerMessage } from '@dscarabelli/shared';
 import { useCallback, useEffect, useRef } from 'react';
 import { useArtifactStore } from '../stores/artifact';
 import { useChatStore } from '../stores/chat';
+import { usePushStore } from '../stores/push';
 
 const WS_URL = `ws://${window.location.hostname}:3000`;
 
@@ -196,6 +197,27 @@ export function useWebSocket() {
           if (aid !== null) state.finishCompaction(aid);
           break;
         }
+
+        case 'board_changed':
+          usePushStore.getState().bumpBoard();
+          break;
+
+        case 'agents_changed':
+          usePushStore.getState().bumpAgents();
+          break;
+
+        case 'artifacts_changed':
+          usePushStore.getState().bumpArtifacts();
+          break;
+
+        case 'job_executions_changed':
+          usePushStore.getState().bumpJobs();
+          break;
+
+        case 'agent_busy_changed':
+          // Bump agents version so AgentPane refetches (includes busy + contextPercent)
+          usePushStore.getState().bumpAgents();
+          break;
 
         case 'error': {
           console.error('Server error:', message.message);

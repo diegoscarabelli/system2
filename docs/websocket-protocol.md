@@ -55,7 +55,13 @@ type ServerMessage =
   | { type: 'chat_history'; messages: ChatMessage[]; agentId: number }
   | { type: 'user_message_broadcast'; id: string; content: string; timestamp: number; agentId?: number }
   | { type: 'compaction_start'; agentId?: number }
-  | { type: 'compaction_end'; agentId?: number };
+  | { type: 'compaction_end'; agentId?: number }
+  // Push notifications for UI panels
+  | { type: 'board_changed' }
+  | { type: 'agents_changed' }
+  | { type: 'artifacts_changed' }
+  | { type: 'job_executions_changed' }
+  | { type: 'agent_busy_changed'; agentId: number; busy: boolean; contextPercent: number | null };
 ```
 
 | Message | Description |
@@ -72,8 +78,13 @@ type ServerMessage =
 | `chat_history` | Sent on connect (Guide) and on `switch_agent`: recent messages for the specified agent |
 | `user_message_broadcast` | User message from another tab, broadcast to all other connected clients |
 | `compaction_start` / `compaction_end` | Auto-compaction lifecycle (context window management). UI shows transient "Compacting..." / "Compacted" indicator |
+| `board_changed` | Broadcast when `write_system2_db` modifies a project, task, task_link, or task_comment. UI panels refetch `/api/kanban`. |
+| `agents_changed` | Broadcast when an agent is spawned, terminated, or resurrected. UI panels refetch `/api/agents`. |
+| `artifacts_changed` | Broadcast when `write_system2_db` modifies an artifact. UI panels refetch `/api/artifacts`. |
+| `job_executions_changed` | Broadcast when a scheduler job execution is created, completed, failed, or skipped. UI panels refetch `/api/job-executions`. |
+| `agent_busy_changed` | Broadcast when an agent's busy state changes (message processing start/end). Includes `agentId`, `busy`, and `contextPercent`. |
 
-Note: the Board, Catalog, and Agent Pane poll their REST endpoints every 2 seconds rather than relying on push notifications. This ensures the UI reflects database changes regardless of how they were made (tool callbacks, direct sqlite3 access, etc.).
+All database writes by agents go through `write_system2_db`, which fires an `onWrite` callback that the server maps to the appropriate push notification. Agents are instructed to never use `bash`/`sqlite3` to modify `app.db`, ensuring all changes are captured. REST endpoints are still used for the initial data load on page open or WebSocket reconnect.
 
 ## Message Flow
 

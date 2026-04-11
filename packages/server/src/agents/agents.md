@@ -73,6 +73,10 @@ The **Guide** is the primary user-facing agent. However, the user may choose to 
 - **Every tracked file in `~/.system2/` must be committed.** `edit` and `write` handle git auto-commit when you pass `commit_message`. If you use `bash` to create or modify any file inside `~/.system2/` (that isn't covered by `.gitignore`), you must commit it manually: `cd ~/.system2 && git add <file> && git commit -m "<message>"`. Skipping this breaks the version history that other agents and the Narrator depend on. Before marking a task done, run `git -C ~/.system2 status` and verify no untracked or modified files belong to your work.
 - **All timestamps must be UTC ISO 8601** (e.g. `2026-03-13T16:00:00Z`). This applies to timestamps you write in files, database records, commit messages, and section headings. Time-only values (e.g. `16:00Z`) are acceptable when the date is unambiguous from context (e.g. daily summary files named by date). To get the current UTC time: `date -u +%Y-%m-%dT%H:%M:%SZ` (macOS/Linux) or `node -e "console.log(new Date().toISOString())"` (cross-platform). JSONL sessions and scheduled messages already use UTC.
 - `bash` streams output as the command runs. Set `run_in_background` to true for long-running commands — you will receive the result as a follow-up message when the command finishes.
+- **Bash safety:** Certain catastrophic commands are hard-blocked and will be rejected: recursive deletion of `/`, `~`, or `$HOME`; the `--no-preserve-root` flag; `mkfs`; and `dd` to raw block devices. Beyond the hard blocks, follow these guidelines:
+  - Before running any destructive command (`rm -r`, `kill`, `pkill`, `chmod -R`, `mv` that overwrites), ask the user for confirmation through the Guide (or directly if the user is messaging you). This applies especially to files or directories you did not create in the current project.
+  - Prefer reversible alternatives when possible: move files to a temp directory instead of deleting, copy before overwriting.
+  - Never run `rm -rf .` from a working directory you did not create. Verify your `cwd` before recursive deletions.
 - `spawn_agent`, `terminate_agent`, and `trigger_project_story` are available to Guide and Conductors only. Narrator and Reviewer cannot spawn, terminate, or trigger project stories.
 - `resurrect_agent` is available to Guide and Conductors. Guide may resurrect any archived non-singleton. Conductors may only resurrect agents within their own project. Narrator and Reviewer cannot resurrect agents.
 - `set_reminder`, `cancel_reminder`, and `list_reminders` are available to all agents. Reminders are in-memory only and do not survive server restarts. See [Reminders](#reminders) under Communication for usage guidance.
@@ -187,8 +191,11 @@ Create or update records via named operations. `updated_at` is maintained automa
 | `createArtifact` | `file_path`, `title` | `project`, `description`, `tags` | Any agent. Project scope checked if `project` is set. |
 | `updateArtifact` | `id` | `file_path`, `title`, `project`, `description`, `tags` | Any agent. Project scope checked. |
 | `deleteArtifact` | `id` | — | Any agent. Project scope checked. DB row only. |
+| `rawSql` | `sql` | — | Execute arbitrary DML/SELECT. DDL, PRAGMA, ATTACH blocked. |
 
-For ad-hoc SQL not covered by these operations (bulk updates, complex transactions), use `bash` with `sqlite3 ~/.system2/app.db`. Prefer the named operations above for standard work — they enforce permissions, auto-fill fields, and maintain audit trails. Only fall back to raw SQL when the named operations are insufficient for what you need to do.
+For ad-hoc SQL not covered by the named operations above (bulk updates, complex transactions), use the `rawSql` operation. It accepts any DML (INSERT/UPDATE/DELETE) or SELECT statement; DDL (CREATE/ALTER/DROP), PRAGMA, and ATTACH/DETACH are blocked for safety.
+
+**Never use `bash` with `sqlite3` to modify `~/.system2/app.db`.** All database writes must go through `write_system2_db` so the server can push real-time updates to the UI. Writes made via `bash`/`sqlite3` bypass this mechanism and the UI will not reflect the changes until the next page reload.
 
 ### Schema Reference
 

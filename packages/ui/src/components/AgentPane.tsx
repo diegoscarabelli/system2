@@ -8,8 +8,8 @@
 import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
 import { useChatStore } from '../stores/chat';
+import { usePushStore } from '../stores/push';
 import { colors, contextColor } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
@@ -58,36 +58,29 @@ export function AgentPane() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const initialized = useRef(false);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
+  const agentsVersion = usePushStore((s) => s.agentsVersion);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: agentsVersion is an intentional trigger to refetch on push
   useEffect(() => {
     const controller = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout>;
 
-    const fetchData = () => {
-      if (!initialized.current) setLoading(true);
+    if (!initialized.current) setLoading(true);
 
-      fetch('/api/agents', { signal: controller.signal })
-        .then((res) => res.json())
-        .then((data) => {
-          setAgents(data.agents || []);
-          initialized.current = true;
+    fetch('/api/agents', { signal: controller.signal })
+      .then((res) => res.json())
+      .then((data) => {
+        setAgents(data.agents || []);
+        initialized.current = true;
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        if ((err as { name?: string }).name !== 'AbortError') {
           setLoading(false);
-          timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
-        })
-        .catch((err: unknown) => {
-          if ((err as { name?: string }).name !== 'AbortError') {
-            setLoading(false);
-            timeoutId = setTimeout(fetchData, POLL_ERROR_BACKOFF_MS);
-          }
-        });
-    };
+        }
+      });
 
-    fetchData();
-    return () => {
-      controller.abort();
-      clearTimeout(timeoutId);
-    };
-  }, []);
+    return () => controller.abort();
+  }, [agentsVersion]);
 
   const toggleGroupCollapse = useCallback((group: string) => {
     setCollapsedGroups((prev) => {

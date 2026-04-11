@@ -737,19 +737,24 @@ export async function trackJobExecution(
   db: DatabaseClient,
   jobName: string,
   triggerType: JobExecution['trigger_type'],
-  handler: () => void | Promise<void>
+  handler: () => void | Promise<void>,
+  onJobChange?: () => void
 ): Promise<void> {
   const execution = db.createJobExecution(jobName, triggerType);
+  onJobChange?.();
   try {
     await handler();
     db.completeJobExecution(execution.id);
+    onJobChange?.();
   } catch (error) {
     if (error instanceof JobSkipped) {
       db.skipJobExecution(execution.id, error.reason);
+      onJobChange?.();
       return;
     }
     const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
     db.failJobExecution(execution.id, message);
+    onJobChange?.();
     throw error;
   }
 }
@@ -763,30 +768,49 @@ export function registerNarratorJobs(
   narratorId: number,
   db: DatabaseClient,
   system2Dir: string,
-  intervalMinutes: number
+  intervalMinutes: number,
+  onJobChange?: () => void
 ): void {
   // Daily summary — configurable interval
   const cronPattern = 60 % intervalMinutes === 0 ? `*/${intervalMinutes} * * * *` : '*/30 * * * *';
 
   scheduler.schedule('daily-summary', cronPattern, async () => {
-    await trackJobExecution(db, 'daily-summary', 'cron', async () => {
-      if (!(await isNetworkAvailable())) {
-        throw new JobSkipped('no network connectivity');
-      }
-      console.log('[Scheduler] Triggering daily-summary job (project logs + daily summary)');
-      await buildAndDeliverDailySummary(db, narratorHost, narratorId, system2Dir, intervalMinutes);
-    });
+    await trackJobExecution(
+      db,
+      'daily-summary',
+      'cron',
+      async () => {
+        if (!(await isNetworkAvailable())) {
+          throw new JobSkipped('no network connectivity');
+        }
+        console.log('[Scheduler] Triggering daily-summary job (project logs + daily summary)');
+        await buildAndDeliverDailySummary(
+          db,
+          narratorHost,
+          narratorId,
+          system2Dir,
+          intervalMinutes
+        );
+      },
+      onJobChange
+    );
   });
 
   // Memory update — daily at 11 AM
   scheduler.schedule('memory-update', '0 11 * * *', async () => {
-    await trackJobExecution(db, 'memory-update', 'cron', async () => {
-      if (!(await isNetworkAvailable())) {
-        throw new JobSkipped('no network connectivity');
-      }
-      console.log('[Scheduler] Triggering memory-update job');
-      await buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir);
-    });
+    await trackJobExecution(
+      db,
+      'memory-update',
+      'cron',
+      async () => {
+        if (!(await isNetworkAvailable())) {
+          throw new JobSkipped('no network connectivity');
+        }
+        console.log('[Scheduler] Triggering memory-update job');
+        await buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir);
+      },
+      onJobChange
+    );
   });
 }
 

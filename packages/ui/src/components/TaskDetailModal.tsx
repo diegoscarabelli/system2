@@ -9,7 +9,7 @@ import { XIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
-import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
+import { usePushStore } from '../stores/push';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
@@ -151,42 +151,33 @@ export function TaskDetailModal({
   const [loading, setLoading] = useState(true);
   const panelRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
+  const boardVersion = usePushStore((s) => s.boardVersion);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: boardVersion is an intentional trigger to refetch on push
   useEffect(() => {
     const controller = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout>;
     initialized.current = false;
 
     if (panelRef.current) panelRef.current.scrollTop = 0;
 
-    const fetchData = () => {
-      if (!initialized.current) {
-        setLoading(true);
-        setData(null);
-      }
+    setLoading(true);
+    setData(null);
 
-      fetch(`/api/tasks/${taskId}`, { signal: controller.signal })
-        .then((r) => r.json())
-        .then((d: TaskDetailData) => {
-          setData(d);
-          initialized.current = true;
+    fetch(`/api/tasks/${taskId}`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((d: TaskDetailData) => {
+        setData(d);
+        initialized.current = true;
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        if ((err as { name?: string }).name !== 'AbortError') {
           setLoading(false);
-          timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
-        })
-        .catch((err: unknown) => {
-          if ((err as { name?: string }).name !== 'AbortError') {
-            setLoading(false);
-            timeoutId = setTimeout(fetchData, POLL_ERROR_BACKOFF_MS);
-          }
-        });
-    };
+        }
+      });
 
-    fetchData();
-    return () => {
-      controller.abort();
-      clearTimeout(timeoutId);
-    };
-  }, [taskId]);
+    return () => controller.abort();
+  }, [taskId, boardVersion]);
 
   // Close on backdrop click
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {

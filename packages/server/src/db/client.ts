@@ -565,6 +565,23 @@ export class DatabaseClient {
     }
   }
 
+  /**
+   * Execute a DML statement (INSERT, UPDATE, DELETE) or SELECT query.
+   * Used by the rawSql operation in write_system2_db.
+   * DDL and ATTACH statements must be blocked by the caller.
+   */
+  runSql(sql: string): { changes: number; rows?: unknown[] } {
+    const trimmed = sql.trim().toUpperCase();
+    if (trimmed.startsWith('SELECT')) {
+      const stmt = this.db.prepare(sql);
+      const rows = stmt.all();
+      return { changes: 0, rows };
+    }
+    const stmt = this.db.prepare(sql);
+    const result = stmt.run();
+    return { changes: result.changes };
+  }
+
   close(): void {
     this.db.close();
   }

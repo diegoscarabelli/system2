@@ -21,6 +21,21 @@ type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 type TaskPriority = (typeof TASK_PRIORITIES)[number];
 type TaskLinkRelationship = (typeof TASK_LINK_RELATIONSHIPS)[number];
 
+/** Entity categories affected by a write operation. */
+export type WriteEntityType =
+  | 'project'
+  | 'task'
+  | 'task_link'
+  | 'task_comment'
+  | 'artifact'
+  | 'unknown';
+
+/** Callback fired after every successful write_system2_db operation. */
+export type OnDatabaseWrite = (entityType: WriteEntityType) => void;
+
+/** Blocked SQL patterns: DDL, PRAGMA, ATTACH/DETACH. */
+const BLOCKED_SQL_PATTERNS = /^\s*(CREATE|ALTER|DROP|PRAGMA|ATTACH|DETACH)\b/i;
+
 function checkProjectScope(
   agentProject: number | null,
   recordProject: number | null
@@ -33,7 +48,11 @@ function checkProjectScope(
   return null;
 }
 
-export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
+export function createWriteSystem2DbTool(
+  db: DatabaseClient,
+  agentId: number,
+  onWrite?: OnDatabaseWrite
+) {
   const params = Type.Object({
     operation: Type.Union(
       [
@@ -49,10 +68,11 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
         Type.Literal('createArtifact'),
         Type.Literal('updateArtifact'),
         Type.Literal('deleteArtifact'),
+        Type.Literal('rawSql'),
       ],
       {
         description:
-          'Operation to perform. createProject/updateProject manage projects. createTask/updateTask manage tasks. claimTask atomically claims an unassigned todo task (pull model, secondary to assignment). createTaskLink/deleteTaskLink manage task relationships. createTaskComment/deleteTaskComment manage task comments. createArtifact/updateArtifact/deleteArtifact manage artifact metadata (file_path is absolute).',
+          'Operation to perform. createProject/updateProject manage projects. createTask/updateTask manage tasks. claimTask atomically claims an unassigned todo task (pull model, secondary to assignment). createTaskLink/deleteTaskLink manage task relationships. createTaskComment/deleteTaskComment manage task comments. createArtifact/updateArtifact/deleteArtifact manage artifact metadata (file_path is absolute). rawSql executes arbitrary DML (INSERT/UPDATE/DELETE) or SELECT — DDL (CREATE/ALTER/DROP), PRAGMA, and ATTACH are blocked.',
       }
     ),
     // Shared: ID for updates/deletes
@@ -121,13 +141,29 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
         description: 'Array of string tags for artifact categorization.',
       })
     ),
+    // rawSql field
+    sql: Type.Optional(
+      Type.String({
+        description:
+          'SQL statement — required for rawSql. DML (INSERT/UPDATE/DELETE) and SELECT only. DDL (CREATE/ALTER/DROP), PRAGMA, and ATTACH are blocked.',
+      })
+    ),
   });
+
+  /** Notify after a successful write. */
+  const notify = (entityType: WriteEntityType) => {
+    try {
+      onWrite?.(entityType);
+    } catch {
+      // Broadcast failures must not break the tool result
+    }
+  };
 
   const tool: AgentTool<typeof params> = {
     name: 'write_system2_db',
     label: 'Write System2 DB',
     description:
-      "Create or update records in the System2 app database (~/.system2/app.db). Use named operations to manage projects, tasks, task links, task comments, and artifacts. updated_at is maintained automatically. The author field on task comments is filled automatically from your agent ID. claimTask atomically claims a todo task — only use this when operating in pull mode at the Conductor's direction, not as a substitute for working your assigned tasks. createArtifact/updateArtifact/deleteArtifact manage artifact metadata (file_path must be absolute; deleteArtifact removes the DB record only, not the file). This tool is only for the System2 management database — not for data pipeline databases (use bash for those). For ad-hoc or complex SQL not covered by these operations, you can also use bash with sqlite3 ~/.system2/app.db.",
+      "Create or update records in the System2 app database (~/.system2/app.db). Use named operations to manage projects, tasks, task links, task comments, and artifacts. updated_at is maintained automatically. The author field on task comments is filled automatically from your agent ID. claimTask atomically claims a todo task — only use this when operating in pull mode at the Conductor's direction, not as a substitute for working your assigned tasks. createArtifact/updateArtifact/deleteArtifact manage artifact metadata (file_path must be absolute; deleteArtifact removes the DB record only, not the file). rawSql is a last-resort escape hatch for ad-hoc DML or SELECT queries not covered by the named operations. This tool is only for the System2 management database — not for data pipeline databases (use bash for those).",
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       const err = (msg: string) => ({
@@ -135,15 +171,18 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
         details: { error: msg },
       });
 
-      const ok = (result: unknown) => ({
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-        details: { result },
-      });
+      const ok = (result: unknown, entityType?: WriteEntityType) => {
+        if (entityType) notify(entityType);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+          details: { result },
+        };
+      };
 
       try {
         const self = db.getAgent(agentId);
@@ -173,7 +212,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
               start_at: params.start_at ?? null,
               end_at: params.end_at ?? null,
             });
-            return ok(result);
+            return ok(result, 'project');
           }
 
           case 'updateProject': {
@@ -203,7 +242,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             });
             if (!result) return err(`No project found with id ${params.id}`);
 
-            return ok(result);
+            return ok(result, 'project');
           }
 
           case 'createTask': {
@@ -238,7 +277,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
               end_at: params.end_at ?? null,
             });
 
-            return ok(result);
+            return ok(result, 'task');
           }
 
           case 'updateTask': {
@@ -273,7 +312,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             });
             if (!result) return err(`No task found with id ${params.id}`);
 
-            return ok(result);
+            return ok(result, 'task');
           }
 
           case 'claimTask': {
@@ -292,7 +331,16 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
               };
             }
 
-            return ok({ claimed: true, task: result.task });
+            notify('task');
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({ claimed: true, task: result.task }, null, 2),
+                },
+              ],
+              details: { result: { claimed: true, task: result.task } },
+            };
           }
 
           case 'createTaskLink': {
@@ -314,7 +362,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
               relationship: params.relationship as TaskLinkRelationship,
             });
 
-            return ok(result);
+            return ok(result, 'task_link');
           }
 
           case 'deleteTaskLink': {
@@ -329,7 +377,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             const deleted = db.deleteTaskLink(params.id);
             if (!deleted) return err(`No task link found with id ${params.id}`);
 
-            return ok({ deleted: true, id: params.id });
+            return ok({ deleted: true, id: params.id }, 'task_link');
           }
 
           case 'createTaskComment': {
@@ -345,7 +393,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
               content: params.content,
             });
 
-            return ok(result);
+            return ok(result, 'task_comment');
           }
 
           case 'deleteTaskComment': {
@@ -359,7 +407,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             }
             const deleted = db.deleteTaskComment(params.id);
             if (!deleted) return err(`No task comment found with id ${params.id}`);
-            return ok({ deleted: true, id: params.id });
+            return ok({ deleted: true, id: params.id }, 'task_comment');
           }
 
           case 'createArtifact': {
@@ -377,7 +425,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
               tags: params.tags ?? [],
             });
 
-            return ok(result);
+            return ok(result, 'artifact');
           }
 
           case 'updateArtifact': {
@@ -398,7 +446,7 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             });
             if (!result) return err(`No artifact found with id ${params.id}`);
 
-            return ok(result);
+            return ok(result, 'artifact');
           }
 
           case 'deleteArtifact': {
@@ -413,7 +461,18 @@ export function createWriteSystem2DbTool(db: DatabaseClient, agentId: number) {
             const deleted = db.deleteArtifact(params.id);
             if (!deleted) return err(`No artifact found with id ${params.id}`);
 
-            return ok({ deleted: true, id: params.id });
+            return ok({ deleted: true, id: params.id }, 'artifact');
+          }
+
+          case 'rawSql': {
+            if (!params.sql) return err('rawSql requires: sql');
+            if (BLOCKED_SQL_PATTERNS.test(params.sql)) {
+              return err(
+                'rawSql blocks DDL (CREATE/ALTER/DROP), PRAGMA, and ATTACH/DETACH statements. Only DML (INSERT/UPDATE/DELETE) and SELECT are allowed.'
+              );
+            }
+            const result = db.runSql(params.sql);
+            return ok(result, 'unknown');
           }
 
           default:

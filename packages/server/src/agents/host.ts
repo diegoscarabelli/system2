@@ -85,7 +85,7 @@ import { createTriggerProjectStoryTool } from './tools/trigger-project-story.js'
 import { createWebFetchTool } from './tools/web-fetch.js';
 import { createWebSearchTool } from './tools/web-search.js';
 import { createWriteTool } from './tools/write.js';
-import { createWriteSystem2DbTool } from './tools/write-system2-db.js';
+import { createWriteSystem2DbTool, type OnDatabaseWrite } from './tools/write-system2-db.js';
 import './types.js'; // Import custom message type declarations
 
 const __filename = fileURLToPath(import.meta.url);
@@ -130,6 +130,12 @@ export interface AgentHostConfig {
   /** Shared AuthResolver for cross-agent rate limit awareness. Falls back to creating a local instance. */
   authResolver?: AuthResolver;
   reminderManager?: ReminderManager;
+  /** Called after every successful write_system2_db operation. */
+  onDatabaseWrite?: OnDatabaseWrite;
+  /** Called when the agent's busy state changes. */
+  onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
+  /** Called when an agent is terminated via terminate_agent tool. */
+  onAgentTerminate?: () => void;
 }
 
 export class AgentHost {
@@ -175,6 +181,9 @@ export class AgentHost {
   private agentModels: Record<string, string> = {};
   private reminderManager?: ReminderManager;
   private unsubscribeSession: (() => void) | null = null;
+  private onDatabaseWrite?: OnDatabaseWrite;
+  private onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
+  private onAgentTerminate?: () => void;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -186,6 +195,9 @@ export class AgentHost {
     this.resurrector = config.resurrector;
     this.chatMaxMessages = config.chatMaxMessages ?? 1000;
     this.reminderManager = config.reminderManager;
+    this.onDatabaseWrite = config.onDatabaseWrite;
+    this.onBusyChange = config.onBusyChange;
+    this.onAgentTerminate = config.onAgentTerminate;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -440,10 +452,12 @@ export class AgentHost {
     if (event.type === 'message_update' || event.type === 'tool_execution_start') {
       if (!this.busy) {
         this.busy = true;
+        this.onBusyChange?.(this.agentId, true, this.getContextUsage()?.percent ?? null);
       }
     } else if (event.type === 'agent_end') {
       if (this.busy) {
         this.busy = false;
+        this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
       }
       // On error turns, lastTurnErrored is true (set synchronously in
       // handlePotentialError before agent_end fires). Skip cleanup so the
@@ -760,6 +774,7 @@ export class AgentHost {
     // All recovery paths exhausted; ensure busy is cleared
     if (this.busy) {
       this.busy = false;
+      this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
     }
 
     // Permanently failed: reject all pending delivery promises
@@ -800,6 +815,7 @@ export class AgentHost {
     // Old session is dead; clear busy so the agent doesn't appear stuck
     if (this.busy) {
       this.busy = false;
+      this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
     }
 
     try {
@@ -975,7 +991,7 @@ export class AgentHost {
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous tool collection matches SDK's AgentTool<any>[]
     const tools: AgentTool<any>[] = [
       createReadSystem2DbTool(this.db),
-      createWriteSystem2DbTool(this.db, this.agentId),
+      createWriteSystem2DbTool(this.db, this.agentId, this.onDatabaseWrite),
       createMessageAgentTool(this.agentId, this.registry, this.db),
       createBashTool((content, details) => {
         this.session?.sendCustomMessage(
@@ -1011,7 +1027,9 @@ export class AgentHost {
 
     if (canOrchestrate && this.spawner) {
       tools.push(createSpawnAgentTool(this.db, this.agentId, this.spawner));
-      tools.push(createTerminateAgentTool(this.db, this.agentId, this.registry));
+      tools.push(
+        createTerminateAgentTool(this.db, this.agentId, this.registry, this.onAgentTerminate)
+      );
       tools.push(createTriggerProjectStoryTool(this.db, this.agentId, this.registry));
     }
 
@@ -1195,6 +1213,7 @@ export class AgentHost {
       // abort() may not trigger agent_end, so clear busy and pending state explicitly
       if (this.busy) {
         this.busy = false;
+        this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
       }
       this.pendingPrompt = null;
       this.deliverySendCount = 0;
