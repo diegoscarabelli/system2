@@ -150,24 +150,26 @@ export function TaskDetailModal({
   const [data, setData] = useState<TaskDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const panelRef = useRef<HTMLDivElement>(null);
-  const initialized = useRef(false);
   const boardVersion = usePushStore((s) => s.boardVersion);
+
+  const prevTaskIdRef = useRef<number>(taskId);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: boardVersion is an intentional trigger to refetch on push
   useEffect(() => {
     const controller = new AbortController();
-    initialized.current = false;
+    const isNewTask = prevTaskIdRef.current !== taskId;
+    prevTaskIdRef.current = taskId;
 
-    if (panelRef.current) panelRef.current.scrollTop = 0;
-
-    setLoading(true);
-    setData(null);
+    if (isNewTask) {
+      setLoading(true);
+      setData(null);
+      if (panelRef.current) panelRef.current.scrollTop = 0;
+    }
 
     fetch(`/api/tasks/${taskId}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((d: TaskDetailData) => {
         setData(d);
-        initialized.current = true;
         setLoading(false);
       })
       .catch((err: unknown) => {

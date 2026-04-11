@@ -121,7 +121,13 @@ export function createTerminateAgentTool(
         registry.unregister(params.agent_id);
       }
 
-      onTerminate?.();
+      if (onTerminate) {
+        try {
+          onTerminate();
+        } catch {
+          // Best-effort notification: termination has already completed.
+        }
+      }
 
       return {
         content: [

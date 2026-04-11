@@ -160,6 +160,31 @@ describe('bash tool', () => {
       expect((result.content[0] as { text: string }).text).toContain('blocked');
     });
 
+    it('blocks dd to raw devices with quoted path', async () => {
+      const result = await exec('dd if=/dev/zero of="/dev/sda" bs=1M');
+      expect((result.content[0] as { text: string }).text).toContain('blocked');
+    });
+
+    it('blocks dd to raw devices with spaces around =', async () => {
+      const result = await exec('dd if=/dev/zero of = /dev/sda bs=1M');
+      expect((result.content[0] as { text: string }).text).toContain('blocked');
+    });
+
+    it('blocks sqlite3 ~/.system2/app.db', async () => {
+      const result = await exec('sqlite3 ~/.system2/app.db "INSERT INTO task VALUES (1)"');
+      expect((result.content[0] as { text: string }).text).toContain('blocked');
+    });
+
+    it('blocks sqlite3 $HOME/.system2/app.db', async () => {
+      const result = await exec('sqlite3 $HOME/.system2/app.db "SELECT * FROM task"');
+      expect((result.content[0] as { text: string }).text).toContain('blocked');
+    });
+
+    it('blocks sqlite3 with absolute path to .system2/app.db', async () => {
+      const result = await exec('sqlite3 /home/user/.system2/app.db ".tables"');
+      expect((result.content[0] as { text: string }).text).toContain('blocked');
+    });
+
     it('allows rm -rf on specific directories', async () => {
       const dir = trackDir(makeTmpDir());
       const result = await exec(`rm -rf ${dir}`);

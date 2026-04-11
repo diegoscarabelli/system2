@@ -733,7 +733,15 @@ export class Server {
     const data = JSON.stringify(message);
     for (const client of this.wss.clients) {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(data);
+        try {
+          client.send(data);
+        } catch {
+          try {
+            client.terminate();
+          } catch {
+            // Client is already unusable; nothing more we can do.
+          }
+        }
       }
     }
   }
@@ -797,6 +805,12 @@ export class Server {
   }
 
   async stop(): Promise<void> {
+    // Cancel pending debounced broadcasts so they don't fire during/after shutdown
+    for (const timer of this.pendingBroadcasts.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingBroadcasts.clear();
+
     // Clean up conversation summarizer
     this.conversationSummarizer?.cleanup();
 

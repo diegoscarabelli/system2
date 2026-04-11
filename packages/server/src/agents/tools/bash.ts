@@ -39,8 +39,12 @@ export const BLOCKED_BASH_PATTERNS: { pattern: RegExp; reason: string }[] = [
     reason: 'Formatting filesystems (mkfs) is blocked',
   },
   {
-    pattern: /\bdd\b[^;|&]*\bof=\/dev\//,
+    pattern: /\bdd\b[^;|&]*\bof\s*=\s*["']?\/dev\//,
     reason: 'Writing to raw block devices (dd of=/dev/) is blocked',
+  },
+  {
+    pattern: /\bsqlite3\b[^;|&]*\.system2\/app\.db/,
+    reason: 'Direct sqlite3 access to app.db is blocked — use write_system2_db instead',
   },
 ];
 

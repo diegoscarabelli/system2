@@ -741,20 +741,27 @@ export async function trackJobExecution(
   onJobChange?: () => void
 ): Promise<void> {
   const execution = db.createJobExecution(jobName, triggerType);
-  onJobChange?.();
+  const notifyChange = () => {
+    try {
+      onJobChange?.();
+    } catch {
+      // Best-effort notification: job tracking must not break due to callback failure.
+    }
+  };
+  notifyChange();
   try {
     await handler();
     db.completeJobExecution(execution.id);
-    onJobChange?.();
+    notifyChange();
   } catch (error) {
     if (error instanceof JobSkipped) {
       db.skipJobExecution(execution.id, error.reason);
-      onJobChange?.();
+      notifyChange();
       return;
     }
     const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
     db.failJobExecution(execution.id, message);
-    onJobChange?.();
+    notifyChange();
     throw error;
   }
 }

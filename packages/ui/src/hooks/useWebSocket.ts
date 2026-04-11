@@ -45,9 +45,10 @@ export function useWebSocket() {
       const state = useChatStore.getState();
       state.setConnected(true);
       if (hasConnectedOnce.current) {
-        // On reconnect, bump all push version counters so UI panels refetch
-        // any changes that may have been missed during the disconnect
+        // On reconnect, clear stale busy state and bump all version counters
+        // so UI panels refetch any changes missed during the disconnect
         const push = usePushStore.getState();
+        push.clearAgentBusy();
         push.bumpAll();
       }
       hasConnectedOnce.current = true;

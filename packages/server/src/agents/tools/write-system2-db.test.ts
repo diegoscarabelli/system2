@@ -93,8 +93,24 @@ function createMockDb() {
     },
     deleteArtifact: (id: number) => artifacts.delete(id),
     runSql: (sql: string) => {
-      const trimmed = sql.trim().toUpperCase();
-      if (trimmed.startsWith('SELECT')) {
+      // Strip leading line comments (-- ...) and block comments (/* ... */) before checking keyword
+      let remaining = sql;
+      for (;;) {
+        const t = remaining.trimStart();
+        if (t.startsWith('--')) {
+          const nl = t.indexOf('\n');
+          remaining = nl === -1 ? '' : t.slice(nl + 1);
+          continue;
+        }
+        if (t.startsWith('/*')) {
+          const end = t.indexOf('*/');
+          remaining = end === -1 ? '' : t.slice(end + 2);
+          continue;
+        }
+        remaining = t;
+        break;
+      }
+      if (remaining.toUpperCase().startsWith('SELECT')) {
         return { changes: 0, rows: [{ count: 42 }] };
       }
       return { changes: 1 };
@@ -709,6 +725,58 @@ describe('write_system2_db tool', () => {
       } as WriteDbParams);
 
       expect((result.content[0] as { text: string }).text).toContain('blocks DDL');
+    });
+
+    it('blocks VACUUM statements', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'VACUUM',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('only allows');
+    });
+
+    it('blocks REINDEX statements', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'REINDEX',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('only allows');
+    });
+
+    it('blocks ANALYZE statements', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: 'ANALYZE',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('only allows');
+    });
+
+    it('allows SELECT after SQL comments', async () => {
+      const db = createMockDb();
+      addAgent(db, 1, 'guide', null);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 1);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'rawSql',
+        sql: '-- comment\nSELECT count(*) AS count FROM task',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('42');
     });
 
     it('returns error when sql is missing', async () => {

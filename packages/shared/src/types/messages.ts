@@ -55,4 +55,4 @@ export type ServerMessage =
       agentId: number;
       busy: boolean;
       contextPercent: number | null;
-    }; // Agent busy state or context usage changed
+    }; // Agent busy state changed; includes current context usage snapshot

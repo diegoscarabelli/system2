@@ -31,6 +31,7 @@ interface PushStore {
   bumpJobs: () => void;
   bumpAll: () => void;
   setAgentBusy: (agentId: number, busy: boolean, contextPercent: number | null) => void;
+  clearAgentBusy: () => void;
 }
 
 export const usePushStore = create<PushStore>((set) => ({
@@ -57,4 +58,5 @@ export const usePushStore = create<PushStore>((set) => ({
       next.set(agentId, { busy, contextPercent });
       return { agentBusy: next };
     }),
+  clearAgentBusy: () => set({ agentBusy: new Map() }),
 }));
