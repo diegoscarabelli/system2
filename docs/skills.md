@@ -93,7 +93,7 @@ The litmus test agents apply: "Am I writing down a fact, or a workflow I'd want 
 
 ## Built-in Skills
 
-System2 ships with four built-in skills in `packages/server/src/agents/skills/`. All are Guide-only (`roles: [guide]`):
+System2 ships with six built-in skills in `packages/server/src/agents/skills/`:
 
 | Skill | Description |
 | ----- | ----------- |
@@ -101,6 +101,8 @@ System2 ships with four built-in skills in `packages/server/src/agents/skills/`.
 | `project-creation` | Delegating complex work to a new project: gathers preliminary requirements with the user, creates the project in app.db, spawns a Conductor and Reviewer, introduces them to each other, and schedules a follow-up reminder so a silent Conductor is noticed. |
 | `project-completion` | Finalizing a completed project: confirms with the user, tells the Conductor to close the project, waits for the close-project report (including the Narrator's project story), then terminates the Conductor and Reviewer and marks the project done. |
 | `project-restart` | Revisiting a completed project: helps the user weigh resurrection against a new project, then resurrects the original Conductor and Reviewer with their context intact and reopens the project record. |
+| `ui-reference` | UI layout and panel reference: describes the sidebar, artifact viewer, chat panel, agent pane, cron jobs panel, and kanban board so the Guide can give accurate directions when the user asks about the interface. |
+| `db-schema-reference` | Column-level schema details for all seven app.db tables: column names, types, constraints, and indexes for writing queries or managing records. Available to all roles. |
 
 ## Build Configuration
 

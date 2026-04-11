@@ -68,10 +68,10 @@ System2 is a TypeScript monorepo with four packages: **cli** (daemon management 
 
 | Role | Purpose | Lifecycle | Scope |
 |------|---------|-----------|-------|
-| **Guide** | User-facing. Helps brainstorm, starts projects, delegates work to Conductors, relays updates between agents and user. | Singleton, persistent | System-wide |
-| **Conductor** | Project orchestrator. Plans work as a task hierarchy, executes or delegates to specialist agents, coordinates the Reviewer, reports completion. | Per-project, spawned by Guide | Project-specific |
-| **Reviewer** | Reviews code before push, assesses data analysis for reasoning fallacies (Kahneman's System 2 lens), and evaluates statistical quality of findings. | Per-project, spawned by Guide | Project-specific |
-| **Narrator** | Memory keeper. Maintains project logs, daily summaries, long-term memory, and writes project stories on completion. Schedule-driven. | Singleton, persistent | System-wide |
+| **Guide** | User-facing. Starts projects, delegates work to Conductors, translates between Conductor technical detail and user understanding, relays decisions in both directions. | Singleton, persistent | System-wide |
+| **Conductor** | Project orchestrator. Researches the domain, discusses approach with Guide, writes a narrative plan, builds task hierarchy after approval, executes or delegates, coordinates the Reviewer, reports completion. | Per-project, spawned by Guide | Project-specific |
+| **Reviewer** | Reviews code before push, assesses data analysis for reasoning fallacies (Kahneman's System 2 lens), evaluates statistical quality. No analytical task is done without Reviewer sign-off. | Per-project, spawned by Guide | Project-specific |
+| **Narrator** | Memory keeper. Maintains project logs, daily summaries, long-term memory, writes project stories on completion. Schedule-driven; does not participate in task-level work. | Singleton, persistent | System-wide |
 
 Every agent has a single persistent session, reloaded on restart, compacted and pruned over time. Guide and Narrator are singletons created at startup. Conductors and Reviewers are spawned per project by the Guide and archived when done. Archived agents can be resurrected with full session history intact. On restart, all non-archived agents are restored automatically.
 
@@ -137,7 +137,7 @@ Most content is git-tracked. `app.db`, `sessions/`, `logs/`, and `config.toml` a
 
 Artifacts are files produced as **published results** of analytical work: EDA notebooks, dashboards, plots, PDFs, markdown reports, and similar deliverables meant for the user to read and see. The distinction is intent: a Python script that performs data analysis and produces a report is an artifact; a data pipeline script that transforms and loads data belongs in its code repository as part of the infrastructure. Pipeline code, utility scripts, and intermediate data files are not artifacts; they belong in the [Scratchpad](#scratchpad).
 
-The `show_artifact` tool displays a file in the artifact viewer with live reload. It can show any file on the filesystem, not only registered artifacts. Best results with HTML (sandboxed iframe), markdown (styled), and images/PDFs (native). Notebooks (`.ipynb`) must be converted to HTML (e.g., `jupyter nbconvert --to html notebook.ipynb`) before being shown. Plain text renders unstyled.
+The `show_artifact` tool displays a file in the artifact viewer with live reload. It can show any file on the filesystem, not only registered artifacts. Best results with HTML (sandboxed iframe), markdown (styled), and images/PDFs (native). Notebooks (`.ipynb`) must be converted to HTML (e.g., `jupyter nbconvert --to html notebook.ipynb`) before being shown. Plain text renders unstyled. HTML artifacts run in sandboxed iframes with full JavaScript execution, so they can function as interactive data applications: embed inline data, render charts, fetch from any accessible API or data source, or read from local files bundled alongside the HTML. A built-in postMessage bridge (`system2:query` / `system2:query_result`) also provides read-only SELECT access to `app.db` for dashboards that need System2 metadata. When building a visualization or data app, write it as a self-contained HTML file with whatever data access the task requires.
 
 **Where artifacts live:**
 
@@ -265,6 +265,14 @@ These files are distinct from the static role instructions (`library/{role}.md` 
 - Always read the full file before updating. Restructure for clarity; do not just append.
 - Prefer the shared files above when information is useful to multiple roles.
 
+**Writing effective role knowledge.** These files are injected into your context on every LLM call, so they function as self-authored supplementary instructions. Write them with the same care you would give a system prompt:
+
+- **Be concrete, not abstract.** "Check delimiter mismatches first: 80% of the user's CSV import errors come from semicolon vs comma confusion" beats "Be careful with CSV imports." Include the *why* so the instruction generalizes correctly.
+- **Show, don't just tell.** When a pattern is hard to describe in prose, add a short example showing the desired behavior vs. the wrong one. A single before/after pair communicates tone and format more reliably than a paragraph of adjectives.
+- **Never restate the built-in instructions.** These files complement `library/{role}.md` and `agents.md`, not duplicate them. If something is already in the static prompt, writing it here wastes tokens and creates a second source of truth that can drift.
+- **Keep it lean.** Every line costs context window space on every call. Prune entries that have become obvious, outdated, or absorbed into the shared knowledge files. A tight 50-line file that all gets read beats a 200-line file where the model skims the middle.
+- **Organize by topic, not chronologically.** Group related insights under clear headings. A reader (you, in a future session) should find what they need by scanning headings, not by reading linearly from top to bottom.
+
 ### Skills
 
 Skills are reusable multi-step workflow instructions following the [Agent Skills standard](https://agentskills.io/specification). Each skill is a subdirectory containing a `SKILL.md` file with YAML frontmatter (`name`, `description`, `roles`) followed by step-by-step instructions. Skills come from two sources:
@@ -323,13 +331,6 @@ Tasks support:
 - **Labels**: JSON array of strings for categorization
 - **Assignee**: the agent responsible
 - **Timestamps**: `start_at` when work begins, `end_at` when complete
-
-### Roles in the Lifecycle
-
-- **Guide** mediates between the user and the rest of the system. It creates projects, spawns the Conductor and Reviewer for each, translates between the Conductor's technical detail and the user's level of understanding, and relays decisions in both directions.
-- **Conductor** is the project owner. It researches the domain, discusses the approach with the Guide, writes a narrative plan, builds the task hierarchy after approval, executes or delegates work, and coordinates the Reviewer.
-- **Reviewer** validates analytical work: methodology, reasoning fallacies, statistical quality. Code reviews before push. No analytical task is considered done without Reviewer sign-off.
-- **Narrator** writes the project log, the final project story, and maintains long-term memory. It is schedule-driven and does not participate in task-level work.
 
 ### Assignment Model
 
@@ -427,116 +428,14 @@ These are the behavioral rules every agent must follow. The critical categories 
 
 ## Schema Reference
 
-Column-level details for the seven tables in `app.db`. All timestamps are UTC ISO 8601.
+Seven tables in `app.db`. All timestamps are UTC ISO 8601. Load the `db-schema-reference` skill for column-level details.
 
-### project
-
-A data project managed by System2 agents.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER PK | Auto-incrementing |
-| name | TEXT NOT NULL | Project name |
-| description | TEXT NOT NULL | Project description |
-| status | TEXT NOT NULL | `todo`, `in progress`, `review`, `done`, `abandoned` (default `todo`) |
-| labels | TEXT NOT NULL | JSON array of string labels (default `[]`) |
-| start_at | TEXT | ISO 8601 timestamp when work began |
-| end_at | TEXT | ISO 8601 timestamp when work completed |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
-
-### agent
-
-An AI agent that performs work within System2, assigned to a project or system-wide.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER PK | Auto-incrementing |
-| role | TEXT NOT NULL | `guide`, `conductor`, `narrator`, `reviewer` |
-| project | INTEGER FK | References `project(id)`. NULL for system-wide agents |
-| status | TEXT | `active`, `archived` (default `active`) |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
-
-Unique indexes enforce singleton constraints on `guide` and `narrator` roles.
-
-### task
-
-A unit of work within a project or standalone.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER PK | Auto-incrementing |
-| parent | INTEGER FK | References `task(id)`. NULL for top-level tasks |
-| project | INTEGER FK | References `project(id)`. NULL for standalone tasks |
-| title | TEXT NOT NULL | Short task title |
-| description | TEXT NOT NULL | Detailed description |
-| status | TEXT NOT NULL | `todo`, `in progress`, `review`, `done`, `abandoned` (default `todo`) |
-| priority | TEXT NOT NULL | `low`, `medium`, `high` (default `medium`) |
-| assignee | INTEGER FK | References `agent(id)`. NULL if unassigned |
-| labels | TEXT NOT NULL | JSON array of string labels (default `[]`) |
-| start_at | TEXT | ISO 8601 timestamp when work began |
-| end_at | TEXT | ISO 8601 timestamp when work completed |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
-
-### task_link
-
-A directed link between two tasks.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER PK | Auto-incrementing |
-| source | INTEGER FK NOT NULL | References `task(id)`. The task that has the relationship |
-| target | INTEGER FK NOT NULL | References `task(id)`. The task being referenced |
-| relationship | TEXT NOT NULL | `blocked_by`, `relates_to`, `duplicates` |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
-
-Unique index on (`source`, `target`, `relationship`).
-
-### task_comment
-
-A comment on a task, authored by an agent.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER PK | Auto-incrementing |
-| task | INTEGER FK NOT NULL | References `task(id)` |
-| author | INTEGER FK NOT NULL | References `agent(id)`. Auto-filled from the calling agent |
-| content | TEXT NOT NULL | Comment body |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
-
-`updateTaskComment` is restricted to the original author so attribution stays honest.
-
-### artifact
-
-A file artifact created by agents, displayed in the UI.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER PK | Auto-incrementing |
-| project | INTEGER FK | References `project(id)`. NULL for project-free artifacts |
-| file_path | TEXT NOT NULL UNIQUE | Absolute path to the file on disk |
-| title | TEXT NOT NULL | Human-readable title |
-| description | TEXT | Brief summary of content or purpose |
-| tags | TEXT NOT NULL | JSON array of string tags (default `[]`) |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
-
-### job_execution
-
-A record of a scheduler job execution.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER PK | Auto-incrementing |
-| job_name | TEXT NOT NULL | Job identifier (`daily-summary`, `memory-update`) |
-| status | TEXT NOT NULL | `running`, `completed`, `failed`, `skipped` (default `running`) |
-| trigger_type | TEXT NOT NULL | `cron`, `catch-up`, `manual` |
-| error | TEXT | Error message (failed) or skip reason (skipped) |
-| started_at | TEXT NOT NULL | When execution began |
-| ended_at | TEXT | When execution finished (NULL while running) |
-| created_at | TEXT | Row creation timestamp |
-| updated_at | TEXT | Last modification timestamp |
+| Table | Description |
+|-------|-------------|
+| `project` | A data project managed by System2 agents |
+| `agent` | An AI agent assigned to a project or system-wide |
+| `task` | A unit of work within a project or standalone |
+| `task_link` | A directed relationship between two tasks |
+| `task_comment` | A comment on a task, authored by an agent |
+| `artifact` | A file artifact created by agents, displayed in the UI |
+| `job_execution` | A record of a scheduler job execution |
