@@ -27,12 +27,16 @@ describe('resolveProjectDir', () => {
     const result = resolveProjectDir(projectsDir, 1, 'My Project');
     expect(result).toBe(join(projectsDir, '1_my-project'));
     expect(existsSync(result)).toBe(true);
+    expect(existsSync(join(result, 'artifacts'))).toBe(true);
+    expect(existsSync(join(result, 'scratchpad'))).toBe(true);
   });
 
-  it('returns existing folder when slug matches', () => {
+  it('returns existing folder when slug matches and ensures subdirs', () => {
     mkdirSync(join(projectsDir, '1_my-project'));
     const result = resolveProjectDir(projectsDir, 1, 'My Project');
     expect(result).toBe(join(projectsDir, '1_my-project'));
+    expect(existsSync(join(result, 'artifacts'))).toBe(true);
+    expect(existsSync(join(result, 'scratchpad'))).toBe(true);
   });
 
   it('renames folder when project title changed', () => {
