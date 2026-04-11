@@ -11,15 +11,21 @@ Pipeline code belongs in the data pipeline repository documented in `infrastruct
 
 ## Core Concepts
 
-**Hypertables**: PostgreSQL tables auto-partitioned into time-based chunks. Standard SQL works transparently.
+**Hypertables**: PostgreSQL tables auto-partitioned into time-based chunks. Every hypertable requires a `TIMESTAMPTZ` column (the time column) that determines how rows are assigned to chunks. Standard SQL works transparently.
 
 ```sql
 SELECT create_hypertable('metrics', by_range('timestamp', INTERVAL '7 days'));
 ```
 
-**Chunks**: physical tables covering a time range. Compression, retention, and continuous aggregates all operate at chunk level. The query planner evaluates every chunk's constraint during planning, so chunk count directly affects planning time.
+**Chunks**: physical tables, each covering a non-overlapping time range. Compression, retention, and continuous aggregates all operate at chunk level. The query planner evaluates every chunk's constraint during planning, so chunk count directly affects planning time.
 
 **Chunk sizing**: target one chunk (with indexes) fitting in ~25% of `shared_buffers`. Alternative: ~25M rows per chunk. Wrong sizing causes massive planning overhead (4,000 chunks with 1-hour interval: 443ms planning vs 26 chunks with 7-day interval: 5ms planning).
+
+**Compression**: converts multiple rows sharing the same segmentby column values into a single row. Non-segmentby columns are stored as arrays, ordered by the orderby column (usually time DESC) in mini-batches of up to 1,000 rows. TimescaleDB stores min/max timestamps per batch, enabling query pruning without full decompression. Properly configured, compression achieves 90-95% space reduction.
+
+**Continuous aggregates**: materialized views specialized for time-series. Unlike regular materialized views, they refresh incrementally (only processing new/changed data since the last refresh). Defined by a `SELECT` with `GROUP BY time_bucket(...)` over a single hypertable. Internally implemented as hypertables themselves (materialization hypertables), so they support compression and retention policies.
+
+**Retention policies**: automated chunk-level deletion. Instead of row-level `DELETE` (which generates massive WAL), retention policies drop entire chunks instantly.
 
 ## Critical Gotchas
 
@@ -131,6 +137,10 @@ SELECT create_hypertable('readings', by_range('timestamp'));
 
 Include `ts_start`, `ts_end`, `ts_last_seen` in dimension tables for efficient discovery queries without scanning the hypertable.
 
+### Uniqueness and compression interaction
+
+If a hypertable has a UNIQUE constraint or PRIMARY KEY, all columns in the constraint except the time column must be segmentby columns. This locks your compression design to your uniqueness constraint. To maximize flexibility, prefer UNIQUE INDEXes over constraints: they enforce uniqueness without restricting segmentby choices.
+
 ### Indexing
 
 TimescaleDB auto-creates a time index. Add composite indexes matching common query patterns. Drop unused secondary indexes (two unnecessary indexes reduce INSERT throughput by 20-40%).
@@ -156,9 +166,9 @@ Both ALTER TABLE (how) and add_compression_policy (when) are required. ALTER TAB
 
 **segmentby**: low-to-medium cardinality columns you filter on (100-10K unique values per chunk, >=100 rows per segment). Do not use the time column as segmentby (chunking already partitions by time, and its high cardinality kills compression). **orderby**: almost always the time column DESC.
 
-If a hypertable has a UNIQUE constraint or PRIMARY KEY, all columns in the constraint except the time column must be segmentby columns. To maximize flexibility, prefer UNIQUE INDEXes over constraints: they enforce uniqueness without restricting segmentby choices.
+### Compressing continuous aggregates
 
-**Compressing continuous aggregates**: segmentby columns are implicitly the GROUP BY columns, so `compress_segmentby` is not used:
+Segmentby columns are implicitly the GROUP BY columns, so `compress_segmentby` is not used:
 
 ```sql
 ALTER MATERIALIZED VIEW metrics_hourly SET (timescaledb.compress);
@@ -211,7 +221,7 @@ SELECT add_continuous_aggregate_policy('metrics_hourly',
 
 Not supported in continuous aggregate definitions: window functions, ORDER BY inside aggregates, DISTINCT inside aggregates, FILTER clauses, JOINs. UPDATE/DELETE on the source hypertable are invisible until the next refresh.
 
-Continuous aggregates are implemented as hypertables internally (materialization hypertables). To inspect them:
+To inspect materialization hypertables:
 
 ```sql
 SELECT view_name, materialization_hypertable_name
