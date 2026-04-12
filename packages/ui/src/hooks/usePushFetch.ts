@@ -25,6 +25,8 @@ export function usePushFetch<T>(
   if (lastUrl.current !== url) {
     lastUrl.current = url;
     initialized.current = false;
+    setLoading(true);
+    setError(null);
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: version and retryCount are intentional refetch triggers
