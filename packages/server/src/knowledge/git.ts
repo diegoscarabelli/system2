@@ -8,6 +8,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { log } from '../utils/logger.js';
 
 const GITIGNORE_CONTENT = `# Database (binary, use SQL timestamps for change detection)
 app.db
@@ -62,5 +63,5 @@ export function initializeGitRepo(system2Dir: string): void {
     stdio: 'ignore',
   });
 
-  console.log('[Knowledge] Initialized git repository in', system2Dir);
+  log.info('[Knowledge] Initialized git repository in', system2Dir);
 }

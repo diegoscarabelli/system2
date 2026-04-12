@@ -12,6 +12,7 @@ import type { Api, Model } from '@mariozechner/pi-ai';
 import type { ModelRegistry } from '@mariozechner/pi-coding-agent';
 import type { AgentHost } from '../agents/host.js';
 import { oneShotComplete } from '../llm/oneshot.js';
+import { log } from '../utils/logger.js';
 
 export interface BufferedEvent {
   type: 'user_message' | 'thinking' | 'tool_call' | 'assistant_reply';
@@ -139,9 +140,9 @@ export class ConversationSummarizer {
           receiver: this.guideAgentId,
           timestamp: Date.now(),
         })
-        .catch((err) => console.error('[ConversationSummarizer] delivery failed:', err));
+        .catch((err) => log.error('[ConversationSummarizer] delivery failed:', err));
     } catch (err) {
-      console.error('[ConversationSummarizer] Failed to generate summary:', err);
+      log.error('[ConversationSummarizer] Failed to generate summary:', err);
     }
 
     // Start new timer only if: additional messages existed in the window AND no timer was

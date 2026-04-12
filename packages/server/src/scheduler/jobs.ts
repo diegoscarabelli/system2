@@ -14,6 +14,7 @@ import type { JobExecution } from '@dscarabelli/shared';
 import type { AgentHost } from '../agents/host.js';
 import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js';
+import { log } from '../utils/logger.js';
 import { isNetworkAvailable } from './network.js';
 import type { Scheduler } from './scheduler.js';
 
@@ -791,7 +792,7 @@ export function registerNarratorJobs(
         if (!(await isNetworkAvailable())) {
           throw new JobSkipped('no network connectivity');
         }
-        console.log('[Scheduler] Triggering daily-summary job (project logs + daily summary)');
+        log.info('[Scheduler] Triggering daily-summary job (project logs + daily summary)');
         await buildAndDeliverDailySummary(
           db,
           narratorHost,
@@ -814,7 +815,7 @@ export function registerNarratorJobs(
         if (!(await isNetworkAvailable())) {
           throw new JobSkipped('no network connectivity');
         }
-        console.log('[Scheduler] Triggering memory-update job');
+        log.info('[Scheduler] Triggering memory-update job');
         await buildAndDeliverMemoryUpdate(
           narratorHost,
           narratorId,

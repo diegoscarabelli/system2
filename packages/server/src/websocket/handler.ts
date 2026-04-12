@@ -14,6 +14,7 @@ import type { WebSocket, WebSocketServer } from 'ws';
 import type { AgentHost } from '../agents/host.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { ConversationSummarizer } from '../chat/summarizer.js';
+import { log } from '../utils/logger.js';
 
 export class WebSocketHandler {
   private ws: WebSocket;
@@ -66,7 +67,7 @@ export class WebSocketHandler {
         const message = JSON.parse(data.toString()) as ClientMessage;
         this.handleClientMessage(message);
       } catch (error) {
-        console.error('Failed to parse client message:', error);
+        log.error('Failed to parse client message:', error);
         this.sendError('Invalid message format');
       }
     });
@@ -77,7 +78,7 @@ export class WebSocketHandler {
     });
 
     ws.on('error', (error) => {
-      console.error('WebSocket error:', error);
+      log.error('WebSocket error:', error);
       this.cleanup();
     });
   }
@@ -139,7 +140,7 @@ export class WebSocketHandler {
         host
           .prompt(message.content, isSteering ? { isSteering: true } : undefined)
           .catch((error) => {
-            console.error('Agent prompt failed:', error);
+            log.error('Agent prompt failed:', error);
             this.sendError('Failed to process message');
           });
         break;
@@ -300,7 +301,7 @@ export class WebSocketHandler {
           const details = event.result?.details as
             | { url?: string; absolutePath?: string; title?: string }
             | undefined;
-          console.log('[WebSocket] show_artifact result:', JSON.stringify(event.result));
+          log.info('[WebSocket] show_artifact result:', JSON.stringify(event.result));
           if (details?.url && details?.absolutePath) {
             this.send({
               type: 'artifact',
@@ -310,7 +311,7 @@ export class WebSocketHandler {
             });
             this.watchArtifact(details.url, details.absolutePath);
           } else {
-            console.warn('[WebSocket] show_artifact missing details:', details);
+            log.warn('[WebSocket] show_artifact missing details:', details);
           }
         }
         break;
@@ -318,7 +319,7 @@ export class WebSocketHandler {
 
       case 'agent_end': {
         // Agent finished processing
-        console.log(
+        log.info(
           'Agent finished. Stop reason:',
           (host.state as unknown as Record<string, unknown>).stopReason
         );
@@ -350,7 +351,7 @@ export class WebSocketHandler {
 
       default:
         // Log other events for debugging
-        console.log('Agent event:', event.type);
+        log.info('Agent event:', event.type);
     }
   }
 
@@ -382,25 +383,25 @@ export class WebSocketHandler {
     }
 
     this.artifactUrl = url;
-    console.log('[WebSocket] Watching artifact:', absolutePath);
+    log.info('[WebSocket] Watching artifact:', absolutePath);
 
     try {
       this.artifactWatcher = watch(absolutePath, (eventType, filename) => {
-        console.log('[WebSocket] fs.watch event:', eventType, filename);
+        log.info('[WebSocket] fs.watch event:', eventType, filename);
         if (eventType === 'change') {
           // Cache-bust so the iframe actually reloads (use & since URL already has ?path=)
           const separator = this.artifactUrl?.includes('?') ? '&' : '?';
           const bustUrl = `${this.artifactUrl}${separator}t=${Date.now()}`;
-          console.log('[WebSocket] Sending artifact reload:', bustUrl);
+          log.info('[WebSocket] Sending artifact reload:', bustUrl);
           this.send({ type: 'artifact', url: bustUrl, filePath: absolutePath });
         }
       });
 
       this.artifactWatcher.on('error', (err) => {
-        console.error('[WebSocket] Watcher error:', err);
+        log.error('[WebSocket] Watcher error:', err);
       });
     } catch (error) {
-      console.error('[WebSocket] Failed to watch artifact:', error);
+      log.error('[WebSocket] Failed to watch artifact:', error);
     }
   }
 

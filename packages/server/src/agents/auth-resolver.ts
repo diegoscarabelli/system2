@@ -13,6 +13,7 @@
 
 import type { LlmConfig, LlmKey, LlmProvider } from '@dscarabelli/shared';
 import { AuthStorage } from '@mariozechner/pi-coding-agent';
+import { log } from '../utils/logger.js';
 
 /** Default cooldown durations */
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 90 * 1000;
@@ -80,7 +81,7 @@ export class AuthResolver {
     if (cooldown) {
       if (Date.now() >= cooldown.expiresAt) {
         this.cooldowns.delete(keyId);
-        console.log(`[AuthResolver] Cooldown expired for ${keyId}, key available again`);
+        log.info(`[AuthResolver] Cooldown expired for ${keyId}, key available again`);
         return false;
       }
       return true;
@@ -194,17 +195,15 @@ export class AuthResolver {
         reason,
       });
       const detail = errorMessage ? `: ${errorMessage}` : '';
-      console.log(
-        `[AuthResolver] Key in cooldown: ${keyId}, expires in ${duration / 1000}s${detail}`
-      );
+      log.info(`[AuthResolver] Key in cooldown: ${keyId}, expires in ${duration / 1000}s${detail}`);
     } else {
-      console.log(`[AuthResolver] Key ${keyId} already in cooldown, skipping`);
+      log.info(`[AuthResolver] Key ${keyId} already in cooldown, skipping`);
     }
 
     // Try to find next valid key for this provider
     const nextKey = this.getFirstValidKey(provider);
     if (nextKey) {
-      console.log(`[AuthResolver] Switching to next key for ${provider}`);
+      log.info(`[AuthResolver] Switching to next key for ${provider}`);
       return true;
     }
 
@@ -214,12 +213,12 @@ export class AuthResolver {
       const fallbackProvider = this.providerOrder[i];
       const fallbackKey = this.getFirstValidKey(fallbackProvider);
       if (fallbackKey) {
-        console.log(`[AuthResolver] Falling back to provider: ${fallbackProvider}`);
+        log.info(`[AuthResolver] Falling back to provider: ${fallbackProvider}`);
         return true;
       }
     }
 
-    console.log('[AuthResolver] No more fallback keys available');
+    log.info('[AuthResolver] No more fallback keys available');
     return false;
   }
 
@@ -248,7 +247,7 @@ export class AuthResolver {
         this.activeKeys.set(provider, 0);
       }
     }
-    console.log('[AuthResolver] All failures and cooldowns reset');
+    log.info('[AuthResolver] All failures and cooldowns reset');
   }
 
   /**
@@ -259,7 +258,7 @@ export class AuthResolver {
     for (const [keyId, cooldown] of this.cooldowns) {
       if (now >= cooldown.expiresAt) {
         this.cooldowns.delete(keyId);
-        console.log(`[AuthResolver] Cooldown expired for ${keyId}`);
+        log.info(`[AuthResolver] Cooldown expired for ${keyId}`);
       }
     }
   }

@@ -128,7 +128,10 @@ describe('ReminderManager', () => {
     manager.schedule(1, 'orphaned reminder', 5);
     vi.advanceTimersByTime(5 * 60_000);
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Agent 1 not active'));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining('Agent 1 not active')
+    );
     warnSpy.mockRestore();
   });
 
