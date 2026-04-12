@@ -236,7 +236,7 @@ Load the `statistical-analysis` skill for comprehensive methodology: test select
 
 **Effect sizes.** Reported for all key findings with domain-specific interpretation (not just Cohen's benchmarks)? Practical vs. statistical significance discussed? Red flags: no effect sizes; trivially small effects described as meaningful.
 
-**Uncertainty quantification.** CIs or CrIs reported for all estimates? Width discussed in practical terms? Red flags: point estimates only; CIs spanning zero described as showing a directional effect.
+**Uncertainty quantification.** CIs or CrIs reported for all estimates? Width discussed in practical terms? Red flags: point estimates only; CIs spanning the null value (0 for differences, 1 for ratios) described as showing a directional effect.
 
 **Multiple comparisons.** Total number of tests stated (including unreported)? Appropriate correction applied (FWER for confirmatory, FDR for exploratory)? Red flags: many tests, no correction; only significant results reported from a battery.
 

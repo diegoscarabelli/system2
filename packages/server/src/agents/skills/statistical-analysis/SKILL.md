@@ -184,7 +184,7 @@ Statistical significance tells you the effect is unlikely to be exactly zero. Ef
 - Report 95% CIs for all key estimates
 - Correct interpretation: "If we repeated this procedure many times, 95% of the intervals would contain the true parameter." It does NOT mean there is a 95% probability THIS interval contains the truth.
 - Discuss CI width in terms of practical implications
-- A CI spanning zero undermines claims of a directional effect
+- A CI spanning the null value (0 for differences, 1 for ratios) undermines claims of a directional effect
 - Extremely wide CIs signal low precision regardless of statistical significance
 
 ### Multiple comparisons
