@@ -163,6 +163,21 @@ useful to multiple roles.
 ## Observations
 `;
 
+export const WORKER_TEMPLATE = `# Worker Role Notes
+
+Role-specific patterns, preferences, and accumulated knowledge shared across Worker agents.
+
+Updated by Workers and by other agents when they have Worker-specific observations.
+Always read the full file before editing. Restructure for clarity rather than appending.
+Prefer shared knowledge files (infrastructure.md, user.md, memory.md) for information
+useful to multiple roles. Workers are ephemeral, so keep this file lean: only reusable
+patterns and lessons that benefit future workers.
+
+## Patterns
+
+## Observations
+`;
+
 export function createMemoryTemplate(): string {
   const now = new Date().toISOString();
   return `---

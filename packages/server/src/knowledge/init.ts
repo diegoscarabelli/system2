@@ -15,6 +15,7 @@ import {
   NARRATOR_TEMPLATE,
   REVIEWER_TEMPLATE,
   USER_TEMPLATE,
+  WORKER_TEMPLATE,
 } from './templates.js';
 
 /**
@@ -50,6 +51,7 @@ export function initializeKnowledge(system2Dir: string): void {
     [join(knowledgeDir, 'conductor.md'), CONDUCTOR_TEMPLATE],
     [join(knowledgeDir, 'narrator.md'), NARRATOR_TEMPLATE],
     [join(knowledgeDir, 'reviewer.md'), REVIEWER_TEMPLATE],
+    [join(knowledgeDir, 'worker.md'), WORKER_TEMPLATE],
   ];
 
   for (const [filePath, content] of templates) {

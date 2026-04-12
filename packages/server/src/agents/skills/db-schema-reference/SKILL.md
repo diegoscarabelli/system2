@@ -1,7 +1,7 @@
 ---
 name: db-schema-reference
 description: Column-level schema details for all seven app.db tables. Read this when you need exact column names, types, constraints, or indexes before writing queries or creating/updating records.
-roles: [guide, conductor, reviewer]
+roles: [guide, conductor, reviewer, worker]
 ---
 
 # Database Schema Reference

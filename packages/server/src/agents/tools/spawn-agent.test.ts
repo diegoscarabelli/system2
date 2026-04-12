@@ -80,6 +80,44 @@ describe('spawn_agent tool', () => {
     );
   });
 
+  it('Guide spawns worker successfully', async () => {
+    const { tool, spawner } = setup(1, [makeAgent(1, 'guide', null)], [makeProject(10)]);
+
+    const result = await exec(tool, {
+      role: 'worker',
+      project_id: 10,
+      initial_message: 'Execute task #25',
+    });
+
+    expect((result.content[0] as { text: string }).text).toContain('Agent spawned');
+    expect(spawner).toHaveBeenCalledWith('worker', 10, 1, 'Execute task #25');
+  });
+
+  it('Conductor spawns worker in own project', async () => {
+    const { tool, spawner } = setup(2, [makeAgent(2, 'conductor', 10)], [makeProject(10)]);
+
+    const result = await exec(tool, {
+      role: 'worker',
+      project_id: 10,
+      initial_message: 'Execute task #26',
+    });
+
+    expect((result.content[0] as { text: string }).text).toContain('Agent spawned');
+    expect(spawner).toHaveBeenCalledWith('worker', 10, 2, 'Execute task #26');
+  });
+
+  it('Worker cannot spawn', async () => {
+    const { tool } = setup(4, [makeAgent(4, 'worker', 10)], [makeProject(10)]);
+
+    const result = await exec(tool, {
+      role: 'worker',
+      project_id: 10,
+      initial_message: 'x',
+    });
+
+    expect((result.content[0] as { text: string }).text).toContain('Only Guide and Conductor');
+  });
+
   it('Reviewer cannot spawn', async () => {
     const { tool } = setup(3, [makeAgent(3, 'reviewer', 10)], [makeProject(10)]);
 

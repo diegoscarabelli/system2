@@ -212,11 +212,11 @@ Returns reminder IDs, messages, and scheduled fire times.
 
 ### `spawn_agent`
 
-Spawn a new agent (Conductor or Reviewer) for a project.
+Spawn a new agent (Conductor, Worker, or Reviewer) for a project.
 
 | Parameter         | Type   | Description                                                          |
 |-------------------|--------|----------------------------------------------------------------------|
-| `role`            | string | `"conductor"` or `"reviewer"`                                        |
+| `role`            | string | `"conductor"`, `"worker"`, or `"reviewer"`                           |
 | `project_id`      | number | ID of an existing project in app.db                                  |
 | `initial_message` | string | Context and instructions delivered to the new agent on creation      |
 
@@ -224,8 +224,8 @@ Creates an agent record in app.db, starts a new `AgentHost` session, registers i
 
 **Permission model:**
 
-- Guide may spawn Conductors or Reviewers for any project
-- Conductors may spawn Conductors or Reviewers within their own project only
+- Guide may spawn Conductors, Workers, or Reviewers for any project
+- Conductors may spawn Conductors, Workers, or Reviewers within their own project only
 - Narrator has no spawner and cannot spawn agents
 
 **Conditional:** only registered when the `AgentHost` is created with a `spawner` callback (all agents except Narrator).

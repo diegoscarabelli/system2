@@ -35,7 +35,7 @@ AI agent instances.
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | INTEGER PK | Auto-incrementing |
-| `role` | TEXT NOT NULL | `guide` \| `conductor` \| `narrator` \| `reviewer` |
+| `role` | TEXT NOT NULL | `guide` \| `conductor` \| `narrator` \| `reviewer` \| `worker` |
 | `project` | INTEGER FK | References `project(id)`. NULL for system-wide agents. |
 | `status` | TEXT | `active` \| `archived` |
 | `created_at` | TEXT | Auto-set |

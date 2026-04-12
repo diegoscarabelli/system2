@@ -19,7 +19,7 @@ CREATE INDEX IF NOT EXISTS idx_project_status ON project(status);
 -- An AI agent that performs work within System2, assigned to projects or system-wide
 CREATE TABLE IF NOT EXISTS agent (
   id INTEGER PRIMARY KEY,                -- Auto-incrementing unique identifier
-  role TEXT NOT NULL CHECK(role IN ('guide', 'conductor', 'narrator', 'reviewer')), -- Agent specialization (guide is system-wide)
+  role TEXT NOT NULL CHECK(role IN ('guide', 'conductor', 'narrator', 'reviewer', 'worker')), -- Agent specialization (guide is system-wide)
   project INTEGER REFERENCES project(id), -- Assigned project, NULL for guide and narrator (system-wide)
   status TEXT DEFAULT 'active' CHECK(status IN ('active', 'archived')), -- Current lifecycle state
   created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), -- Row creation timestamp
