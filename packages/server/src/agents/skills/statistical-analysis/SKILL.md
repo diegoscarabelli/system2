@@ -12,13 +12,32 @@ Key references: ASA Statement on P-Values (Wasserstein & Lazar, 2016), *Bayesian
 
 ---
 
-## 1. Before Any Analysis
+## 1. Analysis Workflow
 
-1. **Define the question.** Is it descriptive, inferential, predictive, or causal? The question type constrains the methods.
-2. **Document the analysis plan** before examining results. Specify: primary outcome, secondary outcomes, covariates, exclusion criteria, planned tests, alpha level.
-3. **Understand the data generating process.** How was data collected, sampled, measured? Selection mechanisms, measurement error, and missing data patterns all affect which methods are valid.
-4. **Characterize the data.** Variable types (nominal, ordinal, interval, ratio), sample size per group, independence structure (nested, clustered, repeated measures), missingness patterns (MCAR, MAR, MNAR).
-5. **Check data quality.** Visualize distributions (histograms, Q-Q plots, boxplots) before modeling. Identify outliers using domain knowledge, not just statistical cutoffs. Verify measurement scales.
+Follow this sequence when performing or reviewing statistical analysis. Each step references the relevant deep-dive section.
+
+1. **Define the question.** Descriptive, inferential, predictive, or causal? The question type constrains which methods are valid (Section 2).
+2. **Plan before analyzing.** Document: primary outcome, secondary outcomes, covariates, exclusion criteria, planned tests, alpha level. Understand the data generating process (how data was collected, sampled, measured). Separate confirmatory from exploratory analyses.
+3. **Characterize the data.** Variable types (nominal, ordinal, interval, ratio), sample size per group, independence structure (nested, clustered, repeated measures), missingness patterns (Section 7). Visualize distributions (histograms, Q-Q plots, boxplots). Identify outliers using domain knowledge, not just statistical cutoffs.
+4. **Check assumptions** (Section 4). Normality, homoscedasticity, independence, linearity, multicollinearity as applicable. Note violations and select robust alternatives.
+5. **Select and run the method.** Use the test selection tables (Section 3). State why this method fits the data structure and question. Check diagnostics: frequentist assumptions (Section 5) or Bayesian MCMC workflow (Section 6).
+6. **Report fully.** Every quantitative finding needs: the test used and why, sample size per group, point estimate with uncertainty (CI or CrI), effect size with domain-context interpretation, assumption checks performed, multiple comparison correction if applicable.
+7. **Flag limitations.** Which assumptions are most fragile? What alternative analyses would be informative? What would need to be true for this conclusion to be wrong?
+8. **Anti-pattern scan** (Section 11). P-hacking, multiple comparisons, Simpson's paradox, base rate neglect, survivorship bias, ecological fallacy, regression to the mean, overfitting.
+
+### Reporting format by analysis type
+
+| Analysis | Report |
+| --- | --- |
+| t-test | t(df) = value, p = value, d = value [95% CI] |
+| ANOVA | F(df1, df2) = value, p = value, eta-squared = value |
+| Chi-squared | chi-squared(df) = value, p = value, Cramer's V |
+| Regression | Coefficient table (B, SE, beta, t, p), R-squared (adjusted), F-test |
+| Bayesian | Posterior mean/median, 95% CrI, pd, MCMC diagnostics |
+
+**General formatting (APA 7th Edition):** exact p-values to three decimals (p = .032, except p < .001), effect sizes with CIs for all key findings, descriptive statistics (M, SD, n) per group, 2 decimal places (3 for p-values). Tables for complex results, figures for patterns and interactions.
+
+**Contextual standards:** STROBE for observational studies, CONSORT for randomized trials, PRISMA for systematic reviews and meta-analyses (Section 10).
 
 ---
 
@@ -563,56 +582,3 @@ Use DAGs to make causal assumptions explicit. A DAG shows:
 - Alternative explanations are discussed
 - Language reflects the design: "associated with" not "caused"
 
----
-
-## 13. Reporting Standards
-
-### General (APA 7th Edition)
-
-- Report exact p-values to three decimal places (p = .032), except p < .001
-- Report effect sizes with confidence/credible intervals for all key findings
-- Report descriptive statistics (M, SD, n) for each group
-- Use tables for complex results; figures for patterns and interactions
-- Round to 2 decimal places (3 for p-values)
-
-### By analysis type
-
-| Analysis | Report |
-| --- | --- |
-| t-test | t(df) = value, p = value, d = value [95% CI] |
-| ANOVA | F(df1, df2) = value, p = value, eta-squared = value |
-| Chi-squared | chi-squared(df) = value, p = value, Cramer's V |
-| Regression | Coefficient table (B, SE, beta, t, p), R-squared (adjusted), F-test |
-| Bayesian | Posterior mean/median, 95% CrI, pd, MCMC diagnostics |
-
-### Contextual reporting standards
-
-- **STROBE:** For observational studies. Report how confounders were selected and handled. Discuss sources of bias. Be cautious with causal language.
-- **CONSORT:** For randomized trials. Flow diagram, intention-to-treat as primary, both absolute and relative effect measures.
-- **PRISMA:** For systematic reviews and meta-analyses.
-
-### Minimum reporting checklist
-
-Every quantitative finding should include:
-1. The test used and why it was appropriate
-2. Sample size per group
-3. Point estimate
-4. Uncertainty measure (CI or CrI)
-5. Effect size with interpretation in context
-6. Assumption checks performed
-7. Multiple comparison correction (if applicable)
-
----
-
-## 14. Analysis Protocol
-
-When performing or reviewing statistical analysis, follow this sequence:
-
-1. **Understand the question.** Descriptive, inferential, predictive, or causal?
-2. **Characterize the data.** Variable types, sample size, study design, independence structure, missingness.
-3. **Check assumptions.** Visualize distributions, test formal assumptions, note violations.
-4. **Select the method.** Use the decision trees above. State why this method is appropriate.
-5. **Conduct the analysis.** Fit the model, check diagnostics (frequentist assumptions or Bayesian MCMC diagnostics).
-6. **Report fully.** Effect size + CI + p-value (frequentist), or posterior summary + CrI + diagnostics (Bayesian). Contextualize practical significance.
-7. **Flag limitations.** What could go wrong? Which assumptions are most fragile? What alternative analyses would be informative?
-8. **Anti-pattern scan.** Check for: p-hacking, multiple comparisons, Simpson's paradox, base rate neglect, survivorship bias, ecological fallacy, regression to the mean, overfitting.
