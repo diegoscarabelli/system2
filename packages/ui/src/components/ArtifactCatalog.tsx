@@ -8,9 +8,11 @@
 import { ChevronDownIcon, ChevronRightIcon, SearchIcon } from '@primer/octicons-react';
 import { Box, Text, TextInput } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePushFetch } from '../hooks/usePushFetch';
 import { useArtifactStore } from '../stores/artifact';
 import { usePushStore } from '../stores/push';
 import { useAccentColors } from '../theme/useAccentColors';
+import { FetchErrorBanner } from './FetchErrorBanner';
 import { MultiSelectDropdown } from './MultiSelectDropdown';
 
 interface CatalogArtifactRaw {
@@ -30,92 +32,74 @@ interface CatalogArtifact extends Omit<CatalogArtifactRaw, 'tags'> {
 
 export function ArtifactCatalog() {
   const [artifacts, setArtifacts] = useState<CatalogArtifact[]>([]);
-  const [loading, setLoading] = useState(true);
   const openArtifact = useArtifactStore((s) => s.openArtifact);
   const { accent, accentSubtle } = useAccentColors();
   const [query, setQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
-  const initialized = useRef(false);
   const tagsInitialized = useRef(false);
   const projectsInitialized = useRef(false);
   const knownTags = useRef<Set<string>>(new Set());
   const knownProjects = useRef<Set<string>>(new Set());
   const artifactsVersion = usePushStore((s) => s.artifactsVersion);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: artifactsVersion is an intentional trigger to refetch on push
-  useEffect(() => {
-    const controller = new AbortController();
-
-    if (!initialized.current) setLoading(true);
-
-    fetch('/api/artifacts', { signal: controller.signal })
-      .then((res) => res.json())
-      .then((data) => {
-        const parsed = (data.artifacts || []).map((a: CatalogArtifactRaw) => {
-          let tags: string[] = [];
-          if (a.tags) {
-            try {
-              tags = JSON.parse(a.tags);
-            } catch {
-              // ignore malformed tags
-            }
-          }
-          return { ...a, tags };
+  const handleData = useCallback((data: { artifacts?: CatalogArtifactRaw[] }) => {
+    const parsed = (data.artifacts || []).map((a: CatalogArtifactRaw) => {
+      let tags: string[] = [];
+      if (a.tags) {
+        try {
+          tags = JSON.parse(a.tags);
+        } catch {
+          // ignore malformed tags
+        }
+      }
+      return { ...a, tags };
+    });
+    setArtifacts(parsed);
+    const tags = [...new Set<string>(parsed.flatMap((a: CatalogArtifact) => a.tags))];
+    const tagValues = ['', ...tags];
+    if (!tagsInitialized.current) {
+      tagsInitialized.current = true;
+      knownTags.current = new Set(tagValues);
+      setSelectedTags(new Set<string>(tagValues));
+    } else {
+      const newTags = tagValues.filter((t) => !knownTags.current.has(t));
+      if (newTags.length > 0) {
+        for (const t of newTags) knownTags.current.add(t);
+        setSelectedTags((prev) => {
+          const next = new Set(prev);
+          for (const t of newTags) next.add(t);
+          return next;
         });
-        setArtifacts(parsed);
-        const tags = [...new Set<string>(parsed.flatMap((a: CatalogArtifact) => a.tags))];
-        const tagValues = ['', ...tags];
-        if (!tagsInitialized.current) {
-          tagsInitialized.current = true;
-          knownTags.current = new Set(tagValues);
-          setSelectedTags(new Set<string>(tagValues));
-        } else {
-          const newTags = tagValues.filter((t) => !knownTags.current.has(t));
-          if (newTags.length > 0) {
-            for (const t of newTags) knownTags.current.add(t);
-            setSelectedTags((prev) => {
-              const next = new Set(prev);
-              for (const t of newTags) next.add(t);
-              return next;
-            });
-          }
-        }
-        const projectNames = [
-          ...new Set<string>(
-            parsed
-              .filter((a: CatalogArtifact) => a.project_name)
-              .map((a: CatalogArtifact) => a.project_name as string)
-          ),
-        ];
-        const hasNullProject = parsed.some((a: CatalogArtifact) => !a.project_name);
-        const projectValues = [...(hasNullProject ? [''] : []), ...projectNames];
-        if (!projectsInitialized.current) {
-          projectsInitialized.current = true;
-          knownProjects.current = new Set(projectValues);
-          setSelectedProjects(new Set<string>(projectValues));
-        } else {
-          const newProjects = projectValues.filter((p) => !knownProjects.current.has(p));
-          if (newProjects.length > 0) {
-            for (const p of newProjects) knownProjects.current.add(p);
-            setSelectedProjects((prev) => {
-              const next = new Set(prev);
-              for (const p of newProjects) next.add(p);
-              return next;
-            });
-          }
-        }
-        initialized.current = true;
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if ((err as { name?: string }).name !== 'AbortError') {
-          setLoading(false);
-        }
-      });
+      }
+    }
+    const projectNames = [
+      ...new Set<string>(
+        parsed
+          .filter((a: CatalogArtifact) => a.project_name)
+          .map((a: CatalogArtifact) => a.project_name as string)
+      ),
+    ];
+    const hasNullProject = parsed.some((a: CatalogArtifact) => !a.project_name);
+    const projectValues = [...(hasNullProject ? [''] : []), ...projectNames];
+    if (!projectsInitialized.current) {
+      projectsInitialized.current = true;
+      knownProjects.current = new Set(projectValues);
+      setSelectedProjects(new Set<string>(projectValues));
+    } else {
+      const newProjects = projectValues.filter((p) => !knownProjects.current.has(p));
+      if (newProjects.length > 0) {
+        for (const p of newProjects) knownProjects.current.add(p);
+        setSelectedProjects((prev) => {
+          const next = new Set(prev);
+          for (const p of newProjects) next.add(p);
+          return next;
+        });
+      }
+    }
+  }, []);
 
-    return () => controller.abort();
-  }, [artifactsVersion]);
+  const { loading, error, retry } = usePushFetch('/api/artifacts', artifactsVersion, handleData);
 
   const handleClick = useCallback(
     (artifact: CatalogArtifact) => {
@@ -271,11 +255,13 @@ export function ArtifactCatalog() {
         </Box>
       </Box>
 
+      {error && <FetchErrorBanner onRetry={retry} />}
+
       {/* Content */}
       <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
         {loading && <Text sx={{ color: 'fg.muted', fontSize: 0 }}>Loading...</Text>}
 
-        {!loading && artifacts.length === 0 && (
+        {!loading && artifacts.length === 0 && !error && (
           <Text sx={{ color: 'fg.muted', fontSize: 0 }}>No artifacts registered.</Text>
         )}
 

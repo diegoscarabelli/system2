@@ -8,9 +8,11 @@
 import { ChevronDownIcon, ChevronRightIcon, InfoIcon, SearchIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text, TextInput } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePushFetch } from '../hooks/usePushFetch';
 import { usePushStore } from '../stores/push';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
+import { FetchErrorBanner } from './FetchErrorBanner';
 import { MultiSelectDropdown } from './MultiSelectDropdown';
 import { ProjectDetailModal } from './ProjectDetailModal';
 import { TaskDetailModal } from './TaskDetailModal';
@@ -168,8 +170,6 @@ const ALL_STATUSES = new Set(['todo', 'in progress', 'review', 'done', 'abandone
 export function KanbanBoard() {
   const { accent, highlight } = useAccentColors();
   const [data, setData] = useState<KanbanData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const initialized = useRef(false);
   const boardVersion = usePushStore((s) => s.boardVersion);
   const [filterKeyword, setFilterKeyword] = useState('');
   const [filterPriorities, setFilterPriorities] = useState<Set<string>>(new Set(ALL_PRIORITIES));
@@ -201,70 +201,61 @@ export function KanbanBoard() {
   const handleNavigate = useCallback((id: number) => setSelectedTaskId(id), []);
   const handleCloseProjectModal = useCallback(() => setSelectedProjectId(null), []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: boardVersion is an intentional trigger to refetch on push
-  useEffect(() => {
-    const controller = new AbortController();
-
-    if (!initialized.current) setLoading(true);
-
-    fetch('/api/kanban', { signal: controller.signal })
-      .then((r) => r.json())
-      .then((raw) => {
-        const tasks: KanbanTask[] = raw.tasks.map((t: KanbanTask & { labels: string }) => ({
-          ...t,
-          labels: (() => {
-            if (typeof t.labels !== 'string') return t.labels;
-            try {
-              return JSON.parse(t.labels) as string[];
-            } catch {
-              return [];
-            }
-          })(),
-        }));
-        setData({ ...raw, tasks });
-        const agentValues = ['', ...raw.agents.map((a: KanbanAgent) => String(a.id))];
-        if (!assigneesInitialized.current) {
-          assigneesInitialized.current = true;
-          knownAssignees.current = new Set(agentValues);
-          setFilterAssignees(new Set(agentValues));
-        } else {
-          const newAssignees = agentValues.filter((v) => !knownAssignees.current.has(v));
-          if (newAssignees.length > 0) {
-            for (const v of newAssignees) knownAssignees.current.add(v);
-            setFilterAssignees((prev) => {
-              const next = new Set(prev);
-              for (const v of newAssignees) next.add(v);
-              return next;
-            });
+  const handleData = useCallback(
+    (raw: {
+      tasks: (KanbanTask & { labels: string })[];
+      projects: KanbanProject[];
+      agents: KanbanAgent[];
+    }) => {
+      const tasks: KanbanTask[] = raw.tasks.map((t) => ({
+        ...t,
+        labels: (() => {
+          if (typeof t.labels !== 'string') return t.labels;
+          try {
+            return JSON.parse(t.labels) as string[];
+          } catch {
+            return [];
           }
+        })(),
+      }));
+      setData({ ...raw, tasks });
+      const agentValues = ['', ...raw.agents.map((a: KanbanAgent) => String(a.id))];
+      if (!assigneesInitialized.current) {
+        assigneesInitialized.current = true;
+        knownAssignees.current = new Set(agentValues);
+        setFilterAssignees(new Set(agentValues));
+      } else {
+        const newAssignees = agentValues.filter((v) => !knownAssignees.current.has(v));
+        if (newAssignees.length > 0) {
+          for (const v of newAssignees) knownAssignees.current.add(v);
+          setFilterAssignees((prev) => {
+            const next = new Set(prev);
+            for (const v of newAssignees) next.add(v);
+            return next;
+          });
         }
-        const labelValues = ['', ...new Set(tasks.flatMap((t: KanbanTask) => t.labels))];
-        if (!labelsInitialized.current) {
-          labelsInitialized.current = true;
-          knownLabels.current = new Set(labelValues);
-          setFilterLabels(new Set(labelValues));
-        } else {
-          const newLabels = labelValues.filter((v) => !knownLabels.current.has(v));
-          if (newLabels.length > 0) {
-            for (const v of newLabels) knownLabels.current.add(v);
-            setFilterLabels((prev) => {
-              const next = new Set(prev);
-              for (const v of newLabels) next.add(v);
-              return next;
-            });
-          }
+      }
+      const labelValues = ['', ...new Set(tasks.flatMap((t: KanbanTask) => t.labels))];
+      if (!labelsInitialized.current) {
+        labelsInitialized.current = true;
+        knownLabels.current = new Set(labelValues);
+        setFilterLabels(new Set(labelValues));
+      } else {
+        const newLabels = labelValues.filter((v) => !knownLabels.current.has(v));
+        if (newLabels.length > 0) {
+          for (const v of newLabels) knownLabels.current.add(v);
+          setFilterLabels((prev) => {
+            const next = new Set(prev);
+            for (const v of newLabels) next.add(v);
+            return next;
+          });
         }
-        initialized.current = true;
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if ((err as { name?: string }).name !== 'AbortError') {
-          setLoading(false);
-        }
-      });
+      }
+    },
+    []
+  );
 
-    return () => controller.abort();
-  }, [boardVersion]);
+  const { loading, error, retry } = usePushFetch('/api/kanban', boardVersion, handleData);
 
   // Visible columns based on status filter
   const visibleColumns = useMemo(() => {
@@ -371,16 +362,21 @@ export function KanbanBoard() {
     );
   }
 
-  if (!data) {
+  if (!data && error) {
     return (
-      <Box sx={{ p: 4, color: 'fg.muted', textAlign: 'center' }}>
-        <Text>Failed to load board data.</Text>
+      <Box sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <FetchErrorBanner onRetry={retry} />
       </Box>
     );
   }
 
+  if (!data) {
+    return null;
+  }
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {error && <FetchErrorBanner onRetry={retry} />}
       {/* Filter toolbar */}
       <Box
         sx={{

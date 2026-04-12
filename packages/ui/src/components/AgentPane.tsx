@@ -7,11 +7,13 @@
 
 import { ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, useCallback, useMemo, useState } from 'react';
+import { usePushFetch } from '../hooks/usePushFetch';
 import { useChatStore } from '../stores/chat';
 import { usePushStore } from '../stores/push';
 import { colors, contextColor } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
+import { FetchErrorBanner } from './FetchErrorBanner';
 
 interface AgentInfo {
   id: number;
@@ -53,13 +55,17 @@ function TableHeaders() {
 
 export function AgentPane() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [loading, setLoading] = useState(true);
   const { accent } = useAccentColors();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const initialized = useRef(false);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
   const agentsVersion = usePushStore((s) => s.agentsVersion);
   const agentBusy = usePushStore((s) => s.agentBusy);
+
+  const handleData = useCallback((data: { agents?: AgentInfo[] }) => {
+    setAgents(data.agents || []);
+  }, []);
+
+  const { loading, error, retry } = usePushFetch('/api/agents', agentsVersion, handleData);
 
   // Overlay real-time busy state from push store onto fetched agent data
   const agentsWithBusy = useMemo(
@@ -71,28 +77,6 @@ export function AgentPane() {
       }),
     [agents, agentBusy]
   );
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: agentsVersion is an intentional trigger to refetch on push
-  useEffect(() => {
-    const controller = new AbortController();
-
-    if (!initialized.current) setLoading(true);
-
-    fetch('/api/agents', { signal: controller.signal })
-      .then((res) => res.json())
-      .then((data) => {
-        setAgents(data.agents || []);
-        initialized.current = true;
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if ((err as { name?: string }).name !== 'AbortError') {
-          setLoading(false);
-        }
-      });
-
-    return () => controller.abort();
-  }, [agentsVersion]);
 
   const toggleGroupCollapse = useCallback((group: string) => {
     setCollapsedGroups((prev) => {
@@ -144,12 +128,14 @@ export function AgentPane() {
         </Box>
       </Box>
 
+      {error && <FetchErrorBanner onRetry={retry} />}
+
       <Box sx={{ flex: 1, overflow: 'auto' }}>
         {loading && (
           <Text sx={{ color: 'fg.muted', fontSize: 0, p: 2, display: 'block' }}>Loading...</Text>
         )}
 
-        {!loading && agents.length === 0 && (
+        {!loading && agents.length === 0 && !error && (
           <Text sx={{ color: 'fg.muted', fontSize: 0, p: 2, display: 'block' }}>
             No active agents.
           </Text>
