@@ -33,6 +33,7 @@ Execute shell commands with streaming output and optional background execution. 
 - **AbortSignal:** child process is killed (`SIGTERM`) when the agent session is aborted
 - **Background:** when `run_in_background` is true, the tool returns immediately and delivers the result as a `followUp` custom message when the command finishes
 - **Implementation:** Node.js `child_process.spawn`
+- **Command blocklist:** certain catastrophic commands are hard-blocked before execution and return an error: recursive `rm` targeting `/`, `~`, or `$HOME`; the `--no-preserve-root` flag; `mkfs` (filesystem formatting); `dd` writing to raw block devices (`of=/dev/...`); `sqlite3` targeting `~/.system2/app.db` (writes must go through `write_system2_db` for push notifications). Patterns are defined in `BLOCKED_BASH_PATTERNS` and checked against the full command string. Note: the `sqlite3` blocklist only applies to System2's management database (`app.db`). Agents are free to use `bash` with any database tool (`sqlite3`, `psql`, `duckdb`, etc.) to operate on data pipeline databases directly.
 
 ### `read`
 
@@ -103,7 +104,7 @@ Create or update records in the System2 app database.
 | `operation` | string | Named operation (see table below) |
 | _(varies)_ | _(varies)_ | Additional params depend on operation |
 
-Executes against `~/.system2/app.db` using structured named operations that delegate to `DatabaseClient` methods. `updated_at` is always maintained automatically. The `author` field on task comments is auto-filled from the calling agent's ID. **Only for System2's management database**: for data pipeline databases use `bash`. For ad-hoc SQL not covered by these operations, use `bash` with `sqlite3 ~/.system2/app.db`.
+Executes against `~/.system2/app.db` using structured named operations that delegate to `DatabaseClient` methods. `updated_at` is always maintained automatically. The `author` field on task comments is auto-filled from the calling agent's ID. **Only for System2's management database**: for data pipeline databases use `bash`. For ad-hoc SQL not covered by the named operations, use `rawSql` (see below). **Never use `bash` with `sqlite3` to modify `app.db`**: writes made outside `write_system2_db` bypass WebSocket push notifications and the UI will not reflect the changes.
 
 | Operation | Required | Optional | Notes |
 |-----------|----------|----------|-------|
@@ -120,6 +121,7 @@ Executes against `~/.system2/app.db` using structured named operations that dele
 | `createArtifact` | `file_path`, `title` | `project`, `description`, `tags` | Any agent. Project scope checked if `project` is set. |
 | `updateArtifact` | `id` | `file_path`, `title`, `project`, `description`, `tags` | Any agent. Project scope checked. |
 | `deleteArtifact` | `id` | — | Any agent. Project scope checked. DB row only (does not delete the file). |
+| `rawSql` | `sql` | — | Execute DML (INSERT/UPDATE/DELETE/REPLACE) or SELECT (including WITH/CTE). DDL (CREATE/ALTER/DROP), PRAGMA, ATTACH/DETACH, and maintenance statements (VACUUM, REINDEX, ANALYZE) are blocked. |
 
 Valid `status` values: `"todo"`, `"in progress"`, `"review"`, `"done"`, `"abandoned"`
 Valid `priority` values: `"low"`, `"medium"`, `"high"`

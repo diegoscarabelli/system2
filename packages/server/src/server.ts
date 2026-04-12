@@ -15,6 +15,7 @@ import type {
   KnowledgeConfig,
   LlmConfig,
   SchedulerConfig,
+  ServerMessage,
   ServicesConfig,
   ToolsConfig,
 } from '@dscarabelli/shared';
@@ -22,12 +23,13 @@ import type { Api, Model } from '@mariozechner/pi-ai';
 import { type AgentSessionEvent, ModelRegistry } from '@mariozechner/pi-coding-agent';
 import express from 'express';
 import matter from 'gray-matter';
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import { AuthResolver } from './agents/auth-resolver.js';
 import { AgentHost } from './agents/host.js';
 import { AgentRegistry } from './agents/registry.js';
 import type { AgentResurrector } from './agents/tools/resurrect-agent.js';
 import type { AgentSpawner } from './agents/tools/spawn-agent.js';
+import type { WriteEntityType } from './agents/tools/write-system2-db.js';
 import { createHistoryCaptureSubscriber } from './chat/history-capture.js';
 import { ConversationSummarizer } from './chat/summarizer.js';
 import { DatabaseClient } from './db/client.js';
@@ -103,6 +105,7 @@ export class Server {
 
     const guideAgent = this.db.getOrCreateGuideAgent();
     this.guideAgentId = guideAgent.id;
+    const callbacks = this.buildAgentCallbacks();
     this.agentHost = new AgentHost({
       db: this.db,
       agentId: guideAgent.id,
@@ -116,6 +119,7 @@ export class Server {
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
+      ...callbacks,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
 
@@ -133,6 +137,7 @@ export class Server {
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
+      ...callbacks,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
 
@@ -379,6 +384,7 @@ export class Server {
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: this.config.knowledgeConfig?.budget_chars,
+      ...this.buildAgentCallbacks(),
     });
 
     // Subscribe for chat cache capture before initialize() so no events are missed
@@ -404,6 +410,9 @@ export class Server {
 
       const newHost = await this.initializeAgentHost(newAgent.id);
 
+      // Notify UI that agent list changed
+      this.debouncedBroadcast({ type: 'agents_changed' });
+
       // Deliver the initial message from the caller (fire-and-forget)
       newHost
         .deliverMessage(initialMessage, {
@@ -426,6 +435,9 @@ export class Server {
   private makeResurrector(): AgentResurrector {
     return async (agentId, callerAgentId, message) => {
       const host = await this.initializeAgentHost(agentId);
+
+      // Notify UI that agent list changed
+      this.debouncedBroadcast({ type: 'agents_changed' });
 
       host
         .deliverMessage(message, {
@@ -480,6 +492,7 @@ export class Server {
 
     // Start scheduled jobs
     const intervalMinutes = this.config.schedulerConfig?.daily_summary_interval_minutes ?? 30;
+    const onJobChange = () => this.debouncedBroadcast({ type: 'job_executions_changed' });
     registerNarratorJobs(
       this.scheduler,
       this.narratorHost,
@@ -487,7 +500,8 @@ export class Server {
       this.db,
       SYSTEM2_DIR,
       intervalMinutes,
-      this.config.knowledgeConfig?.budget_chars
+      this.config.knowledgeConfig?.budget_chars,
+      onJobChange
     );
 
     // Check if narrator needs catch-up after sleep/shutdown.
@@ -525,6 +539,7 @@ export class Server {
     }
 
     const intervalMinutes = this.config.schedulerConfig?.daily_summary_interval_minutes ?? 30;
+    const onJobChange = () => this.debouncedBroadcast({ type: 'job_executions_changed' });
 
     // Daily summary catch-up
     const { lastRunTs } = resolveDailySummaryTimestamp(SYSTEM2_DIR, intervalMinutes);
@@ -537,14 +552,19 @@ export class Server {
           `[Server] Daily summary stale by ${Math.round(staleness / 60000)} min, queuing catch-up`
         );
         try {
-          await trackJobExecution(this.db, 'daily-summary', 'catch-up', () =>
-            buildAndDeliverDailySummary(
-              this.db,
-              this.narratorHost,
-              this.narratorId,
-              SYSTEM2_DIR,
-              intervalMinutes
-            )
+          await trackJobExecution(
+            this.db,
+            'daily-summary',
+            'catch-up',
+            () =>
+              buildAndDeliverDailySummary(
+                this.db,
+                this.narratorHost,
+                this.narratorId,
+                SYSTEM2_DIR,
+                intervalMinutes
+              ),
+            onJobChange
           );
         } catch (error) {
           console.error('[Server] Daily summary catch-up failed:', error);
@@ -564,13 +584,18 @@ export class Server {
           `[Server] Memory stale by ${Math.round(memoryStaleness / 3600000)}h, queuing memory-update catch-up`
         );
         try {
-          await trackJobExecution(this.db, 'memory-update', 'catch-up', () =>
-            buildAndDeliverMemoryUpdate(
-              this.narratorHost,
-              this.narratorId,
-              SYSTEM2_DIR,
-              this.config.knowledgeConfig?.budget_chars
-            )
+          await trackJobExecution(
+            this.db,
+            'memory-update',
+            'catch-up',
+            () =>
+              buildAndDeliverMemoryUpdate(
+                this.narratorHost,
+                this.narratorId,
+                SYSTEM2_DIR,
+                this.config.knowledgeConfig?.budget_chars
+              ),
+            onJobChange
           );
         } catch (error) {
           console.error('[Server] Memory update catch-up failed:', error);
@@ -715,7 +740,89 @@ export class Server {
     });
   }
 
+  /** Send a message to all connected WebSocket clients. */
+  private broadcastToAll(message: ServerMessage): void {
+    const data = JSON.stringify(message);
+    for (const client of this.wss.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(data);
+        } catch {
+          try {
+            client.terminate();
+          } catch {
+            // Client is already unusable; nothing more we can do.
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Debounced broadcast: coalesces rapid successive pushes of the same message type
+   * into a single broadcast (e.g., creating 10 tasks triggers one board_changed).
+   * agent_busy_changed is sent immediately since it carries per-message payload.
+   */
+  private pendingBroadcasts = new Map<string, ReturnType<typeof setTimeout>>();
+  private static readonly BROADCAST_DEBOUNCE_MS = 50;
+
+  private debouncedBroadcast(message: ServerMessage): void {
+    // Messages with per-event payload must be sent immediately
+    if (message.type === 'agent_busy_changed') {
+      this.broadcastToAll(message);
+      return;
+    }
+    const key = message.type;
+    const existing = this.pendingBroadcasts.get(key);
+    if (existing) clearTimeout(existing);
+    this.pendingBroadcasts.set(
+      key,
+      setTimeout(() => {
+        this.pendingBroadcasts.delete(key);
+        this.broadcastToAll(message);
+      }, Server.BROADCAST_DEBOUNCE_MS)
+    );
+  }
+
+  /** Map a write_system2_db entity type to the appropriate push notification(s). */
+  private handleDatabaseWrite(entityType: WriteEntityType): void {
+    switch (entityType) {
+      case 'project':
+      case 'task':
+      case 'task_link':
+      case 'task_comment':
+        this.debouncedBroadcast({ type: 'board_changed' });
+        break;
+      case 'artifact':
+        this.debouncedBroadcast({ type: 'artifacts_changed' });
+        break;
+      case 'unknown':
+        // rawSql: we don't know what changed, invalidate all UI panels
+        this.debouncedBroadcast({ type: 'board_changed' });
+        this.debouncedBroadcast({ type: 'artifacts_changed' });
+        this.debouncedBroadcast({ type: 'agents_changed' });
+        this.debouncedBroadcast({ type: 'job_executions_changed' });
+        break;
+    }
+  }
+
+  /** Build the standard callback set for AgentHost instances. */
+  private buildAgentCallbacks() {
+    return {
+      onDatabaseWrite: (entityType: WriteEntityType) => this.handleDatabaseWrite(entityType),
+      onBusyChange: (agentId: number, busy: boolean, contextPercent: number | null) =>
+        this.debouncedBroadcast({ type: 'agent_busy_changed', agentId, busy, contextPercent }),
+      onAgentTerminate: () => this.debouncedBroadcast({ type: 'agents_changed' }),
+    };
+  }
+
   async stop(): Promise<void> {
+    // Cancel pending debounced broadcasts so they don't fire during/after shutdown
+    for (const timer of this.pendingBroadcasts.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingBroadcasts.clear();
+
     // Clean up conversation summarizer
     this.conversationSummarizer?.cleanup();
 

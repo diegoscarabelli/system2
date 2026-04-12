@@ -14,7 +14,7 @@ System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/b
 
 **Persistent, evolving context.** Every agent's context is assembled from three layers on each LLM call: static instructions (shared agent reference and role-specific prompt, loaded once at startup or spawn); a Knowledge Base of files re-read fresh from disk (knowledge files, plus daily summaries or a project log depending on scope), so any edit takes effect immediately; and the full conversation history replayed from a JSONL session file, with a compaction summary substituted when the context was compressed. Knowledge files are versioned in git; session JSONL files are gitignored (large, private). Session logs rotate at a configurable size threshold to prevent unbounded growth. See [Agents](agents.md#session-management) | [Knowledge System](knowledge-system.md).
 
-**Reliable infrastructure.** Chat history, database state, and agent sessions are managed server-side; the UI is stateless and receives full history on WebSocket connect. API errors trigger automatic retry with exponential backoff, then failover to the next configured key or provider. Scheduled jobs run in-process and are checked for staleness on startup so missed work is caught up automatically. See [Configuration](configuration.md#automatic-failover) | [Scheduler](scheduler.md).
+**Reliable infrastructure.** Chat history, database state, and agent sessions are managed server-side; the UI is stateless and receives full history on WebSocket connect. Database writes by agents trigger push notifications over WebSocket, so UI panels update in real time without polling. API errors trigger automatic retry with exponential backoff, then failover to the next configured key or provider. Scheduled jobs run in-process and are checked for staleness on startup so missed work is caught up automatically. See [Configuration](configuration.md#automatic-failover) | [Scheduler](scheduler.md) | [WebSocket Protocol](websocket-protocol.md).
 
 ## Runtime Architecture
 
@@ -48,9 +48,8 @@ System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/b
 ┌──────────────────────────▼──────────────────────────────┐
 │  UI (React on port 3001 dev, served by server in prod)  │
 │  - Multi-agent chat with streaming                      │
-│  - Kanban board (live task dashboard per project)       │
+│  - Push-driven panels (kanban, agents, artifacts, jobs) │
 │  - Artifact viewer (tabbed sandboxed iframes)           │
-│  - Agent pane, artifact catalog, cron jobs panel        │
 └─────────────────────────────────────────────────────────┘
 ```
 

@@ -44,4 +44,15 @@ export type ServerMessage =
   | { type: 'provider_info'; provider: string; agentId: number } // Sent on connect/switch — current LLM provider for an agent
   | { type: 'provider_change'; provider: string; reason?: string; agentId: number } // Sent on failover — provider switched
   | { type: 'compaction_start'; agentId?: number } // Sent when auto-compaction begins
-  | { type: 'compaction_end'; agentId?: number }; // Sent when auto-compaction completes
+  | { type: 'compaction_end'; agentId?: number } // Sent when auto-compaction completes
+  // Push notifications: tell UI panels to refetch data
+  | { type: 'board_changed' } // Kanban data changed (projects/tasks/links/comments)
+  | { type: 'agents_changed' } // Agent list changed (spawn/terminate/resurrect)
+  | { type: 'artifacts_changed' } // Artifact catalog changed
+  | { type: 'job_executions_changed' } // Scheduler job execution changed
+  | {
+      type: 'agent_busy_changed';
+      agentId: number;
+      busy: boolean;
+      contextPercent: number | null;
+    }; // Agent busy state changed; includes current context usage snapshot

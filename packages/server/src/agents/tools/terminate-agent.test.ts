@@ -115,4 +115,31 @@ describe('terminate_agent tool', () => {
 
     expect((result.content[0] as { text: string }).text).toContain('not found');
   });
+
+  it('succeeds even when onTerminate callback throws', async () => {
+    const guide = makeAgent(1, 'guide', null);
+    const conductor = makeAgent(2, 'conductor', 10);
+    const abort = vi.fn();
+    const unregister = vi.fn();
+    const updateAgentStatus = vi.fn();
+    const db = {
+      getAgent: (id: number) => [guide, conductor].find((a) => a.id === id) ?? null,
+      updateAgentStatus,
+    } as unknown as DatabaseClient;
+    const registry = {
+      get: () => ({ abort }),
+      unregister,
+    } as unknown as AgentRegistry;
+    const onTerminate = vi.fn(() => {
+      throw new Error('broadcast failed');
+    });
+    const tool = createTerminateAgentTool(db, 1, registry, onTerminate);
+
+    const result = await tool.execute('test', { agent_id: 2 } as TerminateParams);
+
+    // Termination completed despite callback throwing
+    expect((result.content[0] as { text: string }).text).toContain('terminated and archived');
+    expect(updateAgentStatus).toHaveBeenCalledWith(2, 'archived');
+    expect(onTerminate).toHaveBeenCalled();
+  });
 });

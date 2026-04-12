@@ -1183,4 +1183,34 @@ describe('trackJobExecution', () => {
 
     expect(db.completeJobExecution).toHaveBeenCalledWith(42);
   });
+
+  it('does not break when onJobChange callback throws', async () => {
+    const db = mockDbForTracking();
+    const handler = vi.fn();
+    const onJobChange = vi.fn(() => {
+      throw new Error('broadcast failed');
+    });
+
+    await trackJobExecution(db, 'test-job', 'cron', handler, onJobChange);
+
+    expect(handler).toHaveBeenCalled();
+    expect(db.completeJobExecution).toHaveBeenCalledWith(42);
+    expect(onJobChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not break on failure path when onJobChange callback throws', async () => {
+    const db = mockDbForTracking();
+    const handler = vi.fn(() => {
+      throw new Error('handler failed');
+    });
+    const onJobChange = vi.fn(() => {
+      throw new Error('broadcast failed');
+    });
+
+    await expect(trackJobExecution(db, 'test-job', 'cron', handler, onJobChange)).rejects.toThrow(
+      'handler failed'
+    );
+
+    expect(db.failJobExecution).toHaveBeenCalledWith(42, expect.stringContaining('handler failed'));
+  });
 });

@@ -160,9 +160,9 @@ Agents query the database via the `read_system2_db` tool (SELECT only). Interact
 
 ### Write access
 
-Agents write to the database via the `write_system2_db` tool, which exposes structured named operations (`createProject`, `updateProject`, `createTask`, `updateTask`, `createTaskLink`, `deleteTaskLink`, `createTaskComment`, `updateTaskComment`, `deleteTaskComment`, `createArtifact`, `updateArtifact`, `deleteArtifact`). These delegate to `DatabaseClient` methods, ensuring `updated_at` is always maintained and `task_comment.author` is auto-filled from the calling agent's ID. `updateTaskComment` is restricted to the original author so attribution stays honest. See [Tools](tools.md#write_system2_db).
+Agents write to the database via the `write_system2_db` tool, which exposes structured named operations (`createProject`, `updateProject`, `createTask`, `updateTask`, `createTaskLink`, `deleteTaskLink`, `createTaskComment`, `updateTaskComment`, `deleteTaskComment`, `createArtifact`, `updateArtifact`, `deleteArtifact`, `rawSql`). These delegate to `DatabaseClient` methods, ensuring `updated_at` is always maintained and `task_comment.author` is auto-filled from the calling agent's ID. `updateTaskComment` is restricted to the original author so attribution stays honest. The `rawSql` operation accepts DML and SELECT statements for cases not covered by named operations; DDL, PRAGMA, and maintenance statements are blocked. See [Tools](tools.md#write_system2_db).
 
-For ad-hoc SQL not covered by the tool (bulk updates, complex transactions), agents can use `bash` with `sqlite3 ~/.system2/app.db`.
+Each write triggers an `onWrite` callback that the server maps to a WebSocket push notification (`board_changed`, `agents_changed`, `artifacts_changed`, etc.), so UI panels update in real time. Direct `sqlite3` access to `app.db` via `bash` is blocked to ensure all writes flow through this notification path. These restrictions apply exclusively to `app.db`; agents operate on data pipeline databases (TimescaleDB, DuckDB, etc.) directly via `bash` with no restrictions.
 
 ## See Also
 

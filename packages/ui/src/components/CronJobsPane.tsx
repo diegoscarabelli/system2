@@ -9,7 +9,7 @@ import { TriangleDownIcon, TriangleUpIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
+import { usePushStore } from '../stores/push';
 import { colors } from '../theme/colors';
 import { JobExecutionDetailModal } from './JobExecutionDetailModal';
 import type { MultiSelectOption } from './MultiSelectDropdown';
@@ -146,6 +146,7 @@ export function CronJobsPane() {
   const [sortKey, setSortKey] = useState<SortKey>('started_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const initialized = useRef(false);
+  const jobsVersion = usePushStore((s) => s.jobsVersion);
 
   // Filter state: initialized with all options on first data load
   const [statusFilter, setStatusFilter] = useState<Set<string>>(
@@ -158,46 +159,37 @@ export function CronJobsPane() {
   const [jobOptions, setJobOptions] = useState<MultiSelectOption[]>([]);
   const jobsSeeded = useRef(false);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: jobsVersion is an intentional trigger to refetch on push
   useEffect(() => {
     const controller = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout>;
 
-    const fetchData = () => {
-      if (!initialized.current) setLoading(true);
+    if (!initialized.current) setLoading(true);
 
-      fetch('/api/job-executions?limit=50', { signal: controller.signal })
-        .then((res) => res.json())
-        .then((data) => {
-          const items: JobExecutionInfo[] = data.executions || [];
-          setExecutions(items);
-          initialized.current = true;
+    fetch('/api/job-executions?limit=50', { signal: controller.signal })
+      .then((res) => res.json())
+      .then((data) => {
+        const items: JobExecutionInfo[] = data.executions || [];
+        setExecutions(items);
+        initialized.current = true;
+        setLoading(false);
+
+        // Seed job options on first data load
+        if (!jobsSeeded.current && items.length > 0) {
+          jobsSeeded.current = true;
+          const names = [...new Set(items.map((e) => e.job_name))].sort();
+          const opts = names.map((n) => ({ value: n, label: n }));
+          setJobOptions(opts);
+          setJobFilter(new Set(names));
+        }
+      })
+      .catch((err: unknown) => {
+        if ((err as { name?: string }).name !== 'AbortError') {
           setLoading(false);
+        }
+      });
 
-          // Seed job options on first data load
-          if (!jobsSeeded.current && items.length > 0) {
-            jobsSeeded.current = true;
-            const names = [...new Set(items.map((e) => e.job_name))].sort();
-            const opts = names.map((n) => ({ value: n, label: n }));
-            setJobOptions(opts);
-            setJobFilter(new Set(names));
-          }
-
-          timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
-        })
-        .catch((err: unknown) => {
-          if ((err as { name?: string }).name !== 'AbortError') {
-            setLoading(false);
-            timeoutId = setTimeout(fetchData, POLL_ERROR_BACKOFF_MS);
-          }
-        });
-    };
-
-    fetchData();
-    return () => {
-      controller.abort();
-      clearTimeout(timeoutId);
-    };
-  }, []);
+    return () => controller.abort();
+  }, [jobsVersion]);
 
   const closeModal = useCallback(() => setSelectedId(null), []);
 

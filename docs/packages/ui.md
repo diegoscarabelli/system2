@@ -33,6 +33,7 @@ src/
 ├── stores/
 │   ├── chat.ts            # Chat state (Zustand)
 │   ├── artifact.ts        # Artifact tab state (Zustand)
+│   ├── push.ts            # Push notification state (Zustand)
 │   └── theme.ts           # Theme preference (Zustand)
 └── theme/
     └── colors.ts          # Color palette constants
@@ -102,13 +103,13 @@ Configuration: 120 particles in accent + teal colors, linked within 150px distan
 
 ### ArtifactCatalog
 
-Side panel showing all registered artifacts from the database. Polls `GET /api/artifacts` every 2 seconds. Groups artifacts by project (null project shown as "No Project"). Supports text search and project/tag filtering via `MultiSelectDropdown` components (same as KanbanBoard filters). Both project and tags dropdowns include a "None" option for artifacts without a project or tags respectively; inline tag badges use a static accent style (not affected by dropdown selection). Clicking an item opens it as a new tab in ArtifactViewer. Toggled via StackIcon in the activity bar.
+Side panel showing all registered artifacts from the database. Refetches `GET /api/artifacts` when `artifactsVersion` bumps (push-driven). Groups artifacts by project (null project shown as "No Project"). Supports text search and project/tag filtering via `MultiSelectDropdown` components (same as KanbanBoard filters). Both project and tags dropdowns include a "None" option for artifacts without a project or tags respectively; inline tag badges use a static accent style (not affected by dropdown selection). Clicking an item opens it as a new tab in ArtifactViewer. Toggled via StackIcon in the activity bar.
 
 ### KanbanBoard
 
 Live kanban dashboard showing all tasks grouped by project in a swimlane layout. Toggled via the TasklistIcon button in the activity bar: clicking opens a native tab named "Board" at position 0; clicking again closes it.
 
-Polls `GET /api/kanban` every 2 seconds. On initial load shows a full loading state; subsequent polls update silently without clearing the board.
+Refetches `GET /api/kanban` when `boardVersion` bumps (push-driven). On initial load shows a full loading state; subsequent fetches update silently without clearing the board.
 
 **Layout:** A shared horizontal scroll container keeps column headers and card grids aligned (minimum 180px per column). Five status columns (Todo, In Progress, Review, Done, Abandoned) with transparent headers (fixed above the vertical scroll area) showing status dot, task count badge, and vertical dividers between columns. Each project is a collapsible swimlane row with transparent header showing project name, info icon button, status badge, completed/total count (done + abandoned = completed), and a segmented progress bar. Done/abandoned projects auto-collapse on first load.
 
@@ -120,7 +121,7 @@ Clicking a card opens a `TaskDetailModal` overlay for that task. Clicking the in
 
 ### TaskDetailModal
 
-Overlay modal showing full task details. Polls `GET /api/tasks/:id` every 2 seconds while open, restarting the poll cycle on navigation to a different task. Uses `AbortController` to cancel in-flight requests when the task ID changes (e.g., clicking a linked task).
+Overlay modal showing full task details. Refetches `GET /api/tasks/:id` when `boardVersion` bumps (push-driven), restarting on navigation to a different task. Uses `AbortController` to cancel in-flight requests when the task ID changes (e.g., clicking a linked task).
 
 **Sections:**
 
@@ -144,13 +145,13 @@ Overlay modal showing full project details. Receives the project data directly f
 
 ### AgentPane
 
-Side panel showing all non-archived agents with busy/idle indicators. Polls `GET /api/agents` every 2 seconds for agent list, busy state, and context window percentages. Groups agents into "System" (Guide, Narrator) listed first, then by project name. Each agent row shows a teal (`#00aaba`) circle when busy or grey when idle. Toggled via PeopleIcon in the activity bar.
+Side panel showing all non-archived agents with busy/idle indicators. Refetches `GET /api/agents` when `agentsVersion` bumps (push-driven); busy state and context window percentages come from `agent_busy_changed` push messages (inline, no refetch). Groups agents into "System" (Guide, Narrator) listed first, then by project name. Each agent row shows a teal (`#00aaba`) circle when busy or grey when idle. Toggled via PeopleIcon in the activity bar.
 
 Clicking an agent row switches the chat panel to that agent. The active agent is highlighted with an accent-colored left border on its ID cell. Switching updates `activeAgentId` in the chat store, which triggers the WebSocket hook to send `switch_agent` to the server. The server responds with the agent's chat history and streaming state.
 
 ### CronJobsPane
 
-Side panel titled "Cron Jobs" showing scheduler job execution history as a flat sortable table. Polls `GET /api/job-executions` every 2 seconds. Toggled via ClockIcon in the activity bar.
+Side panel titled "Cron Jobs" showing scheduler job execution history as a flat sortable table. Refetches `GET /api/job-executions` when `jobsVersion` bumps (push-driven). Toggled via ClockIcon in the activity bar.
 
 **Filters:** Three `MultiSelectDropdown` filters at the top: jobs (e.g., daily-summary, memory-update), statuses (running, completed, failed), and triggers (cron, catch-up, manual).
 
@@ -158,7 +159,7 @@ Side panel titled "Cron Jobs" showing scheduler job execution history as a flat 
 
 ## State Management
 
-Three [Zustand](https://github.com/pmndrs/zustand) stores with no Redux or Context:
+Four [Zustand](https://github.com/pmndrs/zustand) stores with no Redux or Context:
 
 ### `useChatStore` (Primary)
 
@@ -212,6 +213,23 @@ Key behaviors:
 - `toggleKanbanTab`: close kanban tab if open, otherwise call `openKanbanTab` (used by activity bar button)
 - Tab dedup uses `filePath` with cache-bust query params stripped
 
+### `usePushStore`
+
+Tracks server push notification state. Version counters are incremented when the server broadcasts a change notification; components that depend on a counter refetch from the REST API when it bumps.
+
+| State | Type | Description |
+|-------|------|-------------|
+| `boardVersion` | `number` | Bumped on `board_changed` (projects, tasks, links, comments) |
+| `agentsVersion` | `number` | Bumped on `agents_changed` (spawn/terminate/resurrect) |
+| `artifactsVersion` | `number` | Bumped on `artifacts_changed` |
+| `jobsVersion` | `number` | Bumped on `job_executions_changed` |
+| `agentBusy` | `Map<number, { busy, contextPercent }>` | Per-agent busy state from `agent_busy_changed`, consumed inline (no refetch) |
+
+Key actions:
+
+- `bumpAll()`: increments all 4 version counters at once (used on WebSocket reconnect to force a full refetch)
+- `clearAgentBusy()`: resets the busy map (used on reconnect to clear stale state that may have drifted during the disconnect)
+
 ### `useThemeStore`
 
 Tracks `colorMode` (light/dark) and `particlesEnabled` (boolean) with localStorage persistence (`system2-theme` and `system2-particles` respectively). Color mode falls back to system preference; particles default to enabled.
@@ -225,7 +243,7 @@ Manages the WebSocket connection to the server with multi-agent routing:
 - Routes all incoming `ServerMessage` types to the correct agent's state via `message.agentId` (falls back to `guideAgentId`)
 - Exposes `sendMessage()`, `sendSteering()`, `abort()` (all include `activeAgentId`)
 - Watches `activeAgentId` changes and sends `switch_agent` to the server when the user switches agents
-- On reconnect: re-sends `switch_agent` if the user was viewing a non-Guide agent
+- On reconnect: clears stale `agentBusy` state, bumps all push version counters (forces full refetch), and re-sends `switch_agent` if the user was viewing a non-Guide agent
 - On `ready_for_input`: clears `isStreaming` and `isWaitingForResponse` for that agent
 - On `chat_history`: merges committed messages but preserves in-progress streaming state (tool calls, thinking, partial text) for busy agents
 
