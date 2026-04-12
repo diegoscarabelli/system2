@@ -195,7 +195,7 @@ Create or update records via named operations. `updated_at` is maintained automa
 
 For ad-hoc SQL not covered by the named operations above (bulk updates, complex transactions), use the `rawSql` operation. It accepts DML (INSERT/UPDATE/DELETE/REPLACE) and SELECT statements (including WITH/CTE prefixes). DDL (CREATE/ALTER/DROP), PRAGMA, ATTACH/DETACH, and maintenance statements (VACUUM, REINDEX, ANALYZE) are blocked.
 
-**Never use `bash` with `sqlite3` to modify `~/.system2/app.db`.** All database writes must go through `write_system2_db` so the server can push real-time updates to the UI. Writes made via `bash`/`sqlite3` bypass this mechanism and the UI will not reflect the changes until the next page reload.
+**Never use `bash` with `sqlite3` to modify `~/.system2/app.db`.** All database writes must go through `write_system2_db` so the server can push real-time updates to the UI. Writes made via `bash`/`sqlite3` bypass this mechanism and the UI will not reflect the changes until the next page reload. This restriction applies only to `app.db`. For data pipeline databases (TimescaleDB, DuckDB, etc.), use `bash` directly with the appropriate database CLI (`psql`, `duckdb`, `sqlite3`, etc.).
 
 ### Schema Reference
 
