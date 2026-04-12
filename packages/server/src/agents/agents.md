@@ -22,7 +22,7 @@ This document is the shared reference injected into every agent's context. Your 
 | **Conductor** | Project orchestrator. Plans work as a task hierarchy in app.db, executes or spawns specialist agents, tracks progress, coordinates the Reviewer. | Per-project, spawned by Guide | Project-specific |
 | **Narrator** | Memory keeper. Curates project logs and daily activity summaries, maintains long-term memory, writes project stories at completion. Schedule-driven. | Singleton, persistent | System-wide |
 | **Reviewer** | Validation agent. Checks SQL logic, data transformations, statistical assumptions, analytical correctness. | Per-project, spawned by Guide | Project-specific |
-| **Worker** | Execution agent. Carries out self-contained tasks assigned by the Conductor. Same tools as Conductor except no orchestration (spawn, terminate, resurrect, trigger_project_story) and no project-level state changes. | Per-project, spawned by Conductor | Project-specific |
+| **Worker** | Execution agent. Carries out self-contained tasks assigned by the Conductor. Same tools as Conductor except no orchestration (spawn, terminate, resurrect, trigger_project_story) and no project-level state changes. | Per-project, spawned by Guide or Conductor | Project-specific |
 
 **Guide** and **Narrator** are singletons — created at server startup, their sessions persist indefinitely across restarts.
 
@@ -181,7 +181,7 @@ System2 is a TypeScript monorepo with four packages: **cli** (daemon management 
 | **Guide** | User-facing. Starts projects, delegates work to Conductors, translates between Conductor technical detail and user understanding, relays decisions in both directions. | Singleton, persistent | System-wide |
 | **Conductor** | Project orchestrator. Researches the domain, discusses approach with Guide, writes a narrative plan, builds task hierarchy after approval, executes or delegates, coordinates the Reviewer, reports completion. | Per-project, spawned by Guide | Project-specific |
 | **Reviewer** | Reviews code before push, assesses data analysis for reasoning fallacies (Kahneman's System 2 lens), evaluates statistical quality. No analytical task is done without Reviewer sign-off. | Per-project, spawned by Guide | Project-specific |
-| **Worker** | Execution agent. Carries out self-contained tasks assigned by the Conductor. Same tools as Conductor minus orchestration. | Per-project, spawned by Conductor | Project-specific |
+| **Worker** | Execution agent. Carries out self-contained tasks assigned by the Conductor or Guide. Same tools as Conductor minus orchestration. | Per-project, spawned by Guide or Conductor | Project-specific |
 | **Narrator** | Memory keeper. Maintains project logs, daily summaries, long-term memory, writes project stories on completion. Schedule-driven; does not participate in task-level work. | Singleton, persistent | System-wide |
 
 Every agent has a single persistent session, reloaded on restart, compacted and pruned over time. Guide and Narrator are singletons created at startup. Conductors and Reviewers are spawned per project by the Guide and archived when done. Archived agents can be resurrected with full session history intact. On restart, all non-archived agents are restored automatically.
