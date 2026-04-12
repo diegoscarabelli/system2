@@ -1,6 +1,7 @@
 ---
 name: prefect
 description: Use when building, debugging, deploying, or testing data pipelines with Prefect v3. Trigger on any code importing prefect, prefect YAML config, or user mentioning Prefect flows/tasks/deployments/workers.
+roles: [conductor, reviewer]
 ---
 
 # Prefect v3 Data Pipelines

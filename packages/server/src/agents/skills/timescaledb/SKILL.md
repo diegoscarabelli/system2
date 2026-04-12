@@ -1,6 +1,7 @@
 ---
 name: timescaledb
 description: Use when designing schemas, writing queries, configuring compression/retention/continuous aggregates, or troubleshooting performance for TimescaleDB hypertables. Trigger on any SQL referencing hypertables, time_bucket, continuous aggregates, or TimescaleDB functions.
+roles: [conductor, reviewer]
 ---
 
 # TimescaleDB
