@@ -283,15 +283,15 @@ Define a range around zero (or another null value) representing "negligible effe
 **Probability of direction (pd):** The proportion of the posterior that is positive (or negative). Ranges from 50% (no evidence of direction) to 100% (all posterior mass on one side). A useful complement to intervals.
 
 **Bayes factors:**
-Quantify relative evidence for one model/hypothesis over another.
+Quantify relative evidence for one model/hypothesis over another. BF10 denotes evidence for the alternative hypothesis relative to the null.
 
-| BF | Interpretation (Kass & Raftery) |
+| BF10 | Interpretation (Kass & Raftery) |
 | --- | --- |
-| < 1 | Favors alternative |
+| < 1 | Favors null |
 | 1-3 | Barely worth mentioning |
-| 3-20 | Positive evidence |
-| 20-150 | Strong evidence |
-| > 150 | Very strong evidence |
+| 3-20 | Positive evidence for alternative |
+| 20-150 | Strong evidence for alternative |
+| > 150 | Very strong evidence for alternative |
 
 Bayes factors are sensitive to prior specification. Always conduct sensitivity analysis when reporting them.
 
