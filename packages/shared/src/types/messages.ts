@@ -23,6 +23,7 @@ export type ServerMessage =
   | { type: 'thinking_end'; agentId?: number }
   | { type: 'tool_call_start'; name: string; input?: string; agentId?: number }
   | { type: 'tool_call_end'; name: string; result: string; agentId?: number }
+  | { type: 'tool_call_progress'; name: string; message: string; agentId?: number } // Heartbeat progress from long-running tool
   | { type: 'artifact'; url: string; title?: string; filePath?: string }
   | {
       type: 'context_usage';
