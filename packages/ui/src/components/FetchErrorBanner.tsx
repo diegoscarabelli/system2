@@ -7,9 +7,10 @@
 import { Box, Text } from '@primer/react';
 import { colors } from '../theme/colors';
 
-export function FetchErrorBanner({ onRetry }: { onRetry: () => void }) {
+export function FetchErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <Box
+      role="alert"
       sx={{
         display: 'flex',
         alignItems: 'center',
@@ -23,7 +24,7 @@ export function FetchErrorBanner({ onRetry }: { onRetry: () => void }) {
         flexShrink: 0,
       }}
     >
-      <Text sx={{ color: colors.coral, flex: 1 }}>Failed to load data</Text>
+      <Text sx={{ color: colors.coral, flex: 1 }}>Failed to load data: {message}</Text>
       <Box
         as="button"
         type="button"
@@ -40,6 +41,7 @@ export function FetchErrorBanner({ onRetry }: { onRetry: () => void }) {
           py: '2px',
           flexShrink: 0,
           '&:hover': { backgroundColor: `${colors.coral}20` },
+          '&:focus-visible': { outline: '2px solid', outlineColor: colors.coral },
         }}
       >
         Retry

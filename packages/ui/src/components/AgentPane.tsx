@@ -128,7 +128,7 @@ export function AgentPane() {
         </Box>
       </Box>
 
-      {error && <FetchErrorBanner onRetry={retry} />}
+      {error && <FetchErrorBanner message={error} onRetry={retry} />}
 
       <Box sx={{ flex: 1, overflow: 'auto' }}>
         {loading && (

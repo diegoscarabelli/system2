@@ -255,7 +255,7 @@ export function ArtifactCatalog() {
         </Box>
       </Box>
 
-      {error && <FetchErrorBanner onRetry={retry} />}
+      {error && <FetchErrorBanner message={error} onRetry={retry} />}
 
       {/* Content */}
       <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>

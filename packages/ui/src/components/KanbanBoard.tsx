@@ -365,7 +365,7 @@ export function KanbanBoard() {
   if (!data && error) {
     return (
       <Box sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <FetchErrorBanner onRetry={retry} />
+        <FetchErrorBanner message={error} onRetry={retry} />
       </Box>
     );
   }
@@ -376,7 +376,7 @@ export function KanbanBoard() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      {error && <FetchErrorBanner onRetry={retry} />}
+      {error && <FetchErrorBanner message={error} onRetry={retry} />}
       {/* Filter toolbar */}
       <Box
         sx={{

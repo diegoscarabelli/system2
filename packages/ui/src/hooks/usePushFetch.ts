@@ -16,9 +16,16 @@ export function usePushFetch<T>(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const initialized = useRef(false);
+  const lastUrl = useRef(url);
   const [retryCount, setRetryCount] = useState(0);
   const onDataRef = useRef(onData);
   onDataRef.current = onData;
+
+  // Reset when URL changes so a new resource starts fresh
+  if (lastUrl.current !== url) {
+    lastUrl.current = url;
+    initialized.current = false;
+  }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: version and retryCount are intentional refetch triggers
   useEffect(() => {
