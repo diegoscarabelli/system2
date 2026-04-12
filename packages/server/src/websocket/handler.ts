@@ -278,6 +278,23 @@ export class WebSocketHandler {
         break;
       }
 
+      case 'tool_execution_update': {
+        // Forward heartbeat progress events to the UI (skip regular streaming updates)
+        const partialResult = (
+          event as unknown as { partialResult?: { details?: Record<string, unknown> } }
+        ).partialResult;
+        const details = partialResult?.details;
+        if (details?.heartbeat && typeof details.heartbeatMessage === 'string') {
+          this.send({
+            type: 'tool_call_progress',
+            name: event.toolName,
+            message: details.heartbeatMessage,
+            agentId,
+          });
+        }
+        break;
+      }
+
       case 'tool_execution_end': {
         // Format result as string for display
         let resultText = '';

@@ -4,6 +4,10 @@
  * Executes shell commands with streaming output, background execution,
  * and proper AbortSignal handling. Uses PowerShell on Windows, default
  * shell (bash) on macOS/Linux.
+ *
+ * Supports a heartbeat protocol for long-running commands: scripts can
+ * emit `::system2:: <message>` lines on stdout to reset the inactivity
+ * timer and push progress updates to the UI.
  */
 
 import type { ChildProcess } from 'node:child_process';
@@ -12,8 +16,15 @@ import { homedir, platform } from 'node:os';
 import type { AgentTool, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 
-const DEFAULT_TIMEOUT = 120_000; // 120 seconds
+const LEGACY_TIMEOUT = 120_000; // 120s fixed timeout (backward compat when no timeout params given)
+const DEFAULT_INACTIVITY_TIMEOUT = 60_000; // 60 seconds
+const DEFAULT_TOTAL_TIMEOUT = 600_000; // 10 minutes
+const MIN_TIMEOUT = 10_000; // 10 seconds
+const MAX_TIMEOUT = 600_000; // 10 minutes
 const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
+
+/** Sentinel pattern: lines matching `::system2:: <message>` are heartbeats. */
+export const HEARTBEAT_RE = /^::system2::\s*(.*)$/;
 
 /** Patterns that are always blocked: catastrophic, essentially irreversible operations. */
 export const BLOCKED_BASH_PATTERNS: { pattern: RegExp; reason: string }[] = [
@@ -61,15 +72,48 @@ interface BashDetails {
   error?: string;
   background?: boolean;
   command?: string;
+  heartbeat?: boolean;
+  heartbeatMessage?: string;
+}
+
+/**
+ * Filter heartbeat sentinel lines from a stdout chunk.
+ * Returns the filtered text (sentinels removed) and any heartbeat messages found.
+ */
+export function filterHeartbeats(text: string): {
+  filtered: string;
+  heartbeats: string[];
+} {
+  const lines = text.split('\n');
+  const kept: string[] = [];
+  const heartbeats: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = HEARTBEAT_RE.exec(lines[i]);
+    if (match) {
+      heartbeats.push(match[1].trim());
+    } else {
+      kept.push(lines[i]);
+    }
+  }
+
+  return { filtered: kept.join('\n'), heartbeats };
+}
+
+/** Clamp a value between min and max. */
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 /**
  * Run a command via spawn, collect output, stream via onUpdate, respect AbortSignal.
+ * Uses dual timeouts: inactivity (resets on output) and total (hard cap).
  */
 function runCommand(
   command: string,
   cwd: string,
-  timeout: number,
+  inactivityTimeout: number,
+  totalTimeout: number,
   signal?: AbortSignal,
   onUpdate?: AgentToolUpdateCallback<BashDetails>
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
@@ -80,12 +124,18 @@ function runCommand(
     let stdout = '';
     let stderr = '';
     let settled = false;
-    let timerHandle: ReturnType<typeof setTimeout> | undefined;
+    let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
+    let totalTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearTimers = () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      if (totalTimer) clearTimeout(totalTimer);
+    };
 
     const settle = (result: { stdout: string; stderr: string; exitCode: number }) => {
       if (settled) return;
       settled = true;
-      if (timerHandle) clearTimeout(timerHandle);
+      clearTimers();
       cleanup();
       resolve(result);
     };
@@ -93,7 +143,7 @@ function runCommand(
     const fail = (error: Error & { stdout?: string; stderr?: string; exitCode?: number }) => {
       if (settled) return;
       settled = true;
-      if (timerHandle) clearTimeout(timerHandle);
+      clearTimers();
       cleanup();
       error.stdout = stdout;
       error.stderr = stderr;
@@ -121,30 +171,62 @@ function runCommand(
     }
     signal?.addEventListener('abort', onAbort, { once: true });
 
-    // Timeout
-    timerHandle = setTimeout(() => {
+    // Reset the inactivity timer (called on every stdout/stderr data event)
+    const resetInactivityTimer = () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => {
+        child.kill('SIGTERM');
+        const err = new Error(
+          `Command timed out after ${inactivityTimeout / 1000}s of inactivity`
+        ) as Error & { exitCode?: number };
+        err.exitCode = 124;
+        fail(err);
+      }, inactivityTimeout);
+    };
+
+    // Start both timers
+    resetInactivityTimer();
+    totalTimer = setTimeout(() => {
       child.kill('SIGTERM');
-      const err = new Error(`Command timed out after ${timeout / 1000}s`) as Error & {
-        exitCode?: number;
-      };
+      const err = new Error(
+        `Command exceeded total timeout of ${totalTimeout / 1000}s`
+      ) as Error & { exitCode?: number };
       err.exitCode = 124;
       fail(err);
-    }, timeout);
+    }, totalTimeout);
 
     // Collect and stream output
     child.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
-      if (stdout.length + text.length <= MAX_BUFFER) {
-        stdout += text;
+      resetInactivityTimer();
+
+      // Filter heartbeat sentinel lines
+      const { filtered, heartbeats } = filterHeartbeats(text);
+
+      if (filtered && stdout.length + filtered.length <= MAX_BUFFER) {
+        stdout += filtered;
       }
-      onUpdate?.({
-        content: [{ type: 'text', text: stdout + (stderr ? `\nSTDERR:\n${stderr}` : '') }],
-        details: { stdout, stderr, exitCode: -1 },
-      });
+
+      // Emit heartbeat progress updates
+      for (const message of heartbeats) {
+        onUpdate?.({
+          content: [{ type: 'text', text: stdout + (stderr ? `\nSTDERR:\n${stderr}` : '') }],
+          details: { stdout, stderr, exitCode: -1, heartbeat: true, heartbeatMessage: message },
+        });
+      }
+
+      // Regular streaming update (only if there was non-heartbeat content)
+      if (filtered) {
+        onUpdate?.({
+          content: [{ type: 'text', text: stdout + (stderr ? `\nSTDERR:\n${stderr}` : '') }],
+          details: { stdout, stderr, exitCode: -1 },
+        });
+      }
     });
 
     child.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
+      resetInactivityTimer();
       if (stderr.length + text.length <= MAX_BUFFER) {
         stderr += text;
       }
@@ -183,13 +265,29 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
           'If true, start the command in the background and return immediately. You will receive the output as a follow-up message when the command completes. Use for long-running commands (builds, large data processing, etc.).',
       })
     ),
+    inactivity_timeout_seconds: Type.Optional(
+      Type.Number({
+        description:
+          'Inactivity timeout in seconds (10-600, default 60). The timer resets on every stdout/stderr output. Scripts can emit "::system2:: <message>" lines to reset the timer and push progress to the UI. Only takes effect when explicitly provided (legacy 120s fixed timeout otherwise).',
+        minimum: 10,
+        maximum: 600,
+      })
+    ),
+    total_timeout_seconds: Type.Optional(
+      Type.Number({
+        description:
+          'Total (wall-clock) timeout in seconds (10-600, default 600). Hard cap that never resets. Only takes effect when explicitly provided (legacy 120s fixed timeout otherwise).',
+        minimum: 10,
+        maximum: 600,
+      })
+    ),
   });
 
   const tool: AgentTool<typeof params> = {
     name: 'bash',
     label: 'Execute Shell Command',
     description:
-      'Execute a shell command and return stdout/stderr. 120-second timeout by default. Uses PowerShell on Windows, bash on macOS/Linux. Set run_in_background to true for long-running commands — you will be notified when they complete. Output is streamed as the command runs.',
+      'Execute a shell command and return stdout/stderr. 120-second timeout by default. Uses PowerShell on Windows, bash on macOS/Linux. Set run_in_background to true for long-running commands — you will be notified when they complete. Output is streamed as the command runs. For long-running foreground commands, set inactivity_timeout_seconds and/or total_timeout_seconds to use dual timeouts (inactivity resets on output, total is a hard cap). Scripts can emit "::system2:: <message>" on stdout as heartbeats to reset the inactivity timer and show progress in the UI.',
     parameters: params,
     execute: async (_toolCallId, params, signal, onUpdate) => {
       // Block catastrophic commands before execution
@@ -277,12 +375,35 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
         };
       }
 
+      // Compute effective timeouts
+      const hasTimeoutParams =
+        params.inactivity_timeout_seconds !== undefined ||
+        params.total_timeout_seconds !== undefined;
+
+      let inactivityMs: number;
+      let totalMs: number;
+
+      if (hasTimeoutParams) {
+        // New dual-timeout model
+        inactivityMs = params.inactivity_timeout_seconds
+          ? clamp(params.inactivity_timeout_seconds * 1000, MIN_TIMEOUT, MAX_TIMEOUT)
+          : DEFAULT_INACTIVITY_TIMEOUT;
+        totalMs = params.total_timeout_seconds
+          ? clamp(params.total_timeout_seconds * 1000, MIN_TIMEOUT, MAX_TIMEOUT)
+          : DEFAULT_TOTAL_TIMEOUT;
+      } else {
+        // Legacy: single fixed timeout matching the old 120s behavior
+        inactivityMs = LEGACY_TIMEOUT;
+        totalMs = LEGACY_TIMEOUT;
+      }
+
       // Foreground execution with streaming
       try {
         const { stdout, stderr, exitCode } = await runCommand(
           params.command,
           cwd,
-          DEFAULT_TIMEOUT,
+          inactivityMs,
+          totalMs,
           signal,
           onUpdate
         );

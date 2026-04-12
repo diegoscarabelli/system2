@@ -299,7 +299,13 @@ function ToolCallItem({ tc }: { tc: ToolCall }) {
           {tc.name}
         </Text>
         {agentTarget && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{agentTarget}</Text>}
-        {summary && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{summary}</Text>}
+        {isRunning && tc.progressMessage ? (
+          <Text sx={{ fontSize: 0, color: 'fg.muted', fontStyle: 'italic' }}>
+            {tc.progressMessage}
+          </Text>
+        ) : (
+          summary && <Text sx={{ fontSize: 0, color: 'fg.muted' }}>{summary}</Text>
+        )}
         {hasContent && (
           <Text
             sx={{

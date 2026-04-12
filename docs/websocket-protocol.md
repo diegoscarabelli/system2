@@ -46,6 +46,7 @@ type ServerMessage =
   | { type: 'assistant_end'; agentId?: number; errorMessage?: string }
   | { type: 'tool_call_start'; name: string; input?: string; agentId?: number }
   | { type: 'tool_call_end'; name: string; result: string; agentId?: number }
+  | { type: 'tool_call_progress'; name: string; message: string; agentId?: number }
   | { type: 'artifact'; url: string; title?: string; filePath?: string }
   | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number; agentId?: number }
   | { type: 'provider_info'; provider: string; agentId: number }
@@ -69,6 +70,7 @@ type ServerMessage =
 | `thinking_chunk` / `thinking_end` | Streaming extended thinking blocks |
 | `assistant_chunk` / `assistant_end` | Streaming response text. `assistant_end` carries `errorMessage` when the LLM stop reason was an error; the UI renders it as a collapsible system message in the chat timeline. |
 | `tool_call_start` / `tool_call_end` | Tool execution lifecycle |
+| `tool_call_progress` | Heartbeat progress from a long-running tool (e.g., bash `::system2::` sentinel). Carries the progress `message` for UI display. |
 | `artifact` | Display artifact in a UI tab. Includes `title` (from DB or filename) and `filePath` (absolute path for tab dedup and reload targeting). Also sent on live reload (file watch). |
 | `context_usage` | Context window usage after each agent turn |
 | `provider_info` | Sent on connect/switch: current LLM provider for an agent |
@@ -165,6 +167,7 @@ Each WebSocket connection gets its own `WebSocketHandler` instance. It:
    - `message_update` (with text) -> `assistant_chunk`
    - `message_end` -> `assistant_end` (with `errorMessage` when `stopReason` is `'error'`)
    - `tool_execution_start` -> `tool_call_start`
+   - `tool_execution_update` (heartbeat only) -> `tool_call_progress`
    - `tool_execution_end` -> `tool_call_end`
    - `agent_end` -> `context_usage` + `ready_for_input`
 5. Captures user messages in the target agent's chat cache and broadcasts to other tabs

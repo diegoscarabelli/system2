@@ -116,6 +116,12 @@ export function useWebSocket() {
           break;
         }
 
+        case 'tool_call_progress': {
+          const aid = message.agentId ?? state.guideAgentId;
+          if (aid !== null) state.updateToolCallProgress(message.name, message.message, aid);
+          break;
+        }
+
         case 'tool_call_end': {
           const aid = message.agentId ?? state.guideAgentId;
           if (aid !== null) state.finishToolCall(message.name, message.result, aid);
