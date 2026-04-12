@@ -25,7 +25,7 @@ export function createShowArtifactTool(db: DatabaseClient) {
     name: 'show_artifact',
     label: 'Show Artifact',
     description:
-      'Display an artifact file in the UI panel. The file can be anywhere on the filesystem — specify an absolute path. If the artifact is registered in the database, its title is used for the tab label.',
+      'Display an artifact file in the UI panel. The file can be anywhere on the filesystem — specify an absolute path. If the artifact is registered in the database, its title is used for the tab label. The UI watches the file for live reload. Only one artifact is watched per client connection at a time.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       // Reject bare relative paths — require absolute or ~/ prefix

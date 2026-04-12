@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import type {
   ChatConfig,
   JobExecution,
+  KnowledgeConfig,
   LlmConfig,
   SchedulerConfig,
   ServerMessage,
@@ -61,6 +62,7 @@ export interface ServerConfig {
   toolsConfig?: ToolsConfig;
   schedulerConfig?: SchedulerConfig;
   chatConfig?: ChatConfig;
+  knowledgeConfig?: KnowledgeConfig;
 }
 
 export class Server {
@@ -116,6 +118,7 @@ export class Server {
       chatMaxMessages,
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
+      knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
       ...callbacks,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
@@ -133,6 +136,7 @@ export class Server {
       chatMaxMessages,
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
+      knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
       ...callbacks,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
@@ -379,6 +383,7 @@ export class Server {
       chatMaxMessages,
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
+      knowledgeBudgetChars: this.config.knowledgeConfig?.budget_chars,
       ...this.buildAgentCallbacks(),
     });
 
@@ -495,6 +500,7 @@ export class Server {
       this.db,
       SYSTEM2_DIR,
       intervalMinutes,
+      this.config.knowledgeConfig?.budget_chars,
       onJobChange
     );
 
@@ -582,7 +588,13 @@ export class Server {
             this.db,
             'memory-update',
             'catch-up',
-            () => buildAndDeliverMemoryUpdate(this.narratorHost, this.narratorId, SYSTEM2_DIR),
+            () =>
+              buildAndDeliverMemoryUpdate(
+                this.narratorHost,
+                this.narratorId,
+                SYSTEM2_DIR,
+                this.config.knowledgeConfig?.budget_chars
+              ),
             onJobChange
           );
         } catch (error) {

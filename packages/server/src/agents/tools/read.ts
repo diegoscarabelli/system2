@@ -19,7 +19,8 @@ export function createReadTool() {
   const tool: AgentTool<typeof params> = {
     name: 'read',
     label: 'Read File',
-    description: 'Read the contents of a file from the filesystem. Supports text files.',
+    description:
+      'Read the contents of a file from the filesystem. Accepts absolute paths or ~/ relative paths. Returns the full file content as text. Use this to inspect files before editing, review data outputs, or read configuration.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {

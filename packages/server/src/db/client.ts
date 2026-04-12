@@ -390,6 +390,17 @@ export class DatabaseClient {
     return stmt.all(task) as TaskComment[];
   }
 
+  updateTaskComment(id: number, content: string): TaskComment | null {
+    const stmt = this.db.prepare(`
+      UPDATE task_comment
+      SET content = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+      WHERE id = ?
+      RETURNING *
+    `);
+
+    return (stmt.get(content, id) as TaskComment) || null;
+  }
+
   deleteTaskComment(id: number): boolean {
     const stmt = this.db.prepare('DELETE FROM task_comment WHERE id = ?');
     return stmt.run(id).changes > 0;

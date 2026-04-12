@@ -327,6 +327,31 @@ describe('buildAndDeliverMemoryUpdate', () => {
     expect(host.calls).toHaveLength(1);
     expect(host.calls[0].content).toContain('Narrative content.');
   });
+
+  it('delivers condensation message when knowledge file exceeds budget with no summaries', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const knowledgeDir = join(dir, 'knowledge');
+    mkdirSync(knowledgeDir, { recursive: true });
+    writeFileSync(
+      join(knowledgeDir, 'memory.md'),
+      '---\nlast_narrator_update_ts: 2026-03-10T00:00:00Z\n---\n# Memory'
+    );
+    // Write an oversized infrastructure.md (>20,000 chars)
+    writeFileSync(
+      join(knowledgeDir, 'infrastructure.md'),
+      '# Infrastructure\n\n' + 'x'.repeat(21_000)
+    );
+
+    const host = mockNarratorHost();
+    await buildAndDeliverMemoryUpdate(host, 2, dir);
+    expect(host.calls).toHaveLength(1);
+
+    const msg = host.calls[0].content;
+    expect(msg).toContain('[Scheduled task: memory-update]');
+    expect(msg).toContain('## Knowledge Files Requiring Condensation');
+    expect(msg).toContain('infrastructure.md');
+    expect(msg).not.toContain('## Daily summaries to incorporate');
+  });
 });
 
 describe('stripSessionEntry', () => {

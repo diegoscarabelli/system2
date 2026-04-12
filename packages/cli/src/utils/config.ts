@@ -54,6 +54,10 @@ export interface System2Config {
     /** Maximum number of chat messages to keep in history (default: 100) */
     maxHistoryMessages: number;
   };
+  knowledge: {
+    /** Maximum characters per knowledge file before truncation (default: 20000) */
+    budgetChars: number;
+  };
 }
 
 /**
@@ -101,6 +105,9 @@ interface TomlConfig {
   chat?: {
     max_history_messages?: number;
   };
+  knowledge?: {
+    budget_chars?: number;
+  };
 }
 
 /**
@@ -108,7 +115,7 @@ interface TomlConfig {
  */
 const DEFAULT_OPERATIONAL: Pick<
   System2Config,
-  'backup' | 'session' | 'logs' | 'scheduler' | 'chat'
+  'backup' | 'session' | 'logs' | 'scheduler' | 'chat' | 'knowledge'
 > = {
   backup: {
     cooldownHours: 24,
@@ -126,6 +133,9 @@ const DEFAULT_OPERATIONAL: Pick<
   },
   chat: {
     maxHistoryMessages: 100,
+  },
+  knowledge: {
+    budgetChars: 20_000,
   },
 };
 
@@ -205,9 +215,12 @@ function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
  */
 function convertTomlOperational(
   toml: TomlConfig
-): Partial<Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler' | 'chat'>> {
-  const config: Partial<Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler' | 'chat'>> =
-    {};
+): Partial<
+  Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler' | 'chat' | 'knowledge'>
+> {
+  const config: Partial<
+    Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler' | 'chat' | 'knowledge'>
+  > = {};
 
   if (toml.backup) {
     config.backup = {
@@ -243,6 +256,12 @@ function convertTomlOperational(
     config.chat = {
       maxHistoryMessages:
         toml.chat.max_history_messages ?? DEFAULT_OPERATIONAL.chat.maxHistoryMessages,
+    };
+  }
+
+  if (toml.knowledge) {
+    config.knowledge = {
+      budgetChars: toml.knowledge.budget_chars ?? DEFAULT_OPERATIONAL.knowledge.budgetChars,
     };
   }
 
@@ -320,6 +339,7 @@ export function buildConfigToml(options: {
   logs?: System2Config['logs'];
   scheduler?: System2Config['scheduler'];
   chat?: System2Config['chat'];
+  knowledge?: System2Config['knowledge'];
 }): string {
   const lines: string[] = [
     '# System2 Configuration',
@@ -425,6 +445,12 @@ export function buildConfigToml(options: {
   lines.push('[chat]');
   lines.push(`# Maximum number of chat messages to keep in UI history`);
   lines.push(`max_history_messages = ${chat.maxHistoryMessages}`);
+  lines.push('');
+
+  const knowledge = options.knowledge ?? DEFAULT_OPERATIONAL.knowledge;
+  lines.push('[knowledge]');
+  lines.push(`# Maximum characters per knowledge file before truncation`);
+  lines.push(`budget_chars = ${knowledge.budgetChars}`);
   lines.push('');
 
   return lines.join('\n');

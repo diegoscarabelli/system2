@@ -75,6 +75,9 @@ daily_summary_interval_minutes = 30  # Narrator summary frequency
 
 [chat]
 max_history_messages = 1000  # Max messages in chat history ring buffer
+
+[knowledge]
+budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overruns
 ```
 
 ## Sections
@@ -89,6 +92,7 @@ max_history_messages = 1000  # Max messages in chat history ring buffer
 | `[logs]` | Log rotation threshold and archive count | -- |
 | `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
 | `[chat]` | Chat history settings | `ChatConfig` |
+| `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
 
 ## LLM Providers
 
@@ -130,21 +134,16 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 
 ## Application Directory
 
+Config-relevant paths within `~/.system2/` (see [Architecture](architecture.md#runtime-architecture) for the full directory layout):
+
 ```
 ~/.system2/
-├── .git/                  # Version control for text files
-├── config.toml            # Settings and credentials (0600)
-├── app.db                 # SQLite database
+├── config.toml            # Settings and credentials (0600, gitignored)
+├── app.db                 # SQLite database (gitignored)
 ├── server.pid             # PID file when server is running
-├── knowledge/
-│   ├── infrastructure.md  # Data stack details (Guide)
-│   ├── user.md            # User profile (Guide)
-│   ├── memory.md          # Long-term memory (Narrator)
-│   └── daily_summaries/   # Activity summaries (Narrator)
-├── sessions/              # Agent JSONL session files
-├── projects/              # Project workspaces ({id}_{name}/ per project)
-└── logs/
-    ├── system2.log        # Server logs
+├── sessions/              # Agent JSONL session files (gitignored)
+└── logs/                  # Server logs (gitignored)
+    ├── system2.log
     └── system2.log.N      # Rotated archives (1-5)
 ```
 
@@ -154,5 +153,5 @@ Auto-backups: `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`
 
 - [CLI](packages/cli.md): `system2 onboard` creates the config
 - [Agents](agents.md): how LLM config drives provider selection
-- [Knowledge System](knowledge-system.md): knowledge directory details
+- [Knowledge System](knowledge-system.md): knowledge directory details and file size budget
 - [Scheduler](scheduler.md): `daily_summary_interval_minutes`

@@ -24,6 +24,10 @@ logs/
 
 # Session files (JSONL + per-agent chat caches)
 sessions/
+
+# Scratchpad (transient working files: parquet, pickle, draft notebooks, prototype scripts)
+scratchpad/
+projects/**/scratchpad/
 `;
 
 /**

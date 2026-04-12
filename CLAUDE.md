@@ -29,6 +29,8 @@ The [`docs/`](docs/) directory contains in-depth documentation. Start with [`doc
 | [`agents.md`](docs/agents.md) | Multi-agent orchestration, LLM failover, inter-agent messaging |
 | [`tools.md`](docs/tools.md) | Custom agent tools: typed parameters, factory pattern, execution |
 | [`database.md`](docs/database.md) | SQLite schema, WAL mode, better-sqlite3 usage |
+| [`artifacts.md`](docs/artifacts.md) | Published analytical outputs, storage, DB registration, UI rendering, postMessage bridge |
+| [`scratchpad.md`](docs/scratchpad.md) | Working area for exploration and prototyping, intermediate data and notebook recommendations, promotion to artifacts |
 | [`websocket-protocol.md`](docs/websocket-protocol.md) | Real-time UI–server communication protocol |
 | [`knowledge-system.md`](docs/knowledge-system.md) | Persistent knowledge files, git-tracked, dynamic prompt injection |
 | [`skills.md`](docs/skills.md) | Reusable agent workflow instructions, SKILL.md format, discovery and injection |

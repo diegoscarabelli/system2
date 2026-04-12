@@ -7,7 +7,7 @@ Agents interact with the system through custom tools defined in `packages/server
 Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts`):
 
 - Eight tools are always included: `bash`, `read`, `edit`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `web_fetch`
-- `show_artifact` is Guide-only: the Guide is the only agent that interacts with the user via the UI
+- `show_artifact` is included for all agents: any agent can display files in the UI artifact viewer
 - `set_reminder`, `cancel_reminder`, and `list_reminders` are included for all agents when a `ReminderManager` is provided
 - `spawn_agent`, `terminate_agent`, and `trigger_project_story` are conditional: only agents that receive a spawner callback (Guide and Conductors) get these tools
 - `resurrect_agent` is Guide-only: only the Guide receives a resurrector callback
@@ -116,6 +116,7 @@ Executes against `~/.system2/app.db` using structured named operations that dele
 | `createTaskLink` | `source`, `target`, `relationship` | — | Project-scoped (checked via source task). `relationship`: `blocked_by` \| `relates_to` \| `duplicates` |
 | `deleteTaskLink` | `id` | — | Project-scoped (checked via source task) |
 | `createTaskComment` | `task`, `content` | — | Project-scoped. `author` auto-filled from agent ID. |
+| `updateTaskComment` | `id`, `content` | — | Project-scoped. **Author-only:** only the original author can update their own comment. Replaces the entire comment body. |
 | `deleteTaskComment` | `id` | — | Project-scoped |
 | `createArtifact` | `file_path`, `title` | `project`, `description`, `tags` | Any agent. Project scope checked if `project` is set. |
 | `updateArtifact` | `id` | `file_path`, `title`, `project`, `description`, `tags` | Any agent. Project scope checked. |
@@ -128,6 +129,7 @@ Valid `priority` values: `"low"`, `"medium"`, `"high"`
 **Permission model:**
 
 - **Role checks:** `createProject` is Guide-only. `updateProject` is Guide and Conductor only (Conductors restricted to their own project). Setting `assignee` on tasks is Guide and Conductor only.
+- **Author checks:** `updateTaskComment` is restricted to the original author. Other agents must post a new comment instead of editing someone else's attributed content.
 - **Project scope:** if the calling agent is assigned to a project, it can only create/update/delete records belonging to that same project. Agents with no project assignment (Guide, Narrator) and records with no project association are unrestricted.
 
 ### `message_agent`
@@ -144,7 +146,7 @@ Routes through `AgentRegistry` to find the target `AgentHost`, then calls `deliv
 
 ### `show_artifact`
 
-Display an artifact file in the UI panel. **Guide-only**: the Guide is the only agent that interacts with the user via the UI. Supports tabbed display (multiple artifacts open at once).
+Display an artifact file in the UI panel. **Guide-only**: the Guide is the only agent that interacts with the user via the UI. Supports tabbed display (multiple artifacts open at once). See [Artifacts](artifacts.md) for the full artifact system documentation.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|

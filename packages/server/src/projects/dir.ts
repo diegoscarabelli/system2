@@ -45,6 +45,7 @@ export function resolveProjectDir(
 
   // Fast path: canonical folder already exists
   if (existsSync(canonicalPath)) {
+    ensureSubdirs(canonicalPath);
     return canonicalPath;
   }
 
@@ -65,6 +66,7 @@ export function resolveProjectDir(
   if (candidates.length === 0) {
     // No existing folder: create fresh
     mkdirSync(canonicalPath, { recursive: true });
+    ensureSubdirs(canonicalPath);
     return canonicalPath;
   }
 
@@ -86,5 +88,12 @@ export function resolveProjectDir(
     }
   }
 
+  ensureSubdirs(canonicalPath);
   return canonicalPath;
+}
+
+function ensureSubdirs(projectDir: string): void {
+  for (const sub of ['artifacts', 'scratchpad']) {
+    mkdirSync(join(projectDir, sub), { recursive: true });
+  }
 }

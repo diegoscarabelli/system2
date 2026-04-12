@@ -78,6 +78,13 @@ function createMockDb() {
       taskComments.set(id, comment);
       return comment;
     },
+    updateTaskComment: (id: number, content: string) => {
+      const c = taskComments.get(id);
+      if (!c) return null;
+      c.content = content;
+      c.updated_at = 'later';
+      return c;
+    },
     deleteTaskComment: (id: number) => taskComments.delete(id),
     createArtifact: (a: Partial<Artifact>) => {
       const id = nextId++;
@@ -451,6 +458,107 @@ describe('write_system2_db tool', () => {
       // Verify author was set to agentId (2)
       const comment = [...db._taskComments.values()].pop();
       expect(comment?.author).toBe(2);
+    });
+  });
+
+  describe('updateTaskComment', () => {
+    it('enforces project scope', async () => {
+      const db = createMockDb();
+      addAgent(db, 2, 'conductor', 10);
+      addTask(db, 50, 20);
+      db._taskComments.set(1, {
+        id: 1,
+        task: 50,
+        author: 2,
+        content: 'old',
+        created_at: 'now',
+        updated_at: 'now',
+      } as unknown as TaskComment);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'updateTaskComment',
+        id: 1,
+        content: 'new',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('scoped to project 10');
+    });
+
+    it('rejects updates by a non-author', async () => {
+      const db = createMockDb();
+      addAgent(db, 2, 'conductor', 10);
+      addAgent(db, 3, 'reviewer', 10);
+      addTask(db, 50, 10);
+      db._taskComments.set(1, {
+        id: 1,
+        task: 50,
+        author: 3,
+        content: 'original',
+        created_at: 'now',
+        updated_at: 'now',
+      } as unknown as TaskComment);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'updateTaskComment',
+        id: 1,
+        content: 'tampered',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('original author');
+      expect(db._taskComments.get(1)?.content).toBe('original');
+    });
+
+    it('succeeds when the author updates their own comment', async () => {
+      const db = createMockDb();
+      addAgent(db, 2, 'conductor', 10);
+      addTask(db, 50, 10);
+      db._taskComments.set(1, {
+        id: 1,
+        task: 50,
+        author: 2,
+        content: '- [ ] step one',
+        created_at: 'now',
+        updated_at: 'now',
+      } as unknown as TaskComment);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'updateTaskComment',
+        id: 1,
+        content: '- [x] step one',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('- [x] step one');
+      expect(db._taskComments.get(1)?.content).toBe('- [x] step one');
+    });
+
+    it('returns error when comment not found', async () => {
+      const db = createMockDb();
+      addAgent(db, 2, 'conductor', 10);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'updateTaskComment',
+        id: 999,
+        content: 'whatever',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('No task comment found');
+    });
+
+    it('returns error when content is missing', async () => {
+      const db = createMockDb();
+      addAgent(db, 2, 'conductor', 10);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 2);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'updateTaskComment',
+        id: 1,
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain('requires: content');
     });
   });
 

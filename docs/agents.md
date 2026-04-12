@@ -17,7 +17,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 | **Guide** | Primary user-facing agent. Helps brainstorm and plan, starts projects, interfaces with the multi-agent system, and relays updates. Users may also interact directly with other active agents; Guide mediation is preferred in most cases. | Singleton, persistent | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
 | **Narrator** | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. [Schedule-driven](scheduler.md). | Singleton, persistent | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
 | **Conductor** | Orchestrates and executes work within a project: breaks it into tasks, spawns specialist agents or executes directly, and coordinates with the Reviewer before reporting completion. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
-| **Reviewer** | Critically assesses work before it is considered complete. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
+| **Reviewer** | Reviews code before push, assesses data analysis for reasoning fallacies (Kahneman's System 2 lens), and evaluates statistical quality of findings. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
 
 **Guide and Narrator** are singletons created at server startup. Their sessions persist indefinitely across restarts.
 
@@ -109,6 +109,7 @@ Messages flow through two paths depending on whether the sender is the user or a
 
 - **User → Guide → User**: the UI sends a `user_message` over WebSocket. The `WebSocketHandler` calls `agentHost.prompt()`, which blocks while the agent processes. As the agent thinks, generates text, and executes tools, session events stream back through the WebSocket as typed `ServerMessage` chunks. Chat history is captured in a server-side ring buffer (default 1000 messages) and replayed on reconnect, so the UI is stateless. See [WebSocket Protocol](websocket-protocol.md) for the full message format, queuing, multi-tab broadcast, and history capture.
 - **Agent → Agent**: agents communicate via `deliverMessage()`, which wraps the Pi SDK's `sendCustomMessage()`. Messages appear as `custom_message` entries in the recipient's session. The Guide relays relevant agent updates to the user as part of its normal response stream.
+- **User → non-Guide agent**: the user can message any active agent directly via the UI. When this happens, the system automatically summarizes the exchange and delivers it to the Guide after a short delay, so the Guide stays informed without requiring manual relay.
 
 Two methods for sending messages, chosen based on the sender:
 
@@ -210,7 +211,7 @@ These patterns are intentionally narrow to avoid false positives on rate-limit e
 
 The 50% split threshold matches the `reserveTokens` auto-compaction setting, leaving headroom for the system prompt, knowledge files, and compaction overhead. The result is a session with a compact summary of the safe history plus the recent tail. The overflow-causing prompt is not retried; the agent resumes naturally on the next interaction. Pending deliveries (scheduled tasks, inter-agent messages) are replayed on the recovered session via `sendCustomMessage`, preserving them for the agent to process. If no split point below the threshold is found, or if the tail is empty, recovery skips the corresponding steps. If recovery fails mid-way after the file has been truncated, the tail is restored to the file as a best-effort safeguard.
 
-Auto-compaction is also configured to fire earlier (at ~50% of the context window via `reserveTokens`, instead of the SDK default of ~98%) to reduce the chance of overflow in the first place.
+Auto-compaction is also configured to fire earlier (at ~50% of the context window via `reserveTokens`, instead of the SDK default of ~98%) to reduce the chance of overflow in the first place. The tight threshold also helps with rate limits: per-minute token quotas tend to be on the same order of magnitude as the context window size, so multiple agents calling in the same minute can exhaust the quota. Keeping context compact reduces per-call token consumption and leaves more headroom for concurrent agents.
 
 **Last-resort provider recovery:** after all normal recovery paths (retry, failover, context overflow) are exhausted, `handlePotentialError` checks if a different provider is available before giving up. This covers cases where an agent is stuck on a dead fallback provider (e.g., Anthropic with $0 credits returning 400 `client` errors) while the primary provider's cooldown has expired. `getNextProvider()` iterates in provider order (primary first), so agents naturally gravitate back to the primary when it becomes available.
 

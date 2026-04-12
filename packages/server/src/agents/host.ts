@@ -130,6 +130,7 @@ export interface AgentHostConfig {
   /** Shared AuthResolver for cross-agent rate limit awareness. Falls back to creating a local instance. */
   authResolver?: AuthResolver;
   reminderManager?: ReminderManager;
+  knowledgeBudgetChars?: number;
   /** Called after every successful write_system2_db operation. */
   onDatabaseWrite?: OnDatabaseWrite;
   /** Called when the agent's busy state changes. */
@@ -180,6 +181,7 @@ export class AgentHost {
   private contextOverflowHandled = false;
   private agentModels: Record<string, string> = {};
   private reminderManager?: ReminderManager;
+  private knowledgeBudgetChars: number;
   private unsubscribeSession: (() => void) | null = null;
   private onDatabaseWrite?: OnDatabaseWrite;
   private onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
@@ -195,6 +197,7 @@ export class AgentHost {
     this.resurrector = config.resurrector;
     this.chatMaxMessages = config.chatMaxMessages ?? 1000;
     this.reminderManager = config.reminderManager;
+    this.knowledgeBudgetChars = Math.max(config.knowledgeBudgetChars ?? 20_000, 5_000);
     this.onDatabaseWrite = config.onDatabaseWrite;
     this.onBusyChange = config.onBusyChange;
     this.onAgentTerminate = config.onAgentTerminate;
@@ -379,7 +382,10 @@ export class AgentHost {
     this.resourceLoader = new DefaultResourceLoader({
       cwd: SYSTEM2_DIR,
       agentDir: SYSTEM2_DIR,
-      systemPromptOverride: () => `${staticPrompt}${this.loadKnowledgeContext()}`,
+      systemPromptOverride: () => {
+        const identity = `\n\n## Your Identity\n\nYour agent ID is **${agentRecord.id}**. Your role is **${agentRecord.role}**.${agentRecord.project != null ? ` Your project ID is **${agentRecord.project}**.` : ''}`;
+        return `${staticPrompt}${identity}${this.loadKnowledgeContext()}\n\n---\n\nConversation history follows.`;
+      },
       // Suppress SDK default skill directories (~/.pi/agent/skills/, .pi/skills/)
       // but provide our own paths. User dir first for first-wins precedence.
       noSkills: true,
@@ -931,11 +937,22 @@ export class AgentHost {
 
   /**
    * Load knowledge files and return as context string for the system prompt.
-   * Empty files (0 lines) are skipped.
+   * Empty files (0 lines) are skipped. Files exceeding the knowledge budget are
+   * truncated at the tail.
    */
   private loadKnowledgeContext(): string {
+    const MAX_KNOWLEDGE_CHARS = this.knowledgeBudgetChars;
     const knowledgeDir = join(SYSTEM2_DIR, 'knowledge');
     const sections: string[] = [];
+
+    const readWithBudget = (filePath: string): string => {
+      const raw = readFileSync(filePath, 'utf-8');
+      if (raw.length <= MAX_KNOWLEDGE_CHARS) return raw;
+      return (
+        raw.slice(0, MAX_KNOWLEDGE_CHARS) +
+        `\n\n[...truncated: file exceeds ${MAX_KNOWLEDGE_CHARS.toLocaleString()} char budget]`
+      );
+    };
 
     const addSection = (filePath: string, content: string) => {
       if (content.trim().split('\n').length > 0) {
@@ -947,14 +964,14 @@ export class AgentHost {
     for (const file of ['infrastructure.md', 'user.md', 'memory.md']) {
       const filePath = join(knowledgeDir, file);
       if (existsSync(filePath)) {
-        addSection(filePath, readFileSync(filePath, 'utf-8'));
+        addSection(filePath, readWithBudget(filePath));
       }
     }
 
     // Role-specific knowledge file (guide.md, conductor.md, narrator.md, reviewer.md)
     const roleKnowledgePath = join(knowledgeDir, `${this.agentRole}.md`);
     if (existsSync(roleKnowledgePath)) {
-      addSection(roleKnowledgePath, readFileSync(roleKnowledgePath, 'utf-8'));
+      addSection(roleKnowledgePath, readWithBudget(roleKnowledgePath));
     }
 
     // Role-aware activity context:
@@ -962,7 +979,7 @@ export class AgentHost {
     if (this.agentProject !== null && this.agentProjectDirName) {
       const projectLogPath = join(SYSTEM2_DIR, 'projects', this.agentProjectDirName, 'log.md');
       if (existsSync(projectLogPath)) {
-        addSection(projectLogPath, readFileSync(projectLogPath, 'utf-8'));
+        addSection(projectLogPath, readWithBudget(projectLogPath));
       }
     } else {
       const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -975,7 +992,7 @@ export class AgentHost {
           .reverse(); // chronological order
         for (const file of summaryFiles) {
           const filePath = join(summariesDir, file);
-          addSection(filePath, readFileSync(filePath, 'utf-8'));
+          addSection(filePath, readWithBudget(filePath));
         }
       }
     }
