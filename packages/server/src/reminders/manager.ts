@@ -7,6 +7,7 @@
  */
 
 import type { AgentRegistry } from '../agents/registry.js';
+import { log } from '../utils/logger.js';
 
 export interface PendingReminder {
   id: number;
@@ -79,7 +80,7 @@ export class ReminderManager {
 
     const host = this.registry.get(reminder.agentId);
     if (!host) {
-      console.warn(
+      log.warn(
         `[ReminderManager] Agent ${reminder.agentId} not active, dropping reminder #${reminderId}`
       );
       return;
@@ -88,6 +89,6 @@ export class ReminderManager {
     const content = `[Reminder #${reminderId}]\n\n${reminder.message}`;
     host
       .deliverMessage(content, { sender: 0, receiver: reminder.agentId, timestamp: Date.now() })
-      .catch((err) => console.error('[ReminderManager] delivery failed:', err));
+      .catch((err) => log.error('[ReminderManager] delivery failed:', err));
   }
 }

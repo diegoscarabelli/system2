@@ -9,6 +9,7 @@
  */
 
 import { Cron } from 'croner';
+import { log } from '../utils/logger.js';
 
 interface ScheduledJob {
   name: string;
@@ -27,7 +28,7 @@ export class Scheduler {
   schedule(name: string, pattern: string, handler: () => void | Promise<void>): void {
     const cron = new Cron(pattern, handler);
     this.jobs.push({ name, cron });
-    console.log(`[Scheduler] Registered job "${name}" with pattern "${pattern}"`);
+    log.info(`[Scheduler] Registered job "${name}" with pattern "${pattern}"`);
   }
 
   /**
@@ -36,7 +37,7 @@ export class Scheduler {
   stop(): void {
     for (const job of this.jobs) {
       job.cron.stop();
-      console.log(`[Scheduler] Stopped job "${job.name}"`);
+      log.info(`[Scheduler] Stopped job "${job.name}"`);
     }
     this.jobs = [];
   }

@@ -7,6 +7,7 @@
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { log } from '../utils/logger.js';
 import {
   CONDUCTOR_TEMPLATE,
   createMemoryTemplate,
@@ -57,7 +58,7 @@ export function initializeKnowledge(system2Dir: string): void {
   for (const [filePath, content] of templates) {
     if (!existsSync(filePath)) {
       writeFileSync(filePath, content, 'utf-8');
-      console.log(`[Knowledge] Created ${filePath}`);
+      log.info(`[Knowledge] Created ${filePath}`);
     }
   }
 }

@@ -34,6 +34,7 @@ import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js';
 import type { ReminderManager } from '../reminders/manager.js';
 import { filterByRole } from '../skills/loader.js';
+import { log } from '../utils/logger.js';
 import { AuthResolver } from './auth-resolver.js';
 import type { AgentRegistry } from './registry.js';
 import {
@@ -212,7 +213,7 @@ export class AgentHost {
     this.currentProvider = this.authResolver.primaryProvider;
     this.currentKeyIndex = this.authResolver.getActiveKey(this.currentProvider)?.keyIndex ?? 0;
 
-    console.log('[AgentHost] Auth status:', this.authResolver.getStatus());
+    log.info('[AgentHost] Auth status:', this.authResolver.getStatus());
   }
 
   /**
@@ -241,7 +242,7 @@ export class AgentHost {
       }
     }
     this.agentRole = agentRecord.role;
-    console.log('[AgentHost] Agent:', { id: agentRecord.id, role: agentRecord.role });
+    log.info('[AgentHost] Agent:', { id: agentRecord.id, role: agentRecord.role });
 
     // Session directory — use role_id format (e.g., sessions/guide_1/)
     const sessionDirName = `${agentRecord.role}_${agentRecord.id}`;
@@ -272,7 +273,7 @@ export class AgentHost {
     if (!this.session) {
       const rotated = rotateSessionIfNeeded(agentSessionDir, SYSTEM2_DIR);
       if (rotated) {
-        console.log('[AgentHost] Session file rotated to new file');
+        log.info('[AgentHost] Session file rotated to new file');
       }
     }
 
@@ -291,7 +292,7 @@ export class AgentHost {
 
     let llmProvider = this.currentProvider;
 
-    console.log('[AgentHost] Agent config loaded:', {
+    log.info('[AgentHost] Agent config loaded:', {
       name: agentConfig.name,
       models: agentConfig.models,
       provider: llmProvider,
@@ -339,7 +340,7 @@ export class AgentHost {
           modelId = id;
           resolvedProvider = provider;
           if (provider !== llmProvider) {
-            console.log(
+            log.info(
               `[AgentHost] No model for ${llmProvider} in ${agentConfig.name}, falling back to ${provider}`
             );
           }
@@ -356,7 +357,7 @@ export class AgentHost {
       this.currentKeyIndex = this.authResolver.getActiveKey(resolvedProvider)?.keyIndex ?? 0;
     }
 
-    console.log('[AgentHost] Selected model:', modelId, 'for provider:', llmProvider);
+    log.info('[AgentHost] Selected model:', modelId, 'for provider:', llmProvider);
 
     // Find model using registry
     const model = this.modelRegistry.find(llmProvider, modelId);
@@ -364,7 +365,7 @@ export class AgentHost {
       throw new Error(`Model not found: ${llmProvider}/${modelId}`);
     }
 
-    console.log('[AgentHost] Model found:', model ? 'YES' : 'NO');
+    log.info('[AgentHost] Model found:', model ? 'YES' : 'NO');
 
     // Store context window size for overflow recovery
     this.contextWindow = model.contextWindow;
@@ -428,7 +429,7 @@ export class AgentHost {
     this.compactionDepth = agentConfig.compaction_depth ?? 0;
     if (this.compactionDepth > 0) {
       this.compactionCount = this.readCompactionCount();
-      console.log(
+      log.info(
         `[AgentHost] Compaction pruning enabled: depth=${this.compactionDepth}, count=${this.compactionCount}`
       );
     }
@@ -438,8 +439,8 @@ export class AgentHost {
       this.handleSessionEvent(event);
     });
 
-    console.log(`[AgentHost] ${agentRecord.role} agent session initialized with JSONL persistence`);
-    console.log('[AgentHost] Using provider:', this.currentProvider);
+    log.info(`[AgentHost] ${agentRecord.role} agent session initialized with JSONL persistence`);
+    log.info('[AgentHost] Using provider:', this.currentProvider);
   }
 
   /**
@@ -451,7 +452,7 @@ export class AgentHost {
   private handleSessionEvent(event: AgentSessionEvent): void {
     // Check for API errors that need failover handling (async, errors logged internally)
     void this.handlePotentialError(event).catch((err) => {
-      console.error('[AgentHost] handlePotentialError threw unexpectedly:', err);
+      log.error('[AgentHost] handlePotentialError threw unexpectedly:', err);
     });
 
     // Track busy state from agent activity
@@ -518,14 +519,14 @@ export class AgentHost {
     this.lastTurnErrored = true;
 
     const errorMessage = message.errorMessage;
-    console.log('[AgentHost] API error detected:', errorMessage);
+    log.info('[AgentHost] API error detected:', errorMessage);
 
     // Categorize the error and build human-readable prefix for chat messages
     const category = categorizeError({ message: errorMessage });
     const statusCode = extractStatusCode({ message: errorMessage });
     const label = categoryLabel(category);
     const errorPrefix = statusCode ? `${statusCode} ${label}` : label;
-    console.log('[AgentHost] Error category:', category);
+    log.info('[AgentHost] Error category:', category);
 
     // Get retry key for this error type
     const retryKey = `${this.currentProvider}:${category}`;
@@ -555,7 +556,7 @@ export class AgentHost {
           nextProvider === this.currentProvider
             ? `on ${this.currentProvider}, rotating to next key`
             : `on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}`;
-        console.log(
+        log.info(
           `[AgentHost] Key ${this.currentProvider}:${this.currentKeyIndex} already in cooldown`
         );
         await this.reinitializeWithProvider(
@@ -572,9 +573,7 @@ export class AgentHost {
     // Check if we should retry
     if (shouldRetry(category, currentAttempts)) {
       const delay = calculateDelay(currentAttempts);
-      console.log(
-        `[AgentHost] Retrying in ${Math.round(delay)}ms (attempt ${currentAttempts + 1})`
-      );
+      log.info(`[AgentHost] Retrying in ${Math.round(delay)}ms (attempt ${currentAttempts + 1})`);
 
       this.retryAttempts.set(retryKey, currentAttempts + 1);
 
@@ -583,14 +582,14 @@ export class AgentHost {
 
       // Retry the pending prompt if there is one
       if (promptToRetry && this.session) {
-        console.log('[AgentHost] Retrying prompt...');
+        log.info('[AgentHost] Retrying prompt...');
         // Restore only if nothing newer arrived during sleep — a new prompt() call during the
         // delay would have set pendingPrompt to the newer message; don't overwrite it.
         this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
         try {
           await this.resourceLoader?.reload();
         } catch (reloadErr) {
-          console.warn(
+          log.warn(
             '[AgentHost] Resource reload failed before prompt retry, using cached:',
             reloadErr
           );
@@ -603,14 +602,14 @@ export class AgentHost {
       // Without this, deliveries beyond [0] stay in pendingDeliveries forever
       // and their promises never resolve, blocking trackJobExecution.
       if (deliveriesToRetry.length > 0 && this.session) {
-        console.log(
+        log.info(
           `[AgentHost] Resending ${deliveriesToRetry.length} pending delivery(ies) after retry...`
         );
         if (!promptToRetry) {
           try {
             await this.resourceLoader?.reload();
           } catch (reloadErr) {
-            console.warn(
+            log.warn(
               '[AgentHost] Resource reload failed before delivery retry, using cached:',
               reloadErr
             );
@@ -635,7 +634,7 @@ export class AgentHost {
               this.deliverySendCount++;
             })
             .catch((error) => {
-              console.error('[AgentHost] Failed to resend delivery after retry:', error);
+              log.error('[AgentHost] Failed to resend delivery after retry:', error);
               const idx = this.pendingDeliveries.indexOf(d);
               if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
               d.reject(error instanceof Error ? error : new Error(String(error)));
@@ -668,7 +667,7 @@ export class AgentHost {
           if (nextProvider === this.currentProvider) {
             const reason = `${errorPrefix}, rotating to next key`;
             const detail = `on ${this.currentProvider}, rotating to next key`;
-            console.log(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
+            log.info(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
               promptToRetry,
@@ -686,7 +685,7 @@ export class AgentHost {
 
             const reason = `${errorPrefix}, switched to ${nextProvider}`;
             const detail = `on ${fromProvider}, switching to ${nextProvider}`;
-            console.log(`[AgentHost] Failing over from ${fromProvider} to ${nextProvider}`);
+            log.info(`[AgentHost] Failing over from ${fromProvider} to ${nextProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
               promptToRetry,
@@ -702,7 +701,7 @@ export class AgentHost {
       this.pushSystemMessage(
         `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable`
       );
-      console.log('[AgentHost] No fallback providers available, error will be surfaced to user');
+      log.info('[AgentHost] No fallback providers available, error will be surfaced to user');
     }
 
     // Context overflow: truncate JSONL, compact, restore tail, reinitialize.
@@ -738,10 +737,7 @@ export class AgentHost {
                 this.deliverySendCount++;
               })
               .catch((error) => {
-                console.error(
-                  '[AgentHost] Failed to replay delivery after context overflow:',
-                  error
-                );
+                log.error('[AgentHost] Failed to replay delivery after context overflow:', error);
                 const idx = this.pendingDeliveries.indexOf(delivery);
                 if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
                 delivery.reject(error instanceof Error ? error : new Error(String(error)));
@@ -766,7 +762,7 @@ export class AgentHost {
 
       const reason = `${errorPrefix}, switched to ${nextProvider}`;
       const detail = `on ${fromProvider}, switching to ${nextProvider}`;
-      console.log(`[AgentHost] Recovery: switching from ${fromProvider} to ${nextProvider}`);
+      log.info(`[AgentHost] Recovery: switching from ${fromProvider} to ${nextProvider}`);
       await this.reinitializeWithProvider(
         nextProvider,
         promptToRetry,
@@ -811,12 +807,12 @@ export class AgentHost {
     detail?: string
   ): Promise<void> {
     if (this.isReinitializing) {
-      console.log('[AgentHost] Already reinitializing, skipping');
+      log.info('[AgentHost] Already reinitializing, skipping');
       return;
     }
 
     this.isReinitializing = true;
-    console.log(`[AgentHost] Reinitializing with provider: ${provider}`);
+    log.info(`[AgentHost] Reinitializing with provider: ${provider}`);
 
     // Old session is dead; clear busy so the agent doesn't appear stuck
     if (this.busy) {
@@ -866,7 +862,7 @@ export class AgentHost {
 
       // Retry the pending prompt with the new provider
       if (promptToRetry && this.session) {
-        console.log('[AgentHost] Retrying prompt with new provider...');
+        log.info('[AgentHost] Retrying prompt with new provider...');
         // Restore only if nothing newer arrived during reinitialization.
         this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
         await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
@@ -877,7 +873,7 @@ export class AgentHost {
       // Uses sendCustomMessage directly (not deliverMessage) to avoid duplicating
       // chat cache entries that were already added by the original delivery.
       if (deliveriesToRetry && deliveriesToRetry.length > 0 && this.session) {
-        console.log(
+        log.info(
           `[AgentHost] Replaying ${deliveriesToRetry.length} pending deliveries with new provider...`
         );
         // Merge: deliveries queued by concurrent deliverMessage() during async
@@ -906,7 +902,7 @@ export class AgentHost {
               this.deliverySendCount++;
             })
             .catch((error) => {
-              console.error('[AgentHost] Failed to replay delivery after failover:', error);
+              log.error('[AgentHost] Failed to replay delivery after failover:', error);
               const idx = this.pendingDeliveries.indexOf(d);
               if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
               d.reject(error instanceof Error ? error : new Error(String(error)));
@@ -914,7 +910,7 @@ export class AgentHost {
         }
       }
     } catch (error) {
-      console.error('[AgentHost] Failed to reinitialize:', error);
+      log.error('[AgentHost] Failed to reinitialize:', error);
       if (reason) {
         const msg = error instanceof Error ? error.message : String(error);
         this.pushSystemMessage(`Failed to switch provider\n\n${msg}`);
@@ -1026,7 +1022,7 @@ export class AgentHost {
     const braveKey = this.servicesConfig?.brave_search?.key;
     if (braveKey && this.toolsConfig?.web_search?.enabled !== false) {
       tools.push(createWebSearchTool(braveKey, this.toolsConfig?.web_search?.max_results));
-      console.log('[AgentHost] web_search tool enabled');
+      log.info('[AgentHost] web_search tool enabled');
     }
 
     // All agents can show artifacts — any agent can now interact with the user directly
@@ -1179,7 +1175,7 @@ export class AgentHost {
     const reload = this.resourceLoader
       ? this.resourceLoader
           .reload()
-          .catch((err) => console.warn('[AgentHost] reload failed, using cached knowledge:', err))
+          .catch((err) => log.warn('[AgentHost] reload failed, using cached knowledge:', err))
       : Promise.resolve();
 
     reload
@@ -1206,7 +1202,7 @@ export class AgentHost {
         this.deliverySendCount++;
       })
       .catch((err) => {
-        console.error('[AgentHost] deliverMessage error:', err);
+        log.error('[AgentHost] deliverMessage error:', err);
         // Send itself failed (session destroyed, etc.). The message never
         // reached the agent, so remove from queue and reject immediately.
         const idx = this.pendingDeliveries.findIndex((d) => d.resolve === resolve);
@@ -1307,7 +1303,7 @@ export class AgentHost {
       if (usage?.percent != null && usage.percent >= 30) {
         this.isPruning = true;
         this.triggerPruningCompaction()
-          .catch((err: unknown) => console.error('[AgentHost] Pruning compaction error:', err))
+          .catch((err: unknown) => log.error('[AgentHost] Pruning compaction error:', err))
           .finally(() => {
             this.isPruning = false;
           });
@@ -1348,7 +1344,7 @@ export class AgentHost {
 
     const baseline = this.findBaselineSummary();
     if (!baseline) {
-      console.log('[AgentHost] No baseline found for pruning, skipping');
+      log.info('[AgentHost] No baseline found for pruning, skipping');
       return;
     }
 
@@ -1366,7 +1362,7 @@ export class AgentHost {
     await this.session.compact(customInstructions);
     this.compactionCount = 0;
     this.writeCompactionCount(0);
-    console.log(`[AgentHost] Pruning compaction completed for agent ${this.agentId}`);
+    log.info(`[AgentHost] Pruning compaction completed for agent ${this.agentId}`);
   }
 
   /**
@@ -1462,7 +1458,7 @@ export class AgentHost {
     if (currentUsage?.tokens == null) return;
 
     if (currentUsage.tokens > candidateModel.contextWindow) {
-      console.log(
+      log.info(
         `[AgentHost] Context (${currentUsage.tokens} tokens) exceeds ${provider}/${candidateModelId} ` +
           `window (${candidateModel.contextWindow}), compacting before failover`
       );
@@ -1490,11 +1486,11 @@ export class AgentHost {
   ): Promise<boolean> {
     const sessionDir = this.sessionDir;
     if (!this.session || !sessionDir) {
-      console.log('[AgentHost] Context overflow: no session or sessionDir, cannot recover');
+      log.info('[AgentHost] Context overflow: no session or sessionDir, cannot recover');
       return false;
     }
 
-    console.log('[AgentHost] Starting context overflow recovery...');
+    log.info('[AgentHost] Starting context overflow recovery...');
 
     // Hoisted so the catch block can restore the tail if recovery fails mid-way
     let activeFile: string | undefined;
@@ -1513,7 +1509,7 @@ export class AgentHost {
         .sort((a, b) => b.mtime - a.mtime);
 
       if (jsonlFiles.length === 0) {
-        console.log('[AgentHost] Context overflow: no JSONL files found');
+        log.info('[AgentHost] Context overflow: no JSONL files found');
         return false;
       }
 
@@ -1544,14 +1540,14 @@ export class AgentHost {
       }
 
       if (splitIndex === -1) {
-        console.log('[AgentHost] Context overflow: no safe split point found');
+        log.info('[AgentHost] Context overflow: no safe split point found');
         return false;
       }
 
       // Step 3: Split into head and tail
       const headLines = lines.slice(0, splitIndex + 1);
       tailLines = lines.slice(splitIndex + 1);
-      console.log(
+      log.info(
         `[AgentHost] Context overflow: split at line ${splitIndex + 1}, tail has ${tailLines.length} entries`
       );
 
@@ -1568,34 +1564,34 @@ export class AgentHost {
 
       // Step 6: Compact to reduce head context to ~5%
       if (this.session) {
-        console.log('[AgentHost] Context overflow: compacting...');
+        log.info('[AgentHost] Context overflow: compacting...');
         await this.session.compact();
         // Synthesize compaction_end so the pruning counter stays accurate
         this.handleCompactionTracking({ type: 'compaction_end' });
-        console.log('[AgentHost] Context overflow: compaction complete');
+        log.info('[AgentHost] Context overflow: compaction complete');
       }
 
       // Step 7: Append tail and reinitialize — session loads compact summary + tail
       if (tailLines.length > 0) {
         appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
         tailAppended = true;
-        console.log('[AgentHost] Context overflow: tail restored, reinitializing...');
+        log.info('[AgentHost] Context overflow: tail restored, reinitializing...');
         await this.reinitializeWithProvider(provider, null);
       }
 
-      console.log('[AgentHost] Context overflow recovery complete');
+      log.info('[AgentHost] Context overflow recovery complete');
       // Re-arm guard so future overflows on this session can recover again
       this.contextOverflowHandled = false;
       return true;
     } catch (error) {
-      console.error('[AgentHost] Context overflow recovery failed:', error);
+      log.error('[AgentHost] Context overflow recovery failed:', error);
       // Best-effort: if the file was truncated but the tail was not yet appended,
       // restore the tail so no history is permanently lost. Skip if tail was
       // already written to avoid duplicating entries.
       if (fileTruncated && !tailAppended && tailLines.length > 0 && activeFile) {
         try {
           appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
-          console.log('[AgentHost] Context overflow: tail restored after recovery failure');
+          log.info('[AgentHost] Context overflow: tail restored after recovery failure');
         } catch {
           // Ignore — best-effort only
         }

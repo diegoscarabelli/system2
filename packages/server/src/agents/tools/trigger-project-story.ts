@@ -26,6 +26,7 @@ import {
   readFrontmatterField,
   readTailChars,
 } from '../../scheduler/jobs.js';
+import { log } from '../../utils/logger.js';
 import type { AgentRegistry } from '../registry.js';
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
@@ -187,7 +188,7 @@ ${projectDbChanges}`;
             receiver: narratorId,
             timestamp: Date.now(),
           })
-          .catch((err) => console.error('[trigger-project-story] log delivery failed:', err));
+          .catch((err) => log.error('[trigger-project-story] log delivery failed:', err));
 
         // --- Message 2: Project story data ---
         // Full app.db snapshot (not time-windowed)
@@ -260,7 +261,7 @@ ${logContent}`;
             receiver: narratorId,
             timestamp: Date.now(),
           })
-          .catch((err) => console.error('[trigger-project-story] story delivery failed:', err));
+          .catch((err) => log.error('[trigger-project-story] story delivery failed:', err));
 
         return {
           content: [
