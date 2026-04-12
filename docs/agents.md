@@ -18,10 +18,11 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 | **Narrator** | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. [Schedule-driven](scheduler.md). | Singleton, persistent | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-2.0-flash |
 | **Conductor** | Orchestrates and executes work within a project: breaks it into tasks, spawns specialist agents or executes directly, and coordinates with the Reviewer before reporting completion. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
 | **Reviewer** | Reviews code before push, assesses data analysis for reasoning fallacies (Kahneman's System 2 lens), and evaluates statistical quality of findings. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
+| **Worker** | Executes self-contained tasks assigned by the Conductor. Same execution tools, no orchestration. All instructions via `initial_message`. | Per-project, ephemeral | claude-sonnet-4-6, gpt-4o, gemini-2.5-flash |
 
 **Guide and Narrator** are singletons created at server startup. Their sessions persist indefinitely across restarts.
 
-**Conductor and Reviewer** are project-scoped, spawned by Guide for every project and archived when done. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project. On server restart, all non-archived project-scoped agents are restored automatically. If an agent fails to restore, its status remains `active` in the database, the error is logged, and the Guide is notified so it can investigate.
+**Conductor and Reviewer** are project-scoped, spawned by Guide for every project and archived when done. **Workers** are lightweight execution agents spawned by Conductors for parallel or self-contained tasks. They have the same tools as Conductors except orchestration tools (spawn, terminate, resurrect, trigger_project_story) and cannot modify project-level state. The Guide uses the `spawn_agent` tool to create both simultaneously at project creation time. Spawned agents receive the same spawner callback, so Conductors can spawn additional specialist data agents within their own project. On server restart, all non-archived project-scoped agents are restored automatically. If an agent fails to restore, its status remains `active` in the database, the error is logged, and the Guide is notified so it can investigate.
 
 **Agent status** has two values in the database: `active` (alive, should be restored on restart) and `archived` (terminated, will not be restored). Archived agents can be resurrected by the Guide (any non-singleton) or by a Conductor (agents within their own project) via the `resurrect_agent` tool, which flips the status back to `active` and resumes the session from persisted JSONL. Whether an agent is currently processing work is tracked in memory via `AgentHost.isBusy()`, not in the database.
 
@@ -243,8 +244,8 @@ The `spawn_agent` tool creates a new agent with a given role and project assignm
 
 Permission model:
 
-- Guide may spawn Conductors or Reviewers for any project
-- Conductors may spawn Conductors or Reviewers within their own project only
+- Guide may spawn Conductors, Workers, or Reviewers for any project
+- Conductors may spawn Conductors, Workers, or Reviewers within their own project only
 - Narrator cannot spawn agents (receives no spawner)
 
 ### Terminating
@@ -291,7 +292,7 @@ User request → Guide creates project in app.db
              → Conductor presents plan to Guide (prose summary, task IDs, tech decisions)
              → Guide presents plan to user for approval
              → User approves → Guide tells Conductor to proceed
-             → Conductor executes, spawning data agents as needed
+             → Conductor executes, spawning workers as needed
              → Conductor coordinates Reviewer for analytical sign-off
              → Conductor messages Guide: project complete
              → Guide relays to user, user confirms
@@ -402,7 +403,7 @@ Always include task/project/comment IDs in messages. The recipient can then run 
 
 **Project**: Analyze LinkedIn campaign performance and produce an insights report.
 
-**Agents**: Guide (singleton), Conductor (project-scoped), DataAgent-Extract (spawned by Conductor), DataAgent-Analyze (spawned by Conductor), Reviewer (project-scoped), Narrator (singleton).
+**Agents**: Guide (singleton), Conductor (project-scoped), Worker-Extract (spawned by Conductor), Worker-Analyze (spawned by Conductor), Reviewer (project-scoped), Narrator (singleton).
 
 #### Phase 1: User Request to Project Creation
 
@@ -437,17 +438,17 @@ After alignment, the Conductor creates tasks in app.db:
 
 | Task | Title                        | Parent | Assignee               | Priority |
 |------|------------------------------|--------|------------------------|----------|
-| #10  | Extract raw LinkedIn data    | —      | DataAgent-Extract (#5) | high     |
-| #11  | Normalize and clean data     | —      | DataAgent-Extract (#5) | high     |
-| #12  | Perform statistical analysis | —      | DataAgent-Analyze (#6) | high     |
-| #13  | Calculate engagement metrics | #12    | DataAgent-Analyze (#6) | high     |
-| #14  | Identify trends over time    | #12    | DataAgent-Analyze (#6) | medium   |
+| #10  | Extract raw LinkedIn data    | —      | Worker-Extract (#5) | high     |
+| #11  | Normalize and clean data     | —      | Worker-Extract (#5) | high     |
+| #12  | Perform statistical analysis | —      | Worker-Analyze (#6) | high     |
+| #13  | Calculate engagement metrics | #12    | Worker-Analyze (#6) | high     |
+| #14  | Identify trends over time    | #12    | Worker-Analyze (#6) | medium   |
 | #15  | Review analysis quality      | —      | Reviewer (#4)          | high     |
-| #16  | Generate insights report     | —      | DataAgent-Analyze (#6) | high     |
+| #16  | Generate insights report     | —      | Worker-Analyze (#6) | high     |
 
 Task links: #11 `blocked_by` #10 → #12 `blocked_by` #11 → #15 `blocked_by` #12 → #16 `blocked_by` #15.
 
-**Conductor → Guide**: "Plan created. 7 tasks across 4 phases (tasks #10-#16). Using LinkedIn API → Python ingestion script → TimescaleDB `lens` database → Airflow DAG for scheduling. DataAgent-Extract (#5) and DataAgent-Analyze (#6) will be spawned at execution. No new dependencies needed."
+**Conductor → Guide**: "Plan created. 7 tasks across 4 phases (tasks #10-#16). Using LinkedIn API → Python ingestion script → TimescaleDB `lens` database → Airflow DAG for scheduling. Worker-Extract (#5) and Worker-Analyze (#6) will be spawned at execution. No new dependencies needed."
 
 **Guide → User**: "Here's the plan: [summary with phases and tech choices]. Should I tell the Conductor to proceed?"
 
@@ -457,7 +458,7 @@ Task links: #11 `blocked_by` #10 → #12 `blocked_by` #11 → #15 `blocked_by` #
 
 #### Phase 3: Parallel Execution and Mid-Flight Adjustment
 
-DataAgent-Extract, DataAgent-Analyze, and Reviewer work through their tasks in dependency order. When Reviewer finds an error in the engagement rate formula, it sends an urgent message to Conductor. Conductor creates a correction task (#18), notifies DataAgent-Analyze, and keeps Guide informed. After correction, Reviewer approves.
+Worker-Extract, Worker-Analyze, and Reviewer work through their tasks in dependency order. When Reviewer finds an error in the engagement rate formula, it sends an urgent message to Conductor. Conductor creates a correction task (#18), notifies Worker-Analyze, and keeps Guide informed. After correction, Reviewer approves.
 
 **Conductor → Guide** (throughout): phase completion messages, blocker alerts, key findings.
 
@@ -465,7 +466,7 @@ DataAgent-Extract, DataAgent-Analyze, and Reviewer work through their tasks in d
 
 #### Phase 4: Completion and Story
 
-1. DataAgent-Analyze generates `~/.system2/artifacts/linkedin_report.html`.
+1. Worker-Analyze generates `~/.system2/artifacts/linkedin_report.html`.
 2. Conductor messages Guide: "Project #1 complete. Report at artifacts/linkedin_report.html."
 3. **Guide → User**: "Project #1 is complete. [Summary]. Shall I finalize this project?"
 4. User confirms → Guide messages Conductor: "close the project."

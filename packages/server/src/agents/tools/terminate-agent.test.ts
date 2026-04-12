@@ -97,6 +97,27 @@ describe('terminate_agent tool', () => {
     expect((result.content[0] as { text: string }).text).toContain('singleton');
   });
 
+  it('Conductor terminates worker in own project', async () => {
+    const conductor = makeAgent(2, 'conductor', 10);
+    const worker = makeAgent(4, 'worker', 10);
+    const { tool, updateAgentStatus } = setup(2, [conductor, worker], [4]);
+
+    const result = await exec(tool, { agent_id: 4 });
+
+    expect((result.content[0] as { text: string }).text).toContain('terminated');
+    expect(updateAgentStatus).toHaveBeenCalledWith(4, 'archived');
+  });
+
+  it('Worker cannot terminate agents', async () => {
+    const worker = makeAgent(4, 'worker', 10);
+    const conductor = makeAgent(2, 'conductor', 10);
+    const { tool } = setup(4, [worker, conductor], [2]);
+
+    const result = await exec(tool, { agent_id: 2 });
+
+    expect((result.content[0] as { text: string }).text).toContain('Only Guide and Conductor');
+  });
+
   it('errors for unauthorized role (reviewer)', async () => {
     const reviewer = makeAgent(3, 'reviewer', 10);
     const conductor = makeAgent(2, 'conductor', 10);

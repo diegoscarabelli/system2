@@ -1,7 +1,7 @@
 ---
 name: sql-schema-modeling
 description: Use when designing database schemas, choosing between normalization levels, modeling dimensional/star schemas, deciding on JSON columns vs relational columns, or reviewing table structures. Trigger on CREATE TABLE statements, schema design discussions, or questions about data modeling patterns.
-roles: [conductor, reviewer]
+roles: [conductor, reviewer, worker]
 ---
 
 # SQL Schema Modeling

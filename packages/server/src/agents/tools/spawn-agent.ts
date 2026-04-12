@@ -1,8 +1,8 @@
 /**
  * Spawn Agent Tool
  *
- * Allows Guide to spawn a Conductor for a project, and Conductors to spawn
- * specialist sub-agents (conductor role) or a Reviewer within their own project.
+ * Allows Guide to spawn agents for a project, and Conductors to spawn
+ * Workers, Conductors, or a Reviewer within their own project.
  *
  * The spawner callback is provided by the Server and handles AgentHost creation,
  * registration, and initial message delivery.
@@ -22,10 +22,13 @@ export type AgentSpawner = (
 
 export function createSpawnAgentTool(db: DatabaseClient, agentId: number, spawner: AgentSpawner) {
   const params = Type.Object({
-    role: Type.Union([Type.Literal('conductor'), Type.Literal('reviewer')], {
-      description:
-        'Role for the new agent. "conductor" for a specialist sub-agent that executes tasks (data extraction, analysis, etc.). "reviewer" for a Reviewer that validates analytical work and checks statistical rigor.',
-    }),
+    role: Type.Union(
+      [Type.Literal('conductor'), Type.Literal('reviewer'), Type.Literal('worker')],
+      {
+        description:
+          'Role for the new agent. "conductor" for a specialist sub-agent that orchestrates tasks. "reviewer" for a Reviewer that validates analytical work and checks statistical rigor. "worker" for a lightweight execution agent that receives task-specific instructions via initial_message (no orchestration tools, no project-level state changes).',
+      }
+    ),
     project_id: Type.Number({
       description:
         'Project ID to assign the new agent to. Must already exist in app.db. Conductors may only spawn agents for their own project.',
@@ -40,7 +43,7 @@ export function createSpawnAgentTool(db: DatabaseClient, agentId: number, spawne
     name: 'spawn_agent',
     label: 'Spawn Agent',
     description:
-      "Spawn a new agent for a project. Guide may spawn conductors for any project. Conductors may spawn conductors or a reviewer within their own project only. Returns the new agent's database ID — store it to send follow-up messages via message_agent and to set as task assignee.",
+      "Spawn a new agent for a project. Guide may spawn conductors, workers, or reviewers for any project. Conductors may spawn conductors, workers, or a reviewer within their own project only. Returns the new agent's database ID — store it to send follow-up messages via message_agent and to set as task assignee.",
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {

@@ -270,6 +270,22 @@ describe('write_system2_db tool', () => {
         'restricted to Guide and Conductor'
       );
     });
+
+    it('fails for Worker', async () => {
+      const db = createMockDb();
+      addAgent(db, 4, 'worker', 10);
+      const tool = createWriteSystem2DbTool(db as unknown as DatabaseClient, 4);
+
+      const result: WriteDbResult = await tool.execute('test', {
+        operation: 'updateProject',
+        id: 10,
+        name: 'X',
+      } as WriteDbParams);
+
+      expect((result.content[0] as { text: string }).text).toContain(
+        'restricted to Guide and Conductor'
+      );
+    });
   });
 
   describe('createTask', () => {

@@ -28,8 +28,8 @@ System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/b
 │                                                         │
 │  ┌──────────────┐  ┌──────────────┐  + per-project:     │
 │  │ Guide Agent  │  │Narrator Agent│    Conductor(s)     │
-│  │ (singleton)  │  │ (singleton)  │    Reviewer(s)      │
-│  └──────┬───────┘  └──────┬───────┘                     │
+│  │ (singleton)  │  │ (singleton)  │    Worker(s)        │
+│  └──────┬───────┘  └──────┬───────┘    Reviewer(s)      │                     │
 │         │                 │                             │
 │  ┌──────▼─────────────────▼──────────────────────────┐  │
 │  │          AgentRegistry (message routing)          │  │
@@ -70,6 +70,7 @@ All runtime state lives in `~/.system2/`:
 │   ├── conductor.md                 Conductor role-specific knowledge
 │   ├── narrator.md                  Narrator role-specific knowledge
 │   ├── reviewer.md                  Reviewer role-specific knowledge
+│   ├── worker.md                    Worker role-specific knowledge
 │   └── daily_summaries/             Daily activity logs
 │       └── YYYY-MM-DD.md
 ├── artifacts/                       Project-free reports, dashboards, exports

@@ -1,7 +1,7 @@
 ---
 name: airflow
 description: Use when building, debugging, scheduling, or testing data pipelines with Apache Airflow v3. Trigger on any code importing airflow, DAG definitions, operator usage, or user mentioning DAGs/tasks/operators/sensors/scheduling.
-roles: [conductor, reviewer]
+roles: [conductor, reviewer, worker]
 ---
 
 # Apache Airflow v3
