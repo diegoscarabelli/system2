@@ -815,7 +815,12 @@ export function registerNarratorJobs(
           throw new JobSkipped('no network connectivity');
         }
         console.log('[Scheduler] Triggering memory-update job');
-        await buildAndDeliverMemoryUpdate(narratorHost, narratorId, system2Dir, knowledgeBudgetChars);
+        await buildAndDeliverMemoryUpdate(
+          narratorHost,
+          narratorId,
+          system2Dir,
+          knowledgeBudgetChars
+        );
       },
       onJobChange
     );
