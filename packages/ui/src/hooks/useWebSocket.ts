@@ -11,6 +11,7 @@ import type { ClientMessage, ServerMessage } from '@dscarabelli/shared';
 import { useCallback, useEffect, useRef } from 'react';
 import { useArtifactStore } from '../stores/artifact';
 import { useChatStore } from '../stores/chat';
+import { usePushStore } from '../stores/push';
 
 const WS_URL = `ws://${window.location.hostname}:3000`;
 
@@ -18,6 +19,7 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
   const prevAgentRef = useRef<number | null>(null);
+  const hasConnectedOnce = useRef(false);
 
   // Send switch_agent when activeAgentId changes (user-initiated switch via AgentPane)
   useEffect(() => {
@@ -42,7 +44,15 @@ export function useWebSocket() {
       console.log('WebSocket connected');
       const state = useChatStore.getState();
       state.setConnected(true);
-      // On reconnect, re-subscribe to the active agent if it's not the Guide
+      if (hasConnectedOnce.current) {
+        // On reconnect, clear stale busy state and bump all version counters
+        // so UI panels refetch any changes missed during the disconnect
+        const push = usePushStore.getState();
+        push.clearAgentBusy();
+        push.bumpAll();
+      }
+      hasConnectedOnce.current = true;
+      // Re-subscribe to the active agent if it's not the Guide
       if (
         state.activeAgentId !== null &&
         state.guideAgentId !== null &&
@@ -196,6 +206,29 @@ export function useWebSocket() {
           if (aid !== null) state.finishCompaction(aid);
           break;
         }
+
+        case 'board_changed':
+          usePushStore.getState().bumpBoard();
+          break;
+
+        case 'agents_changed':
+          usePushStore.getState().bumpAgents();
+          break;
+
+        case 'artifacts_changed':
+          usePushStore.getState().bumpArtifacts();
+          break;
+
+        case 'job_executions_changed':
+          usePushStore.getState().bumpJobs();
+          break;
+
+        case 'agent_busy_changed':
+          // Update busy state inline (no refetch needed)
+          usePushStore
+            .getState()
+            .setAgentBusy(message.agentId, message.busy, message.contextPercent);
+          break;
 
         case 'error': {
           console.error('Server error:', message.message);

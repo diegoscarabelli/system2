@@ -53,10 +53,11 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 4. Create Guide agent (singleton via `db.getOrCreateGuideAgent()`)
 5. Create Narrator agent (singleton via `db.getOrCreateNarratorAgent()`)
 6. Subscribe to each agent's events for assistant message history capture into per-agent chat caches (prevents duplicates with multiple tabs)
-7. Resolve Narrator model and create `ConversationSummarizer` (summarizes user-agent interactions for Guide notification)
-8. Create `Scheduler`
-9. Set up Express routes
-10. Create HTTP server and WebSocket server
+7. Wire push notification callbacks (`onDatabaseWrite`, `onBusyChange`, `onAgentTerminate`) into agent hosts
+8. Resolve Narrator model and create `ConversationSummarizer` (summarizes user-agent interactions for Guide notification)
+9. Create `Scheduler`
+10. Set up Express routes
+11. Create HTTP server and WebSocket server
 
 ### `start()` Method
 
@@ -81,9 +82,22 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 | `/api/query` | POST | SQL query endpoint for artifact dashboards (SELECT only) |
 | `/*` | GET | UI static files (if `uiDistPath` configured) |
 
+### Push Broadcasts
+
+The server broadcasts lightweight WebSocket notifications when state changes, so UI panels update in real time without polling. Five push message types exist: `board_changed` (projects, tasks, links, comments), `agents_changed` (spawn/terminate/resurrect), `artifacts_changed`, `job_executions_changed`, and `agent_busy_changed` (inline busy/context data).
+
+Push notifications flow through callbacks threaded into subsystems:
+
+- **`onDatabaseWrite(entity)`**: fired by `write_system2_db` after each mutation, mapped to the appropriate push type by entity name
+- **`onBusyChange(agentId, busy, contextPercent)`**: fired by `AgentHost` when message processing starts/ends
+- **`onAgentTerminate()`**: fired by `terminate_agent` after archiving, broadcasts `agents_changed`
+- **`onJobChange()`**: fired by `trackJobExecution` on job lifecycle transitions
+
+All broadcasts are debounced per message type (50ms) to coalesce rapid successive writes. Callback failures are caught with best-effort try/catch so they never break the caller.
+
 ### Graceful Shutdown
 
-`stop()` tears down in order: summarizer -> scheduler -> WebSocket clients -> WebSocket server -> HTTP server -> database.
+`stop()` cancels pending debounced broadcasts, then tears down in order: scheduler -> WebSocket clients -> WebSocket server -> HTTP server -> database.
 
 1. Stop all scheduled cron jobs
 2. Send `close(1001, "server shutting down")` to every connected WebSocket client (clean close handshake)

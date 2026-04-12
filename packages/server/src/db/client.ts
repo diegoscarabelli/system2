@@ -565,6 +565,29 @@ export class DatabaseClient {
     }
   }
 
+  /**
+   * Execute a DML statement (INSERT, UPDATE, DELETE) or SELECT query.
+   * Used by the rawSql operation in write_system2_db.
+   * DDL and ATTACH statements must be blocked by the caller.
+   */
+  runSql(sql: string): { changes: number; rows?: unknown[] } {
+    const stmt = this.db.prepare(sql);
+
+    if (stmt.reader) {
+      const rows = stmt.all();
+      // DML with RETURNING is a reader (returns rows) but still mutates data.
+      // Check if the SQL is DML and query changes() to get the actual mutation count.
+      const isDml = /^\s*(?:WITH\b[\s\S]*?\)\s*)?(?:INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql);
+      const changes = isDml
+        ? (this.db.prepare('SELECT changes() AS changes').get() as { changes: number }).changes
+        : 0;
+      return { changes, rows };
+    }
+
+    const result = stmt.run();
+    return { changes: result.changes };
+  }
+
   close(): void {
     this.db.close();
   }

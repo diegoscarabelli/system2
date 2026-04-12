@@ -2,13 +2,13 @@
  * KanbanBoard Component
  *
  * Live kanban dashboard showing tasks grouped by project in a swimlane layout.
- * Fetches from /api/kanban and polls every 2 seconds for updates.
+ * Fetches from /api/kanban on mount and refetches on WebSocket push notifications.
  */
 
 import { ChevronDownIcon, ChevronRightIcon, InfoIcon, SearchIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text, TextInput } from '@primer/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { POLL_ERROR_BACKOFF_MS, POLL_INTERVAL_MS } from '../constants';
+import { usePushStore } from '../stores/push';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 import { MultiSelectDropdown } from './MultiSelectDropdown';
@@ -170,6 +170,7 @@ export function KanbanBoard() {
   const [data, setData] = useState<KanbanData | null>(null);
   const [loading, setLoading] = useState(true);
   const initialized = useRef(false);
+  const boardVersion = usePushStore((s) => s.boardVersion);
   const [filterKeyword, setFilterKeyword] = useState('');
   const [filterPriorities, setFilterPriorities] = useState<Set<string>>(new Set(ALL_PRIORITIES));
   const [filterAssignees, setFilterAssignees] = useState<Set<string>>(new Set());
@@ -200,78 +201,70 @@ export function KanbanBoard() {
   const handleNavigate = useCallback((id: number) => setSelectedTaskId(id), []);
   const handleCloseProjectModal = useCallback(() => setSelectedProjectId(null), []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: boardVersion is an intentional trigger to refetch on push
   useEffect(() => {
     const controller = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout>;
 
-    const fetchData = () => {
-      if (!initialized.current) setLoading(true);
+    if (!initialized.current) setLoading(true);
 
-      fetch('/api/kanban', { signal: controller.signal })
-        .then((r) => r.json())
-        .then((raw) => {
-          const tasks: KanbanTask[] = raw.tasks.map((t: KanbanTask & { labels: string }) => ({
-            ...t,
-            labels: (() => {
-              if (typeof t.labels !== 'string') return t.labels;
-              try {
-                return JSON.parse(t.labels) as string[];
-              } catch {
-                return [];
-              }
-            })(),
-          }));
-          setData({ ...raw, tasks });
-          const agentValues = ['', ...raw.agents.map((a: KanbanAgent) => String(a.id))];
-          if (!assigneesInitialized.current) {
-            assigneesInitialized.current = true;
-            knownAssignees.current = new Set(agentValues);
-            setFilterAssignees(new Set(agentValues));
-          } else {
-            const newAssignees = agentValues.filter((v) => !knownAssignees.current.has(v));
-            if (newAssignees.length > 0) {
-              for (const v of newAssignees) knownAssignees.current.add(v);
-              setFilterAssignees((prev) => {
-                const next = new Set(prev);
-                for (const v of newAssignees) next.add(v);
-                return next;
-              });
+    fetch('/api/kanban', { signal: controller.signal })
+      .then((r) => r.json())
+      .then((raw) => {
+        const tasks: KanbanTask[] = raw.tasks.map((t: KanbanTask & { labels: string }) => ({
+          ...t,
+          labels: (() => {
+            if (typeof t.labels !== 'string') return t.labels;
+            try {
+              return JSON.parse(t.labels) as string[];
+            } catch {
+              return [];
             }
+          })(),
+        }));
+        setData({ ...raw, tasks });
+        const agentValues = ['', ...raw.agents.map((a: KanbanAgent) => String(a.id))];
+        if (!assigneesInitialized.current) {
+          assigneesInitialized.current = true;
+          knownAssignees.current = new Set(agentValues);
+          setFilterAssignees(new Set(agentValues));
+        } else {
+          const newAssignees = agentValues.filter((v) => !knownAssignees.current.has(v));
+          if (newAssignees.length > 0) {
+            for (const v of newAssignees) knownAssignees.current.add(v);
+            setFilterAssignees((prev) => {
+              const next = new Set(prev);
+              for (const v of newAssignees) next.add(v);
+              return next;
+            });
           }
-          const labelValues = ['', ...new Set(tasks.flatMap((t: KanbanTask) => t.labels))];
-          if (!labelsInitialized.current) {
-            labelsInitialized.current = true;
-            knownLabels.current = new Set(labelValues);
-            setFilterLabels(new Set(labelValues));
-          } else {
-            const newLabels = labelValues.filter((v) => !knownLabels.current.has(v));
-            if (newLabels.length > 0) {
-              for (const v of newLabels) knownLabels.current.add(v);
-              setFilterLabels((prev) => {
-                const next = new Set(prev);
-                for (const v of newLabels) next.add(v);
-                return next;
-              });
-            }
+        }
+        const labelValues = ['', ...new Set(tasks.flatMap((t: KanbanTask) => t.labels))];
+        if (!labelsInitialized.current) {
+          labelsInitialized.current = true;
+          knownLabels.current = new Set(labelValues);
+          setFilterLabels(new Set(labelValues));
+        } else {
+          const newLabels = labelValues.filter((v) => !knownLabels.current.has(v));
+          if (newLabels.length > 0) {
+            for (const v of newLabels) knownLabels.current.add(v);
+            setFilterLabels((prev) => {
+              const next = new Set(prev);
+              for (const v of newLabels) next.add(v);
+              return next;
+            });
           }
-          initialized.current = true;
+        }
+        initialized.current = true;
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        if ((err as { name?: string }).name !== 'AbortError') {
           setLoading(false);
-          timeoutId = setTimeout(fetchData, POLL_INTERVAL_MS);
-        })
-        .catch((err: unknown) => {
-          if ((err as { name?: string }).name !== 'AbortError') {
-            setLoading(false);
-            timeoutId = setTimeout(fetchData, POLL_ERROR_BACKOFF_MS);
-          }
-        });
-    };
+        }
+      });
 
-    fetchData();
-    return () => {
-      controller.abort();
-      clearTimeout(timeoutId);
-    };
-  }, []);
+    return () => controller.abort();
+  }, [boardVersion]);
 
   // Visible columns based on status filter
   const visibleColumns = useMemo(() => {

@@ -52,8 +52,8 @@ Types for the WebSocket protocol between UI and server. See [WebSocket Protocol]
 
 | Type | Description |
 |------|-------------|
-| `ClientMessage` | Union: `user_message`, `steering_message`, `abort` |
-| `ServerMessage` | Union: streaming chunks, tool calls, artifacts, context usage, errors, ready signal, chat history |
+| `ClientMessage` | Union: `user_message`, `steering_message`, `abort`, `switch_agent` |
+| `ServerMessage` | Union: streaming chunks, tool calls, artifacts, context usage, errors, ready signal, chat history, push notifications (`board_changed`, `agents_changed`, `artifacts_changed`, `job_executions_changed`, `agent_busy_changed`) |
 
 ## See Also
 

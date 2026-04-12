@@ -15,6 +15,39 @@ import { Type } from '@sinclair/typebox';
 const DEFAULT_TIMEOUT = 120_000; // 120 seconds
 const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
 
+/** Patterns that are always blocked: catastrophic, essentially irreversible operations. */
+export const BLOCKED_BASH_PATTERNS: { pattern: RegExp; reason: string }[] = [
+  {
+    pattern: /\brm\b[^;|&]*(--recursive|-[a-zA-Z]*[rR])[^;|&]*\s+\/(\s|$|\*)/,
+    reason: 'Recursive deletion of root directory (/) is blocked',
+  },
+  {
+    pattern: /\brm\b[^;|&]*(--recursive|-[a-zA-Z]*[rR])[^;|&]*\s+~\/?(\s|$|\*)/,
+    reason: 'Recursive deletion of home directory (~) is blocked',
+  },
+  {
+    pattern:
+      /\brm\b[^;|&]*(--recursive|-[a-zA-Z]*[rR])[^;|&]*\s+"?(?:\$HOME|\$\{HOME\})\/?"?(\s|$|\*)/,
+    reason: 'Recursive deletion of home directory ($HOME) is blocked',
+  },
+  {
+    pattern: /--no-preserve-root/,
+    reason: 'The --no-preserve-root flag is blocked',
+  },
+  {
+    pattern: /\bmkfs\b/,
+    reason: 'Formatting filesystems (mkfs) is blocked',
+  },
+  {
+    pattern: /\bdd\b[^;|&]*\bof\s*=\s*["']?\/dev\//,
+    reason: 'Writing to raw block devices (dd of=/dev/) is blocked',
+  },
+  {
+    pattern: /\bsqlite3\b[^;|&]*\.system2[/\\]app\.db/,
+    reason: 'Direct sqlite3 access to app.db is blocked — use write_system2_db instead',
+  },
+];
+
 // On Windows, use PowerShell instead of cmd.exe for better scripting support
 const isWindows = platform() === 'win32';
 const shellCmd = isWindows ? 'powershell.exe' : '/bin/bash';
@@ -159,6 +192,21 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
       'Execute a shell command and return stdout/stderr. 120-second timeout by default. Uses PowerShell on Windows, bash on macOS/Linux. Set run_in_background to true for long-running commands — you will be notified when they complete. Output is streamed as the command runs.',
     parameters: params,
     execute: async (_toolCallId, params, signal, onUpdate) => {
+      // Block catastrophic commands before execution
+      for (const { pattern, reason } of BLOCKED_BASH_PATTERNS) {
+        if (pattern.test(params.command)) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Command blocked: ${reason}. Rephrase the command or use a safer alternative.`,
+              },
+            ],
+            details: { stdout: '', stderr: reason, exitCode: 1 },
+          };
+        }
+      }
+
       const cwd = params.cwd || homedir();
 
       // Background execution
