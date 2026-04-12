@@ -29,7 +29,7 @@ System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/b
 │  ┌──────────────┐  ┌──────────────┐  + per-project:     │
 │  │ Guide Agent  │  │Narrator Agent│    Conductor(s)     │
 │  │ (singleton)  │  │ (singleton)  │    Worker(s)        │
-│  └──────┬───────┘  └──────┬───────┘    Reviewer(s)      │                     │
+│  └──────┬───────┘  └──────┬───────┘    Reviewer(s)     │
 │         │                 │                             │
 │  ┌──────▼─────────────────▼──────────────────────────┐  │
 │  │          AgentRegistry (message routing)          │  │
