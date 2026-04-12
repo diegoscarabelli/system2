@@ -43,6 +43,7 @@ describe('log', () => {
 
   it('passes through multiple arguments', () => {
     log.info('a', 'b', 3, { key: 'val' });
+    expect(logSpy).toHaveBeenCalledOnce();
     const [_timestamp, ...rest] = logSpy.mock.calls[0];
     expect(rest).toEqual(['a', 'b', 3, { key: 'val' }]);
   });
