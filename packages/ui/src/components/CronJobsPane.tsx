@@ -7,10 +7,12 @@
 
 import { TriangleDownIcon, TriangleUpIcon } from '@primer/octicons-react';
 import { Box, Text } from '@primer/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
+import { usePushFetch } from '../hooks/usePushFetch';
 import { usePushStore } from '../stores/push';
 import { colors } from '../theme/colors';
+import { FetchErrorBanner } from './FetchErrorBanner';
 import { JobExecutionDetailModal } from './JobExecutionDetailModal';
 import type { MultiSelectOption } from './MultiSelectDropdown';
 import { MultiSelectDropdown } from './MultiSelectDropdown';
@@ -141,11 +143,9 @@ function TableHeaders({ sortKey, sortDir, onSort }: TableHeadersProps) {
 
 export function CronJobsPane() {
   const [executions, setExecutions] = useState<JobExecutionInfo[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('started_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const initialized = useRef(false);
   const jobsVersion = usePushStore((s) => s.jobsVersion);
 
   // Filter state: initialized with all options on first data load
@@ -159,37 +159,25 @@ export function CronJobsPane() {
   const [jobOptions, setJobOptions] = useState<MultiSelectOption[]>([]);
   const jobsSeeded = useRef(false);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: jobsVersion is an intentional trigger to refetch on push
-  useEffect(() => {
-    const controller = new AbortController();
+  const handleData = useCallback((data: { executions?: JobExecutionInfo[] }) => {
+    const items: JobExecutionInfo[] = data.executions || [];
+    setExecutions(items);
 
-    if (!initialized.current) setLoading(true);
+    // Seed job options on first data load
+    if (!jobsSeeded.current && items.length > 0) {
+      jobsSeeded.current = true;
+      const names = [...new Set(items.map((e) => e.job_name))].sort();
+      const opts = names.map((n) => ({ value: n, label: n }));
+      setJobOptions(opts);
+      setJobFilter(new Set(names));
+    }
+  }, []);
 
-    fetch('/api/job-executions?limit=50', { signal: controller.signal })
-      .then((res) => res.json())
-      .then((data) => {
-        const items: JobExecutionInfo[] = data.executions || [];
-        setExecutions(items);
-        initialized.current = true;
-        setLoading(false);
-
-        // Seed job options on first data load
-        if (!jobsSeeded.current && items.length > 0) {
-          jobsSeeded.current = true;
-          const names = [...new Set(items.map((e) => e.job_name))].sort();
-          const opts = names.map((n) => ({ value: n, label: n }));
-          setJobOptions(opts);
-          setJobFilter(new Set(names));
-        }
-      })
-      .catch((err: unknown) => {
-        if ((err as { name?: string }).name !== 'AbortError') {
-          setLoading(false);
-        }
-      });
-
-    return () => controller.abort();
-  }, [jobsVersion]);
+  const { loading, error, retry } = usePushFetch(
+    '/api/job-executions?limit=50',
+    jobsVersion,
+    handleData
+  );
 
   const closeModal = useCallback(() => setSelectedId(null), []);
 
@@ -264,12 +252,14 @@ export function CronJobsPane() {
         )}
       </Box>
 
+      {error && <FetchErrorBanner message={error} onRetry={retry} />}
+
       <Box sx={{ flex: 1, overflow: 'auto' }}>
         {loading && (
           <Text sx={{ color: 'fg.muted', fontSize: 0, p: 2, display: 'block' }}>Loading...</Text>
         )}
 
-        {!loading && executions.length === 0 && (
+        {!loading && executions.length === 0 && !error && (
           <Text sx={{ color: 'fg.muted', fontSize: 0, p: 2, display: 'block' }}>
             No executions recorded.
           </Text>
