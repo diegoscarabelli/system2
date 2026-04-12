@@ -20,6 +20,7 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked f
 ├── conductor.md           # Conductor role-specific accumulated knowledge
 ├── narrator.md            # Narrator role-specific accumulated knowledge
 ├── reviewer.md            # Reviewer role-specific accumulated knowledge
+├── worker.md              # Worker role-specific accumulated knowledge
 └── daily_summaries/       # Daily activity summaries
     ├── 2024-01-15.md
     ├── 2024-01-16.md
@@ -29,7 +30,7 @@ System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked f
 ### Role-Specific Knowledge Files
 
 Each agent role has its own knowledge file at `~/.system2/knowledge/{role}.md`
-(guide.md, conductor.md, narrator.md, reviewer.md). These are injected into each
+(guide.md, conductor.md, narrator.md, reviewer.md, worker.md). These are injected into each
 agent's context immediately after the shared files and before the activity context
 (project log or daily summaries).
 
@@ -91,10 +92,10 @@ budget_chars = 20000  # default; comment out to use the default
 `AgentHost.loadKnowledgeContext()` runs on every LLM call (via `resourceLoader.reload()` called before each prompt, which invokes the `systemPromptOverride` callback):
 
 1. Reads `infrastructure.md`, `user.md`, `memory.md`
-2. Reads `{role}.md` for the agent's role (guide.md, conductor.md, narrator.md, reviewer.md)
+2. Reads `{role}.md` for the agent's role (guide.md, conductor.md, narrator.md, reviewer.md, worker.md)
 3. Skips empty files; files exceeding the character budget are truncated at the tail with a notice. For knowledge files (`knowledge/*.md`), the Narrator condenses oversized files during the next memory-update run. Daily summaries and project logs are not condensed (they are append-only).
 4. Loads role-aware context based on the agent's project assignment:
-   - **Project-scoped agents** (Conductor, Reviewer, specialists): loads `projects/{id}_{name}/log.md`
+   - **Project-scoped agents** (Conductor, Worker, Reviewer): loads `projects/{id}_{name}/log.md`
    - **System-wide agents** (Guide, Narrator): loads the 2 most recent daily summary files (sorted by filename, chronological order)
 5. Returns all content under a `## Knowledge Base` header, separated by `---`
 
