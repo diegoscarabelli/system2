@@ -195,23 +195,43 @@ function runCommand(
       fail(err);
     }, totalTimeout);
 
+    // Buffer for incomplete lines across chunks (sentinel may be split across data events)
+    let pendingLine = '';
+
     // Collect and stream output
     child.stdout?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
+      const text = pendingLine + chunk.toString();
+      pendingLine = '';
       resetInactivityTimer();
 
+      // Only process complete lines; hold the trailing fragment for the next chunk
+      const lastNewline = text.lastIndexOf('\n');
+      if (lastNewline === -1) {
+        // No newline at all: entire chunk is a partial line, buffer it
+        pendingLine = text;
+        return;
+      }
+      const complete = text.slice(0, lastNewline + 1); // includes trailing \n
+      pendingLine = text.slice(lastNewline + 1); // remainder (may be empty)
+
       // Filter heartbeat sentinel lines
-      const { filtered, heartbeats } = filterHeartbeats(text);
+      const { filtered, heartbeats } = filterHeartbeats(complete);
 
       if (filtered && stdout.length + filtered.length <= MAX_BUFFER) {
         stdout += filtered;
       }
 
-      // Emit heartbeat progress updates
+      // Emit heartbeat progress updates (minimal payload: only details matter)
       for (const message of heartbeats) {
         onUpdate?.({
-          content: [{ type: 'text', text: stdout + (stderr ? `\nSTDERR:\n${stderr}` : '') }],
-          details: { stdout, stderr, exitCode: -1, heartbeat: true, heartbeatMessage: message },
+          content: [{ type: 'text', text: '' }],
+          details: {
+            stdout: '',
+            stderr: '',
+            exitCode: -1,
+            heartbeat: true,
+            heartbeatMessage: message,
+          },
         });
       }
 
@@ -237,6 +257,14 @@ function runCommand(
     });
 
     child.on('close', (code) => {
+      // Flush any remaining partial line from the buffer
+      if (pendingLine) {
+        const { filtered } = filterHeartbeats(pendingLine);
+        if (filtered && stdout.length + filtered.length <= MAX_BUFFER) {
+          stdout += filtered;
+        }
+        pendingLine = '';
+      }
       settle({ stdout, stderr, exitCode: code ?? 0 });
     });
 
@@ -319,9 +347,19 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
         let stdout = '';
         let stderr = '';
 
+        let bgPendingLine = '';
         child.stdout?.on('data', (chunk: Buffer) => {
-          const text = chunk.toString();
-          if (stdout.length + text.length <= MAX_BUFFER) stdout += text;
+          const text = bgPendingLine + chunk.toString();
+          bgPendingLine = '';
+          const lastNewline = text.lastIndexOf('\n');
+          if (lastNewline === -1) {
+            bgPendingLine = text;
+            return;
+          }
+          const complete = text.slice(0, lastNewline + 1);
+          bgPendingLine = text.slice(lastNewline + 1);
+          const { filtered } = filterHeartbeats(complete);
+          if (filtered && stdout.length + filtered.length <= MAX_BUFFER) stdout += filtered;
         });
 
         child.stderr?.on('data', (chunk: Buffer) => {
@@ -337,6 +375,12 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
         signal?.addEventListener('abort', onAbort, { once: true });
 
         child.on('close', (code) => {
+          // Flush remaining partial line
+          if (bgPendingLine) {
+            const { filtered } = filterHeartbeats(bgPendingLine);
+            if (filtered && stdout.length + filtered.length <= MAX_BUFFER) stdout += filtered;
+            bgPendingLine = '';
+          }
           backgroundProcesses.delete(id);
           signal?.removeEventListener('abort', onAbort);
           const exitCode = code ?? 0;

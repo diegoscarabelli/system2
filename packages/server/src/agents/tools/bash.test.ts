@@ -394,6 +394,26 @@ describe('bash tool', () => {
       expect(content).toContain('completed');
     });
 
+    it('strips heartbeat sentinels from background output', async () => {
+      const notifyBackground = vi.fn();
+      const tool = createBashTool(notifyBackground);
+
+      await tool.execute('bg-hb', {
+        command: 'echo "data"; echo "::system2:: progress"; echo "more data"',
+        run_in_background: true,
+      } as BashParams);
+
+      await vi.waitFor(() => expect(notifyBackground).toHaveBeenCalledTimes(1), {
+        timeout: 5000,
+      });
+      // Check the details.stdout (not the full content string, which includes the command text)
+      const [, details] = notifyBackground.mock.calls[0];
+      const stdout = (details as { stdout: string }).stdout;
+      expect(stdout).toContain('data');
+      expect(stdout).toContain('more data');
+      expect(stdout).not.toContain('::system2::');
+    });
+
     it('falls through to foreground when no notifyBackground callback', async () => {
       const tool = createBashTool(); // no callback
       const result: BashResult = await tool.execute('fg-call', {
