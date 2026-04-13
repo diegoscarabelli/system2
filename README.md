@@ -80,7 +80,7 @@ The UI is a browser-based workspace with a VSCode-style activity bar:
 
 **Narrative traceability.** When a project completes, the Narrator reconstructs it as a story: what the goal was, what approaches were considered, what was found, what wasn't, and why decisions were made.
 
-**Interactive artifacts.** HTML dashboards with JavaScript execution, displayed in sandboxed iframes with live reload. Dashboards can query the System2 database for live project data.
+**Interactive artifacts.** HTML dashboards with JavaScript execution, displayed in sandboxed iframes with live reload. Dashboards can query System2's internal database or any configured external database (PostgreSQL, MySQL, ClickHouse, DuckDB, Snowflake, BigQuery, MSSQL, SQLite) for live data via a built-in postMessage bridge.
 
 **Multi-provider LLM failover.** Configure multiple providers and API keys. Rate limits, auth errors, and transient failures trigger automatic key rotation and provider fallover with exponential backoff. Supports Anthropic, Google Gemini, OpenAI, Cerebras, Mistral, OpenRouter, Groq, xAI, and any OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama).
 

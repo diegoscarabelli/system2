@@ -69,6 +69,71 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
        - Visualization: `plotly`, `dash[jupyter]` (the `[jupyter]` extra enables running Dash apps inline in JupyterLab)
      - Register the shared env as a Jupyter kernel: `python -m ipykernel install --user --name system2 --display-name "System2"`
    - Save all findings and configurations to `~/.system2/knowledge/infrastructure.md`
+   - For each database discovered or installed, perform two additional actions:
+
+     **Install the database driver** into `~/.system2/node_modules/` so the server can connect at runtime:
+     ```bash
+     npm install --prefix ~/.system2 pg                    # PostgreSQL, TimescaleDB, CockroachDB
+     npm install --prefix ~/.system2 mysql2                 # MySQL, MariaDB
+     npm install --prefix ~/.system2 mssql                  # SQL Server, Azure SQL
+     npm install --prefix ~/.system2 @clickhouse/client     # ClickHouse
+     npm install --prefix ~/.system2 duckdb                 # DuckDB, MotherDuck
+     npm install --prefix ~/.system2 snowflake-sdk          # Snowflake
+     npm install --prefix ~/.system2 @google-cloud/bigquery # BigQuery
+     # SQLite: no install needed (built-in)
+     ```
+
+     **Write a config entry** to `~/.system2/config.toml` for each database. Use the `write` tool to append a `[databases.<name>]` section. Do NOT include passwords: they belong in native credential files or environment variables. Examples:
+
+     ```toml
+     [databases.my_postgres]
+     type = "postgres"
+     host = "localhost"
+     port = 5432
+     database = "analytics"
+     user = "readonly"
+
+     [databases.my_snowflake]
+     type = "snowflake"
+     account = "xy12345.us-east-1"
+     database = "ANALYTICS"
+     warehouse = "COMPUTE_WH"
+     user = "analyst"
+     role = "ANALYST"
+
+     [databases.my_bigquery]
+     type = "bigquery"
+     project = "my-project-123"
+     database = "my_dataset"
+     credentials_file = "/path/to/service-account.json"
+     ```
+
+     For SQLite and DuckDB, only `type` and `database` (the file path) are needed:
+
+     ```toml
+     [databases.my_sqlite]
+     type = "sqlite"
+     database = "/path/to/data.db"
+
+     [databases.my_duckdb]
+     type = "duckdb"
+     database = "/path/to/analysis.duckdb"
+     ```
+
+     Common database-to-driver mappings:
+
+     | Database | `type` value | Driver package |
+     |----------|-------------|----------------|
+     | PostgreSQL, TimescaleDB, CockroachDB | `postgres` | `pg` |
+     | MySQL, MariaDB | `mysql` | `mysql2` |
+     | SQLite | `sqlite` | (built-in) |
+     | SQL Server, Azure SQL | `mssql` | `mssql` |
+     | ClickHouse | `clickhouse` | `@clickhouse/client` |
+     | DuckDB, MotherDuck | `duckdb` | `duckdb` |
+     | Snowflake | `snowflake` | `snowflake-sdk` |
+     | Google BigQuery | `bigquery` | `@google-cloud/bigquery` |
+
+     After writing the config entries, verify each connection works by using the `bash` tool to run a simple test query (e.g. `SELECT 1`). If a connection fails, troubleshoot with the user before moving on.
 
 5. **Configure development environment:**
    - Check whether the user has a GitHub account (needed for remote git operations).

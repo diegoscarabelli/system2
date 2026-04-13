@@ -44,6 +44,7 @@ Execute shell commands with streaming output and optional background execution. 
 - **Background:** when `run_in_background` is true, the tool returns immediately and delivers the result as a `followUp` custom message when the command finishes
 - **Implementation:** Node.js `child_process.spawn`
 - **Command blocklist:** certain catastrophic commands are hard-blocked before execution and return an error: recursive `rm` targeting `/`, `~`, or `$HOME`; the `--no-preserve-root` flag; `mkfs` (filesystem formatting); `dd` writing to raw block devices (`of=/dev/...`); `sqlite3` targeting `~/.system2/app.db` (writes must go through `write_system2_db` for push notifications). Patterns are defined in `BLOCKED_BASH_PATTERNS` and checked against the full command string. Note: the `sqlite3` blocklist only applies to System2's management database (`app.db`). Agents are free to use `bash` with any database tool (`sqlite3`, `psql`, `duckdb`, etc.) to operate on data pipeline databases directly.
+- **Database access for artifacts vs. agents:** agents query external databases through `bash` (e.g., `psql -c "SELECT ..."`). HTML artifacts query the same databases through the server's postMessage bridge (see [Artifacts: Interactive Dashboards](artifacts.md#interactive-dashboards-postmessage-bridge)). The bridge uses database connections configured in `config.toml`, not the agent's shell access. Both paths can coexist: an agent might use `bash` to prototype queries, then write an HTML dashboard that uses the bridge for live data.
 
 ### `read`
 

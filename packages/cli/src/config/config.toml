@@ -44,6 +44,66 @@ max_backups = 3
 # Approximate token equivalent: budget_chars / 4 (e.g. 20000 chars ≈ 5000 tokens).
 # budget_chars = 20000
 
+# External database connections for the query_database tool.
+# Each [databases.<name>] section defines a named connection.
+# Required fields: type, database. All other fields are optional.
+#
+# [databases.analytics]
+# type = "postgres"
+# host = "localhost"
+# port = 5432
+# database = "analytics"
+# user = "readonly"
+# ssl = false
+# query_timeout = 30
+# max_rows = 1000
+#
+# [databases.app]
+# type = "mysql"
+# host = "db.example.com"
+# port = 3306
+# database = "myapp"
+# user = "reader"
+# ssl = true
+#
+# [databases.local]
+# type = "sqlite"
+# database = "/path/to/data.db"
+#
+# [databases.sqlserver]
+# type = "mssql"
+# host = "sql.example.com"
+# port = 1433
+# database = "reporting"
+# user = "reader"
+# ssl = true
+#
+# [databases.clickhouse]
+# type = "clickhouse"
+# host = "clickhouse.example.com"
+# port = 8123
+# database = "analytics"
+# user = "default"
+#
+# [databases.duckfiles]
+# type = "duckdb"
+# database = "/path/to/data.duckdb"
+#
+# [databases.snowflake_wh]
+# type = "snowflake"
+# account = "xy12345.us-east-1"
+# database = "ANALYTICS"
+# warehouse = "COMPUTE_WH"
+# user = "analyst"
+# role = "ANALYST"
+# schema = "PUBLIC"
+#
+# [databases.bq_analytics]
+# type = "bigquery"
+# project = "my-project-123"
+# database = "my_dataset"
+# credentials_file = "/path/to/service-account.json"
+
 [session]
 # Session file size threshold for rotation in MB
 rotation_threshold_mb = 10

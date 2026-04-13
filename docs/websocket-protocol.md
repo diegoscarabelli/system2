@@ -137,6 +137,29 @@ User clicks agent in AgentPane
 
 Messages sent while an agent is streaming are delivered immediately as `steering_message`, which uses `streamingBehavior: 'steer'` to interrupt the current turn. The UI commits any in-progress turn events (thinking blocks, tool calls, partial text) as a snapshot message so they remain visible, then adds the user's message below them.
 
+## Artifact postMessage Bridge
+
+HTML artifacts rendered in iframes communicate with the server through a postMessage bridge, separate from the WebSocket channel. This enables interactive dashboards that query databases at runtime.
+
+**Flow:**
+
+```
+Artifact iframe JS
+  -> window.parent.postMessage({ type: 'system2:query', requestId, sql, database? })
+    -> ArtifactViewer listener in the UI
+      -> fetch('POST /api/query', { sql, database })
+        -> Server: DatabaseAdapterRegistry routes to the named adapter
+          -> Adapter executes SELECT query, returns rows
+        <- { rows, count }
+      <- postMessage({ type: 'system2:query_result', requestId, data: { rows, count } })
+    or on error:
+      <- postMessage({ type: 'system2:query_error', requestId, error: message })
+```
+
+The `database` field selects the connection: omit it or pass `system2` for app.db, or pass the name of an external database from `[databases.<name>]` in config.toml. Only read-only queries are permitted (SELECT, CTEs, EXPLAIN); DML, DDL, and multi-statement queries are rejected with HTTP 403.
+
+This bridge is not part of the WebSocket protocol. It uses standard DOM `postMessage` between the iframe and its parent window, with the UI acting as a relay to the REST endpoint. See [Artifacts](artifacts.md#interactive-dashboards-postmessage-bridge) for the full message format and [Configuration](configuration.md#databases) for database setup.
+
 ## Conversation Summarization
 
 When a user directly messages a non-Guide agent, the `ConversationSummarizer` buffers the interaction. After a 1-minute non-resetting timer expires, it generates a concise summary via a one-shot LLM call (using the Narrator's model) and delivers it to the Guide as a follow-up message. This keeps the Guide informed of user-agent interactions without requiring the user to relay information.

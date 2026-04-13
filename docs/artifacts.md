@@ -83,7 +83,9 @@ The tool technically accepts any file path, not just registered artifacts. This 
 
 ## Interactive Dashboards (postMessage Bridge)
 
-HTML/JS artifacts rendered in iframes can query the System2 database through a postMessage bridge. This enables interactive dashboards that display live project data.
+HTML/JS artifacts rendered in iframes can query databases through a postMessage bridge. This enables interactive dashboards that display live data from the user's analytical infrastructure.
+
+**Supported databases:** PostgreSQL (including TimescaleDB, CockroachDB, Redshift, AlloyDB, Neon, Supabase), MySQL (including MariaDB), SQLite, MSSQL/SQL Server, ClickHouse, DuckDB (including MotherDuck), Snowflake, and BigQuery. Connections are configured under `[databases.<name>]` in config.toml (see [Configuration](configuration.md#databases)). The built-in `system2` database (app.db) is always available.
 
 **Protocol:**
 
@@ -92,11 +94,12 @@ HTML/JS artifacts rendered in iframes can query the System2 database through a p
    window.parent.postMessage({
      type: 'system2:query',
      requestId: 'unique-id',
-     sql: 'SELECT ...'
+     sql: 'SELECT ...',
+     database: 'analytics'  // optional: defaults to 'system2' (app.db)
    }, '*');
    ```
 
-2. The UI forwards the query to `POST /api/query` (SELECT-only, no mutations allowed).
+2. The UI forwards the query to `POST /api/query`.
 
 3. The result is posted back to the iframe:
    ```js
@@ -106,13 +109,17 @@ HTML/JS artifacts rendered in iframes can query the System2 database through a p
    { type: 'system2:query_error', requestId: 'unique-id', error: 'message' }
    ```
 
+**Security:** Only read-only queries are allowed: `SELECT`, `WITH ... SELECT` (CTEs), and `EXPLAIN`. The server rejects DML/DDL keywords (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, etc.) and multi-statement queries (semicolons within the body). Results are capped at `max_rows` (default 10,000) per query, and queries time out after `query_timeout` seconds (default 30). Unknown database names or unsupported types return HTTP 400.
+
+**Architecture:** The server maintains a `DatabaseAdapterRegistry` that lazily creates database connections on first use. Each adapter dynamically loads its driver package from `~/.system2/node_modules/` (installed during onboarding). Connections are pooled where the driver supports it and torn down after 5 minutes of inactivity. The registry is initialized from `config.toml` at server startup. See `packages/server/src/db/adapter-registry.ts` and the individual adapters in `packages/server/src/db/adapters/`.
+
 ## HTTP Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/artifact?path=<encoded_path>` | Serve an artifact file from disk. Resolves `~/` paths. Returns `no-cache` headers. |
 | GET | `/api/artifacts` | List all registered artifacts with project names, ordered by creation date (descending). |
-| POST | `/api/query` | Execute a read-only SQL query (SELECT only). Used by the postMessage bridge for interactive dashboards. |
+| POST | `/api/query` | Execute a read-only SQL query (SELECT, CTEs, EXPLAIN). Used by the postMessage bridge for interactive dashboards. |
 
 ## WebSocket Events
 
