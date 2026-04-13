@@ -11,8 +11,8 @@
  * - gcloud CLI default credentials
  * - GCE/GKE/Cloud Run metadata server
  *
- * Note: BigQuery queries cost money. The adapter sets maximumBytesBilled
- * as a safety limit when configured via max_rows (a rough proxy).
+ * Note: BigQuery queries cost money. The adapter caps result rows via
+ * max_rows and enforces jobTimeoutMs, but does not set maximumBytesBilled.
  */
 
 import type { DatabaseConnectionConfig } from '@dscarabelli/shared';
