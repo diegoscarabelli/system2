@@ -69,7 +69,12 @@ export const createAdapter: AdapterFactory = (
 
       const conn = await pool.getConnection();
       try {
-        await conn.query(`SET SESSION MAX_EXECUTION_TIME = ${timeoutMs}`);
+        // MAX_EXECUTION_TIME is MySQL-specific; MariaDB may not support it
+        try {
+          await conn.query(`SET SESSION MAX_EXECUTION_TIME = ${timeoutMs}`);
+        } catch {
+          // Ignore: server doesn't support MAX_EXECUTION_TIME (e.g. MariaDB)
+        }
         const [rows] = await conn.query(sql);
         const result = rows as unknown[];
         return result.slice(0, maxRows);

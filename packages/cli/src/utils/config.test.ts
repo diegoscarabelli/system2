@@ -195,4 +195,33 @@ describe('buildConfigToml', () => {
     expect(result).not.toContain('base_url');
     expect(result).not.toContain('model =');
   });
+
+  it('includes databases section when configured', () => {
+    const result = buildConfigToml({
+      databases: {
+        analytics: {
+          type: 'postgres',
+          database: 'analytics',
+          host: 'db.example.com',
+          port: 5432,
+          user: 'readonly',
+          query_timeout: 60,
+          max_rows: 50000,
+        },
+      },
+    });
+    expect(result).toContain('[databases.analytics]');
+    expect(result).toContain('type = "postgres"');
+    expect(result).toContain('database = "analytics"');
+    expect(result).toContain('host = "db.example.com"');
+    expect(result).toContain('port = 5432');
+    expect(result).toContain('user = "readonly"');
+    expect(result).toContain('query_timeout = 60');
+    expect(result).toContain('max_rows = 50000');
+  });
+
+  it('omits databases section when not configured', () => {
+    const result = buildConfigToml({});
+    expect(result).not.toContain('[databases.');
+  });
 });

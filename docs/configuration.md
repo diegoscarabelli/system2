@@ -174,6 +174,8 @@ This keeps secrets out of config.toml entirely, relying on well-established cred
 | `port` | no | Driver default (5432/3306) | Server port (postgres, mysql) |
 | `database` | yes | -- | Database name (postgres, mysql) or file path (sqlite) |
 | `user` | no | Current OS user | Authentication user (postgres, mysql) |
+| `socket` | no | -- | Unix domain socket path (overrides host/port) |
+| `ssl` | no | `false` | Enable SSL/TLS connection (postgres, mysql) |
 | `query_timeout` | no | `30` | Query timeout in seconds |
 | `max_rows` | no | `10000` | Maximum rows returned per query |
 

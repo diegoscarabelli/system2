@@ -26,6 +26,8 @@ export class DatabaseAdapterRegistry {
 
   constructor(configs: DatabasesConfig | undefined, db: DatabaseClient) {
     this.configs = configs ?? {};
+    // Prevent config from shadowing the built-in system2 adapter
+    delete this.configs.system2;
     // Register app.db as 'system2' by wrapping the existing DatabaseClient.query()
     this.adapters.set('system2', {
       engine: 'sqlite',
