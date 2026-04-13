@@ -112,7 +112,7 @@ describe('DatabaseAdapterRegistry', () => {
       await registry.query('analytics', 'SELECT 1');
 
       // Retrieve the mock adapter so we can check disconnect later
-      const { __testAdapter: pgAdapter } = (await import('./adapters/postgres.js')) as {
+      const { __testAdapter: pgAdapter } = (await import('./adapters/postgres.js')) as unknown as {
         __testAdapter: DatabaseAdapter;
       };
 
