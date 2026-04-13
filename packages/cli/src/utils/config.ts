@@ -123,6 +123,12 @@ interface TomlConfig {
       ssl?: boolean;
       query_timeout?: number;
       max_rows?: number;
+      account?: string;
+      warehouse?: string;
+      role?: string;
+      schema?: string;
+      project?: string;
+      credentials_file?: string;
     }
   >;
 }
@@ -260,6 +266,12 @@ function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>): Datab
       const m = Number(entry.max_rows);
       if (Number.isFinite(m) && m > 0) conn.max_rows = Math.min(m, 1_000_000);
     }
+    if (entry.account !== undefined) conn.account = entry.account;
+    if (entry.warehouse !== undefined) conn.warehouse = entry.warehouse;
+    if (entry.role !== undefined) conn.role = entry.role;
+    if (entry.schema !== undefined) conn.schema = entry.schema;
+    if (entry.project !== undefined) conn.project = entry.project;
+    if (entry.credentials_file !== undefined) conn.credentials_file = entry.credentials_file;
 
     databases[name] = conn;
   }
@@ -486,6 +498,13 @@ export function buildConfigToml(options: {
       if (conn.ssl !== undefined) lines.push(`ssl = ${conn.ssl}`);
       if (conn.query_timeout !== undefined) lines.push(`query_timeout = ${conn.query_timeout}`);
       if (conn.max_rows !== undefined) lines.push(`max_rows = ${conn.max_rows}`);
+      if (conn.account !== undefined) lines.push(`account = "${conn.account}"`);
+      if (conn.warehouse !== undefined) lines.push(`warehouse = "${conn.warehouse}"`);
+      if (conn.role !== undefined) lines.push(`role = "${conn.role}"`);
+      if (conn.schema !== undefined) lines.push(`schema = "${conn.schema}"`);
+      if (conn.project !== undefined) lines.push(`project = "${conn.project}"`);
+      if (conn.credentials_file !== undefined)
+        lines.push(`credentials_file = "${conn.credentials_file}"`);
       lines.push('');
     }
   }

@@ -224,4 +224,43 @@ describe('buildConfigToml', () => {
     const result = buildConfigToml({});
     expect(result).not.toContain('[databases.');
   });
+
+  it('serializes snowflake-specific fields (account, warehouse, role, schema)', () => {
+    const result = buildConfigToml({
+      databases: {
+        snow: {
+          type: 'snowflake',
+          database: 'ANALYTICS',
+          account: 'xy12345.us-east-1',
+          warehouse: 'COMPUTE_WH',
+          user: 'analyst',
+          role: 'ANALYST',
+          schema: 'PUBLIC',
+        },
+      },
+    });
+    expect(result).toContain('[databases.snow]');
+    expect(result).toContain('type = "snowflake"');
+    expect(result).toContain('account = "xy12345.us-east-1"');
+    expect(result).toContain('warehouse = "COMPUTE_WH"');
+    expect(result).toContain('role = "ANALYST"');
+    expect(result).toContain('schema = "PUBLIC"');
+  });
+
+  it('serializes bigquery-specific fields (project, credentials_file)', () => {
+    const result = buildConfigToml({
+      databases: {
+        bq: {
+          type: 'bigquery',
+          database: 'my_dataset',
+          project: 'my-project-123',
+          credentials_file: '/path/to/sa.json',
+        },
+      },
+    });
+    expect(result).toContain('[databases.bq]');
+    expect(result).toContain('type = "bigquery"');
+    expect(result).toContain('project = "my-project-123"');
+    expect(result).toContain('credentials_file = "/path/to/sa.json"');
+  });
 });

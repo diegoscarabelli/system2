@@ -69,6 +69,40 @@ max_backups = 3
 # [databases.local]
 # type = "sqlite"
 # database = "/path/to/data.db"
+#
+# [databases.sqlserver]
+# type = "mssql"
+# host = "sql.example.com"
+# port = 1433
+# database = "reporting"
+# user = "reader"
+# ssl = true
+#
+# [databases.clickhouse]
+# type = "clickhouse"
+# host = "clickhouse.example.com"
+# port = 8123
+# database = "analytics"
+# user = "default"
+#
+# [databases.duckfiles]
+# type = "duckdb"
+# database = "/path/to/data.duckdb"
+#
+# [databases.snowflake_wh]
+# type = "snowflake"
+# account = "xy12345.us-east-1"
+# database = "ANALYTICS"
+# warehouse = "COMPUTE_WH"
+# user = "analyst"
+# role = "ANALYST"
+# schema = "PUBLIC"
+#
+# [databases.bq_analytics]
+# type = "bigquery"
+# project = "my-project-123"
+# database = "my_dataset"
+# credentials_file = "/path/to/service-account.json"
 
 [session]
 # Session file size threshold for rotation in MB

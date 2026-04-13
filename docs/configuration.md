@@ -141,13 +141,18 @@ When no database is specified, queries default to `system2`, the internal app.db
 
 ### Supported types
 
-| Type | Driver package | Notes |
-|------|---------------|-------|
-| `postgres` | `pg` | Connects via `libpq` conventions |
-| `mysql` | `mysql2` | Connects via standard MySQL protocol |
-| `sqlite` | `better-sqlite3` | Opens a local file (read-only) |
+| Type | Driver package | Compatible databases |
+|------|---------------|---------------------|
+| `postgres` | `pg` | PostgreSQL, TimescaleDB, CockroachDB, YugabyteDB, Redshift, AlloyDB, Neon, Supabase |
+| `mysql` | `mysql2` | MySQL, MariaDB |
+| `sqlite` | `better-sqlite3` | SQLite (opens local file, read-only) |
+| `mssql` | `mssql` | SQL Server, Azure SQL |
+| `clickhouse` | `@clickhouse/client` | ClickHouse (HTTP protocol) |
+| `duckdb` | `duckdb` | DuckDB, MotherDuck (via `md:` prefix) |
+| `snowflake` | `snowflake-sdk` | Snowflake |
+| `bigquery` | `@google-cloud/bigquery` | Google BigQuery |
 
-More types can be added by implementing a driver adapter. The set above covers the initial release.
+More types can be added by implementing a driver adapter.
 
 ### Driver installation
 
@@ -162,35 +167,59 @@ Database credentials are **not** stored in config.toml. Each driver uses its nat
 | `postgres` | `~/.pgpass` (or `PGPASSWORD` env var) |
 | `mysql` | `~/.my.cnf` `[client]` section (or `MYSQL_PWD` env var) |
 | `sqlite` | No credentials needed |
+| `mssql` | Environment variables (`MSSQL_USER`, `MSSQL_PASSWORD`) or Azure AD |
+| `clickhouse` | Username/password in ClickHouse server config |
+| `duckdb` | No credentials needed (local files); `MOTHERDUCK_TOKEN` env var for MotherDuck |
+| `snowflake` | `SNOWFLAKE_PASSWORD` env var, key-pair via `credentials_file`, or `~/.snowflake/connections.toml` |
+| `bigquery` | `credentials_file` (service account JSON), `GOOGLE_APPLICATION_CREDENTIALS` env var, or gcloud ADC |
 
 This keeps secrets out of config.toml entirely, relying on well-established credential mechanisms that users and ops teams already know.
 
 ### Configuration fields
 
+**Common fields** (all types):
+
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `type` | yes | -- | Database type: `postgres`, `mysql`, or `sqlite` |
-| `host` | no | `localhost` | Server hostname or IP (postgres, mysql) |
-| `port` | no | Driver default (5432/3306) | Server port (postgres, mysql) |
-| `database` | yes | -- | Database name (postgres, mysql) or file path (sqlite) |
-| `user` | no | Current OS user | Authentication user (postgres, mysql) |
-| `socket` | no | -- | Unix domain socket path (overrides host/port) |
-| `ssl` | no | `false` | Enable SSL/TLS connection (postgres, mysql) |
+| `type` | yes | -- | Database type (see supported types table) |
+| `database` | yes | -- | Database name, file path (sqlite/duckdb), or dataset (bigquery) |
+| `host` | no | `localhost` | Server hostname or IP (postgres, mysql, mssql, clickhouse) |
+| `port` | no | Driver default | Server port (postgres: 5432, mysql: 3306, mssql: 1433, clickhouse: 8123) |
+| `user` | no | Current OS user | Authentication user |
+| `socket` | no | -- | Unix domain socket path, overrides host/port (postgres, mysql) |
+| `ssl` | no | `false` | Enable SSL/TLS (postgres, mysql, mssql, clickhouse) |
 | `query_timeout` | no | `30` | Query timeout in seconds |
 | `max_rows` | no | `10000` | Maximum rows returned per query |
 
-For postgres and mysql, `host`, `port`, `database`, and `user` follow the same semantics as the native client tools (`psql`, `mysql`). For sqlite, `database` is the file path.
+**Snowflake-specific fields:**
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `account` | yes | -- | Account identifier (e.g. `xy12345.us-east-1`) |
+| `warehouse` | no | -- | Compute warehouse |
+| `role` | no | -- | Security role |
+| `schema` | no | -- | Default schema |
+| `credentials_file` | no | -- | Path to private key file (key-pair auth) |
+
+**BigQuery-specific fields:**
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `project` | yes | -- | GCP project ID |
+| `credentials_file` | no | -- | Path to service account JSON (falls back to ADC) |
+
+For postgres and mysql, `host`, `port`, `database`, and `user` follow the same semantics as the native client tools (`psql`, `mysql`). For sqlite and duckdb, `database` is the file path. For bigquery, `database` is the dataset name.
 
 ### Example configurations
 
 ```toml
-# PostgreSQL: local server via unix socket (default host/port)
+# PostgreSQL (also works for TimescaleDB, CockroachDB, etc.)
 [databases.analytics]
 type = "postgres"
 database = "analytics"
 user = "analyst"
 
-# PostgreSQL: remote server
+# PostgreSQL: remote server with custom timeout
 [databases.warehouse]
 type = "postgres"
 host = "db.example.com"
@@ -212,6 +241,50 @@ user = "reader"
 [databases.survey_results]
 type = "sqlite"
 database = "/Users/me/data/survey.db"
+
+# SQL Server
+[databases.reporting]
+type = "mssql"
+host = "sql.example.com"
+port = 1433
+database = "reporting"
+user = "reader"
+ssl = true
+
+# ClickHouse
+[databases.events]
+type = "clickhouse"
+host = "clickhouse.internal"
+port = 8123
+database = "events"
+user = "default"
+
+# DuckDB: local file
+[databases.parquet_analysis]
+type = "duckdb"
+database = "/Users/me/data/analysis.duckdb"
+
+# DuckDB: MotherDuck (cloud)
+[databases.motherduck]
+type = "duckdb"
+database = "md:my_database"
+
+# Snowflake
+[databases.snowflake_wh]
+type = "snowflake"
+account = "xy12345.us-east-1"
+database = "ANALYTICS"
+warehouse = "COMPUTE_WH"
+user = "analyst"
+role = "ANALYST"
+schema = "PUBLIC"
+
+# BigQuery
+[databases.bq_analytics]
+type = "bigquery"
+project = "my-project-123"
+database = "my_dataset"
+credentials_file = "/path/to/service-account.json"
 ```
 
 ## Application Directory

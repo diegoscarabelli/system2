@@ -2,7 +2,8 @@
  * Database Adapter Interface
  *
  * Uniform async interface for querying databases through the postMessage bridge.
- * Each adapter wraps a specific database driver (pg, mysql2, better-sqlite3).
+ * Each adapter wraps a specific database driver (pg, mysql2, better-sqlite3,
+ * mssql, @clickhouse/client, duckdb, snowflake-sdk, @google-cloud/bigquery).
  */
 
 import type { DatabaseConnectionConfig } from '@dscarabelli/shared';

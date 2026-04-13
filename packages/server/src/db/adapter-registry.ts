@@ -22,6 +22,11 @@ export class DatabaseAdapterRegistry {
     postgres: async () => (await import('./adapters/postgres.js')).createAdapter,
     mysql: async () => (await import('./adapters/mysql.js')).createAdapter,
     sqlite: async () => (await import('./adapters/sqlite.js')).createAdapter,
+    mssql: async () => (await import('./adapters/mssql.js')).createAdapter,
+    clickhouse: async () => (await import('./adapters/clickhouse.js')).createAdapter,
+    duckdb: async () => (await import('./adapters/duckdb.js')).createAdapter,
+    snowflake: async () => (await import('./adapters/snowflake.js')).createAdapter,
+    bigquery: async () => (await import('./adapters/bigquery.js')).createAdapter,
   };
 
   constructor(configs: DatabasesConfig | undefined, db: DatabaseClient) {

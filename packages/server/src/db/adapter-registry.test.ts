@@ -20,7 +20,7 @@ function makeFakeAdapter(overrides?: Partial<DatabaseAdapter>): DatabaseAdapter 
   };
 }
 
-// Mock the dynamic adapter imports so no real pg/mysql2/sqlite drivers are needed
+// Mock the dynamic adapter imports so no real drivers are needed
 vi.mock('./adapters/postgres.js', () => {
   const adapter = makeFakeAdapter({ engine: 'postgres' });
   const createAdapter: AdapterFactory = () => adapter;
@@ -35,6 +35,36 @@ vi.mock('./adapters/mysql.js', () => {
 
 vi.mock('./adapters/sqlite.js', () => {
   const adapter = makeFakeAdapter({ engine: 'sqlite' });
+  const createAdapter: AdapterFactory = () => adapter;
+  return { createAdapter, __testAdapter: adapter };
+});
+
+vi.mock('./adapters/mssql.js', () => {
+  const adapter = makeFakeAdapter({ engine: 'mssql' });
+  const createAdapter: AdapterFactory = () => adapter;
+  return { createAdapter, __testAdapter: adapter };
+});
+
+vi.mock('./adapters/clickhouse.js', () => {
+  const adapter = makeFakeAdapter({ engine: 'clickhouse' });
+  const createAdapter: AdapterFactory = () => adapter;
+  return { createAdapter, __testAdapter: adapter };
+});
+
+vi.mock('./adapters/duckdb.js', () => {
+  const adapter = makeFakeAdapter({ engine: 'duckdb' });
+  const createAdapter: AdapterFactory = () => adapter;
+  return { createAdapter, __testAdapter: adapter };
+});
+
+vi.mock('./adapters/snowflake.js', () => {
+  const adapter = makeFakeAdapter({ engine: 'snowflake' });
+  const createAdapter: AdapterFactory = () => adapter;
+  return { createAdapter, __testAdapter: adapter };
+});
+
+vi.mock('./adapters/bigquery.js', () => {
+  const adapter = makeFakeAdapter({ engine: 'bigquery' });
   const createAdapter: AdapterFactory = () => adapter;
   return { createAdapter, __testAdapter: adapter };
 });
@@ -78,7 +108,7 @@ describe('DatabaseAdapterRegistry', () => {
       const registry = new DatabaseAdapterRegistry(configs, db as never);
 
       await expect(registry.query('oracle', 'SELECT 1')).rejects.toThrow(
-        'Unsupported database type "oracle". Supported types: postgres, mysql, sqlite'
+        /Unsupported database type "oracle"\. Supported types: postgres, mysql, sqlite/
       );
     });
   });
