@@ -2,124 +2,151 @@
 
 **Not a chatbot. A self-hosted AI data team that does the work.**
 
-System2 is a multi-agent system that extracts, transforms, analyzes, and reviews your data with the rigor you would expect from a human analyst. You talk to a Guide agent in a browser-based chat interface. Behind the scenes, specialized agents plan the work, execute it in parallel, check each other's reasoning, and write up what they found. You stay in the loop without managing the details.
+System2 is a multi-agent system specialized in data engineering, analysis, and analytical reasoning. It adapts to your existing data stack or builds one from scratch. You describe an analytical goal to the Guide, your single point of contact, and it spawns a team of agents that plan the approach, build pipelines, run analyses, review results for statistical fallacies, and produce traceable, interactive analysis. Every conversation builds on the last: no chat sessions, no Memento resets. Agents learn about you and your infrastructure over time. Stop the server, restart it days later: the team picks up where it left off, with project state and accumulated knowledge intact. You stay in the loop without managing the details.
 
-There are no chat sessions. The Guide maintains a single continuous conversation that accumulates knowledge over time: your infrastructure, your preferences, lessons from past projects. Every interaction builds on the last. System2 is not a tool you restart; it is a team member that remembers.
-
-> **TL;DR:** You describe a data goal in plain language. System2 spawns a team of AI agents that research the domain, plan the approach (with your approval), build pipelines, run analyses, review results for statistical fallacies, and produce traceable reports. Everything is persisted: tasks, decisions, findings, and a narrative project story. Runs entirely on your machine.
+Named for Kahneman's slow, deliberate mode of reasoning, System2 is the bicycle for your analytical mind. It puts AI-agent data work automation and rigorous statistical reasoning under your control, whether the data is private or public. System2 is built for epistemic autonomy: every step, from raw data sources to how the data is processed, stored, and analyzed, is in your control, traceable and verifiable end-to-end, so that your understanding of the world is grounded in evidence you can inspect, not in conclusions shaped by the incentives of whoever controls the information pipeline.
 
 <!-- TODO: screenshot/GIF of the full UI: chat panel on the right, artifact viewer with a dashboard on the left, activity bar visible -->
 
 ---
 
-## See it in action
+## Quick start
 
-```text
-You:       Analyze our LinkedIn campaigns for the last 6 months.
-           What's driving engagement and where is budget being wasted?
+**Requirements:** Node.js 20+, pnpm 8+, at least one LLM API key (Anthropic, Google, or OpenAI). Runs on macOS, Linux, and Windows.
 
-Guide:     A few questions first: where does the LinkedIn data live,
-           CSV export, API, or already in a database? And should this
-           be a one-time analysis or a recurring pipeline?
-
-You:       CSV export for now. One-time analysis, I just need the report.
-
-Guide:     Project created. Conductor and Reviewer are spinning up.
+```bash
+pnpm add -g system2
+system2 onboard          # API keys, LLM providers, config.toml
+system2 start            # starts server on port 3000 and opens the browser
 ```
 
-From here, the Conductor researches the data, writes a plan, and waits for your approval before executing. The Reviewer checks every statistical claim. When the work finishes, you get:
+```bash
+system2 status           # check if the server is running
+system2 stop             # graceful shutdown
+```
 
-- An interactive HTML dashboard in the artifact viewer
-- A narrative project story reconstructing what was found and how decisions were made
-- A full audit trail of tasks, comments, and agent reasoning in the database
-
-<!-- TODO: screenshot of the kanban board showing tasks across status columns with project swimlanes -->
-<!-- TODO: screenshot of an interactive dashboard artifact displayed in the artifact viewer -->
-
----
-
-## How it works
-
-Four agents, each with a distinct role:
-
-| Agent | What it does |
-| ----- | ------------ |
-| **Guide** | Your interface. Answers questions, creates projects, delegates to Conductors, translates between you and the technical work. |
-| **Conductor** | Researches the domain, writes a plan for your approval, builds the task hierarchy, executes or delegates, coordinates the Reviewer. One per project. |
-| **Reviewer** | Checks SQL logic, statistical methodology, and analytical reasoning. Catches p-hacking, multiple comparisons without correction, causal claims from observational data, and missing confidence intervals. Nothing ships without Reviewer sign-off. |
-| **Narrator** | Runs on a schedule. Writes daily summaries, maintains long-term memory, and produces a journalistic project story when work completes. |
-
-Agents communicate through direct messages and share a structured SQLite database for projects, tasks, and findings. All conversations are persisted as JSONL files. The Guide spawns and terminates agents as needed, and Conductors can spawn additional specialist agents within their projects.
-
-<!-- TODO: render the ASCII system diagram from docs/architecture.md as an SVG image -->
-
----
-
-## The interface
-
-The UI is a browser-based workspace with a VSCode-style activity bar:
-
-- **Chat panel** (right): multi-agent chat with streaming. Switch between agents to inspect their work. Send steering messages to interrupt an agent mid-turn.
-- **Artifact viewer** (left): tabbed display for interactive HTML dashboards, markdown reports, images, and PDFs. Live reload on file changes. A postMessage bridge gives dashboards read-only SQL access to `app.db`.
-- **Kanban board**: live task dashboard with project swimlanes, status columns, priority indicators, and click-through to task details and comments.
-- **Agent pane**: shows all active agents with busy/idle indicators and context window usage.
-- **Artifact catalog**: browsable list of all registered artifacts, filterable by project and tags.
-- **Cron jobs panel**: execution history for the Narrator's scheduled jobs.
-
-<!-- TODO: 2x2 grid of screenshots: (1) chat with streaming, (2) kanban board, (3) artifact dashboard, (4) agent pane -->
+> **Note:** System2 is not yet published to npm. For now, clone and build from source: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
 ## Key capabilities
 
-**Structured work management.** Projects, tasks with hierarchy and dependencies, priority levels, comments, and status tracking. All in SQLite with a live kanban board.
+**Multi-agent system built for data work.** A Guide is your single point of contact, your customizable interface to the world of data. It defers complex work, organized by project, to a Conductor that researches, plans, and orchestrates; a Reviewer that catches statistical fallacies and flawed methodology; and optional Workers that execute tasks in parallel. A Narrator curates short- and long-term memory on a schedule. Agents carry built-in skills for statistical analysis, SQL modeling, and data infrastructure, with system-level rules that require verification before any result is reported and Reviewer sign-off before any analytical task is marked done.
 
-**Statistical rigor built in.** The Reviewer applies a System 2 thinking lens (Kahneman) to every analytical output: are the sample sizes sufficient? Are effect sizes reported alongside p-values? Is this correlation being presented as causation?
+**Structured collaboration.** Agents manage work through a database-backed kanban board (visible to the user) with task hierarchies, dependencies, and comment threads, and coordinate through real-time messages. Every project follows a plan-approve-execute cycle: the Conductor researches and proposes, you approve before work begins.
 
-**Persistent, evolving knowledge.** Markdown files about your infrastructure, preferences, and lessons learned, git-tracked and re-read on every LLM call. Edits take effect immediately. Agents improve over time without code changes.
+**Knowledge base that learns and adapts.** Agents continuously refine git-tracked markdown files storing user preferences, data infrastructure setup, role-specific lessons, long-term memory, and reusable skills they create alongside the built-in ones. A Narrator synthesizes activity into daily summaries and project logs on a schedule, and a journalistic-style project story when work concludes.
 
-**Narrative traceability.** When a project completes, the Narrator reconstructs it as a story: what the goal was, what approaches were considered, what was found, what wasn't, and why decisions were made.
+**Interactive artifacts.** Agents craft whatever the analysis demands: dashboards that query your analytical databases live (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite), research articles, Jupyter notebooks, financial models. Agents surface these in the UI alongside the conversation, so you see the result the moment it is ready and can ask follow-up questions while looking at it.
 
-**Interactive artifacts.** HTML dashboards with JavaScript execution, displayed in sandboxed iframes with live reload. Dashboards can query System2's internal database or any configured external database (PostgreSQL, MySQL, ClickHouse, DuckDB, Snowflake, BigQuery, MSSQL, SQLite) for live data via a built-in postMessage bridge.
+**Autonomous scheduling.** Agents set reminders for their future selves to follow up on long-running work, revisit blocked tasks, or re-evaluate conditions. A cron scheduler triggers daily summaries, long-term memory updates, and project stories. Long-running commands emit heartbeat signals to report progress back to the system.
 
-**Multi-provider LLM failover.** Configure multiple providers and API keys. Rate limits, auth errors, and transient failures trigger automatic key rotation and provider fallover with exponential backoff. Supports Anthropic, Google Gemini, OpenAI, Cerebras, Mistral, OpenRouter, Groq, xAI, and any OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama).
-
-**Skills framework.** Reusable workflow instructions that agents load on demand, filtered by role. Agents proactively create skills when they recognize reusable patterns.
-
-**Plan-approve-execute.** Every project follows a mandatory cycle: the Conductor researches, discusses options with the Guide, and presents a plan. You approve before any execution begins. Mid-project changes surface back to you for re-approval.
+**Any LLM, automatic failover.** Anthropic, Google, OpenAI, OpenRouter, Cerebras, Mistral, Groq, xAI, and any OpenAI-compatible endpoint. Automatic key rotation, provider failover with exponential backoff, and time-based cooldowns. The system recovers on its own when providers come back.
 
 ---
 
-## Quick start
+## See it in action
 
-> System2 is not yet published to npm. Clone and build from source: see [CONTRIBUTING.md](CONTRIBUTING.md).
+A walkthrough of a real project: building a health and fitness pipeline from a smartwatch API, orchestrated by Prefect, stored in TimescaleDB, with an analytical dashboard at the end.
 
-**Requirements:** Node.js 20+, pnpm 8+, at least one LLM API key (Anthropic, Google, or OpenAI). Runs on macOS, Linux, and Windows.
+<!-- TODO: short video (2-3 min) or annotated GIF showing this full flow end-to-end -->
 
-```bash
-# After building from source:
-system2 onboard   # interactive setup: API keys, LLM providers, config.toml
-system2 start     # starts server on port 3000 and opens the browser
+### 1. You describe the goal
+
+```text
+You:    I want to track my health data from my Garmin watch. Set up a daily
+        pipeline that pulls sleep, heart rate, and activity data into
+        TimescaleDB, orchestrated by Prefect. Then analyze the last 3 months
+        and build me a dashboard.
+
+Guide:  A few questions first. Are you using the Garmin Connect API directly
+        or the garminconnect Python library? Where is TimescaleDB running,
+        and is Prefect already deployed or do we need to set it up?
+
+You:    garminconnect library. TimescaleDB is on DiegoTower, Prefect is
+        running locally. Credentials are in .env.
+
+Guide:  Got it. Creating the project now. Conductor and Reviewer are
+        spinning up.
 ```
 
-```bash
-system2 status    # check if the server is running
-system2 stop      # graceful shutdown
+The Guide is your only point of contact. It translates between you and the technical work, creates projects, and spawns the agents that do the execution.
+
+<!-- TODO: screenshot of the chat panel showing this conversation, with the agent pane on the left showing Guide (idle), Conductor (busy), Reviewer (idle) -->
+
+### 2. The Conductor researches and plans
+
+Behind the scenes, the Conductor reads your `infrastructure.md` (to understand your stack), inspects your existing pipeline code for patterns, and investigates the Garmin Connect library's capabilities and rate limits. It messages the Guide with its findings and proposed approach:
+
+```text
+Conductor → Guide:  Garmin Connect provides daily summaries for sleep,
+                     heart rate, and activities. Rate limits are soft but
+                     I'll add backoff. Recommending three hypertables in
+                     TimescaleDB (garmin_sleep, garmin_heart_rate,
+                     garmin_activities) with 7-day chunk intervals.
+                     Prefect flow: one parent flow with three extraction
+                     tasks running in parallel, then a dbt transform step.
+                     Two options for the historical backfill: single batch
+                     (simpler, risk of rate limiting) or chunked by week
+                     (slower, more resilient). I recommend chunked.
 ```
 
----
+The Guide relays this to you along with the full plan document. You read it in the artifact viewer, ask a question about the chunk interval, and approve.
 
-## What makes System2 different
+This is the **plan-approve-execute** cycle: no work begins until you sign off. If the Conductor discovers mid-project that the Garmin API returns data in a different format than expected, it surfaces the problem back to you for re-approval before changing direction.
 
-| | System2 | Typical AI assistant |
-| - | ------- | ------------------- |
-| **Work model** | Multi-agent: plan, execute, review in parallel | Single LLM loop |
-| **Continuity** | Single persistent session, no "new chat"; accumulates knowledge | Resets between conversations |
-| **Analytical rigor** | Dedicated Reviewer agent checking statistical methodology | No validation layer |
-| **Traceability** | Tasks, comments, agent IDs, timestamps, narrative stories | Chat logs (if saved) |
-| **Outputs** | Interactive HTML dashboards with live database queries | Text and code |
-| **Approval gates** | Plan-approve-execute with explicit user gates | No structured lifecycle |
-| **LLM resilience** | Multi-provider failover with key rotation and cooldowns | Single provider |
+<!-- TODO: screenshot of a plan document displayed in the artifact viewer -->
+
+### 3. Execution: agents coordinate in parallel
+
+Once approved, the Conductor builds the task hierarchy in the database and starts working. On the kanban board, you see tasks appear across status columns: "Create TimescaleDB hypertables", "Write Prefect extraction flow", "Configure dbt transforms", "Run 3-month backfill", "Build analytical dashboard".
+
+<!-- TODO: screenshot of the kanban board showing tasks across status columns with project swimlanes -->
+
+Agents communicate through direct messages for real-time coordination and task comments for the permanent record. The Conductor assigns tasks, tracks progress, and posts updates:
+
+```text
+Conductor → Reviewer:  Backfill complete. 89 days of data loaded.
+                        garmin_sleep: 89 rows, garmin_heart_rate: 127,440
+                        rows (1-min intervals), garmin_activities: 156 rows.
+                        Row counts verified against API response counts.
+                        Ready for your review of the analysis. Task #47.
+```
+
+### 4. The Reviewer checks everything
+
+The Reviewer reads the analysis, checks the SQL logic, and applies statistical scrutiny:
+
+```text
+Reviewer → Conductor:  Two issues on task #47.
+                        (1) The sleep vs. exercise correlation (r=0.31) is
+                        presented as "moderate" but the 95% CI spans
+                        [0.08, 0.51] — too wide to draw conclusions with
+                        n=89. Add the CI to the dashboard and soften the
+                        language. (2) The weekly heart rate trend uses a
+                        7-day moving average but the first week is partial
+                        (5 days). Either drop it or note the caveat.
+```
+
+Nothing ships without Reviewer sign-off. The Conductor fixes both issues and resubmits.
+
+### 5. Results
+
+When the work finishes, you get three things:
+
+**An interactive dashboard** in the artifact viewer: sleep trends, heart rate zones, activity breakdowns, with filters and drill-downs. The dashboard runs as a sandboxed HTML application with full JavaScript execution and can query the System2 database for live project metadata.
+
+<!-- TODO: screenshot of the health dashboard artifact in the viewer: charts, filters, a data table -->
+
+**A narrative project story** written by the Narrator: what the goal was, what the Conductor tried, where the Reviewer pushed back, what the final findings were, and how decisions were made. A journalistic reconstruction of the entire project arc.
+
+**A full audit trail** in the database: every task with status history, every comment with agent attribution and timestamps, every decision documented. Visible on the kanban board and queryable via SQL.
+
+### 6. The system remembers
+
+After the project, the Narrator's scheduled jobs kick in. The daily summary captures what happened. Long-term memory records that your Garmin data uses the `garminconnect` library, that your preferred chunk interval is 7 days, that DiegoTower runs TimescaleDB. Next time you ask for anything involving Garmin or time-series data, the system already knows your stack.
+
+The Conductor's role-specific knowledge file now contains a note: "Garmin Connect API returns daily summary endpoints that lag by ~2 hours. Schedule extraction flows for early morning to ensure previous day is complete." Every future Conductor inherits this lesson.
 
 ---
 

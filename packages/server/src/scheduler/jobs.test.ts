@@ -339,7 +339,7 @@ describe('buildAndDeliverMemoryUpdate', () => {
     // Write an oversized infrastructure.md (>20,000 chars)
     writeFileSync(
       join(knowledgeDir, 'infrastructure.md'),
-      '# Infrastructure\n\n' + 'x'.repeat(21_000)
+      `# Infrastructure\n\n${'x'.repeat(21_000)}`
     );
 
     const host = mockNarratorHost();
