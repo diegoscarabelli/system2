@@ -237,7 +237,7 @@ function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
  * Convert TOML databases section to DatabasesConfig.
  * Entries missing required fields (type, database) are skipped with a warning.
  */
-function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>): DatabasesConfig {
+export function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>): DatabasesConfig {
   const databases: DatabasesConfig = {};
 
   for (const [name, entry] of Object.entries(toml)) {

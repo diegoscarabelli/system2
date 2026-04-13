@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { buildConfigToml } from './config.js';
+import { describe, expect, it, vi } from 'vitest';
+import { buildConfigToml, convertTomlDatabases } from './config.js';
 
 describe('buildConfigToml', () => {
   it('generates valid TOML with LLM config', () => {
@@ -262,5 +262,142 @@ describe('buildConfigToml', () => {
     expect(result).toContain('type = "bigquery"');
     expect(result).toContain('project = "my-project-123"');
     expect(result).toContain('credentials_file = "/path/to/sa.json"');
+  });
+
+  it('outputs multiple [databases.*] sections', () => {
+    const result = buildConfigToml({
+      databases: {
+        pg: { type: 'postgres', database: 'mydb', host: 'pg.local', port: 5432, user: 'admin' },
+        my: { type: 'mysql', database: 'app', host: 'mysql.local', port: 3306 },
+      },
+    });
+    expect(result).toContain('[databases.pg]');
+    expect(result).toContain('type = "postgres"');
+    expect(result).toContain('host = "pg.local"');
+    expect(result).toContain('[databases.my]');
+    expect(result).toContain('type = "mysql"');
+    expect(result).toContain('host = "mysql.local"');
+  });
+
+  it('outputs ssl and socket fields in database sections', () => {
+    const result = buildConfigToml({
+      databases: {
+        local_pg: {
+          type: 'postgres',
+          database: 'dev',
+          socket: '/var/run/postgresql/.s.PGSQL.5432',
+          ssl: true,
+        },
+      },
+    });
+    expect(result).toContain('[databases.local_pg]');
+    expect(result).toContain('socket = "/var/run/postgresql/.s.PGSQL.5432"');
+    expect(result).toContain('ssl = true');
+  });
+});
+
+describe('convertTomlDatabases', () => {
+  it('converts a valid database entry', () => {
+    const result = convertTomlDatabases({
+      analytics: {
+        type: 'postgres',
+        database: 'analytics',
+        host: 'db.example.com',
+        port: 5432,
+        user: 'reader',
+      },
+    });
+    expect(result).toEqual({
+      analytics: {
+        type: 'postgres',
+        database: 'analytics',
+        host: 'db.example.com',
+        port: 5432,
+        user: 'reader',
+      },
+    });
+  });
+
+  it('skips entries missing required "type" field', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlDatabases({
+      bad: { database: 'something' } as never,
+    });
+    expect(result).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Skipping database "bad"'));
+    warnSpy.mockRestore();
+  });
+
+  it('skips entries missing required "database" field', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlDatabases({
+      bad: { type: 'postgres' } as never,
+    });
+    expect(result).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Skipping database "bad"'));
+    warnSpy.mockRestore();
+  });
+
+  it('clamps max_rows to 1,000,000', () => {
+    const result = convertTomlDatabases({
+      big: { type: 'postgres', database: 'db', max_rows: 5_000_000 },
+    });
+    expect(result.big?.max_rows).toBe(1_000_000);
+  });
+
+  it('ignores non-positive max_rows', () => {
+    const result = convertTomlDatabases({
+      zero: { type: 'postgres', database: 'db', max_rows: 0 },
+      neg: { type: 'postgres', database: 'db', max_rows: -10 },
+    });
+    expect(result.zero?.max_rows).toBeUndefined();
+    expect(result.neg?.max_rows).toBeUndefined();
+  });
+
+  it('ignores non-positive query_timeout', () => {
+    const result = convertTomlDatabases({
+      zero: { type: 'postgres', database: 'db', query_timeout: 0 },
+      neg: { type: 'postgres', database: 'db', query_timeout: -5 },
+    });
+    expect(result.zero?.query_timeout).toBeUndefined();
+    expect(result.neg?.query_timeout).toBeUndefined();
+  });
+
+  it('accepts valid query_timeout and max_rows', () => {
+    const result = convertTomlDatabases({
+      ok: { type: 'mysql', database: 'app', query_timeout: 60, max_rows: 500 },
+    });
+    expect(result.ok?.query_timeout).toBe(60);
+    expect(result.ok?.max_rows).toBe(500);
+  });
+
+  it('passes through optional fields (socket, ssl, snowflake, bigquery)', () => {
+    const result = convertTomlDatabases({
+      full: {
+        type: 'postgres',
+        database: 'db',
+        host: 'h',
+        port: 5432,
+        user: 'u',
+        socket: '/tmp/.s.PGSQL.5432',
+        ssl: true,
+        account: 'acct',
+        warehouse: 'wh',
+        role: 'r',
+        schema: 's',
+        project: 'p',
+        credentials_file: '/path/to/creds.json',
+      },
+    });
+    const conn = result.full;
+    expect(conn).toBeDefined();
+    expect(conn?.socket).toBe('/tmp/.s.PGSQL.5432');
+    expect(conn?.ssl).toBe(true);
+    expect(conn?.account).toBe('acct');
+    expect(conn?.warehouse).toBe('wh');
+    expect(conn?.role).toBe('r');
+    expect(conn?.schema).toBe('s');
+    expect(conn?.project).toBe('p');
+    expect(conn?.credentials_file).toBe('/path/to/creds.json');
   });
 });

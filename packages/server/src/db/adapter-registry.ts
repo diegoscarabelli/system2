@@ -8,6 +8,7 @@
  */
 
 import type { DatabasesConfig } from '@dscarabelli/shared';
+import { log } from '../utils/logger.js';
 import type { AdapterFactory, DatabaseAdapter } from './adapter.js';
 import type { DatabaseClient } from './client.js';
 
@@ -40,7 +41,12 @@ export class DatabaseAdapterRegistry {
   constructor(configs: DatabasesConfig | undefined, db: DatabaseClient) {
     this.configs = configs ?? {};
     // Prevent config from shadowing the built-in system2 adapter
-    delete this.configs.system2;
+    if ('system2' in this.configs) {
+      log.warn(
+        '[AdapterRegistry] Ignoring [databases.system2] in config: "system2" is reserved for the built-in database'
+      );
+      delete this.configs.system2;
+    }
     // Register app.db as 'system2' by wrapping the existing DatabaseClient.query()
     this.adapters.set('system2', {
       engine: 'sqlite',
@@ -81,7 +87,7 @@ export class DatabaseAdapterRegistry {
   }
 
   listDatabases(): string[] {
-    return ['system2', ...Object.keys(this.configs)];
+    return [...new Set(['system2', ...Object.keys(this.configs)])];
   }
 
   async disconnectAll(): Promise<void> {

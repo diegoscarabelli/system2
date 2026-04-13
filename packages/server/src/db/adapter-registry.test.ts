@@ -135,6 +135,41 @@ describe('DatabaseAdapterRegistry', () => {
     });
   });
 
+  describe('system2 name collision', () => {
+    it('removes a "system2" key from external configs and logs a warning', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const configs: DatabasesConfig = {
+        system2: { type: 'postgres', database: 'shadow' },
+        analytics: { type: 'postgres', database: 'analytics' },
+      };
+      const registry = new DatabaseAdapterRegistry(configs, db as never);
+
+      // system2 should route to the built-in adapter, not the external config
+      const result = await registry.query('system2', 'SELECT 1');
+      expect(db.query).toHaveBeenCalledWith('SELECT 1');
+      expect(result).toEqual([{ id: 1 }]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.anything(), // timestamp
+        expect.stringContaining('reserved for the built-in database')
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('does not list system2 twice when config contains a system2 key', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const configs: DatabasesConfig = {
+        system2: { type: 'postgres', database: 'shadow' },
+        analytics: { type: 'postgres', database: 'analytics' },
+      };
+      const registry = new DatabaseAdapterRegistry(configs, db as never);
+
+      const databases = registry.listDatabases();
+      expect(databases.filter((d) => d === 'system2')).toHaveLength(1);
+      expect(databases).toContain('analytics');
+      warnSpy.mockRestore();
+    });
+  });
+
   describe('disconnectAll()', () => {
     it('calls disconnect on external adapters but not system2', async () => {
       const configs: DatabasesConfig = {
