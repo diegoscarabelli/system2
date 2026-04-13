@@ -183,12 +183,12 @@ export function ArtifactViewer() {
     function handleMessage(event: MessageEvent) {
       if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) return;
 
-      const { type, requestId, sql } = event.data || {};
+      const { type, requestId, sql, database } = event.data || {};
       if (type === 'system2:query') {
         fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sql }),
+          body: JSON.stringify({ sql, ...(database ? { database } : {}) }),
         })
           .then((res) => res.json())
           .then((data) => {

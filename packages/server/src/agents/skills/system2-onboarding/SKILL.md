@@ -69,6 +69,43 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
        - Visualization: `plotly`, `dash[jupyter]` (the `[jupyter]` extra enables running Dash apps inline in JupyterLab)
      - Register the shared env as a Jupyter kernel: `python -m ipykernel install --user --name system2 --display-name "System2"`
    - Save all findings and configurations to `~/.system2/knowledge/infrastructure.md`
+   - For each database discovered or installed, perform two additional actions:
+
+     **Install the database driver** into `~/.system2/node_modules/` so the server can connect at runtime:
+     ```bash
+     npm install --prefix ~/.system2 pg          # PostgreSQL, TimescaleDB, CockroachDB
+     npm install --prefix ~/.system2 mysql2       # MySQL, MariaDB
+     # SQLite: no install needed (built-in)
+     ```
+
+     **Write a config entry** to `~/.system2/config.toml` for each database. Use the `write` tool to append a `[databases.<name>]` section. Include `type`, `host`, `port`, `database`, and `user`. Do NOT include passwords: they belong in native credential files (`~/.pgpass` for Postgres, `~/.my.cnf` for MySQL). Example:
+
+     ```toml
+     [databases.my_postgres]
+     type = "postgres"
+     host = "localhost"
+     port = 5432
+     database = "analytics"
+     user = "readonly"
+     ```
+
+     For SQLite databases, only `type` and `database` (the file path) are needed:
+
+     ```toml
+     [databases.my_sqlite]
+     type = "sqlite"
+     database = "/path/to/data.db"
+     ```
+
+     Common database-to-driver mappings:
+
+     | Database | `type` value | Driver package |
+     |----------|-------------|----------------|
+     | PostgreSQL, TimescaleDB, CockroachDB | `postgres` | `pg` |
+     | MySQL, MariaDB | `mysql` | `mysql2` |
+     | SQLite | `sqlite` | (built-in) |
+
+     After writing the config entries, verify each connection works by using the `bash` tool to run a simple test query (e.g. `SELECT 1`). If a connection fails, troubleshoot with the user before moving on.
 
 5. **Configure development environment:**
    - Check whether the user has a GitHub account (needed for remote git operations).

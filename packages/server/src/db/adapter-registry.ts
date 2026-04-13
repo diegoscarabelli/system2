@@ -1,0 +1,83 @@
+/**
+ * Database Adapter Registry
+ *
+ * Routes queries to the appropriate database adapter by name.
+ * The built-in 'system2' database (app.db) is registered automatically
+ * by wrapping DatabaseClient.query(). External databases are created
+ * lazily from config on first query.
+ */
+
+import type { DatabasesConfig } from '@dscarabelli/shared';
+import type { AdapterFactory, DatabaseAdapter } from './adapter.js';
+import type { DatabaseClient } from './client.js';
+
+export class DatabaseAdapterRegistry {
+  private adapters = new Map<string, DatabaseAdapter>();
+  private configs: DatabasesConfig;
+
+  private static factories: Record<string, () => Promise<AdapterFactory>> = {
+    postgres: async () => (await import('./adapters/postgres.js')).createAdapter,
+    mysql: async () => (await import('./adapters/mysql.js')).createAdapter,
+    sqlite: async () => (await import('./adapters/sqlite.js')).createAdapter,
+  };
+
+  constructor(configs: DatabasesConfig | undefined, db: DatabaseClient) {
+    this.configs = configs ?? {};
+    // Register app.db as 'system2' by wrapping the existing DatabaseClient.query()
+    this.adapters.set('system2', {
+      engine: 'sqlite',
+      connected: true,
+      connect: async () => {},
+      disconnect: async () => {},
+      query: async (sql: string) => db.query(sql),
+    });
+  }
+
+  async query(name: string, sql: string): Promise<unknown[]> {
+    let adapter = this.adapters.get(name);
+
+    if (!adapter) {
+      const config = this.configs[name];
+      if (!config) {
+        const configured = [...Object.keys(this.configs), 'system2'];
+        throw new Error(
+          `Unknown database "${name}". Available databases: ${configured.join(', ')}`
+        );
+      }
+
+      const factoryLoader = DatabaseAdapterRegistry.factories[config.type];
+      if (!factoryLoader) {
+        const supported = Object.keys(DatabaseAdapterRegistry.factories);
+        throw new Error(
+          `Unsupported database type "${config.type}". Supported types: ${supported.join(', ')}`
+        );
+      }
+
+      const factory = await factoryLoader();
+      adapter = factory(config);
+      this.adapters.set(name, adapter);
+    }
+
+    if (!adapter.connected) {
+      await adapter.connect();
+    }
+
+    return adapter.query(sql);
+  }
+
+  listDatabases(): string[] {
+    return ['system2', ...Object.keys(this.configs)];
+  }
+
+  async disconnectAll(): Promise<void> {
+    for (const [name, adapter] of this.adapters) {
+      if (name === 'system2') continue; // lifecycle managed by Server
+      try {
+        await adapter.disconnect();
+      } catch {
+        // best-effort cleanup during shutdown
+      }
+    }
+    this.adapters.clear();
+  }
+}

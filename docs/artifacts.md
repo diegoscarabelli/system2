@@ -92,9 +92,12 @@ HTML/JS artifacts rendered in iframes can query the System2 database through a p
    window.parent.postMessage({
      type: 'system2:query',
      requestId: 'unique-id',
-     sql: 'SELECT ...'
+     sql: 'SELECT ...',
+     database: 'analytics'  // optional
    }, '*');
    ```
+
+   The `database` field names a connection defined in `[databases.<name>]` in config.toml (see [Configuration](configuration.md#databases)). When omitted, the query runs against `system2`, the internal app.db.
 
 2. The UI forwards the query to `POST /api/query` (SELECT-only, no mutations allowed).
 

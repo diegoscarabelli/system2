@@ -12,6 +12,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type {
+  DatabaseConnectionConfig,
+  DatabasesConfig,
   LlmConfig,
   LlmProvider,
   LlmProviderConfig,
@@ -30,6 +32,7 @@ export interface System2Config {
   llm?: LlmConfig;
   services?: ServicesConfig;
   tools?: ToolsConfig;
+  databases?: DatabasesConfig;
   backup: {
     /** Hours between automatic backups (default: 24) */
     cooldownHours: number;
@@ -108,6 +111,20 @@ interface TomlConfig {
   knowledge?: {
     budget_chars?: number;
   };
+  databases?: Record<
+    string,
+    {
+      type?: string;
+      host?: string;
+      port?: number;
+      database?: string;
+      user?: string;
+      socket?: string;
+      ssl?: boolean;
+      query_timeout?: number;
+      max_rows?: number;
+    }
+  >;
 }
 
 /**
@@ -208,6 +225,40 @@ function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
     };
   }
   return tools;
+}
+
+/**
+ * Convert TOML databases section to DatabasesConfig.
+ * Entries missing required fields (type, database) are skipped with a warning.
+ */
+function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>): DatabasesConfig {
+  const databases: DatabasesConfig = {};
+
+  for (const [name, entry] of Object.entries(toml)) {
+    if (!entry.type || !entry.database) {
+      console.warn(
+        `[Config] Skipping database "${name}": missing required field "type" or "database"`
+      );
+      continue;
+    }
+
+    const conn: DatabaseConnectionConfig = {
+      type: entry.type,
+      database: entry.database,
+    };
+
+    if (entry.host !== undefined) conn.host = entry.host;
+    if (entry.port !== undefined) conn.port = entry.port;
+    if (entry.user !== undefined) conn.user = entry.user;
+    if (entry.socket !== undefined) conn.socket = entry.socket;
+    if (entry.ssl !== undefined) conn.ssl = entry.ssl;
+    if (entry.query_timeout !== undefined) conn.query_timeout = entry.query_timeout;
+    if (entry.max_rows !== undefined) conn.max_rows = entry.max_rows;
+
+    databases[name] = conn;
+  }
+
+  return databases;
 }
 
 /**
@@ -320,6 +371,10 @@ export function loadConfig(): System2Config {
       config.tools = convertTomlTools(tomlConfig.tools);
     }
 
+    if (tomlConfig.databases) {
+      config.databases = convertTomlDatabases(tomlConfig.databases);
+    }
+
     return config;
   } catch (_error) {
     console.warn('[Config] Failed to parse config.toml, using defaults');
@@ -334,6 +389,7 @@ export function buildConfigToml(options: {
   llm?: LlmConfig;
   services?: ServicesConfig;
   tools?: ToolsConfig;
+  databases?: DatabasesConfig;
   backup?: System2Config['backup'];
   session?: System2Config['session'];
   logs?: System2Config['logs'];
@@ -409,6 +465,23 @@ export function buildConfigToml(options: {
     lines.push(`enabled = ${options.tools.web_search.enabled}`);
     lines.push(`max_results = ${options.tools.web_search.max_results}`);
     lines.push('');
+  }
+
+  // Databases section
+  if (options.databases) {
+    for (const [name, conn] of Object.entries(options.databases)) {
+      lines.push(`[databases.${name}]`);
+      lines.push(`type = "${conn.type}"`);
+      lines.push(`database = "${conn.database}"`);
+      if (conn.host !== undefined) lines.push(`host = "${conn.host}"`);
+      if (conn.port !== undefined) lines.push(`port = ${conn.port}`);
+      if (conn.user !== undefined) lines.push(`user = "${conn.user}"`);
+      if (conn.socket !== undefined) lines.push(`socket = "${conn.socket}"`);
+      if (conn.ssl !== undefined) lines.push(`ssl = ${conn.ssl}`);
+      if (conn.query_timeout !== undefined) lines.push(`query_timeout = ${conn.query_timeout}`);
+      if (conn.max_rows !== undefined) lines.push(`max_rows = ${conn.max_rows}`);
+      lines.push('');
+    }
   }
 
   // Operational sections

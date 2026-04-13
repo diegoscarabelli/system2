@@ -93,6 +93,7 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 | `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
 | `[chat]` | Chat history settings | `ChatConfig` |
 | `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
+| `[databases.*]` | External database connections | `DatabasesConfig` |
 
 ## LLM Providers
 
@@ -131,6 +132,86 @@ When API errors occur, System2 automatically retries and fails over:
 **Cooldown recovery:** Rate limit and transient failures enter a 5-minute cooldown. Keys become available again automatically after cooldown expires. Auth errors (invalid/revoked keys) are permanent until you edit config.toml.
 
 See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
+
+## Databases
+
+External database connections are declared as `[databases.<name>]` blocks in config.toml. The name you choose becomes the identifier agents and dashboards use to target that database (for example, the `database` field in the [postMessage bridge](artifacts.md#interactive-dashboards-postmessage-bridge) or the `query_database` tool).
+
+When no database is specified, queries default to `system2`, the internal app.db (SQLite).
+
+### Supported types
+
+| Type | Driver package | Notes |
+|------|---------------|-------|
+| `postgres` | `pg` | Connects via `libpq` conventions |
+| `mysql` | `mysql2` | Connects via standard MySQL protocol |
+| `sqlite` | `better-sqlite3` | Opens a local file by `path` |
+
+More types can be added by implementing a driver adapter. The set above covers the initial release.
+
+### Driver installation
+
+Database drivers are not bundled with System2. The Guide installs the required driver packages during onboarding into `~/.system2/node_modules/` based on the database types declared in config.toml. If you add a new database type after onboarding, the Guide will install the missing driver on next startup.
+
+### Credentials
+
+Database credentials are **not** stored in config.toml. Each driver uses its native credential location:
+
+| Type | Credential source |
+|------|------------------|
+| `postgres` | `~/.pgpass` (or `PGPASSWORD` env var) |
+| `mysql` | `~/.my.cnf` `[client]` section (or `MYSQL_PWD` env var) |
+| `sqlite` | No credentials needed |
+
+This keeps secrets out of config.toml entirely, relying on well-established credential mechanisms that users and ops teams already know.
+
+### Configuration fields
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `type` | yes | -- | Database type: `postgres`, `mysql`, or `sqlite` |
+| `host` | no | `localhost` | Server hostname or IP (postgres, mysql) |
+| `port` | no | Driver default (5432/3306) | Server port (postgres, mysql) |
+| `database` | no | -- | Database name to connect to (postgres, mysql) |
+| `user` | no | Current OS user | Authentication user (postgres, mysql) |
+| `path` | no | -- | File path for sqlite databases |
+| `query_timeout` | no | `30` | Query timeout in seconds |
+| `max_rows` | no | `10000` | Maximum rows returned per query |
+
+For postgres and mysql, `host`, `port`, `database`, and `user` follow the same semantics as the native client tools (`psql`, `mysql`). For sqlite, only `path` is needed.
+
+### Example configurations
+
+```toml
+# PostgreSQL: local server via unix socket (default host/port)
+[databases.analytics]
+type = "postgres"
+database = "analytics"
+user = "analyst"
+
+# PostgreSQL: remote server
+[databases.warehouse]
+type = "postgres"
+host = "db.example.com"
+port = 5432
+database = "warehouse"
+user = "readonly"
+query_timeout = 60
+max_rows = 50000
+
+# MySQL
+[databases.legacy]
+type = "mysql"
+host = "mysql.internal"
+port = 3306
+database = "legacy_app"
+user = "reader"
+
+# SQLite: external database file
+[databases.survey_results]
+type = "sqlite"
+path = "~/data/survey.db"
+```
 
 ## Application Directory
 

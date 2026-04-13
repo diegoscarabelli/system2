@@ -11,6 +11,7 @@ import { dirname, isAbsolute, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
   ChatConfig,
+  DatabasesConfig,
   JobExecution,
   KnowledgeConfig,
   LlmConfig,
@@ -32,6 +33,7 @@ import type { AgentSpawner } from './agents/tools/spawn-agent.js';
 import type { WriteEntityType } from './agents/tools/write-system2-db.js';
 import { createHistoryCaptureSubscriber } from './chat/history-capture.js';
 import { ConversationSummarizer } from './chat/summarizer.js';
+import { DatabaseAdapterRegistry } from './db/adapter-registry.js';
 import { DatabaseClient } from './db/client.js';
 import { initializeGitRepo } from './knowledge/git.js';
 import { initializeKnowledge } from './knowledge/init.js';
@@ -64,6 +66,7 @@ export interface ServerConfig {
   schedulerConfig?: SchedulerConfig;
   chatConfig?: ChatConfig;
   knowledgeConfig?: KnowledgeConfig;
+  databasesConfig?: DatabasesConfig;
 }
 
 export class Server {
@@ -79,6 +82,7 @@ export class Server {
   private narratorId: number;
   private guideAgentId: number;
   private conversationSummarizer?: ConversationSummarizer;
+  private adapterRegistry: DatabaseAdapterRegistry;
   private authResolver: AuthResolver;
   private reminderManager: ReminderManager;
 
@@ -87,6 +91,7 @@ export class Server {
 
     // Initialize database
     this.db = new DatabaseClient(config.dbPath);
+    this.adapterRegistry = new DatabaseAdapterRegistry(config.databasesConfig, this.db);
 
     // Initialize knowledge directory and git repo (idempotent)
     initializeKnowledge(SYSTEM2_DIR);
@@ -320,19 +325,22 @@ export class Server {
     });
 
     // Query API for interactive artifact dashboards (postMessage bridge)
-    this.app.post('/api/query', (req, res) => {
+    this.app.post('/api/query', async (req, res) => {
       try {
-        const { sql } = req.body;
+        const { sql, database = 'system2' } = req.body;
         if (!sql || typeof sql !== 'string') {
           res.status(400).json({ error: 'Missing or invalid sql parameter' });
           return;
         }
         const trimmed = sql.trim().toUpperCase();
-        if (!trimmed.startsWith('SELECT')) {
+        const isSelect =
+          trimmed.startsWith('SELECT') ||
+          (trimmed.startsWith('WITH') && /\bSELECT\b/.test(trimmed));
+        if (!isSelect) {
           res.status(403).json({ error: 'Only SELECT queries are allowed' });
           return;
         }
-        const rows = this.db.query(sql);
+        const rows = await this.adapterRegistry.query(database, sql);
         res.json({ rows, count: rows.length });
       } catch (error) {
         res.status(500).json({ error: (error as Error).message });
@@ -859,8 +867,13 @@ export class Server {
             return;
           }
 
-          this.db.close();
-          resolve();
+          this.adapterRegistry
+            .disconnectAll()
+            .then(() => {
+              this.db.close();
+              resolve();
+            })
+            .catch(reject);
         });
       });
     });
