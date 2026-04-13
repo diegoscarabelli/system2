@@ -2,33 +2,44 @@
 
 **Not a chatbot. A self-hosted AI data team that does the work.**
 
-System2 is a multi-agent system specialized in data engineering, data analysis, and analytical reasoning. It handles the full data lifecycle (procurement, transformation, loading, analysis, reporting) and manages the underlying machinery of your stack (pipelines, databases, orchestrators). You describe a data goal in plain language. System2 spawns a team of AI agents that research the domain, plan the approach, build pipelines, run analyses, review results for statistical fallacies, and produce traceable reports. You stay in the loop without managing the details.
+System2 is a multi-agent system specialized in data engineering, analysis, and analytical reasoning. It adapts to your existing data stack or builds one from scratch. You describe an analytical goal to the Guide, your single point of contact, and it spawns a team of agents that plan the approach, build pipelines, run analyses, review results for statistical fallacies, and produce traceable, interactive analysis. Every conversation builds on the last: no chat sessions, no Memento resets. Agents learn about you and your infrastructure over time. Stop the server, restart it days later: the entire team picks up where it left off, with full context intact. You stay in the loop without managing the details.
 
-The agents collectively constitute the system: they manage projects together, learn about your infrastructure over time, and take initiative on your behalf. There are no chat sessions. A dedicated Narrator agent runs on a schedule to curate long-term memory, write daily summaries, and produce journalistic project stories. Every interaction builds on the last. System2 is not a tool you restart; it is a team member that remembers.
+Named for Kahneman's slow, deliberate mode of reasoning, System2 is the bicycle for your analytical mind. It puts AI-agent data work automation and rigorous statistical reasoning under your control, whether the data is private or public. System2 is built for epistemic autonomy: every step, from raw data sources to how the data is processed, stored, and analyzed, is in your control, traceable and verifiable end-to-end, so that your understanding of the world is grounded in evidence you can inspect, not in conclusions shaped by the incentives of whoever controls the information pipeline.
 
 <!-- TODO: screenshot/GIF of the full UI: chat panel on the right, artifact viewer with a dashboard on the left, activity bar visible -->
 
 ---
 
+## Quick start
+
+**Requirements:** Node.js 20+, pnpm 8+, at least one LLM API key (Anthropic, Google, or OpenAI). Runs on macOS, Linux, and Windows.
+
+```bash
+pnpm add -g system2
+system2 onboard          # API keys, LLM providers, config.toml
+system2 start            # starts server on port 3000 and opens the browser
+```
+
+```bash
+system2 status           # check if the server is running
+system2 stop             # graceful shutdown
+```
+
+> **Note:** System2 is not yet published to npm. For now, clone and build from source: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
 ## Key capabilities
 
-**Knowledge capture and transfer.** Git-tracked markdown files about your infrastructure, preferences, and lessons learned, re-read on every LLM call. Each agent role maintains its own knowledge file. Edits take effect immediately; agents improve over time without code changes.
+**Multi-agent system built for data work.** A Guide is your single point of contact, your customizable interface to the world of data. It defers complex work, organized by project, to a Conductor that researches, plans, and orchestrates; a Reviewer that catches statistical fallacies and flawed methodology; and optional Workers that execute tasks in parallel. A Narrator curates short- and long-term memory on a schedule. Agents carry built-in skills for statistical analysis, SQL modeling, and data infrastructure, with system-level rules that require verification before any result is reported and Reviewer sign-off before any analytical task is marked done.
 
-**Scheduled memory curation.** The Narrator runs on a cron schedule: every 30 minutes it synthesizes agent activity into project logs and daily summaries. Once a day it consolidates learnings into long-term memory. On project completion, it writes a narrative story of the full arc.
+**Structured collaboration.** Agents manage work through a database-backed kanban board (visible to the user) with task hierarchies, dependencies, and comment threads, and coordinate through real-time messages. Every project follows a plan-approve-execute cycle: the Conductor researches and proposes, you approve before work begins.
 
-**Inter-agent communication.** Direct messages for real-time coordination (with urgent interrupts) and task comments for the permanent audit trail. Agents steer each other, push back on flawed methodology, and relay decisions to you through the Guide.
+**Knowledge base that learns and adapts.** Agents continuously refine git-tracked markdown files storing user preferences, data infrastructure setup, role-specific lessons, long-term memory, and reusable skills they create alongside the built-in ones. A Narrator synthesizes activity into daily summaries and project logs on a schedule, and a journalistic-style project story when work concludes.
 
-**Autonomous project management.** Tasks with hierarchy, dependencies, priority, and status tracking in SQLite. The Conductor decomposes work, assigns tasks, and coordinates reviews. You watch progress on a live kanban board.
+**Interactive artifacts.** Agents craft whatever the analysis demands: dashboards with live database querying, research articles, Jupyter notebooks, financial models. Agents surface these in the UI alongside the conversation, so you see the result the moment it is ready and can ask follow-up questions while looking at it.
 
-**Statistical rigor.** A dedicated Reviewer checks every analytical output: sample sizes, effect sizes, causal claims, multiple comparisons. Nothing ships without sign-off.
-
-**Plan-approve-execute.** The Conductor researches, presents a plan, and waits for your approval. Mid-project changes surface back for re-approval.
-
-**Skills framework.** Reusable workflow instructions loaded on demand, filtered by role. Agents create new skills when they recognize reusable patterns.
-
-**Interactive artifacts.** HTML dashboards in sandboxed iframes with live reload. A postMessage bridge provides read-only SQL access to the System2 database.
-
-**Multi-provider LLM failover.** Automatic key rotation and provider failover with exponential backoff across Anthropic, Google, OpenAI, Cerebras, Mistral, OpenRouter, Groq, xAI, and any OpenAI-compatible endpoint.
+**Any LLM, automatic failover.** Anthropic, Google, OpenAI, Cerebras, Mistral, OpenRouter, Groq, xAI, and any OpenAI-compatible endpoint. Automatic key rotation, provider failover with exponential backoff, and time-based cooldowns. The system recovers on its own when providers come back.
 
 ### How System2 compares
 
@@ -46,25 +57,6 @@ The agents collectively constitute the system: they manage projects together, le
 | **UI** | Full workspace (chat, kanban, artifacts, agents) | Chat + charts | No (Enterprise only) | No | Spatial canvas |
 
 [Anton](https://github.com/mindsdb/anton) (MindsDB): self-hosted autonomous BI agent. Closest direct competitor, but single-agent with no project management, statistical review, or scheduled memory curation. [CrewAI](https://github.com/crewAIInc/crewAI): popular Python framework for role-based agent crews. A building block, not a finished product. [MetaGPT](https://github.com/FoundationAgents/MetaGPT): multi-agent framework simulating a software company. Similar "virtual team" concept but targets software development. [Agor](https://github.com/preset-io/agor): multiplayer spatial canvas for orchestrating coding agents in parallel. Multi-agent UI for software engineering, not data work.
-
----
-
-## Quick start
-
-> System2 is not yet published to npm. Clone and build from source: see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-**Requirements:** Node.js 20+, pnpm 8+, at least one LLM API key (Anthropic, Google, or OpenAI). Runs on macOS, Linux, and Windows.
-
-```bash
-# After building from source:
-system2 onboard   # interactive setup: API keys, LLM providers, config.toml
-system2 start     # starts server on port 3000 and opens the browser
-```
-
-```bash
-system2 status    # check if the server is running
-system2 stop      # graceful shutdown
-```
 
 ---
 
