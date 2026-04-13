@@ -109,7 +109,7 @@ HTML/JS artifacts rendered in iframes can query databases through a postMessage 
    { type: 'system2:query_error', requestId: 'unique-id', error: 'message' }
    ```
 
-**Security:** Only SELECT queries are allowed. The server rejects DML/DDL keywords (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, etc.), multi-statement queries (semicolons within the body), and non-SELECT statements. Results are capped at `max_rows` (default 10,000) per query, and queries time out after `query_timeout` seconds (default 30). Unknown database names or unsupported types return HTTP 400.
+**Security:** Only read-only queries are allowed: `SELECT`, `WITH ... SELECT` (CTEs), and `EXPLAIN`. The server rejects DML/DDL keywords (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, etc.) and multi-statement queries (semicolons within the body). Results are capped at `max_rows` (default 10,000) per query, and queries time out after `query_timeout` seconds (default 30). Unknown database names or unsupported types return HTTP 400.
 
 **Architecture:** The server maintains a `DatabaseAdapterRegistry` that lazily creates database connections on first use. Each adapter dynamically loads its driver package from `~/.system2/node_modules/` (installed during onboarding). Connections are pooled where the driver supports it and torn down after 5 minutes of inactivity. The registry is initialized from `config.toml` at server startup. See `packages/server/src/db/adapter-registry.ts` and the individual adapters in `packages/server/src/db/adapters/`.
 
@@ -119,7 +119,7 @@ HTML/JS artifacts rendered in iframes can query databases through a postMessage 
 |--------|------|-------------|
 | GET | `/api/artifact?path=<encoded_path>` | Serve an artifact file from disk. Resolves `~/` paths. Returns `no-cache` headers. |
 | GET | `/api/artifacts` | List all registered artifacts with project names, ordered by creation date (descending). |
-| POST | `/api/query` | Execute a read-only SQL query (SELECT only). Used by the postMessage bridge for interactive dashboards. |
+| POST | `/api/query` | Execute a read-only SQL query (SELECT, CTEs, EXPLAIN). Used by the postMessage bridge for interactive dashboards. |
 
 ## WebSocket Events
 

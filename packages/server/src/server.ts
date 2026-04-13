@@ -339,21 +339,22 @@ export class Server {
         // Strip optional trailing semicolon, then reject any remaining semicolons (multi-statement)
         const trimmed = sql.trim().replace(/;\s*$/, '').toUpperCase();
         if (trimmed.includes(';')) {
-          res.status(403).json({ error: 'Only single SELECT queries are allowed' });
+          res.status(403).json({ error: 'Multi-statement queries are not allowed' });
           return;
         }
         // Reject DML/DDL keywords anywhere in the query (blocks CTE abuse like WITH x AS (DELETE ...) SELECT ...)
         const forbidden =
           /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|REVOKE)\b/;
         if (forbidden.test(trimmed)) {
-          res.status(403).json({ error: 'Only SELECT queries are allowed' });
+          res.status(403).json({ error: 'Only SELECT and EXPLAIN queries are allowed' });
           return;
         }
-        const isSelect =
+        const isReadOnly =
           trimmed.startsWith('SELECT') ||
-          (trimmed.startsWith('WITH') && /\bSELECT\b/.test(trimmed));
-        if (!isSelect) {
-          res.status(403).json({ error: 'Only SELECT queries are allowed' });
+          (trimmed.startsWith('WITH') && /\bSELECT\b/.test(trimmed)) ||
+          trimmed.startsWith('EXPLAIN');
+        if (!isReadOnly) {
+          res.status(403).json({ error: 'Only SELECT and EXPLAIN queries are allowed' });
           return;
         }
         const rows = await this.adapterRegistry.query(database, sql);

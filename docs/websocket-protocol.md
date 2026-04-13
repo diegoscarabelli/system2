@@ -156,7 +156,7 @@ Artifact iframe JS
       <- postMessage({ type: 'system2:query_error', requestId, error: message })
 ```
 
-The `database` field selects the connection: omit it or pass `system2` for app.db, or pass the name of an external database from `[databases.<name>]` in config.toml. Only SELECT queries are permitted; DML, DDL, and multi-statement queries are rejected with HTTP 403.
+The `database` field selects the connection: omit it or pass `system2` for app.db, or pass the name of an external database from `[databases.<name>]` in config.toml. Only read-only queries are permitted (SELECT, CTEs, EXPLAIN); DML, DDL, and multi-statement queries are rejected with HTTP 403.
 
 This bridge is not part of the WebSocket protocol. It uses standard DOM `postMessage` between the iframe and its parent window, with the UI acting as a relay to the REST endpoint. See [Artifacts](artifacts.md#interactive-dashboards-postmessage-bridge) for the full message format and [Configuration](configuration.md#databases) for database setup.
 
