@@ -216,9 +216,9 @@ PostgreSQL stores TEXT, VARCHAR, and VARCHAR(n) identically. No performance diff
 
 ### Timestamps
 
-Always use TIMESTAMPTZ, never TIMESTAMP (without time zone). PostgreSQL stores TIMESTAMPTZ as UTC internally and converts on display. TIMESTAMP without time zone is ambiguous: it causes bugs when servers change timezone or data crosses timezone boundaries.
+Prefer TIMESTAMPTZ for points-in-time (events, `created_at`, `updated_at`, audit logs, expiration times). PostgreSQL stores TIMESTAMPTZ as UTC internally and converts on display, which avoids bugs when servers change timezone or data crosses timezone boundaries.
 
-Use DATE when you genuinely only need the date (birthdays, business days). Use INTERVAL for durations.
+Use TIMESTAMP (without time zone) only for true local wall-clock datetimes that are not instants, such as a recurring local schedule or a store's local opening/closing time. Use DATE when you genuinely only need the date (birthdays, business days). Use INTERVAL for durations.
 
 ### Booleans
 
@@ -487,7 +487,7 @@ DO UPDATE SET
 
 Do not use SQL triggers or stored procedures as the primary vehicle for materializing derived data. They create hidden coupling (a developer inserting a row has no idea a cascade of side-effects fires), are difficult to test (requires integration tests against a live database), live as database state rather than version-controlled code, and scale poorly (database-tier compute is expensive and hard to scale horizontally).
 
-**The worst pattern:** triggers that auto-refresh materialized views on insert/update. Each row-level change triggers a full MV refresh: inserting 1000 rows means 1000 full refreshes, exponential dead tuple accumulation, and insert blocking.
+**The worst pattern:** triggers that auto-refresh materialized views on insert/update. Each row-level change triggers a full MV refresh: inserting 1000 rows means 1000 full refreshes, rapid dead tuple accumulation, heavy vacuum pressure, and insert blocking.
 
 **Valid uses for triggers:** simple audit trails (`created_at`/`updated_at` timestamps), enforcing invariants that cannot be expressed as CHECK constraints. Keep them minimal and side-effect-free.
 
