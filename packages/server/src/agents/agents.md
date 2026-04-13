@@ -304,9 +304,11 @@ Scratchpad files are working materials, not deliverables. They are **not** regis
 
 This lets later work resume from a known state without recomputing expensive queries or transforms.
 
-**Notebooks.** Author `.ipynb` files in the scratchpad, execute them (`jupyter nbconvert --execute` or iteratively), and keep iterating there. When ready to show the user, render to HTML with `jupyter nbconvert --to html`, copy the HTML into the appropriate `artifacts/` directory, register it, and show it. The source `.ipynb` stays in the scratchpad as the editable working copy; the HTML is the published deliverable.
+**Notebooks.** Author `.ipynb` files in the scratchpad, execute them (`jupyter nbconvert --execute` or iteratively), and keep iterating there. When ready to show the user, render to HTML with `jupyter nbconvert --to html`, place the HTML directly in the appropriate `artifacts/` directory, register it, and show it. The source `.ipynb` stays in the scratchpad as the editable working copy; the rendered HTML is the published deliverable.
 
-**Promotion to artifacts** is an explicit step: copy the file to the appropriate `artifacts/` directory, register it in the database, optionally call `show_artifact`. If the work also produced reusable pipeline code, graduate that code to the data pipelines repository as a separate step.
+**Promotion to artifacts** is an explicit step: move the file to the appropriate `artifacts/` directory (or, for notebooks, place the rendered output there), register it in the database, optionally call `show_artifact`. There is no reason to keep a copy in the scratchpad once something is an artifact. If the work also produced reusable pipeline code, graduate that code to the data pipelines repository as a separate step.
+
+**HTML dashboards are artifacts, not scratchpad material.** Interactive HTML dashboards (with JavaScript that queries databases via the postMessage bridge) are deliverables. Author them directly in the `artifacts/` directory, register them, and show them. The scratchpad may be used to prototype the underlying queries, but the dashboard itself is an artifact from the start.
 
 ### Background Processes
 

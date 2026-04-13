@@ -54,30 +54,21 @@ Jupyter notebooks (`.ipynb`) are a natural fit for exploratory analysis with mix
 5. Register it as an artifact in the database (`createArtifact` via the `write_system2_db` tool), using an absolute `file_path`.
 6. Display it with `show_artifact` for the user.
 
-The source `.ipynb` stays in the scratchpad as the editable working copy; the HTML in the appropriate `artifacts/` directory is the published deliverable. This separation lets the agent keep iterating on the source without disturbing the published version, and lets the user see the rendered output without needing a Jupyter server.
-
-## Interactive HTML Dashboards
-
-For dashboards that should display current data each time they are opened (rather than a frozen snapshot from when the notebook was last executed), author the artifact as a standalone HTML file with JavaScript that queries databases at runtime via the postMessage bridge. The workflow:
-
-1. Prototype the queries and analysis in the scratchpad (notebook or Python script) to verify the data shape and logic.
-2. Write the HTML/JS dashboard in the scratchpad, using `system2:query` postMessages to fetch data from the configured databases.
-3. Test by registering and showing the artifact. The dashboard should render with live data.
-4. Once the dashboard is working, copy it to `artifacts/` and register it.
-
-This approach is best when the user needs a dashboard they can reopen over time and always see fresh data, as opposed to a notebook report that captures a point-in-time analysis. See [Artifacts: Interactive Dashboards](artifacts.md#interactive-dashboards-postmessage-bridge) for the full postMessage protocol and [Configuration](configuration.md#databases) for setting up external database connections.
+The source `.ipynb` stays in the scratchpad as the editable working copy; the rendered HTML goes directly into the appropriate `artifacts/` directory. This separation lets the agent keep iterating on the source without disturbing the published version, and lets the user see the rendered output without needing a Jupyter server.
 
 ## Promotion to Artifacts
 
 Promotion is an explicit step, not an automatic one. When something in the scratchpad becomes a deliverable the user should see (a finished plot, a polished report, a rendered notebook, a usable export):
 
-1. Copy the file from the scratchpad to the appropriate `artifacts/` directory (project-scoped or project-free).
+1. Move the file from the scratchpad to the appropriate `artifacts/` directory (project-scoped or project-free). For notebooks, the rendered HTML goes to artifacts while the source `.ipynb` stays in the scratchpad.
 2. Register the artifact in the database with `createArtifact`, providing `file_path`, `title`, optional `description`, and optional `tags`.
 3. Optionally call `show_artifact` to display it to the user immediately.
 
-The scratchpad copy stays as the working version. If the artifact needs further iteration, the agent edits the scratchpad source, re-renders or re-exports, and overwrites the artifact file. The database record tracks the title and metadata; the file at `file_path` is the live published version.
+If the artifact needs further iteration, the agent edits the source (in the scratchpad for notebooks, or the artifact file directly for standalone files), re-renders if needed, and overwrites the artifact. The database record tracks the title and metadata; the file at `file_path` is the live published version.
 
 If the same exploration also produced reusable pipeline code, graduate that code to the data pipelines repository as a separate step (see `infrastructure.md` for the repository location).
+
+**HTML dashboards are not scratchpad material.** Interactive HTML dashboards (with JavaScript that queries databases via the postMessage bridge) are deliverables, not prototypes. Author them directly in the `artifacts/` directory, register them, and show them. The scratchpad may be used to prototype the underlying queries (in a notebook or Python script), but the dashboard itself is an artifact from the start. See [Artifacts: Interactive Dashboards](artifacts.md#interactive-dashboards-postmessage-bridge) for the postMessage protocol.
 
 ## Lifecycle and Cleanup
 
