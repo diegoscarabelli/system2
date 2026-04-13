@@ -62,3 +62,25 @@ export interface ChatConfig {
 export interface KnowledgeConfig {
   budget_chars: number;
 }
+
+export interface DatabaseConnectionConfig {
+  type: string;
+  host?: string;
+  port?: number;
+  database: string;
+  user?: string;
+  socket?: string;
+  ssl?: boolean;
+  query_timeout?: number;
+  max_rows?: number;
+  account?: string;
+  warehouse?: string;
+  role?: string;
+  schema?: string;
+  project?: string;
+  credentials_file?: string;
+}
+
+export interface DatabasesConfig {
+  [name: string]: DatabaseConnectionConfig;
+}

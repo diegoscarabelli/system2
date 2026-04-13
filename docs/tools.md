@@ -24,8 +24,18 @@ Execute shell commands with streaming output and optional background execution. 
 | `command` | string | Shell command to execute |
 | `cwd` | string? | Working directory (defaults to user home) |
 | `run_in_background` | boolean? | If true, return immediately and deliver output as a follow-up message on completion |
+| `inactivity_timeout_seconds` | number? | Inactivity timeout in seconds (10-600, default 60). Resets on every stdout/stderr output. Only takes effect when explicitly provided. |
+| `total_timeout_seconds` | number? | Total wall-clock timeout in seconds (10-600, default 600). Hard cap, never resets. Only takes effect when explicitly provided. |
 
-- **Timeout:** 120 seconds (foreground only; background commands have no timeout)
+- **Timeout (legacy):** 120 seconds fixed timeout when neither `inactivity_timeout_seconds` nor `total_timeout_seconds` is provided. Background commands have no timeout.
+- **Timeout (dual mode):** when either timeout parameter is provided, the tool uses dual timeouts: an inactivity timer that resets on every stdout/stderr data event, and a total timer that never resets. This allows long-running commands that produce regular output to run for up to 10 minutes.
+- **Heartbeat protocol:** scripts can emit `::system2:: <message>` lines on stdout to reset the inactivity timer and push progress updates to the UI. Sentinel lines are stripped from the output before it reaches the agent. Example:
+  ```bash
+  for i in $(seq 1 100); do
+    echo "::system2:: processing batch $i of 100"
+    process_batch "$i"
+  done
+  ```
 - **Output buffer:** 10MB
 - **Working directory:** user's home directory (overridable via `cwd`)
 - **Shell:** PowerShell (`powershell.exe`) on Windows, `/bin/bash` on macOS/Linux
@@ -34,6 +44,7 @@ Execute shell commands with streaming output and optional background execution. 
 - **Background:** when `run_in_background` is true, the tool returns immediately and delivers the result as a `followUp` custom message when the command finishes
 - **Implementation:** Node.js `child_process.spawn`
 - **Command blocklist:** certain catastrophic commands are hard-blocked before execution and return an error: recursive `rm` targeting `/`, `~`, or `$HOME`; the `--no-preserve-root` flag; `mkfs` (filesystem formatting); `dd` writing to raw block devices (`of=/dev/...`); `sqlite3` targeting `~/.system2/app.db` (writes must go through `write_system2_db` for push notifications). Patterns are defined in `BLOCKED_BASH_PATTERNS` and checked against the full command string. Note: the `sqlite3` blocklist only applies to System2's management database (`app.db`). Agents are free to use `bash` with any database tool (`sqlite3`, `psql`, `duckdb`, etc.) to operate on data pipeline databases directly.
+- **Database access for artifacts vs. agents:** agents query external databases through `bash` (e.g., `psql -c "SELECT ..."`). HTML artifacts query the same databases through the server's postMessage bridge (see [Artifacts: Interactive Dashboards](artifacts.md#interactive-dashboards-postmessage-bridge)). The bridge uses database connections configured in `config.toml`, not the agent's shell access. Both paths can coexist: an agent might use `bash` to prototype queries, then write an HTML dashboard that uses the bridge for live data.
 
 ### `read`
 

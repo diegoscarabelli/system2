@@ -11,6 +11,7 @@ import { dirname, isAbsolute, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
   ChatConfig,
+  DatabasesConfig,
   JobExecution,
   KnowledgeConfig,
   LlmConfig,
@@ -32,6 +33,7 @@ import type { AgentSpawner } from './agents/tools/spawn-agent.js';
 import type { WriteEntityType } from './agents/tools/write-system2-db.js';
 import { createHistoryCaptureSubscriber } from './chat/history-capture.js';
 import { ConversationSummarizer } from './chat/summarizer.js';
+import { DatabaseAdapterRegistry, DatabaseConfigError } from './db/adapter-registry.js';
 import { DatabaseClient } from './db/client.js';
 import { initializeGitRepo } from './knowledge/git.js';
 import { initializeKnowledge } from './knowledge/init.js';
@@ -46,6 +48,7 @@ import {
 } from './scheduler/jobs.js';
 import { isNetworkAvailable } from './scheduler/network.js';
 import { Scheduler } from './scheduler/scheduler.js';
+import { log } from './utils/logger.js';
 import { WebSocketHandler } from './websocket/handler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -63,6 +66,7 @@ export interface ServerConfig {
   schedulerConfig?: SchedulerConfig;
   chatConfig?: ChatConfig;
   knowledgeConfig?: KnowledgeConfig;
+  databasesConfig?: DatabasesConfig;
 }
 
 export class Server {
@@ -78,6 +82,7 @@ export class Server {
   private narratorId: number;
   private guideAgentId: number;
   private conversationSummarizer?: ConversationSummarizer;
+  private adapterRegistry: DatabaseAdapterRegistry;
   private authResolver: AuthResolver;
   private reminderManager: ReminderManager;
 
@@ -86,6 +91,7 @@ export class Server {
 
     // Initialize database
     this.db = new DatabaseClient(config.dbPath);
+    this.adapterRegistry = new DatabaseAdapterRegistry(config.databasesConfig, this.db);
 
     // Initialize knowledge directory and git repo (idempotent)
     initializeKnowledge(SYSTEM2_DIR);
@@ -319,22 +325,43 @@ export class Server {
     });
 
     // Query API for interactive artifact dashboards (postMessage bridge)
-    this.app.post('/api/query', (req, res) => {
+    this.app.post('/api/query', async (req, res) => {
       try {
-        const { sql } = req.body;
+        const { sql, database = 'system2' } = req.body;
         if (!sql || typeof sql !== 'string') {
           res.status(400).json({ error: 'Missing or invalid sql parameter' });
           return;
         }
-        const trimmed = sql.trim().toUpperCase();
-        if (!trimmed.startsWith('SELECT')) {
-          res.status(403).json({ error: 'Only SELECT queries are allowed' });
+        if (typeof database !== 'string') {
+          res.status(400).json({ error: 'Invalid database parameter' });
           return;
         }
-        const rows = this.db.query(sql);
+        // Strip optional trailing semicolon, then reject any remaining semicolons (multi-statement)
+        const trimmed = sql.trim().replace(/;\s*$/, '').toUpperCase();
+        if (trimmed.includes(';')) {
+          res.status(403).json({ error: 'Multi-statement queries are not allowed' });
+          return;
+        }
+        // Reject DML/DDL keywords anywhere in the query (blocks CTE abuse like WITH x AS (DELETE ...) SELECT ...)
+        const forbidden =
+          /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|REVOKE)\b/;
+        if (forbidden.test(trimmed)) {
+          res.status(403).json({ error: 'Only SELECT and EXPLAIN queries are allowed' });
+          return;
+        }
+        const isReadOnly =
+          trimmed.startsWith('SELECT') ||
+          (trimmed.startsWith('WITH') && /\bSELECT\b/.test(trimmed)) ||
+          trimmed.startsWith('EXPLAIN');
+        if (!isReadOnly) {
+          res.status(403).json({ error: 'Only SELECT and EXPLAIN queries are allowed' });
+          return;
+        }
+        const rows = await this.adapterRegistry.query(database, sql);
         res.json({ rows, count: rows.length });
       } catch (error) {
-        res.status(500).json({ error: (error as Error).message });
+        const status = error instanceof DatabaseConfigError ? 400 : 500;
+        res.status(status).json({ error: (error as Error).message });
       }
     });
 
@@ -354,7 +381,7 @@ export class Server {
 
     // Handle WebSocket connections
     this.wss.on('connection', (ws) => {
-      console.log('Client connected');
+      log.info('Client connected');
       new WebSocketHandler(
         ws,
         this.agentRegistry,
@@ -420,7 +447,7 @@ export class Server {
           receiver: newAgent.id,
           timestamp: Date.now(),
         })
-        .catch((err) => console.error('[Server] spawner delivery failed:', err));
+        .catch((err) => log.error('[Server] spawner delivery failed:', err));
 
       return newAgent.id;
     };
@@ -445,7 +472,7 @@ export class Server {
           receiver: agentId,
           timestamp: Date.now(),
         })
-        .catch((err) => console.error('[Server] resurrector delivery failed:', err));
+        .catch((err) => log.error('[Server] resurrector delivery failed:', err));
     };
   }
 
@@ -475,10 +502,10 @@ export class Server {
         );
         // Subscribe non-Guide agents for summarizer event capture
         this.subscribeForSummarizerCapture(this.narratorHost);
-        console.log('[Server] Conversation summarizer initialized');
+        log.info('[Server] Conversation summarizer initialized');
       }
     } catch (err) {
-      console.warn('[Server] Failed to initialize conversation summarizer:', err);
+      log.warn('[Server] Failed to initialize conversation summarizer:', err);
     }
 
     // Restore previously active spawned agents (conductors, reviewers, etc.)
@@ -487,7 +514,7 @@ export class Server {
     // Mark any stale 'running' job executions from a previous crash as failed
     const staleCount = this.db.failStaleJobExecutions('server shutdown');
     if (staleCount > 0) {
-      console.log(`[Server] Recovered ${staleCount} stale job execution(s) from previous process`);
+      log.info(`[Server] Recovered ${staleCount} stale job execution(s) from previous process`);
     }
 
     // Start scheduled jobs
@@ -507,12 +534,12 @@ export class Server {
     // Check if narrator needs catch-up after sleep/shutdown.
     // Fire-and-forget: don't block the HTTP server from starting.
     this.checkNarratorCatchUp().catch((err) =>
-      console.error('[Server] Narrator catch-up failed:', err)
+      log.error('[Server] Narrator catch-up failed:', err)
     );
 
     // Graceful shutdown handlers
     const shutdown = async () => {
-      console.log('Shutting down...');
+      log.info('Shutting down...');
       await this.stop();
       process.exit(0);
     };
@@ -521,8 +548,8 @@ export class Server {
 
     return new Promise((resolve) => {
       this.httpServer.listen(this.config.port, () => {
-        console.log(`System2 Gateway running on http://localhost:${this.config.port}`);
-        console.log(`WebSocket server ready`);
+        log.info(`System2 Gateway running on http://localhost:${this.config.port}`);
+        log.info(`WebSocket server ready`);
         resolve();
       });
     });
@@ -534,7 +561,7 @@ export class Server {
    */
   private async checkNarratorCatchUp(): Promise<void> {
     if (!(await isNetworkAvailable())) {
-      console.log('[Server] No network connectivity, skipping narrator catch-up');
+      log.info('[Server] No network connectivity, skipping narrator catch-up');
       return;
     }
 
@@ -544,11 +571,11 @@ export class Server {
     // Daily summary catch-up
     const { lastRunTs } = resolveDailySummaryTimestamp(SYSTEM2_DIR, intervalMinutes);
     if (!lastRunTs) {
-      console.log('[Server] No daily summary timestamps found, skipping daily-summary catch-up');
+      log.info('[Server] No daily summary timestamps found, skipping daily-summary catch-up');
     } else {
       const staleness = Date.now() - new Date(lastRunTs).getTime();
       if (staleness > intervalMinutes * 60 * 1000) {
-        console.log(
+        log.info(
           `[Server] Daily summary stale by ${Math.round(staleness / 60000)} min, queuing catch-up`
         );
         try {
@@ -567,7 +594,7 @@ export class Server {
             onJobChange
           );
         } catch (error) {
-          console.error('[Server] Daily summary catch-up failed:', error);
+          log.error('[Server] Daily summary catch-up failed:', error);
         }
       }
     }
@@ -580,7 +607,7 @@ export class Server {
       const memoryStaleness = Date.now() - new Date(memoryTs).getTime();
       const ONE_DAY_MS = 24 * 60 * 60 * 1000;
       if (memoryStaleness > ONE_DAY_MS) {
-        console.log(
+        log.info(
           `[Server] Memory stale by ${Math.round(memoryStaleness / 3600000)}h, queuing memory-update catch-up`
         );
         try {
@@ -598,7 +625,7 @@ export class Server {
             onJobChange
           );
         } catch (error) {
-          console.error('[Server] Memory update catch-up failed:', error);
+          log.error('[Server] Memory update catch-up failed:', error);
         }
       }
     }
@@ -614,14 +641,14 @@ export class Server {
     ) as import('@dscarabelli/shared').Agent[];
     if (agents.length === 0) return;
 
-    console.log(`[Server] Restoring ${agents.length} agent(s)...`);
+    log.info(`[Server] Restoring ${agents.length} agent(s)...`);
 
     for (const agent of agents) {
       try {
         await this.initializeAgentHost(agent.id);
-        console.log(`[Server] Restored ${agent.role} agent (id=${agent.id})`);
+        log.info(`[Server] Restored ${agent.role} agent (id=${agent.id})`);
       } catch (error) {
-        console.error(`[Server] Failed to restore ${agent.role} agent (id=${agent.id}):`, error);
+        log.error(`[Server] Failed to restore ${agent.role} agent (id=${agent.id}):`, error);
 
         // Notify the Guide about the restore failure (agent stays active in DB)
         const errorMsg =
@@ -634,7 +661,7 @@ export class Server {
             receiver: this.agentHost.agentId,
             timestamp: Date.now(),
           })
-          .catch((err) => console.error('[Server] restore error delivery failed:', err));
+          .catch((err) => log.error('[Server] restore error delivery failed:', err));
       }
     }
   }
@@ -649,7 +676,7 @@ export class Server {
     const narratorPath = join(agentDir, 'library', 'narrator.md');
 
     if (!existsSync(narratorPath)) {
-      console.warn('[Server] Narrator definition not found at', narratorPath);
+      log.warn('[Server] Narrator definition not found at', narratorPath);
       return null;
     }
 
@@ -667,7 +694,7 @@ export class Server {
       }
     }
 
-    console.warn('[Server] No narrator model found for any configured provider');
+    log.warn('[Server] No narrator model found for any configured provider');
     return null;
   }
 
@@ -858,8 +885,13 @@ export class Server {
             return;
           }
 
-          this.db.close();
-          resolve();
+          this.adapterRegistry
+            .disconnectAll()
+            .then(() => {
+              this.db.close();
+              resolve();
+            })
+            .catch(reject);
         });
       });
     });

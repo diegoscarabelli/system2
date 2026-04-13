@@ -4,7 +4,7 @@ import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BLOCKED_BASH_PATTERNS, createBashTool } from './bash.js';
+import { BLOCKED_BASH_PATTERNS, createBashTool, filterHeartbeats, HEARTBEAT_RE } from './bash.js';
 
 const isWindows = platform() === 'win32';
 
@@ -216,6 +216,161 @@ describe('bash tool', () => {
     });
   });
 
+  describe('heartbeat protocol', () => {
+    const tool = createBashTool();
+    const exec = (
+      params: Record<string, unknown>,
+      signal?: AbortSignal,
+      onUpdate?: AgentToolUpdateCallback<BashResult['details']>
+    ) => tool.execute('test-call', params as BashParams, signal, onUpdate);
+
+    it('strips heartbeat sentinel lines from stdout', async () => {
+      const cmd = 'echo "line1"; echo "::system2:: progress 1"; echo "line2"';
+      const result = await exec({ command: cmd, inactivity_timeout_seconds: 30 });
+
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).toContain('line1');
+      expect(text).toContain('line2');
+      expect(text).not.toContain('::system2::');
+      expect(text).not.toContain('progress 1');
+    });
+
+    it('emits heartbeat onUpdate with heartbeat detail', async () => {
+      const onUpdate = vi.fn();
+      const cmd = 'echo "::system2:: step 1 of 3"';
+      await exec({ command: cmd, inactivity_timeout_seconds: 30 }, undefined, onUpdate);
+
+      const heartbeatCalls = onUpdate.mock.calls.filter((args: unknown[]) => {
+        const update = args[0] as { details?: { heartbeat?: boolean } };
+        return update.details?.heartbeat === true;
+      });
+      expect(heartbeatCalls.length).toBeGreaterThanOrEqual(1);
+      const update = heartbeatCalls[0][0] as {
+        details: { heartbeat: boolean; heartbeatMessage: string };
+      };
+      expect(update.details.heartbeatMessage).toBe('step 1 of 3');
+    });
+
+    it('preserves non-heartbeat output alongside heartbeats', async () => {
+      const onUpdate = vi.fn();
+      const cmd = 'echo "before"; echo "::system2:: heartbeat"; echo "after"';
+      const result = await exec(
+        { command: cmd, inactivity_timeout_seconds: 30 },
+        undefined,
+        onUpdate
+      );
+
+      const stdout = (result.details as { stdout: string }).stdout;
+      expect(stdout).toContain('before');
+      expect(stdout).toContain('after');
+      expect(stdout).not.toContain('::system2::');
+    });
+  });
+
+  describe('filterHeartbeats', () => {
+    it('extracts heartbeat messages and filters sentinel lines', () => {
+      const input = 'line1\n::system2:: hello world\nline2\n';
+      const { filtered, heartbeats } = filterHeartbeats(input);
+
+      expect(filtered).toBe('line1\nline2\n');
+      expect(heartbeats).toEqual(['hello world']);
+    });
+
+    it('handles multiple heartbeats', () => {
+      const input = '::system2:: a\n::system2:: b\n';
+      const { filtered, heartbeats } = filterHeartbeats(input);
+
+      expect(filtered).toBe('');
+      expect(heartbeats).toEqual(['a', 'b']);
+    });
+
+    it('returns text unchanged when no heartbeats', () => {
+      const input = 'just normal output\n';
+      const { filtered, heartbeats } = filterHeartbeats(input);
+
+      expect(filtered).toBe('just normal output\n');
+      expect(heartbeats).toEqual([]);
+    });
+
+    it('handles empty heartbeat message', () => {
+      const { heartbeats } = filterHeartbeats('::system2::\n');
+      expect(heartbeats).toEqual(['']);
+    });
+  });
+
+  describe('HEARTBEAT_RE', () => {
+    it('matches sentinel with message', () => {
+      const match = HEARTBEAT_RE.exec('::system2:: processing batch 3');
+      expect(match).not.toBeNull();
+      expect(match?.[1]).toBe('processing batch 3');
+    });
+
+    it('matches sentinel without message', () => {
+      const match = HEARTBEAT_RE.exec('::system2::');
+      expect(match).not.toBeNull();
+      expect(match?.[1]).toBe('');
+    });
+
+    it('does not match partial sentinels', () => {
+      expect(HEARTBEAT_RE.test('some ::system2:: embedded')).toBe(false);
+    });
+  });
+
+  describe('dual timeouts', () => {
+    const tool = createBashTool();
+    const exec = (
+      params: Record<string, unknown>,
+      signal?: AbortSignal,
+      onUpdate?: AgentToolUpdateCallback<BashResult['details']>
+    ) => tool.execute('test-call', params as BashParams, signal, onUpdate);
+
+    it('uses legacy 120s behavior when no timeout params given', async () => {
+      // A fast command should succeed with default params (no timeout params)
+      const result = await exec({ command: 'echo legacy' });
+      expect((result.content[0] as { text: string }).text).toContain('legacy');
+      expect(result.details).toHaveProperty('exitCode', 0);
+    });
+
+    it('uses custom inactivity timeout', async () => {
+      // Command that sleeps longer than the inactivity timeout
+      const result = await exec({
+        command: 'sleep 15',
+        inactivity_timeout_seconds: 10,
+      });
+
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).toContain('inactivity');
+      expect((result.details as { exitCode: number }).exitCode).toBe(124);
+    }, 20_000);
+
+    it('uses custom total timeout', async () => {
+      // Command that emits output (resets inactivity) but exceeds total timeout
+      const cmd = 'for i in $(seq 1 20); do echo "tick $i"; sleep 1; done';
+      const result = await exec({
+        command: cmd,
+        inactivity_timeout_seconds: 30,
+        total_timeout_seconds: 10,
+      });
+
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).toContain('total timeout');
+      expect((result.details as { exitCode: number }).exitCode).toBe(124);
+    }, 20_000);
+
+    it('active output prevents inactivity timeout', async () => {
+      // Command outputs every second for 3s with a 10s inactivity timeout
+      const cmd = 'for i in 1 2 3; do echo "ping $i"; sleep 1; done';
+      const result = await exec({
+        command: cmd,
+        inactivity_timeout_seconds: 10,
+        total_timeout_seconds: 30,
+      });
+
+      expect(result.details).toHaveProperty('exitCode', 0);
+      expect((result.details as { stdout: string }).stdout).toContain('ping 3');
+    }, 15_000);
+  });
+
   describe('background execution', () => {
     it('returns immediately and notifies on completion', async () => {
       const notifyBackground = vi.fn();
@@ -237,6 +392,26 @@ describe('bash tool', () => {
       const [content] = notifyBackground.mock.calls[0];
       expect(content).toContain('background');
       expect(content).toContain('completed');
+    });
+
+    it('strips heartbeat sentinels from background output', async () => {
+      const notifyBackground = vi.fn();
+      const tool = createBashTool(notifyBackground);
+
+      await tool.execute('bg-hb', {
+        command: 'echo "data"; echo "::system2:: progress"; echo "more data"',
+        run_in_background: true,
+      } as BashParams);
+
+      await vi.waitFor(() => expect(notifyBackground).toHaveBeenCalledTimes(1), {
+        timeout: 5000,
+      });
+      // Check the details.stdout (not the full content string, which includes the command text)
+      const [, details] = notifyBackground.mock.calls[0];
+      const stdout = (details as { stdout: string }).stdout;
+      expect(stdout).toContain('data');
+      expect(stdout).toContain('more data');
+      expect(stdout).not.toContain('::system2::');
     });
 
     it('falls through to foreground when no notifyBackground callback', async () => {

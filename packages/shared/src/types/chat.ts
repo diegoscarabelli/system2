@@ -11,6 +11,7 @@ export interface ChatToolCall {
   status: 'running' | 'completed' | 'error';
   input?: string;
   result?: string;
+  progressMessage?: string;
   timestamp: number;
 }
 

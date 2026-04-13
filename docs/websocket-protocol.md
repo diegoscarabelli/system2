@@ -46,6 +46,7 @@ type ServerMessage =
   | { type: 'assistant_end'; agentId?: number; errorMessage?: string }
   | { type: 'tool_call_start'; name: string; input?: string; agentId?: number }
   | { type: 'tool_call_end'; name: string; result: string; agentId?: number }
+  | { type: 'tool_call_progress'; name: string; message: string; agentId?: number }
   | { type: 'artifact'; url: string; title?: string; filePath?: string }
   | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number; agentId?: number }
   | { type: 'provider_info'; provider: string; agentId: number }
@@ -69,6 +70,7 @@ type ServerMessage =
 | `thinking_chunk` / `thinking_end` | Streaming extended thinking blocks |
 | `assistant_chunk` / `assistant_end` | Streaming response text. `assistant_end` carries `errorMessage` when the LLM stop reason was an error; the UI renders it as a collapsible system message in the chat timeline. |
 | `tool_call_start` / `tool_call_end` | Tool execution lifecycle |
+| `tool_call_progress` | Heartbeat progress from a long-running tool (e.g., bash `::system2::` sentinel). Carries the progress `message` for UI display. |
 | `artifact` | Display artifact in a UI tab. Includes `title` (from DB or filename) and `filePath` (absolute path for tab dedup and reload targeting). Also sent on live reload (file watch). |
 | `context_usage` | Context window usage after each agent turn |
 | `provider_info` | Sent on connect/switch: current LLM provider for an agent |
@@ -135,6 +137,29 @@ User clicks agent in AgentPane
 
 Messages sent while an agent is streaming are delivered immediately as `steering_message`, which uses `streamingBehavior: 'steer'` to interrupt the current turn. The UI commits any in-progress turn events (thinking blocks, tool calls, partial text) as a snapshot message so they remain visible, then adds the user's message below them.
 
+## Artifact postMessage Bridge
+
+HTML artifacts rendered in iframes communicate with the server through a postMessage bridge, separate from the WebSocket channel. This enables interactive dashboards that query databases at runtime.
+
+**Flow:**
+
+```
+Artifact iframe JS
+  -> window.parent.postMessage({ type: 'system2:query', requestId, sql, database? })
+    -> ArtifactViewer listener in the UI
+      -> fetch('POST /api/query', { sql, database })
+        -> Server: DatabaseAdapterRegistry routes to the named adapter
+          -> Adapter executes SELECT query, returns rows
+        <- { rows, count }
+      <- postMessage({ type: 'system2:query_result', requestId, data: { rows, count } })
+    or on error:
+      <- postMessage({ type: 'system2:query_error', requestId, error: message })
+```
+
+The `database` field selects the connection: omit it or pass `system2` for app.db, or pass the name of an external database from `[databases.<name>]` in config.toml. Only read-only queries are permitted (SELECT, CTEs, EXPLAIN); DML, DDL, and multi-statement queries are rejected with HTTP 403.
+
+This bridge is not part of the WebSocket protocol. It uses standard DOM `postMessage` between the iframe and its parent window, with the UI acting as a relay to the REST endpoint. See [Artifacts](artifacts.md#interactive-dashboards-postmessage-bridge) for the full message format and [Configuration](configuration.md#databases) for database setup.
+
 ## Conversation Summarization
 
 When a user directly messages a non-Guide agent, the `ConversationSummarizer` buffers the interaction. After a 1-minute non-resetting timer expires, it generates a concise summary via a one-shot LLM call (using the Narrator's model) and delivers it to the Guide as a follow-up message. This keeps the Guide informed of user-agent interactions without requiring the user to relay information.
@@ -165,6 +190,7 @@ Each WebSocket connection gets its own `WebSocketHandler` instance. It:
    - `message_update` (with text) -> `assistant_chunk`
    - `message_end` -> `assistant_end` (with `errorMessage` when `stopReason` is `'error'`)
    - `tool_execution_start` -> `tool_call_start`
+   - `tool_execution_update` (heartbeat only) -> `tool_call_progress`
    - `tool_execution_end` -> `tool_call_end`
    - `agent_end` -> `context_usage` + `ready_for_input`
 5. Captures user messages in the target agent's chat cache and broadcasts to other tabs

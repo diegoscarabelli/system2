@@ -9,6 +9,7 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
+import { log } from '../../utils/logger.js';
 import type { AgentRegistry } from '../registry.js';
 
 export function createMessageAgentTool(
@@ -88,7 +89,7 @@ export function createMessageAgentTool(
       try {
         receiverHost
           .deliverMessage(content, { sender: selfId, receiver: agent_id, timestamp }, urgent)
-          .catch((err) => console.error('[message-agent] delivery failed:', err));
+          .catch((err) => log.error('[message-agent] delivery failed:', err));
 
         return {
           content: [

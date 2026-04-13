@@ -87,6 +87,7 @@ interface ChatState {
   appendThinkingChunk: (chunk: string, agentId?: number) => void;
   finishThinking: (agentId?: number) => void;
   startToolCall: (name: string, input?: string, agentId?: number) => void;
+  updateToolCallProgress: (name: string, message: string, agentId?: number) => void;
   finishToolCall: (name: string, result: string, agentId?: number) => void;
   setConnected: (connected: boolean) => void;
   clearAllStreamingState: () => void;
@@ -372,6 +373,25 @@ export const useChatStore = create<ChatState>()(
             currentTurnEvents: [...s.currentTurnEvents, { type: 'tool_call', data: toolCall }],
             isStreaming: true,
             isWaitingForResponse: false,
+          })),
+        }));
+      },
+
+      updateToolCallProgress: (name: string, message: string, agentId?: number) => {
+        const targetId = agentId ?? get().activeAgentId;
+        if (targetId === null) return;
+        set((state) => ({
+          agentStates: updateAgentState(state.agentStates, targetId, (s) => ({
+            currentTurnEvents: s.currentTurnEvents.map((event) =>
+              event.type === 'tool_call' &&
+              event.data.name === name &&
+              event.data.status === 'running'
+                ? {
+                    ...event,
+                    data: { ...event.data, progressMessage: message },
+                  }
+                : event
+            ),
           })),
         }));
       },

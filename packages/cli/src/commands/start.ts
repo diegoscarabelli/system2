@@ -101,6 +101,7 @@ export async function start(options: {
         ? { max_history_messages: config.chat.maxHistoryMessages }
         : undefined,
       knowledgeConfig: { budget_chars: config.knowledge.budgetChars },
+      databasesConfig: config.databases,
     });
 
     await server.start();

@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { log } from '../utils/logger.js';
 
 const SESSION_FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 
@@ -143,21 +144,21 @@ export function rotateSessionIfNeeded(
     return false;
   }
 
-  console.log(
+  log.info(
     `[SessionRotation] File size ${(stat.size / 1024 / 1024).toFixed(2)}MB exceeds threshold, rotating...`
   );
 
   // Parse entries
   const entries = parseSessionEntries(currentFile);
   if (entries.length === 0) {
-    console.log('[SessionRotation] No entries found, skipping rotation');
+    log.info('[SessionRotation] No entries found, skipping rotation');
     return false;
   }
 
   // Find compaction entry
   const compaction = findLastCompaction(entries);
   if (!compaction) {
-    console.log(
+    log.info(
       '[SessionRotation] No compaction found, SDK will compact naturally. Skipping rotation.'
     );
     return false;
@@ -167,16 +168,14 @@ export function rotateSessionIfNeeded(
   const firstKeptEntryId = compactionEntry.firstKeptEntryId;
 
   if (!firstKeptEntryId) {
-    console.log('[SessionRotation] Compaction has no firstKeptEntryId, skipping rotation');
+    log.info('[SessionRotation] Compaction has no firstKeptEntryId, skipping rotation');
     return false;
   }
 
   // Find index of firstKeptEntryId
   const firstKeptIndex = entries.findIndex((e) => e.id === firstKeptEntryId);
   if (firstKeptIndex === -1) {
-    console.log(
-      `[SessionRotation] firstKeptEntryId ${firstKeptEntryId} not found, skipping rotation`
-    );
+    log.info(`[SessionRotation] firstKeptEntryId ${firstKeptEntryId} not found, skipping rotation`);
     return false;
   }
 
@@ -213,10 +212,10 @@ export function rotateSessionIfNeeded(
   const archivedPath = `${currentFile}.archived`;
   renameSync(currentFile, archivedPath);
 
-  console.log(
+  log.info(
     `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries`
   );
-  console.log(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
+  log.info(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
 
   return true;
 }
