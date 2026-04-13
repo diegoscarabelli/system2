@@ -145,7 +145,7 @@ When no database is specified, queries default to `system2`, the internal app.db
 |------|---------------|-------|
 | `postgres` | `pg` | Connects via `libpq` conventions |
 | `mysql` | `mysql2` | Connects via standard MySQL protocol |
-| `sqlite` | `better-sqlite3` | Opens a local file by `path` |
+| `sqlite` | `better-sqlite3` | Opens a local file (read-only) |
 
 More types can be added by implementing a driver adapter. The set above covers the initial release.
 
@@ -172,13 +172,12 @@ This keeps secrets out of config.toml entirely, relying on well-established cred
 | `type` | yes | -- | Database type: `postgres`, `mysql`, or `sqlite` |
 | `host` | no | `localhost` | Server hostname or IP (postgres, mysql) |
 | `port` | no | Driver default (5432/3306) | Server port (postgres, mysql) |
-| `database` | no | -- | Database name to connect to (postgres, mysql) |
+| `database` | yes | -- | Database name (postgres, mysql) or file path (sqlite) |
 | `user` | no | Current OS user | Authentication user (postgres, mysql) |
-| `path` | no | -- | File path for sqlite databases |
 | `query_timeout` | no | `30` | Query timeout in seconds |
 | `max_rows` | no | `10000` | Maximum rows returned per query |
 
-For postgres and mysql, `host`, `port`, `database`, and `user` follow the same semantics as the native client tools (`psql`, `mysql`). For sqlite, only `path` is needed.
+For postgres and mysql, `host`, `port`, `database`, and `user` follow the same semantics as the native client tools (`psql`, `mysql`). For sqlite, `database` is the file path.
 
 ### Example configurations
 
@@ -210,7 +209,7 @@ user = "reader"
 # SQLite: external database file
 [databases.survey_results]
 type = "sqlite"
-path = "~/data/survey.db"
+database = "/Users/me/data/survey.db"
 ```
 
 ## Application Directory

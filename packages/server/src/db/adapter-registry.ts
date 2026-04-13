@@ -11,8 +11,11 @@ import type { DatabasesConfig } from '@dscarabelli/shared';
 import type { AdapterFactory, DatabaseAdapter } from './adapter.js';
 import type { DatabaseClient } from './client.js';
 
+const DEFAULT_MAX_ROWS = 10_000;
+
 export class DatabaseAdapterRegistry {
   private adapters = new Map<string, DatabaseAdapter>();
+  private pending = new Map<string, Promise<DatabaseAdapter>>();
   private configs: DatabasesConfig;
 
   private static factories: Record<string, () => Promise<AdapterFactory>> = {
@@ -29,7 +32,10 @@ export class DatabaseAdapterRegistry {
       connected: true,
       connect: async () => {},
       disconnect: async () => {},
-      query: async (sql: string) => db.query(sql),
+      query: async (sql: string) => {
+        const rows = db.query(sql);
+        return rows.slice(0, DEFAULT_MAX_ROWS);
+      },
     });
   }
 
@@ -37,25 +43,19 @@ export class DatabaseAdapterRegistry {
     let adapter = this.adapters.get(name);
 
     if (!adapter) {
-      const config = this.configs[name];
-      if (!config) {
-        const configured = [...Object.keys(this.configs), 'system2'];
-        throw new Error(
-          `Unknown database "${name}". Available databases: ${configured.join(', ')}`
-        );
+      // Check for an in-flight creation to avoid duplicate adapters from concurrent queries
+      const inflight = this.pending.get(name);
+      if (inflight) {
+        adapter = await inflight;
+      } else {
+        const promise = this.createAdapter(name);
+        this.pending.set(name, promise);
+        try {
+          adapter = await promise;
+        } finally {
+          this.pending.delete(name);
+        }
       }
-
-      const factoryLoader = DatabaseAdapterRegistry.factories[config.type];
-      if (!factoryLoader) {
-        const supported = Object.keys(DatabaseAdapterRegistry.factories);
-        throw new Error(
-          `Unsupported database type "${config.type}". Supported types: ${supported.join(', ')}`
-        );
-      }
-
-      const factory = await factoryLoader();
-      adapter = factory(config);
-      this.adapters.set(name, adapter);
     }
 
     if (!adapter.connected) {
@@ -79,5 +79,26 @@ export class DatabaseAdapterRegistry {
       }
     }
     this.adapters.clear();
+  }
+
+  private async createAdapter(name: string): Promise<DatabaseAdapter> {
+    const config = this.configs[name];
+    if (!config) {
+      const configured = [...Object.keys(this.configs), 'system2'];
+      throw new Error(`Unknown database "${name}". Available databases: ${configured.join(', ')}`);
+    }
+
+    const factoryLoader = DatabaseAdapterRegistry.factories[config.type];
+    if (!factoryLoader) {
+      const supported = Object.keys(DatabaseAdapterRegistry.factories);
+      throw new Error(
+        `Unsupported database type "${config.type}". Supported types: ${supported.join(', ')}`
+      );
+    }
+
+    const factory = await factoryLoader();
+    const adapter = factory(config);
+    this.adapters.set(name, adapter);
+    return adapter;
   }
 }

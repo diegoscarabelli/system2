@@ -332,7 +332,23 @@ export class Server {
           res.status(400).json({ error: 'Missing or invalid sql parameter' });
           return;
         }
+        if (typeof database !== 'string') {
+          res.status(400).json({ error: 'Invalid database parameter' });
+          return;
+        }
         const trimmed = sql.trim().toUpperCase();
+        // Reject multi-statement input
+        if (trimmed.includes(';')) {
+          res.status(403).json({ error: 'Only single SELECT queries are allowed' });
+          return;
+        }
+        // Reject DML/DDL keywords anywhere in the query (blocks CTE abuse like WITH x AS (DELETE ...) SELECT ...)
+        const forbidden =
+          /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|REVOKE)\b/;
+        if (forbidden.test(trimmed)) {
+          res.status(403).json({ error: 'Only SELECT queries are allowed' });
+          return;
+        }
         const isSelect =
           trimmed.startsWith('SELECT') ||
           (trimmed.startsWith('WITH') && /\bSELECT\b/.test(trimmed));

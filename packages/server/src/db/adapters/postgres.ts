@@ -19,7 +19,7 @@ export const createAdapter: AdapterFactory = (
   let pool: any = null;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const timeoutMs = config.query_timeout ?? 30_000;
+  const timeoutMs = (config.query_timeout ?? 30) * 1000;
   const maxRows = config.max_rows ?? 10_000;
 
   function resetIdleTimer(): void {
