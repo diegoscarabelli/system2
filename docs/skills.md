@@ -106,7 +106,7 @@ Built-in skills live in `packages/server/src/agents/skills/`:
 | `airflow` | Apache Airflow v3 workflow orchestration: DAG design, TaskFlow API, dynamic task mapping, connections/secrets, scheduling, error handling, debugging, and production checklist. |
 | `prefect` | Prefect v3 data pipelines: flows, tasks, deployments, work pools, concurrency, error handling, testing, events/automations, and production checklist. |
 | `timescaledb` | TimescaleDB time-series database: hypertables, chunk sizing, compression (segmentby/orderby), continuous aggregates, retention policies, ingestion performance, and monitoring. |
-| `sql-schema-modeling` | SQL schema design: normalization (1NF-BCNF), dimensional modeling (star schema, SCD types), JSON/JSONB columns with indexing, primary key strategy, indexing patterns, naming conventions, and anti-patterns (EAV, polymorphic associations). |
+| `sql-schema-modeling` | SQL schema design: normalization (1NF-BCNF), dimensional modeling (star schema, SCD types), data types, JSON/JSONB columns with indexing, primary key strategy, constraints (CHECK, EXCLUDE, FK cascades), indexing patterns (unique, partial, covering), partitioning (range, list, hash), materialization strategy (materialized views vs pipeline-built tables, incremental patterns, why to avoid triggers/procedures), naming conventions, SQL documentation (COMMENT ON), and anti-patterns (EAV, polymorphic associations). |
 | `statistical-analysis` | Statistical methodology: frequentist and Bayesian workflows, test selection, assumption checking, effect sizes, multiple comparisons, power analysis, missing data handling, bootstrap methods, time series analysis, meta-analysis, reporting standards, and common anti-patterns. |
 
 ## Build Configuration

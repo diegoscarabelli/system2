@@ -1,6 +1,6 @@
 ---
 name: sql-schema-modeling
-description: Use when designing database schemas, choosing between normalization levels, modeling dimensional/star schemas, deciding on JSON columns vs relational columns, or reviewing table structures. Trigger on CREATE TABLE statements, schema design discussions, or questions about data modeling patterns.
+description: Use when designing database schemas, choosing between normalization levels, modeling dimensional/star schemas, deciding on JSON columns vs relational columns, choosing materialization strategies (materialized views vs pipeline-built tables), or reviewing table structures. Trigger on CREATE TABLE statements, schema design discussions, materialization decisions, or questions about data modeling patterns.
 roles: [conductor, reviewer, worker]
 ---
 
@@ -56,7 +56,7 @@ CREATE TABLE customers (
 
 ### When to stop
 
-Aim for 3NF as a baseline for OLTP systems. Denormalize deliberately for read-heavy workloads (analytics, reporting). Always denormalize based on measured query patterns, not guesswork. Keep normalized source tables and create denormalized views or materialized views for read paths.
+Aim for 3NF as a baseline for OLTP systems. Denormalize deliberately for read-heavy workloads (analytics, reporting). Always denormalize based on measured query patterns, not guesswork. Keep normalized source tables and create denormalized read tables or views for read paths (see Materialization Strategy for when to use materialized views vs pipeline-built tables).
 
 ## Dimensional Modeling (Star Schema)
 
@@ -200,6 +200,38 @@ SELECT * FROM products WHERE attributes @> '{"color": "red"}';
 CREATE INDEX idx_products_color ON products ((attributes->>'color'));
 ```
 
+## Data Types
+
+### Text
+
+PostgreSQL stores TEXT, VARCHAR, and VARCHAR(n) identically. No performance difference. Prefer TEXT for most string columns. Use VARCHAR(n) only when the database should enforce a maximum length as a business rule (e.g., ISO country codes, fixed-format identifiers).
+
+### Numeric
+
+| Type | Use for | Avoid for |
+|------|---------|-----------|
+| INTEGER / BIGINT | Counts, IDs, whole numbers | Fractional values |
+| NUMERIC(p,s) | Money, financial calculations, anything where rounding errors matter | High-volume scientific computation (slower than float) |
+| FLOAT / DOUBLE PRECISION | Scientific measurements, approximate values | Money, exact comparisons (`0.1 + 0.2 != 0.3`) |
+
+### Timestamps
+
+Always use TIMESTAMPTZ, never TIMESTAMP (without time zone). PostgreSQL stores TIMESTAMPTZ as UTC internally and converts on display. TIMESTAMP without time zone is ambiguous: it causes bugs when servers change timezone or data crosses timezone boundaries.
+
+Use DATE when you genuinely only need the date (birthdays, business days). Use INTERVAL for durations.
+
+### Booleans
+
+Use BOOLEAN, not integer flags (0/1) or char flags ('Y'/'N'). Boolean columns are self-documenting and type-safe.
+
+### Enums vs CHECK vs lookup tables
+
+| Approach | Pros | Cons | Use when |
+|----------|------|------|----------|
+| PostgreSQL ENUM | Compact storage, type-safe | Adding values is easy, removing/reordering is not; requires migration | Truly stable, small sets (status types, priority levels) |
+| CHECK constraint | Simple, no custom type | Values not easily discoverable via introspection | Simple validation on a single column |
+| Lookup/reference table | Most flexible, can add metadata (display name, sort order, is_active), queryable, FK-enforceable | Extra join | Sets that might grow or need metadata |
+
 ## Primary Keys
 
 ### Surrogate vs natural keys
@@ -231,6 +263,57 @@ Default to `GENERATED ALWAYS AS IDENTITY` for single-server systems. Use UUIDs w
 
 Appropriate for join/association tables. Even there, consider a surrogate PK with a unique constraint on the composite, especially if the join table will itself be referenced by other tables.
 
+## Constraints
+
+### NOT NULL
+
+Default to NOT NULL on every column unless you have a specific reason to allow NULL. NULL means "unknown" or "not applicable," not "empty string" or "zero." When the absence of a value has a sensible default, use DEFAULT instead of allowing NULL.
+
+### CHECK
+
+Validate data at the database level. Prefer CHECK over application-only validation: the database is the last line of defense.
+
+```sql
+CREATE TABLE orders (
+    id          INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    quantity    INT NOT NULL CHECK (quantity > 0),
+    unit_price  NUMERIC(10,2) NOT NULL CHECK (unit_price >= 0),
+    status      TEXT NOT NULL CHECK (status IN ('pending', 'shipped', 'delivered', 'cancelled')),
+    start_date  DATE NOT NULL,
+    end_date    DATE NOT NULL,
+    CHECK (end_date > start_date)
+);
+```
+
+### EXCLUDE
+
+Prevent overlapping ranges (requires btree_gist extension). Essential for scheduling, reservations, temporal data.
+
+```sql
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+CREATE TABLE room_bookings (
+    room_id   INT NOT NULL,
+    booked_at TSTZRANGE NOT NULL,
+    EXCLUDE USING GIST (room_id WITH =, booked_at WITH &&)
+);
+```
+
+### DEFAULT
+
+Use for timestamps (`DEFAULT now()`), JSONB (`DEFAULT '{}'`), booleans (`DEFAULT TRUE`), counters (`DEFAULT 0`). Avoid defaults that hide bugs (e.g., defaulting a required business field to empty string).
+
+### Foreign key cascades
+
+| Behavior | ON DELETE | ON UPDATE | Use when |
+|----------|-----------|-----------|----------|
+| RESTRICT | Prevent deletion if children exist | Prevent PK change if children exist | Default. Safest. |
+| CASCADE | Delete children with parent | Update children's FK when parent PK changes | True ownership (delete user -> delete sessions) |
+| SET NULL | Set FK to NULL on parent deletion | Set FK to NULL on parent PK change | Optional relationships where history should survive |
+| NO ACTION | Like RESTRICT but checked at transaction end | Like RESTRICT but deferred | Deferred constraint checking needed |
+
+**Rule**: default to RESTRICT. Use CASCADE only for true parent-child ownership where orphaned children have no meaning. Document every CASCADE with a COMMENT explaining why.
+
 ## Indexing Strategy
 
 ### When to add
@@ -250,6 +333,14 @@ Appropriate for join/association tables. Even there, consider a surrogate PK wit
 CREATE INDEX idx_orders_status_created ON orders (status, created_at);
 ```
 
+**Unique indexes**: enforce uniqueness as a constraint. Use `CREATE UNIQUE INDEX` for unique business rules that are not the primary key. Prefer unique indexes over UNIQUE table constraints when you also need to filter (partial unique index) or include extra columns.
+
+```sql
+-- Enforce one active subscription per customer
+CREATE UNIQUE INDEX uq_subscriptions_active
+    ON subscriptions (customer_id) WHERE is_active = TRUE;
+```
+
 **Partial indexes**: index only rows matching a condition. Smaller and faster.
 
 ```sql
@@ -266,7 +357,143 @@ CREATE INDEX idx_users_username ON users (username) INCLUDE (email);
 
 Monitor with `pg_stat_user_indexes` (`idx_scan` counts). Drop indexes where `idx_scan = 0` for extended periods. Use `REINDEX CONCURRENTLY` for bloated indexes. Tune autovacuum on high-churn tables.
 
-## Naming Conventions
+## Partitioning
+
+Partitioning adds complexity (partition key constraints on all unique indexes, query planning overhead, DDL management per partition). Use it sparingly: only when analytical queries on a large table are demonstrably slow and the bottleneck is scan size, not missing indexes or poor query structure. Fix indexes and query plans first. Partition only after profiling proves the table is too large for those fixes to help.
+
+### When to partition
+
+- Tables with hundreds of millions of rows where queries consistently filter on the partition key and performance is still poor after proper indexing
+- Time-series data where old data must be dropped or archived by time range (partition detach is far cheaper than DELETE)
+- Multi-tenant data at scale where tenant-level isolation improves both performance and maintenance
+
+Do not partition small or medium tables. The overhead outweighs the benefit when the entire table fits comfortably in memory or when proper indexes already make queries fast.
+
+### Partition types
+
+**Range** (most common): partition by date ranges, numeric ranges. Ideal for time-series.
+
+```sql
+CREATE TABLE events (
+    id         BIGINT GENERATED ALWAYS AS IDENTITY,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    payload    JSONB NOT NULL
+) PARTITION BY RANGE (occurred_at);
+
+CREATE TABLE events_2025_q1 PARTITION OF events
+    FOR VALUES FROM ('2025-01-01') TO ('2025-04-01');
+CREATE TABLE events_2025_q2 PARTITION OF events
+    FOR VALUES FROM ('2025-04-01') TO ('2025-07-01');
+```
+
+**List**: partition by discrete values. Good for multi-tenant or category-based splits.
+
+```sql
+CREATE TABLE metrics (
+    tenant_id  INT NOT NULL,
+    recorded_at TIMESTAMPTZ NOT NULL,
+    value      NUMERIC NOT NULL
+) PARTITION BY LIST (tenant_id);
+
+CREATE TABLE metrics_tenant_1 PARTITION OF metrics FOR VALUES IN (1);
+CREATE TABLE metrics_tenant_2 PARTITION OF metrics FOR VALUES IN (2);
+```
+
+**Hash**: distribute rows evenly across N partitions. Use when no natural range or list key exists but you want parallel scans or even I/O spread.
+
+### Lifecycle management
+
+Detach and drop old partitions instead of running DELETE statements. DELETE on large tables generates enormous WAL, holds locks, and bloats the table until vacuum runs. Detaching is near-instant.
+
+```sql
+ALTER TABLE events DETACH PARTITION events_2024_q1;
+DROP TABLE events_2024_q1;
+```
+
+### Partition key in indexes
+
+Every unique index (including the primary key) on a partitioned table must include the partition key. PostgreSQL enforces this because it cannot guarantee global uniqueness across partitions otherwise.
+
+```sql
+-- This fails on a partitioned table:
+-- PRIMARY KEY (id)
+-- This works:
+PRIMARY KEY (id, occurred_at)
+```
+
+## Materialization Strategy
+
+When queries need precomputed aggregations, joins, or denormalized snapshots, you have three options: materialized views, pipeline-built tables, or triggers/procedures. They differ fundamentally in how they handle incremental updates, and this difference dominates at scale.
+
+### Materialized views: the scaling problem
+
+PostgreSQL `REFRESH MATERIALIZED VIEW` re-executes the entire defining query from scratch. If 500 rows changed out of 100 million, Postgres still scans all 100 million. Refresh time grows linearly with total data size, regardless of change rate.
+
+**Locking compounds the problem.** A standard refresh acquires an exclusive lock, blocking all reads until it completes. `REFRESH CONCURRENTLY` avoids the lock but requires a unique index, runs slower, and generates dead tuples that need vacuuming.
+
+**When materialized views are appropriate:**
+
+- Small datasets (under ~1M rows) where full refresh completes in seconds
+- Read-heavy, rarely-changing reference data
+- Prototyping, before the refresh cost matters
+
+**When they break down:**
+
+- Large or growing datasets where refresh time exceeds the refresh cadence
+- High-frequency updates where concurrent refresh overhead and dead tuple accumulation cause cascading performance issues
+- Multiple dependent materialized views, where one refresh blocks the next
+
+### Prefer pipeline-built tables
+
+The scalable alternative: use data pipelines (Airflow, Prefect, dbt, custom Python) to transform data and write results into regular tables. This unlocks incremental materialization, where you process only the diff rather than recomputing everything.
+
+```sql
+-- Pipeline writes only new/changed rows via upsert
+INSERT INTO agg_daily_sales (date, product_id, total_qty, total_amount)
+SELECT
+    date_trunc('day', sold_at)::date,
+    product_id,
+    sum(quantity),
+    sum(amount)
+FROM fact_sales
+WHERE sold_at >= %(watermark)s  -- only rows since last run
+GROUP BY 1, 2
+ON CONFLICT (date, product_id)
+DO UPDATE SET
+    total_qty    = EXCLUDED.total_qty,
+    total_amount = EXCLUDED.total_amount;
+```
+
+**Advantages over materialized views:**
+
+| Aspect | Materialized view | Pipeline-built table |
+|--------|-------------------|----------------------|
+| Refresh cost | O(total data) always | O(changed data) with incremental |
+| Locking | Exclusive lock or concurrent overhead | Controlled by pipeline (upsert, swap) |
+| Indexing | Standard indexes, some restrictions | Full DDL freedom (partitioning, FKs, partial indexes) |
+| Observability | Opaque database operation | Pipeline logs, row counts, duration, alerts |
+| Testability | Must hit the database | Transform logic testable in isolation |
+| Failure handling | Refresh fails or succeeds atomically | Granular retry, partial progress, dead-letter patterns |
+
+**Incremental patterns:**
+
+- **Watermark append**: process rows with timestamps newer than the last run. Simple but misses late-arriving data.
+- **Watermark with lookback**: subtract N intervals from the high watermark to catch late arrivals within a window.
+- **Upsert on natural key**: `INSERT ... ON CONFLICT DO UPDATE`. Handles mutable source data.
+- **Swap**: write to a staging table, then `ALTER TABLE RENAME` in a transaction. Zero-downtime full rebuilds when needed.
+- **Periodic full refresh**: schedule weekly/monthly full rebuilds during off-peak to reset accumulated drift from incremental runs.
+
+### Avoid triggers and stored procedures for materialization
+
+Do not use SQL triggers or stored procedures as the primary vehicle for materializing derived data. They create hidden coupling (a developer inserting a row has no idea a cascade of side-effects fires), are difficult to test (requires integration tests against a live database), live as database state rather than version-controlled code, and scale poorly (database-tier compute is expensive and hard to scale horizontally).
+
+**The worst pattern:** triggers that auto-refresh materialized views on insert/update. Each row-level change triggers a full MV refresh: inserting 1000 rows means 1000 full refreshes, exponential dead tuple accumulation, and insert blocking.
+
+**Valid uses for triggers:** simple audit trails (`created_at`/`updated_at` timestamps), enforcing invariants that cannot be expressed as CHECK constraints. Keep them minimal and side-effect-free.
+
+**Rule of thumb:** if the logic involves aggregation, joins, or anything resembling a transformation, it belongs in a Python pipeline, not a trigger or stored procedure.
+
+## Naming Conventions and Documentation
 
 - **Table names**: pick singular or plural, be consistent across the entire database
 - **Column names**: `snake_case` everywhere (PostgreSQL folds unquoted identifiers to lowercase)
@@ -277,6 +504,27 @@ Monitor with `pg_stat_user_indexes` (`idx_scan` counts). Drop indexes where `idx
 - **Unique constraints**: `uq_<table>_<columns>`
 - Avoid abbreviations unless universally understood (`id`, `url`, `sku` are fine; `cust_addr` is not)
 - Never prefix with `tbl_` or `col_`
+
+### SQL comments (COMMENT ON)
+
+Document schemas, tables, and columns with `COMMENT ON`. These comments are stored in the database catalog, visible via `\d+` in psql, queryable from `pg_description`, and available to any tool that reads the catalog (ORMs, documentation generators, data catalogs). They are the single source of truth for what each object means.
+
+```sql
+COMMENT ON TABLE fact_sales IS 'One row per sale line item. Grain: one product sold in one transaction.';
+COMMENT ON COLUMN fact_sales.total_amount IS 'quantity * unit_price after discount. Additive across all dimensions.';
+COMMENT ON COLUMN dim_customer.customer_id IS 'Natural business key. Not unique in SCD Type 2: use customer_key for joins.';
+COMMENT ON INDEX idx_orders_status_created IS 'Covers active order queries filtered by status + date range.';
+```
+
+**What to document:**
+
+- Every table: its grain (what one row represents), its role (fact, dimension, staging, aggregate)
+- Columns where the name alone is ambiguous: units, business rules, whether it is additive, FK semantics
+- Non-obvious indexes: why they exist, which query patterns they serve
+- CASCADE foreign keys: why deletion cascades rather than restricts
+- Constraints with non-trivial logic: what business rule the CHECK or EXCLUDE enforces
+
+**When to write comments:** at table creation time, not retroactively. Treat `COMMENT ON` as part of the DDL, not optional documentation.
 
 ## Anti-Patterns
 
