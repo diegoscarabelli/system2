@@ -14,7 +14,7 @@ describe('loadDriver()', () => {
 
   it('includes the npm install command in the error message', () => {
     expect(() => loadDriver('nonexistent-package-xyz')).toThrow(
-      /npm install --prefix .+\.system2 nonexistent-package-xyz/
+      /npm install --prefix ".+\.system2" "nonexistent-package-xyz"/
     );
   });
 });

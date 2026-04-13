@@ -252,8 +252,14 @@ function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>): Datab
     if (entry.user !== undefined) conn.user = entry.user;
     if (entry.socket !== undefined) conn.socket = entry.socket;
     if (entry.ssl !== undefined) conn.ssl = entry.ssl;
-    if (entry.query_timeout !== undefined) conn.query_timeout = entry.query_timeout;
-    if (entry.max_rows !== undefined) conn.max_rows = entry.max_rows;
+    if (entry.query_timeout !== undefined) {
+      const t = Number(entry.query_timeout);
+      if (Number.isFinite(t) && t > 0) conn.query_timeout = t;
+    }
+    if (entry.max_rows !== undefined) {
+      const m = Number(entry.max_rows);
+      if (Number.isFinite(m) && m > 0) conn.max_rows = Math.min(m, 1_000_000);
+    }
 
     databases[name] = conn;
   }

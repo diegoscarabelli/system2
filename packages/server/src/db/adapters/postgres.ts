@@ -42,7 +42,7 @@ export const createAdapter: AdapterFactory = (
       port: config.port,
       database: config.database,
       user: config.user,
-      ssl: config.ssl ? { rejectUnauthorized: false } : undefined,
+      ssl: config.ssl ? true : undefined,
       max: 5,
     });
   }

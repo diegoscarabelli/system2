@@ -57,8 +57,12 @@ export const createAdapter: AdapterFactory = (
       resetIdleTimer();
 
       const stmt = instance.prepare(sql);
-      const rows = stmt.all() as unknown[];
-      return rows.slice(0, maxRows);
+      const rows: unknown[] = [];
+      for (const row of stmt.iterate()) {
+        rows.push(row);
+        if (rows.length >= maxRows) break;
+      }
+      return rows;
     },
 
     async disconnect(): Promise<void> {

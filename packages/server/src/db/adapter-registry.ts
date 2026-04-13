@@ -70,6 +70,8 @@ export class DatabaseAdapterRegistry {
   }
 
   async disconnectAll(): Promise<void> {
+    this.pending.clear();
+    const system2 = this.adapters.get('system2');
     for (const [name, adapter] of this.adapters) {
       if (name === 'system2') continue; // lifecycle managed by Server
       try {
@@ -79,6 +81,7 @@ export class DatabaseAdapterRegistry {
       }
     }
     this.adapters.clear();
+    if (system2) this.adapters.set('system2', system2);
   }
 
   private async createAdapter(name: string): Promise<DatabaseAdapter> {

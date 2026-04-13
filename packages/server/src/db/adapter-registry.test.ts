@@ -121,5 +121,18 @@ describe('DatabaseAdapterRegistry', () => {
       expect(pgAdapter.disconnect).toHaveBeenCalled();
       // system2 adapter.disconnect should never be called (lifecycle managed by Server)
     });
+
+    it('preserves system2 adapter after disconnectAll', async () => {
+      const configs: DatabasesConfig = {
+        analytics: { type: 'postgres', database: 'analytics' },
+      };
+      const registry = new DatabaseAdapterRegistry(configs, db as never);
+
+      await registry.disconnectAll();
+
+      // system2 should still work
+      const result = await registry.query('system2', 'SELECT 1');
+      expect(result).toEqual([{ id: 1 }]);
+    });
   });
 });

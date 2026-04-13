@@ -336,8 +336,8 @@ export class Server {
           res.status(400).json({ error: 'Invalid database parameter' });
           return;
         }
-        const trimmed = sql.trim().toUpperCase();
-        // Reject multi-statement input
+        // Strip optional trailing semicolon, then reject any remaining semicolons (multi-statement)
+        const trimmed = sql.trim().replace(/;\s*$/, '').toUpperCase();
         if (trimmed.includes(';')) {
           res.status(403).json({ error: 'Only single SELECT queries are allowed' });
           return;

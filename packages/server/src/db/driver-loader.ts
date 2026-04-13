@@ -15,10 +15,14 @@ export function loadDriver(packageName: string): unknown {
   try {
     const localRequire = createRequire(join(SYSTEM2_DIR, 'package.json'));
     return localRequire(packageName);
-  } catch {
-    throw new Error(
-      `Database driver "${packageName}" is not installed. ` +
-        `Ask the Guide to set it up, or run: npm install --prefix ${SYSTEM2_DIR} ${packageName}`
-    );
+  } catch (error: unknown) {
+    const code = (error as { code?: string }).code;
+    if (code === 'MODULE_NOT_FOUND') {
+      throw new Error(
+        `Database driver "${packageName}" is not installed. ` +
+          `Ask the Guide to set it up, or run: npm install --prefix "${SYSTEM2_DIR}" "${packageName}"`
+      );
+    }
+    throw error;
   }
 }
