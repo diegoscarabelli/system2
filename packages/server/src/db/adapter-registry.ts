@@ -13,6 +13,14 @@ import type { DatabaseClient } from './client.js';
 
 const DEFAULT_MAX_ROWS = 10_000;
 
+/** Thrown for configuration errors (unknown database, unsupported type). */
+export class DatabaseConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DatabaseConfigError';
+  }
+}
+
 export class DatabaseAdapterRegistry {
   private adapters = new Map<string, DatabaseAdapter>();
   private pending = new Map<string, Promise<DatabaseAdapter>>();
@@ -95,13 +103,15 @@ export class DatabaseAdapterRegistry {
     const config = this.configs[name];
     if (!config) {
       const configured = [...Object.keys(this.configs), 'system2'];
-      throw new Error(`Unknown database "${name}". Available databases: ${configured.join(', ')}`);
+      throw new DatabaseConfigError(
+        `Unknown database "${name}". Available databases: ${configured.join(', ')}`
+      );
     }
 
     const factoryLoader = DatabaseAdapterRegistry.factories[config.type];
     if (!factoryLoader) {
       const supported = Object.keys(DatabaseAdapterRegistry.factories);
-      throw new Error(
+      throw new DatabaseConfigError(
         `Unsupported database type "${config.type}". Supported types: ${supported.join(', ')}`
       );
     }

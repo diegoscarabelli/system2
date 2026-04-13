@@ -1,7 +1,7 @@
 import type { DatabaseConnectionConfig, DatabasesConfig } from '@dscarabelli/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AdapterFactory, DatabaseAdapter } from './adapter.js';
-import { DatabaseAdapterRegistry } from './adapter-registry.js';
+import { DatabaseAdapterRegistry, DatabaseConfigError } from './adapter-registry.js';
 
 // Minimal mock for DatabaseClient: only needs query()
 function makeMockDb() {
@@ -88,26 +88,30 @@ describe('DatabaseAdapterRegistry', () => {
   });
 
   describe('unknown database', () => {
-    it('throws with available databases listed', async () => {
+    it('throws DatabaseConfigError with available databases listed', async () => {
       const configs: DatabasesConfig = {
         analytics: { type: 'postgres', database: 'analytics' },
       };
       const registry = new DatabaseAdapterRegistry(configs, db as never);
 
-      await expect(registry.query('nope', 'SELECT 1')).rejects.toThrow(
+      const error = await registry.query('nope', 'SELECT 1').catch((e) => e);
+      expect(error).toBeInstanceOf(DatabaseConfigError);
+      expect(error.message).toBe(
         'Unknown database "nope". Available databases: analytics, system2'
       );
     });
   });
 
   describe('unsupported engine type', () => {
-    it('throws with supported types listed', async () => {
+    it('throws DatabaseConfigError with supported types listed', async () => {
       const configs: DatabasesConfig = {
         oracle: { type: 'oracle', database: 'orcl' } as DatabaseConnectionConfig,
       };
       const registry = new DatabaseAdapterRegistry(configs, db as never);
 
-      await expect(registry.query('oracle', 'SELECT 1')).rejects.toThrow(
+      const error = await registry.query('oracle', 'SELECT 1').catch((e) => e);
+      expect(error).toBeInstanceOf(DatabaseConfigError);
+      expect(error.message).toMatch(
         /Unsupported database type "oracle"\. Supported types: postgres, mysql, sqlite/
       );
     });

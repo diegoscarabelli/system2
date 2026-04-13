@@ -33,7 +33,7 @@ import type { AgentSpawner } from './agents/tools/spawn-agent.js';
 import type { WriteEntityType } from './agents/tools/write-system2-db.js';
 import { createHistoryCaptureSubscriber } from './chat/history-capture.js';
 import { ConversationSummarizer } from './chat/summarizer.js';
-import { DatabaseAdapterRegistry } from './db/adapter-registry.js';
+import { DatabaseAdapterRegistry, DatabaseConfigError } from './db/adapter-registry.js';
 import { DatabaseClient } from './db/client.js';
 import { initializeGitRepo } from './knowledge/git.js';
 import { initializeKnowledge } from './knowledge/init.js';
@@ -359,7 +359,8 @@ export class Server {
         const rows = await this.adapterRegistry.query(database, sql);
         res.json({ rows, count: rows.length });
       } catch (error) {
-        res.status(500).json({ error: (error as Error).message });
+        const status = error instanceof DatabaseConfigError ? 400 : 500;
+        res.status(status).json({ error: (error as Error).message });
       }
     });
 
