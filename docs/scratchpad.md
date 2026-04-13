@@ -56,6 +56,17 @@ Jupyter notebooks (`.ipynb`) are a natural fit for exploratory analysis with mix
 
 The source `.ipynb` stays in the scratchpad as the editable working copy; the HTML in the appropriate `artifacts/` directory is the published deliverable. This separation lets the agent keep iterating on the source without disturbing the published version, and lets the user see the rendered output without needing a Jupyter server.
 
+## Interactive HTML Dashboards
+
+For dashboards that should display current data each time they are opened (rather than a frozen snapshot from when the notebook was last executed), author the artifact as a standalone HTML file with JavaScript that queries databases at runtime via the postMessage bridge. The workflow:
+
+1. Prototype the queries and analysis in the scratchpad (notebook or Python script) to verify the data shape and logic.
+2. Write the HTML/JS dashboard in the scratchpad, using `system2:query` postMessages to fetch data from the configured databases.
+3. Test by registering and showing the artifact. The dashboard should render with live data.
+4. Once the dashboard is working, copy it to `artifacts/` and register it.
+
+This approach is best when the user needs a dashboard they can reopen over time and always see fresh data, as opposed to a notebook report that captures a point-in-time analysis. See [Artifacts: Interactive Dashboards](artifacts.md#interactive-dashboards-postmessage-bridge) for the full postMessage protocol and [Configuration](configuration.md#databases) for setting up external database connections.
+
 ## Promotion to Artifacts
 
 Promotion is an explicit step, not an automatic one. When something in the scratchpad becomes a deliverable the user should see (a finished plot, a polished report, a rendered notebook, a usable export):
