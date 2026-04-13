@@ -37,26 +37,11 @@ system2 stop             # graceful shutdown
 
 **Knowledge base that learns and adapts.** Agents continuously refine git-tracked markdown files storing user preferences, data infrastructure setup, role-specific lessons, long-term memory, and reusable skills they create alongside the built-in ones. A Narrator synthesizes activity into daily summaries and project logs on a schedule, and a journalistic-style project story when work concludes.
 
-**Interactive artifacts.** Agents craft whatever the analysis demands: dashboards with live database querying, research articles, Jupyter notebooks, financial models. Agents surface these in the UI alongside the conversation, so you see the result the moment it is ready and can ask follow-up questions while looking at it.
+**Interactive artifacts.** Agents craft whatever the analysis demands: dashboards that query your analytical databases live (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite), research articles, Jupyter notebooks, financial models. Agents surface these in the UI alongside the conversation, so you see the result the moment it is ready and can ask follow-up questions while looking at it.
 
-**Any LLM, automatic failover.** Anthropic, Google, OpenAI, Cerebras, Mistral, OpenRouter, Groq, xAI, and any OpenAI-compatible endpoint. Automatic key rotation, provider failover with exponential backoff, and time-based cooldowns. The system recovers on its own when providers come back.
+**Autonomous scheduling.** Agents set reminders for their future selves to follow up on long-running work, revisit blocked tasks, or re-evaluate conditions. A cron scheduler triggers daily summaries, long-term memory updates, and project stories. Long-running commands emit heartbeat signals to report progress back to the system.
 
-### How System2 compares
-
-|  | System2 | Anton | CrewAI | MetaGPT | Agor |
-| --- | --- | --- | --- | --- | --- |
-| **Domain** | Data engineering + analytics | Business intelligence | General purpose | Software engineering | Software engineering |
-| **Agent model** | 4-role team (Guide, Conductor, Reviewer, Narrator) | Single agent | Configurable crew | Role-playing software company | Canvas + coding agents |
-| **Persistent knowledge** | Git-tracked markdown, auto-curated by Narrator | JSONL episodic memory | Basic config-level | Shared message pool | Per-session only |
-| **Project management** | Full (tasks, hierarchy, dependencies, kanban) | No | No | Phase-based SOPs | GitHub issue linking |
-| **Statistical review** | Dedicated Reviewer agent | No | No | No | No |
-| **Scheduled maintenance** | Narrator cron jobs (summaries, memory, stories) | No | No | No | No |
-| **Skills / reusable workflows** | Role-gated, agent-authored | No | No | SOPs | Workflow zones |
-| **Interactive artifacts** | HTML dashboards + DB bridge | Charts and dashboards | No | No | No |
-| **Self-hosted** | Yes | Yes | Yes (Python library) | Yes (Python library) | Yes |
-| **UI** | Full workspace (chat, kanban, artifacts, agents) | Chat + charts | No (Enterprise only) | No | Spatial canvas |
-
-[Anton](https://github.com/mindsdb/anton) (MindsDB): self-hosted autonomous BI agent. Closest direct competitor, but single-agent with no project management, statistical review, or scheduled memory curation. [CrewAI](https://github.com/crewAIInc/crewAI): popular Python framework for role-based agent crews. A building block, not a finished product. [MetaGPT](https://github.com/FoundationAgents/MetaGPT): multi-agent framework simulating a software company. Similar "virtual team" concept but targets software development. [Agor](https://github.com/preset-io/agor): multiplayer spatial canvas for orchestrating coding agents in parallel. Multi-agent UI for software engineering, not data work.
+**Any LLM, automatic failover.** Anthropic, Google, OpenAI, OpenRouter, Cerebras, Mistral, Groq, xAI, and any OpenAI-compatible endpoint. Automatic key rotation, provider failover with exponential backoff, and time-based cooldowns. The system recovers on its own when providers come back.
 
 ---
 
