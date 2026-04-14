@@ -43,8 +43,11 @@ describe('commitIfStateDir', () => {
   }
 
   function initGitRepo(dir: string): void {
-    execSync('git init', { cwd: dir, env: gitEnv(), stdio: 'ignore' });
-    execSync('git commit --allow-empty -m "init"', { cwd: dir, env: gitEnv(), stdio: 'ignore' });
+    const opts = { cwd: dir, env: gitEnv(), stdio: 'ignore' as const };
+    execSync('git init', opts);
+    execSync('git config user.email "test@test.com"', opts);
+    execSync('git config user.name "Test"', opts);
+    execSync('git commit --allow-empty -m "init"', opts);
   }
 
   function commitCount(dir: string): number {
