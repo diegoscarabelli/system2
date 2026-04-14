@@ -180,7 +180,7 @@ const DEFAULT_OPERATIONAL: Pick<
 /**
  * Convert TOML LLM section to LlmConfig.
  */
-function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
+export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
   const providers: Partial<Record<LlmProvider, LlmProviderConfig>> = {};
 
   for (const name of [
@@ -517,6 +517,11 @@ export function loadConfig(): System2Config {
   }
 }
 
+/** Escape a string for use inside a TOML quoted string (double quotes). */
+function escapeTomlString(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 /**
  * Build a human-readable config.toml string with comments.
  */
@@ -575,8 +580,8 @@ export function buildConfigToml(options: {
           lines.push('');
           lines.push('[llm.openrouter.routing]');
           for (const [prefix, order] of Object.entries(provider.routing)) {
-            const key = /^[A-Za-z0-9_-]+$/.test(prefix) ? prefix : `"${prefix}"`;
-            lines.push(`${key} = [${order.map((s) => `"${s}"`).join(', ')}]`);
+            const key = /^[A-Za-z0-9_-]+$/.test(prefix) ? prefix : `"${escapeTomlString(prefix)}"`;
+            lines.push(`${key} = [${order.map((s) => `"${escapeTomlString(s)}"`).join(', ')}]`);
           }
         }
 

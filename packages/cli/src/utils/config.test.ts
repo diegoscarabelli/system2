@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildConfigToml, convertTomlAgents, convertTomlDatabases } from './config.js';
+import {
+  buildConfigToml,
+  convertTomlAgents,
+  convertTomlDatabases,
+  convertTomlLlm,
+} from './config.js';
 
 describe('buildConfigToml', () => {
   it('generates valid TOML with LLM config', () => {
@@ -159,6 +164,22 @@ describe('buildConfigToml', () => {
     });
     expect(result).toContain('google = ["google-vertex"]');
     expect(result).not.toContain('"google"');
+  });
+
+  it('escapes quotes and backslashes in routing values', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openrouter',
+        fallback: [],
+        providers: {
+          openrouter: {
+            keys: [{ key: 'sk-or-key', label: 'default' }],
+            routing: { test: ['slug-with-"quote', 'slug-with-\\back'] },
+          },
+        },
+      },
+    });
+    expect(result).toContain('test = ["slug-with-\\"quote", "slug-with-\\\\back"]');
   });
 
   it('omits routing section when not set for openrouter', () => {
@@ -659,5 +680,98 @@ describe('convertTomlAgents', () => {
       conductor: { models: { google: 'gemini-2.5-pro' } },
       narrator: { thinking_level: 'off' },
     });
+  });
+});
+
+describe('convertTomlLlm', () => {
+  it('parses openrouter routing into config', () => {
+    const result = convertTomlLlm({
+      primary: 'openrouter',
+      fallback: [],
+      openrouter: {
+        keys: [{ key: 'sk-or-key', label: 'default' }],
+        routing: { google: ['google-vertex/global', 'google-ai-studio'] },
+      },
+    });
+    expect(result.providers.openrouter?.routing).toEqual({
+      google: ['google-vertex/global', 'google-ai-studio'],
+    });
+  });
+
+  it('accepts routing with quoted prefix keys', () => {
+    const result = convertTomlLlm({
+      primary: 'openrouter',
+      fallback: [],
+      openrouter: {
+        keys: [{ key: 'sk-or-key', label: 'default' }],
+        routing: { 'google/': ['google-vertex'] },
+      },
+    });
+    expect(result.providers.openrouter?.routing).toEqual({
+      'google/': ['google-vertex'],
+    });
+  });
+
+  it('rejects invalid routing values with warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlLlm({
+      primary: 'openrouter',
+      fallback: [],
+      openrouter: {
+        keys: [{ key: 'sk-or-key', label: 'default' }],
+        routing: { google: 'not-an-array' as never },
+      },
+    });
+    expect(result.providers.openrouter?.routing).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid routing entry'));
+    warnSpy.mockRestore();
+  });
+
+  it('rejects routing arrays containing non-strings with warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlLlm({
+      primary: 'openrouter',
+      fallback: [],
+      openrouter: {
+        keys: [{ key: 'sk-or-key', label: 'default' }],
+        routing: { google: [42, 'google-vertex'] as never },
+      },
+    });
+    expect(result.providers.openrouter?.routing).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid routing entry'));
+    warnSpy.mockRestore();
+  });
+
+  it('keeps valid routing entries and drops invalid ones', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlLlm({
+      primary: 'openrouter',
+      fallback: [],
+      openrouter: {
+        keys: [{ key: 'sk-or-key', label: 'default' }],
+        routing: {
+          google: ['google-vertex'],
+          bad: 'string' as never,
+        },
+      },
+    });
+    expect(result.providers.openrouter?.routing).toEqual({
+      google: ['google-vertex'],
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Ignoring invalid routing entry "bad"')
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('omits routing when openrouter has no routing field', () => {
+    const result = convertTomlLlm({
+      primary: 'openrouter',
+      fallback: [],
+      openrouter: {
+        keys: [{ key: 'sk-or-key', label: 'default' }],
+      },
+    });
+    expect(result.providers.openrouter?.routing).toBeUndefined();
   });
 });
