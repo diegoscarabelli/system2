@@ -26,6 +26,7 @@ export interface LlmProviderConfig {
   base_url?: string;
   model?: string;
   compat_reasoning?: boolean;
+  routing?: Record<string, string[]>;
 }
 
 export interface LlmConfig {
@@ -83,4 +84,16 @@ export interface DatabaseConnectionConfig {
 
 export interface DatabasesConfig {
   [name: string]: DatabaseConnectionConfig;
+}
+
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high';
+
+export interface AgentOverrideConfig {
+  thinking_level?: ThinkingLevel;
+  compaction_depth?: number;
+  models?: Partial<Record<Exclude<LlmProvider, 'openai-compatible'>, string>>;
+}
+
+export interface AgentsConfig {
+  [role: string]: AgentOverrideConfig;
 }

@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
+  AgentsConfig,
   ChatConfig,
   DatabasesConfig,
   JobExecution,
@@ -67,6 +68,7 @@ export interface ServerConfig {
   chatConfig?: ChatConfig;
   knowledgeConfig?: KnowledgeConfig;
   databasesConfig?: DatabasesConfig;
+  agentsConfig?: AgentsConfig;
 }
 
 export class Server {
@@ -119,6 +121,7 @@ export class Server {
       llmConfig: config.llmConfig,
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
+      agentsConfig: config.agentsConfig,
       spawner: this.makeSpawner(),
       resurrector: this.makeResurrector(),
       chatMaxMessages,
@@ -139,6 +142,7 @@ export class Server {
       llmConfig: config.llmConfig,
       servicesConfig: config.servicesConfig,
       toolsConfig: config.toolsConfig,
+      agentsConfig: config.agentsConfig,
       chatMaxMessages,
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
@@ -405,6 +409,7 @@ export class Server {
       llmConfig: this.config.llmConfig,
       servicesConfig: this.config.servicesConfig,
       toolsConfig: this.config.toolsConfig,
+      agentsConfig: this.config.agentsConfig,
       spawner: this.makeSpawner(),
       resurrector: this.makeResurrector(),
       chatMaxMessages,

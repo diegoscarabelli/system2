@@ -12,12 +12,15 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type {
+  AgentOverrideConfig,
+  AgentsConfig,
   DatabaseConnectionConfig,
   DatabasesConfig,
   LlmConfig,
   LlmProvider,
   LlmProviderConfig,
   ServicesConfig,
+  ThinkingLevel,
   ToolsConfig,
 } from '@dscarabelli/shared';
 import TOML from '@iarna/toml';
@@ -30,6 +33,7 @@ export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
  */
 export interface System2Config {
   llm?: LlmConfig;
+  agents?: AgentsConfig;
   services?: ServicesConfig;
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
@@ -76,7 +80,10 @@ interface TomlConfig {
     groq?: { keys?: Array<{ key: string; label: string }> };
     mistral?: { keys?: Array<{ key: string; label: string }> };
     openai?: { keys?: Array<{ key: string; label: string }> };
-    openrouter?: { keys?: Array<{ key: string; label: string }> };
+    openrouter?: {
+      keys?: Array<{ key: string; label: string }>;
+      routing?: Record<string, string[]>;
+    };
     xai?: { keys?: Array<{ key: string; label: string }> };
     'openai-compatible'?: {
       keys?: Array<{ key: string; label: string }>;
@@ -85,31 +92,19 @@ interface TomlConfig {
       compat_reasoning?: boolean;
     };
   };
+  agents?: Record<
+    string,
+    {
+      thinking_level?: string;
+      compaction_depth?: number;
+      models?: Record<string, string>;
+    }
+  >;
   services?: {
     brave_search?: { key?: string };
   };
   tools?: {
     web_search?: { enabled?: boolean; max_results?: number };
-  };
-  backup?: {
-    cooldown_hours?: number;
-    max_backups?: number;
-  };
-  session?: {
-    rotation_threshold_mb?: number;
-  };
-  logs?: {
-    rotation_threshold_mb?: number;
-    max_archives?: number;
-  };
-  scheduler?: {
-    daily_summary_interval_minutes?: number;
-  };
-  chat?: {
-    max_history_messages?: number;
-  };
-  knowledge?: {
-    budget_chars?: number;
   };
   databases?: Record<
     string,
@@ -131,6 +126,26 @@ interface TomlConfig {
       credentials_file?: string;
     }
   >;
+  backup?: {
+    cooldown_hours?: number;
+    max_backups?: number;
+  };
+  session?: {
+    rotation_threshold_mb?: number;
+  };
+  logs?: {
+    rotation_threshold_mb?: number;
+    max_archives?: number;
+  };
+  scheduler?: {
+    daily_summary_interval_minutes?: number;
+  };
+  chat?: {
+    max_history_messages?: number;
+  };
+  knowledge?: {
+    budget_chars?: number;
+  };
 }
 
 /**
@@ -175,7 +190,6 @@ function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
     'groq',
     'mistral',
     'openai',
-    'openrouter',
     'xai',
   ] as const) {
     const providerToml = toml[name];
@@ -184,6 +198,31 @@ function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
       if (validKeys.length > 0) {
         providers[name] = { keys: validKeys };
       }
+    }
+  }
+
+  // openrouter has an extra field (routing)
+  const openrouterToml = toml.openrouter;
+  if (openrouterToml?.keys && openrouterToml.keys.length > 0) {
+    const validKeys = openrouterToml.keys.filter((k) => k.key);
+    if (validKeys.length > 0) {
+      const config: LlmProviderConfig = { keys: validKeys };
+      if (openrouterToml.routing && Object.keys(openrouterToml.routing).length > 0) {
+        const validRouting: Record<string, string[]> = {};
+        for (const [prefix, order] of Object.entries(openrouterToml.routing)) {
+          if (Array.isArray(order) && order.every((s) => typeof s === 'string' && s.length > 0)) {
+            validRouting[prefix] = order;
+          } else {
+            console.warn(
+              `[Config] Ignoring invalid routing entry "${prefix}": expected an array of non-empty strings.`
+            );
+          }
+        }
+        if (Object.keys(validRouting).length > 0) {
+          config.routing = validRouting;
+        }
+      }
+      providers.openrouter = config;
     }
   }
 
@@ -277,6 +316,80 @@ export function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>)
   }
 
   return databases;
+}
+
+const VALID_THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high']);
+
+const VALID_MODEL_PROVIDERS = new Set<string>([
+  'anthropic',
+  'cerebras',
+  'google',
+  'groq',
+  'mistral',
+  'openai',
+  'openrouter',
+  'xai',
+]);
+
+/**
+ * Convert TOML agents section to AgentsConfig.
+ * Each entry is a role name with optional overrides for thinking_level, compaction_depth, and models.
+ */
+export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): AgentsConfig {
+  const agents: AgentsConfig = {};
+
+  for (const [role, entry] of Object.entries(toml)) {
+    const override: AgentOverrideConfig = {};
+
+    if (entry.thinking_level !== undefined) {
+      if (VALID_THINKING_LEVELS.has(entry.thinking_level as ThinkingLevel)) {
+        override.thinking_level = entry.thinking_level as ThinkingLevel;
+      } else {
+        console.warn(
+          `[Config] Ignoring invalid thinking_level "${entry.thinking_level}" for agent "${role}". Valid values: ${[...VALID_THINKING_LEVELS].join(', ')}`
+        );
+      }
+    }
+
+    if (entry.compaction_depth !== undefined) {
+      const d = Number(entry.compaction_depth);
+      if (Number.isInteger(d) && d >= 0) {
+        override.compaction_depth = d;
+      } else {
+        console.warn(
+          `[Config] Ignoring invalid compaction_depth "${entry.compaction_depth}" for agent "${role}". Expected an integer >= 0.`
+        );
+      }
+    }
+
+    if (entry.models && Object.keys(entry.models).length > 0) {
+      const validModels: Record<string, string> = {};
+      for (const [provider, model] of Object.entries(entry.models as Record<string, unknown>)) {
+        if (!VALID_MODEL_PROVIDERS.has(provider)) {
+          console.warn(
+            `[Config] Ignoring unknown model provider "${provider}" for agent "${role}". Valid providers: ${[...VALID_MODEL_PROVIDERS].join(', ')}`
+          );
+          continue;
+        }
+        if (typeof model === 'string' && model.length > 0) {
+          validModels[provider] = model;
+        } else {
+          console.warn(
+            `[Config] Ignoring invalid model "${String(model)}" for provider "${provider}" on agent "${role}". Expected a non-empty string.`
+          );
+        }
+      }
+      if (Object.keys(validModels).length > 0) {
+        override.models = validModels as AgentOverrideConfig['models'];
+      }
+    }
+
+    if (Object.keys(override).length > 0) {
+      agents[role] = override;
+    }
+  }
+
+  return agents;
 }
 
 /**
@@ -381,6 +494,10 @@ export function loadConfig(): System2Config {
       config.llm = convertTomlLlm(tomlConfig.llm);
     }
 
+    if (tomlConfig.agents) {
+      config.agents = convertTomlAgents(tomlConfig.agents);
+    }
+
     if (tomlConfig.services) {
       config.services = convertTomlServices(tomlConfig.services);
     }
@@ -405,6 +522,7 @@ export function loadConfig(): System2Config {
  */
 export function buildConfigToml(options: {
   llm?: LlmConfig;
+  agents?: AgentsConfig;
   services?: ServicesConfig;
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
@@ -452,6 +570,16 @@ export function buildConfigToml(options: {
         }
         lines.push(']');
 
+        // openrouter has extra fields
+        if (name === 'openrouter' && provider.routing) {
+          lines.push('');
+          lines.push('[llm.openrouter.routing]');
+          for (const [prefix, order] of Object.entries(provider.routing)) {
+            const key = /^[A-Za-z0-9_-]+$/.test(prefix) ? prefix : `"${prefix}"`;
+            lines.push(`${key} = [${order.map((s) => `"${s}"`).join(', ')}]`);
+          }
+        }
+
         // openai-compatible has extra fields
         if (name === 'openai-compatible') {
           if (provider.base_url) {
@@ -465,6 +593,34 @@ export function buildConfigToml(options: {
           }
         }
 
+        lines.push('');
+      }
+    }
+  }
+
+  // Agents section (per-role overrides)
+  if (options.agents) {
+    for (const [role, override] of Object.entries(options.agents)) {
+      const hasScalarFields =
+        override.thinking_level !== undefined || override.compaction_depth !== undefined;
+      const hasModels = override.models && Object.keys(override.models).length > 0;
+
+      if (hasScalarFields) {
+        lines.push(`[agents.${role}]`);
+        if (override.thinking_level !== undefined) {
+          lines.push(`thinking_level = "${override.thinking_level}"`);
+        }
+        if (override.compaction_depth !== undefined) {
+          lines.push(`compaction_depth = ${override.compaction_depth}`);
+        }
+        lines.push('');
+      }
+
+      if (hasModels && override.models) {
+        lines.push(`[agents.${role}.models]`);
+        for (const [provider, model] of Object.entries(override.models)) {
+          lines.push(`${provider} = "${model}"`);
+        }
         lines.push('');
       }
     }
