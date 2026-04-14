@@ -60,4 +60,42 @@ describe('write tool', () => {
 
     expect(readFileSync(file, 'utf-8')).toBe('new content');
   });
+
+  it('warns when overwriting an existing file with content', async () => {
+    const dir = trackDir(makeTmpDir());
+    const file = join(dir, 'existing.txt');
+    writeFileSync(file, 'important existing content');
+
+    const result = await exec({ path: file, content: 'replacement' });
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).toContain('WARNING: Overwrote existing file');
+    expect(text).toContain('important existing content');
+    expect(text).toContain('Use the `edit` tool');
+  });
+
+  it('does not warn when creating a new file', async () => {
+    const dir = trackDir(makeTmpDir());
+    const file = join(dir, 'brand-new.txt');
+
+    const result = await exec({ path: file, content: 'fresh' });
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).not.toContain('WARNING');
+  });
+
+  it('truncates long existing content in overwrite warning', async () => {
+    const dir = trackDir(makeTmpDir());
+    const file = join(dir, 'big.txt');
+    const longContent = 'x'.repeat(500);
+    writeFileSync(file, longContent);
+
+    const result = await exec({ path: file, content: 'short' });
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).toContain('WARNING: Overwrote existing file (500 bytes)');
+    expect(text).toContain('...');
+    // Preview should be truncated, not the full 500 chars
+    expect(text.indexOf('x'.repeat(201))).toBe(-1);
+  });
 });

@@ -4,12 +4,15 @@
  * Writes content to files on the filesystem.
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { commitIfStateDir } from './git-commit.js';
 import { resolvePath } from './resolve-path.js';
+
+/** Max bytes of existing content to include in the overwrite warning. */
+const PREVIEW_BYTES = 200;
 
 export function createWriteTool() {
   const params = Type.Object({
@@ -37,6 +40,24 @@ export function createWriteTool() {
       try {
         const filePath = resolvePath(params.path);
 
+        // Check if we're about to overwrite an existing file
+        let overwriteWarning = '';
+        try {
+          const stats = await stat(filePath);
+          if (stats.isFile() && stats.size > 0) {
+            const existing = await readFile(filePath, 'utf-8');
+            const preview =
+              existing.length > PREVIEW_BYTES ? `${existing.slice(0, PREVIEW_BYTES)}...` : existing;
+            overwriteWarning =
+              `\n\nWARNING: Overwrote existing file (${stats.size} bytes). ` +
+              `Previous content started with:\n${preview}\n\n` +
+              'If this was unintentional, the existing content is now lost. ' +
+              'Use the `edit` tool to modify files without replacing them entirely.';
+          }
+        } catch {
+          // File doesn't exist, no warning needed
+        }
+
         const dir = dirname(filePath);
         await mkdir(dir, { recursive: true });
 
@@ -50,7 +71,7 @@ export function createWriteTool() {
           content: [
             {
               type: 'text',
-              text: `Successfully wrote ${params.content.length} bytes to ${params.path}`,
+              text: `Successfully wrote ${params.content.length} bytes to ${params.path}${overwriteWarning}`,
             },
           ],
           details: { path: filePath, size: params.content.length },
