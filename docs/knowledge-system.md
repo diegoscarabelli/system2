@@ -3,11 +3,11 @@
 System2 maintains persistent knowledge in `~/.system2/knowledge/`, git-tracked for change history. Knowledge files are injected into agent system prompts dynamically, re-read on every LLM API call for immediate effect.
 
 **Key source files:**
-- `packages/server/src/knowledge/init.ts`: directory initialization
-- `packages/server/src/knowledge/templates.ts`: default file templates
-- `packages/server/src/knowledge/git.ts`: git repo setup
-- `packages/server/src/agents/host.ts`: `loadKnowledgeContext()` method and SDK skill wiring via `additionalSkillPaths`/`skillsOverride`
-- `packages/server/src/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`)
+- `src/server/knowledge/init.ts`: directory initialization
+- `src/server/knowledge/templates.ts`: default file templates
+- `src/server/knowledge/git.ts`: git repo setup
+- `src/server/agents/host.ts`: `loadKnowledgeContext()` method and SDK skill wiring via `additionalSkillPaths`/`skillsOverride`
+- `src/server/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`)
 
 ## Knowledge Directory
 
@@ -35,7 +35,7 @@ agent's context immediately after the shared files and before the activity conte
 (project log or daily summaries).
 
 These files are **separate from and in addition to** the built-in system instructions
-each role receives (the static role prompts in `packages/server/src/agents/library/`).
+each role receives (the static role prompts in `src/server/agents/library/`).
 The static prompts define how an agent behaves; the role knowledge files accumulate
 what an agent has *learned* — patterns, preferences, and lessons that build up over
 time. They provide a path for self-improvement and customization without modifying
@@ -274,7 +274,7 @@ See [Scheduler](scheduler.md) for the pipeline that produces project logs and da
 
 **Gitignored:** `app.db` (and WAL/SHM), `sessions/` (JSONL files and per-agent chat caches), `logs/`, `*.log`, `server.pid`, `config.toml` (contains API keys).
 
-**Backup:** The CLI creates timestamped full copies (`~/.system2-auto-backup-*`) on every `system2 start` (24h cooldown, 5 max retention). This covers everything git ignores (database, sessions, config). See [CLI](packages/cli.md) and [Configuration](configuration.md).
+**Backup:** The CLI creates timestamped full copies (`~/.system2-auto-backup-*`) on every `system2 start` (24h cooldown, 5 max retention). This covers everything git ignores (database, sessions, config). See [CLI](cli.md) and [Configuration](configuration.md).
 
 ## Initialization
 

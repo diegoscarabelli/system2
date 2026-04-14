@@ -5,14 +5,14 @@ Artifacts are files produced as published results of analytical work: EDA notebo
 Pipeline code, utility scripts, intermediate data files, and other working materials are **not** artifacts. The distinction is intent: artifacts are created for the user to consume, not for agents to execute. Working files used during exploration, prototyping, and debugging belong in the [Scratchpad](scratchpad.md), which is the companion working area where source notebooks, intermediate data dumps, and prototype scripts live before anything is published as an artifact.
 
 **Key source files:**
-- `packages/server/src/agents/tools/show-artifact.ts`: Guide-only tool to display artifacts in the UI
-- `packages/server/src/agents/tools/write-system2-db.ts`: CRUD operations (`createArtifact`, `updateArtifact`, `deleteArtifact`)
-- `packages/server/src/db/client.ts`: database methods (`createArtifact`, `getArtifact`, `getArtifactByPath`, `updateArtifact`, `deleteArtifact`)
-- `packages/server/src/server.ts`: HTTP endpoints (`/api/artifact`, `/api/artifacts`, `/api/query`)
-- `packages/server/src/websocket/handler.ts`: WebSocket artifact events and file watching
-- `packages/ui/src/components/ArtifactViewer.tsx`: tabbed viewer with iframe/markdown rendering
-- `packages/ui/src/components/ArtifactCatalog.tsx`: browsable catalog panel
-- `packages/ui/src/stores/artifact.ts`: Zustand store for tab state (persisted to localStorage)
+- `src/server/agents/tools/show-artifact.ts`: Guide-only tool to display artifacts in the UI
+- `src/server/agents/tools/write-system2-db.ts`: CRUD operations (`createArtifact`, `updateArtifact`, `deleteArtifact`)
+- `src/server/db/client.ts`: database methods (`createArtifact`, `getArtifact`, `getArtifactByPath`, `updateArtifact`, `deleteArtifact`)
+- `src/server/server.ts`: HTTP endpoints (`/api/artifact`, `/api/artifacts`, `/api/query`)
+- `src/server/websocket/handler.ts`: WebSocket artifact events and file watching
+- `src/ui/components/ArtifactViewer.tsx`: tabbed viewer with iframe/markdown rendering
+- `src/ui/components/ArtifactCatalog.tsx`: browsable catalog panel
+- `src/ui/stores/artifact.ts`: Zustand store for tab state (persisted to localStorage)
 
 ## What Qualifies as an Artifact
 
@@ -111,7 +111,7 @@ HTML/JS artifacts rendered in iframes can query databases through a postMessage 
 
 **Security:** Only read-only queries are allowed: `SELECT`, `WITH ... SELECT` (CTEs), and `EXPLAIN`. The server rejects DML/DDL keywords (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, etc.) and multi-statement queries (semicolons within the body). Results are capped at `max_rows` (default 10,000) per query, and queries time out after `query_timeout` seconds (default 30). Unknown database names or unsupported types return HTTP 400.
 
-**Architecture:** The server maintains a `DatabaseAdapterRegistry` that lazily creates database connections on first use. Each adapter dynamically loads its driver package from `~/.system2/node_modules/` (installed during onboarding). Connections are pooled where the driver supports it and torn down after 5 minutes of inactivity. The registry is initialized from `config.toml` at server startup. See `packages/server/src/db/adapter-registry.ts` and the individual adapters in `packages/server/src/db/adapters/`.
+**Architecture:** The server maintains a `DatabaseAdapterRegistry` that lazily creates database connections on first use. Each adapter dynamically loads its driver package from `~/.system2/node_modules/` (installed during onboarding). Connections are pooled where the driver supports it and torn down after 5 minutes of inactivity. The registry is initialized from `config.toml` at server startup. See `src/server/db/adapter-registry.ts` and the individual adapters in `src/server/db/adapters/`.
 
 ## HTTP Endpoints
 
@@ -138,11 +138,11 @@ The same message type is sent on live reload (with a cache-busting `&t=<timestam
 
 ## UI Components
 
-**ArtifactViewer** (`packages/ui/src/components/ArtifactViewer.tsx`): the main display area. Renders a tab bar with title and close buttons. Each tab is either an iframe (HTML/JS) or a native component (the Kanban board). Includes the postMessage bridge listener and a ResizeObserver for dynamic iframe content.
+**ArtifactViewer** (`src/ui/components/ArtifactViewer.tsx`): the main display area. Renders a tab bar with title and close buttons. Each tab is either an iframe (HTML/JS) or a native component (the Kanban board). Includes the postMessage bridge listener and a ResizeObserver for dynamic iframe content.
 
-**ArtifactCatalog** (`packages/ui/src/components/ArtifactCatalog.tsx`): a toggleable overlay panel listing all registered artifacts. Grouped by project, filterable by tags and project. Clicking an item opens it in a new tab. Polls `/api/artifacts` every 2 seconds.
+**ArtifactCatalog** (`src/ui/components/ArtifactCatalog.tsx`): a toggleable overlay panel listing all registered artifacts. Grouped by project, filterable by tags and project. Clicking an item opens it in a new tab. Polls `/api/artifacts` every 2 seconds.
 
-**Artifact store** (`packages/ui/src/stores/artifact.ts`): Zustand store managing tab state (open tabs, active tab, panel visibility). Persisted to localStorage via the Zustand persist middleware. Deduplicates tabs by `filePath`: opening an already-open artifact activates its existing tab.
+**Artifact store** (`src/ui/stores/artifact.ts`): Zustand store managing tab state (open tabs, active tab, panel visibility). Persisted to localStorage via the Zustand persist middleware. Deduplicates tabs by `filePath`: opening an already-open artifact activates its existing tab.
 
 ## See Also
 
@@ -151,4 +151,4 @@ The same message type is sent on live reload (with a cache-busting `&t=<timestam
 - [Tools](tools.md#show_artifact): `show_artifact` tool parameters and behavior
 - [WebSocket Protocol](websocket-protocol.md): artifact message type and live reload events
 - [Agents](agents.md): agent-facing artifact guidelines in the shared system prompt
-- [UI Package](packages/ui.md): ArtifactViewer and ArtifactCatalog component details
+- [UI](ui.md): ArtifactViewer and ArtifactCatalog component details

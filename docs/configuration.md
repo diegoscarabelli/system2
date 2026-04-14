@@ -3,9 +3,9 @@
 All System2 settings live in `~/.system2/config.toml`, created by `system2 onboard` with `0600` permissions (contains API keys).
 
 **Key source files:**
-- `packages/shared/src/types/config.ts`: TypeScript types
-- `packages/cli/src/utils/config.ts`: TOML loading and validation
-- `packages/server/src/agents/auth-resolver.ts`: failover logic
+- `src/shared/types/config.ts`: TypeScript types
+- `src/cli/utils/config.ts`: TOML loading and validation
+- `src/server/agents/auth-resolver.ts`: failover logic
 
 ## config.toml Reference
 
@@ -163,7 +163,7 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 
 ## Agent Overrides
 
-Each agent role (guide, conductor, narrator, reviewer, worker) has default settings defined in its library file (`packages/server/src/agents/library/{role}.md`). You can override these defaults per role in config.toml under `[agents.<role>]` sections without modifying the source code.
+Each agent role (guide, conductor, narrator, reviewer, worker) has default settings defined in its library file (`src/server/agents/library/{role}.md`). You can override these defaults per role in config.toml under `[agents.<role>]` sections without modifying the source code.
 
 ### Overridable fields
 
@@ -370,7 +370,7 @@ Auto-backups: `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`
 
 ## See Also
 
-- [CLI](packages/cli.md): `system2 onboard` creates the config
+- [CLI](cli.md): `system2 onboard` creates the config
 - [Agents](agents.md): how LLM config drives provider selection
 - [Knowledge System](knowledge-system.md): knowledge directory details and file size budget
 - [Scheduler](scheduler.md): `daily_summary_interval_minutes`

@@ -1,21 +1,30 @@
 {
   "name": "system2",
   "version": "0.1.0",
-  "private": true,
   "description": "A multi-agent data platform for solo analysts",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "https://github.com/diegoscarabelli/system2.git"
   },
+  "type": "module",
+  "bin": {
+    "system2": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=20",
     "pnpm": ">=8"
   },
   "scripts": {
-    "build": "pnpm -r build",
-    "dev": "pnpm -r --parallel dev",
-    "clean": "pnpm -r clean && rm -rf node_modules",
-    "typecheck": "pnpm -r typecheck",
+    "build": "tsup && vite build",
+    "build:server": "tsup",
+    "build:ui": "vite build",
+    "dev": "concurrently \"tsup --watch\" \"vite --config vite.config.ts\"",
+    "clean": "rm -rf dist node_modules",
+    "typecheck": "tsc --noEmit",
     "lint": "biome lint .",
     "format": "biome format --write .",
     "format:check": "biome format .",
@@ -23,13 +32,53 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "dependencies": {
+    "@clack/prompts": "^1.0.1",
+    "@iarna/toml": "^2.2.5",
+    "@mariozechner/pi-agent-core": "^0.63.1",
+    "@mariozechner/pi-ai": "^0.63.1",
+    "@mariozechner/pi-coding-agent": "^0.63.1",
+    "@mozilla/readability": "^0.6.0",
+    "@primer/octicons-react": "^19.22.0",
+    "@primer/react": "^36.8.0",
+    "@sinclair/typebox": "^0.32.0",
+    "@tsparticles/engine": "^3.0.2",
+    "@tsparticles/react": "^3.0.0",
+    "@tsparticles/slim": "^3.9.1",
+    "better-sqlite3": "^11.10.0",
+    "commander": "^11.1.0",
+    "croner": "^10.0.1",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "gray-matter": "^4.0.3",
+    "linkedom": "^0.18.12",
+    "open": "^9.1.0",
+    "picocolors": "^1.1.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
+    "ws": "^8.16.0",
+    "zustand": "^4.5.0"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.4.5",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/express": "^4.17.21",
     "@types/node": "^20.11.0",
-    "@vitest/coverage-v8": "^4.0.18",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@types/ws": "^8.5.10",
+    "@vitejs/plugin-react": "^4.2.1",
+    "@vitest/coverage-v8": "4.0.18",
+    "concurrently": "^9.0.0",
+    "jsdom": "^28.1.0",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3",
-    "vitest": "^4.0.18"
+    "vite": "^5.0.11",
+    "vitest": "4.0.18"
   },
   "packageManager": "pnpm@8.15.0"
 }

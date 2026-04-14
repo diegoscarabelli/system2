@@ -6,14 +6,14 @@ For installation and usage, see the [project README](../README.md).
 
 ## Architecture
 
-- [Architecture Overview](architecture.md): How the monorepo is organized, how the runtime components connect, and how data flows through the system.
+- [Architecture Overview](architecture.md): How the project is organized, how the runtime components connect, and how data flows through the system.
 
-## Packages
+## Source Layout
 
-- [@dscarabelli/shared](packages/shared.md): The TypeScript types and interfaces that all other packages depend on.
-- [@dscarabelli/server](packages/server.md): The main runtime, hosting agents, serving the UI over HTTP and WebSocket, and running scheduled jobs.
-- [@dscarabelli/cli](packages/cli.md): Command-line tool for managing the server (initial setup, starting, stopping, checking status).
-- [@dscarabelli/ui](packages/ui.md): The browser-based chat interface where you interact with the Guide agent and view artifacts.
+- [Shared types](shared.md): The TypeScript types and interfaces used across the codebase.
+- [Server](server.md): The main runtime, hosting agents, serving the UI over HTTP and WebSocket, and running scheduled jobs.
+- [CLI](cli.md): Command-line tool for managing the server (initial setup, starting, stopping, checking status).
+- [UI](ui.md): The browser-based chat interface where you interact with the Guide agent and view artifacts.
 
 ## Core Systems
 

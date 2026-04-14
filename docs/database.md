@@ -3,8 +3,8 @@
 System2 uses [SQLite](https://www.sqlite.org/) via [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) with WAL mode for concurrent read/write access.
 
 **Key source files:**
-- `packages/server/src/db/schema.sql`: full schema
-- `packages/server/src/db/client.ts`: DatabaseClient class
+- `src/server/db/schema.sql`: full schema
+- `src/server/db/client.ts`: DatabaseClient class
 
 **Location:** `~/.system2/app.db`
 
@@ -166,6 +166,6 @@ Each write triggers an `onWrite` callback that the server maps to a WebSocket pu
 
 ## See Also
 
-- [Shared Types](packages/shared.md): TypeScript interfaces matching this schema
+- [Shared Types](shared.md): TypeScript interfaces matching this schema
 - [Tools](tools.md): `read_system2_db` and `write_system2_db` tools
-- [Server](packages/server.md): `/api/query` endpoint
+- [Server](server.md): `/api/query` endpoint

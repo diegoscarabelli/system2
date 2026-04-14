@@ -6,24 +6,21 @@ export default defineConfig({
       {
         test: {
           name: 'server',
-          root: 'packages/server',
-          include: ['src/**/*.test.ts'],
+          include: ['src/server/**/*.test.ts'],
         },
       },
       {
         test: {
           name: 'cli',
-          root: 'packages/cli',
-          include: ['src/**/*.test.ts'],
+          include: ['src/cli/**/*.test.ts'],
         },
       },
       {
         test: {
           name: 'ui',
-          root: 'packages/ui',
-          include: ['src/**/*.test.{ts,tsx}'],
+          include: ['src/ui/**/*.test.{ts,tsx}'],
           environment: 'jsdom',
-          setupFiles: ['src/test-setup.ts'],
+          setupFiles: ['src/ui/test-setup.ts'],
         },
       },
     ],

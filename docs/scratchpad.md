@@ -5,7 +5,7 @@ The scratchpad is a working area for exploration, testing, and debugging. It hol
 The scratchpad is the companion working area to [Artifacts](artifacts.md): exploration happens in the scratchpad, finished deliverables are promoted to artifacts.
 
 **Key source files:**
-- `packages/server/src/agents/agents.md`: agent-facing instructions on what belongs in the scratchpad and how it relates to artifacts and pipeline code
+- `src/server/agents/agents.md`: agent-facing instructions on what belongs in the scratchpad and how it relates to artifacts and pipeline code
 
 ## What Goes in the Scratchpad
 
@@ -31,7 +31,7 @@ Scratchpad files live under `~/.system2/`:
 | `~/.system2/projects/{id}_{name}/scratchpad/` | Working files tied to a specific project. Default for any work happening inside a project. |
 | `~/.system2/scratchpad/` | Working files not associated with any project (one-off explorations, system-wide experiments, generic prototypes). |
 
-There are no subdirectory conventions: agents organize the contents of these directories as they see fit for the work at hand. There is no automatic cleanup; files persist indefinitely. Both directories are gitignored by the default `.gitignore` template installed in `~/.system2/` (see `packages/server/src/knowledge/git.ts`): the top-level `scratchpad/` entry covers the global scratchpad, and `projects/**/scratchpad/` covers per-project scratchpads. Scratchpad files do not appear in `git -C ~/.system2 status` and never get committed to the knowledge repo.
+There are no subdirectory conventions: agents organize the contents of these directories as they see fit for the work at hand. There is no automatic cleanup; files persist indefinitely. Both directories are gitignored by the default `.gitignore` template installed in `~/.system2/` (see `src/server/knowledge/git.ts`): the top-level `scratchpad/` entry covers the global scratchpad, and `projects/**/scratchpad/` covers per-project scratchpads. Scratchpad files do not appear in `git -C ~/.system2 status` and never get committed to the knowledge repo.
 
 ## Recommendations for Intermediate Data
 

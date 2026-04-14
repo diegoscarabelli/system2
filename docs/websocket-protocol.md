@@ -3,9 +3,9 @@
 The UI communicates with the server over a single WebSocket connection. The server streams agent events in real time.
 
 **Key source files:**
-- `packages/shared/src/types/messages.ts`: TypeScript types
-- `packages/server/src/websocket/handler.ts`: WebSocketHandler
-- `packages/ui/src/hooks/useWebSocket.ts`: client-side hook
+- `src/shared/types/messages.ts`: TypeScript types
+- `src/server/websocket/handler.ts`: WebSocketHandler
+- `src/ui/hooks/useWebSocket.ts`: client-side hook
 
 ## Connection
 
@@ -200,6 +200,6 @@ Each WebSocket connection gets its own `WebSocketHandler` instance. It:
 
 ## See Also
 
-- [Shared Types](packages/shared.md): TypeScript type definitions
-- [UI](packages/ui.md): client-side WebSocket hook and chat store
+- [Shared Types](shared.md): TypeScript type definitions
+- [UI](ui.md): client-side WebSocket hook and chat store
 - [Agents](agents.md): `prompt()` and `deliverMessage()` methods
