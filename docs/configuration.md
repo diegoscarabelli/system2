@@ -40,7 +40,8 @@ keys = [{ key = "sk-...", label = "default" }]
 keys = [{ key = "sk-or-...", label = "default" }]
 
 # Upstream provider routing for OpenRouter models (optional).
-# Keys are model ID prefixes, values are provider order arrays.
+# Keys are model ID prefixes; quote them when they contain special characters (e.g. "/").
+# Values are provider order arrays.
 [llm.openrouter.routing]
 google = ["google-vertex/global", "google-vertex", "google-ai-studio"]
 
@@ -136,7 +137,7 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
 
-The `openrouter` provider supports an optional `[llm.openrouter.routing]` section that controls upstream provider routing. Keys are model ID prefixes matched against the resolved model (longest prefix wins), values are arrays of OpenRouter provider slugs tried in order. For example, `google = ["google-vertex/global", "google-vertex", "google-ai-studio"]` routes all `google/*` models through Vertex AI first. If no prefix matches, no routing preference is set and OpenRouter uses its default load balancing.
+The `openrouter` provider supports an optional `[llm.openrouter.routing]` section that controls upstream provider routing. Keys are model ID prefixes matched against the resolved model (longest prefix wins), values are arrays of OpenRouter provider slugs tried in order. Prefixes containing special characters like `/` must be quoted in TOML (e.g. `"google/" = [...]`). For example, `google = ["google-vertex/global", "google-vertex", "google-ai-studio"]` routes all `google/*` models through Vertex AI first. If no prefix matches, no routing preference is set and OpenRouter uses its default load balancing.
 
 The `openai-compatible` provider requires `base_url` and `model` fields in addition to keys. Use it for self-hosted proxies or providers not listed above. The optional `compat_reasoning` field (default `true`) declares whether the model supports extended thinking. For built-in providers (anthropic, openai, etc.), the SDK already knows which models support reasoning; `compat_reasoning` only applies to `openai-compatible` since the SDK has no way to know the capabilities of an arbitrary endpoint. Setting it to `true` for a model that doesn't support reasoning is safe: the SDK only sends `reasoning_effort` when the provider's compatibility layer confirms support, and most backends ignore unknown parameters.
 

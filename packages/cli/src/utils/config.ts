@@ -208,7 +208,19 @@ function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
     if (validKeys.length > 0) {
       const config: LlmProviderConfig = { keys: validKeys };
       if (openrouterToml.routing && Object.keys(openrouterToml.routing).length > 0) {
-        config.routing = openrouterToml.routing;
+        const validRouting: Record<string, string[]> = {};
+        for (const [prefix, order] of Object.entries(openrouterToml.routing)) {
+          if (Array.isArray(order) && order.every((s) => typeof s === 'string' && s.length > 0)) {
+            validRouting[prefix] = order;
+          } else {
+            console.warn(
+              `[Config] Ignoring invalid routing entry "${prefix}": expected an array of non-empty strings.`
+            );
+          }
+        }
+        if (Object.keys(validRouting).length > 0) {
+          config.routing = validRouting;
+        }
       }
       providers.openrouter = config;
     }
@@ -323,7 +335,7 @@ const VALID_MODEL_PROVIDERS = new Set<string>([
  * Convert TOML agents section to AgentsConfig.
  * Each entry is a role name with optional overrides for thinking_level, compaction_depth, and models.
  */
-function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): AgentsConfig {
+export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): AgentsConfig {
   const agents: AgentsConfig = {};
 
   for (const [role, entry] of Object.entries(toml)) {
@@ -352,12 +364,18 @@ function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): AgentsConfi
 
     if (entry.models && Object.keys(entry.models).length > 0) {
       const validModels: Record<string, string> = {};
-      for (const [provider, model] of Object.entries(entry.models as Record<string, string>)) {
-        if (VALID_MODEL_PROVIDERS.has(provider)) {
+      for (const [provider, model] of Object.entries(entry.models as Record<string, unknown>)) {
+        if (!VALID_MODEL_PROVIDERS.has(provider)) {
+          console.warn(
+            `[Config] Ignoring unknown model provider "${provider}" for agent "${role}". Valid providers: ${[...VALID_MODEL_PROVIDERS].join(', ')}`
+          );
+          continue;
+        }
+        if (typeof model === 'string' && model.length > 0) {
           validModels[provider] = model;
         } else {
           console.warn(
-            `[Config] Ignoring unknown model provider "${provider}" for agent "${role}". Valid providers: ${[...VALID_MODEL_PROVIDERS].join(', ')}`
+            `[Config] Ignoring invalid model "${String(model)}" for provider "${provider}" on agent "${role}". Expected a non-empty string.`
           );
         }
       }
@@ -557,7 +575,8 @@ export function buildConfigToml(options: {
           lines.push('');
           lines.push('[llm.openrouter.routing]');
           for (const [prefix, order] of Object.entries(provider.routing)) {
-            lines.push(`${prefix} = [${order.map((s) => `"${s}"`).join(', ')}]`);
+            const key = /^[A-Za-z0-9_-]+$/.test(prefix) ? prefix : `"${prefix}"`;
+            lines.push(`${key} = [${order.map((s) => `"${s}"`).join(', ')}]`);
           }
         }
 
