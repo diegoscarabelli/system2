@@ -83,7 +83,7 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
      # SQLite: no install needed (built-in)
      ```
 
-     **Write a config entry** to `~/.system2/config.toml` for each database. Use the `write` tool to append a `[databases.<name>]` section. Do NOT include passwords: they belong in native credential files or environment variables. Examples:
+     **Write a config entry** to `~/.system2/config.toml` for each database. Use the `edit` tool with `append: true` to add a `[databases.<name>]` section. NEVER use the `write` tool on config.toml as it replaces the entire file and will destroy existing sections (LLM keys, services, operational settings). Do NOT include passwords: they belong in native credential files or environment variables. Examples:
 
      ```toml
      [databases.my_postgres]
