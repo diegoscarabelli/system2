@@ -240,6 +240,16 @@ export function useWebSocket() {
           console.error('Server error:', message.message);
           const aid = message.agentId ?? state.activeAgentId;
           if (aid !== null) state.setWaitingForResponse(false, aid);
+          // If the failed agent is the active non-Guide agent, fall back to Guide
+          // (handles stale persisted agent IDs from localStorage)
+          if (
+            message.agentId &&
+            state.guideAgentId &&
+            message.agentId === state.activeAgentId &&
+            message.agentId !== state.guideAgentId
+          ) {
+            state.setActiveAgent(state.guideAgentId, 'guide');
+          }
           break;
         }
 
