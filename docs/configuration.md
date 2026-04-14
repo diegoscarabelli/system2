@@ -125,6 +125,8 @@ google = "gemini-2.5-pro"
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
 
+When `openrouter` is the active provider and the resolved model is a Google model (ID starting with `google/`), System2 automatically sets OpenRouter's provider routing to prefer Vertex AI: `google-vertex/global` first, then `google-vertex`, with `google-ai-studio` as a last resort. Vertex AI offers higher throughput and rate limits compared to Google AI Studio.
+
 The `openai-compatible` provider requires `base_url` and `model` fields in addition to keys. Use it for self-hosted proxies or providers not listed above. The optional `compat_reasoning` field (default `true`) declares whether the model supports extended thinking. For built-in providers (anthropic, openai, etc.), the SDK already knows which models support reasoning; `compat_reasoning` only applies to `openai-compatible` since the SDK has no way to know the capabilities of an arbitrary endpoint. Setting it to `true` for a model that doesn't support reasoning is safe: the SDK only sends `reasoning_effort` when the provider's compatibility layer confirms support, and most backends ignore unknown parameters.
 
 ## Automatic Failover

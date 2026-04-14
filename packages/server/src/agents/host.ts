@@ -394,6 +394,17 @@ export class AgentHost {
 
     log.info('[AgentHost] Model found:', model ? 'YES' : 'NO');
 
+    // Route OpenRouter Google models through Vertex AI for higher throughput and rate limits.
+    if (llmProvider === 'openrouter' && modelId.startsWith('google/')) {
+      model.compat = {
+        ...model.compat,
+        openRouterRouting: {
+          order: ['google-vertex/global', 'google-vertex', 'google-ai-studio'],
+        },
+      };
+      log.info('[AgentHost] OpenRouter routing set to Vertex AI for', modelId);
+    }
+
     // Store context window size for overflow recovery
     this.contextWindow = model.contextWindow;
 
