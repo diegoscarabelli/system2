@@ -587,8 +587,7 @@ export class AgentHost {
     // reinitializeWithProvider needs the values passed as arguments.
     const promptToRetry = this.pendingPrompt;
     const deliveriesToRetry = [...this.pendingDeliveries];
-    // Reset the send counter: any .then() callbacks from the failed turn's
-    // sendCustomMessage calls have already run, and their increments are stale.
+    // Reset the send counter: the failed turn's sends are abandoned.
     // The retry/failover path will re-send and re-increment as needed.
     this.deliverySendCount = 0;
 
@@ -667,6 +666,7 @@ export class AgentHost {
         }
         const session = this.session;
         for (const d of deliveriesToRetry) {
+          this.deliverySendCount++;
           session
             .sendCustomMessage(
               {
@@ -680,10 +680,8 @@ export class AgentHost {
                 triggerTurn: true,
               }
             )
-            .then(() => {
-              this.deliverySendCount++;
-            })
             .catch((error) => {
+              this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
               log.error('[AgentHost] Failed to resend delivery after retry:', error);
               const idx = this.pendingDeliveries.indexOf(d);
               if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
@@ -770,6 +768,7 @@ export class AgentHost {
         // pendingDeliveries: agent_end will shift each one as turns succeed.
         if (this.pendingDeliveries.length > 0 && this.session) {
           for (const delivery of this.pendingDeliveries) {
+            this.deliverySendCount++;
             this.session
               .sendCustomMessage(
                 {
@@ -783,10 +782,8 @@ export class AgentHost {
                   triggerTurn: true,
                 }
               )
-              .then(() => {
-                this.deliverySendCount++;
-              })
               .catch((error) => {
+                this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
                 log.error('[AgentHost] Failed to replay delivery after context overflow:', error);
                 const idx = this.pendingDeliveries.indexOf(delivery);
                 if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
@@ -935,6 +932,9 @@ export class AgentHost {
         this.pendingDeliveries = [...deliveriesToRetry, ...newDuringReinit];
         const session = this.session;
         for (const d of deliveriesToRetry) {
+          // Increment count synchronously so agent_end (which fires before
+          // sendCustomMessage resolves for idle agents) sees the correct tally.
+          this.deliverySendCount++;
           session
             .sendCustomMessage(
               {
@@ -948,10 +948,8 @@ export class AgentHost {
                 triggerTurn: true,
               }
             )
-            .then(() => {
-              this.deliverySendCount++;
-            })
             .catch((error) => {
+              this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
               log.error('[AgentHost] Failed to replay delivery after failover:', error);
               const idx = this.pendingDeliveries.indexOf(d);
               if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
@@ -1228,6 +1226,9 @@ export class AgentHost {
           .catch((err) => log.warn('[AgentHost] reload failed, using cached knowledge:', err))
       : Promise.resolve();
 
+    // Increment count synchronously so agent_end (which fires before
+    // sendCustomMessage resolves for idle agents) sees the correct tally.
+    this.deliverySendCount++;
     reload
       .then(() =>
         session.sendCustomMessage(
@@ -1243,15 +1244,8 @@ export class AgentHost {
           }
         )
       )
-      .then(() => {
-        // Track successful send for agent_end resolution. Incremented here
-        // (after sendCustomMessage resolves) so only actually-sent messages
-        // are counted. The SDK processes all queued messages (prompt +
-        // follow-ups) in one turn and fires a single agent_end, so the
-        // counter accumulates correctly across the batch.
-        this.deliverySendCount++;
-      })
       .catch((err) => {
+        this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
         log.error('[AgentHost] deliverMessage error:', err);
         // Send itself failed (session destroyed, etc.). The message never
         // reached the agent, so remove from queue and reject immediately.
