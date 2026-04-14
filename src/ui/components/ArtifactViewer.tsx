@@ -366,6 +366,7 @@ export function ArtifactViewer() {
               ) : /\.pdf$/i.test(activeTab.filePath) ? (
                 <iframe
                   src={activeTab.url}
+                  sandbox="allow-same-origin"
                   title={activeTab.title}
                   style={{
                     width: '100%',
