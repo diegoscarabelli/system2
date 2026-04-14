@@ -54,6 +54,19 @@ base_url = "http://localhost:4000/v1"
 model = "my-model"
 compat_reasoning = true  # optional, default true
 
+# Per-role agent overrides (optional)
+# Override thinking_level, compaction_depth, or models for any agent role.
+# Only specified fields override the library defaults.
+[agents.guide]
+thinking_level = "medium"
+compaction_depth = 5
+
+[agents.guide.models]
+anthropic = "claude-opus-4-6"
+
+[agents.conductor.models]
+google = "gemini-2.5-pro"
+
 # Service credentials
 [services.brave_search]
 key = "BSA..."
@@ -63,7 +76,13 @@ key = "BSA..."
 enabled = true
 max_results = 5
 
-# Operational settings
+# Database connections (added during onboarding)
+# [databases.my_postgres]
+# type = "postgres"
+# database = "analytics"
+# user = "readonly"
+
+# Operational settings (defaults are fine for most users)
 [backup]
 cooldown_hours = 24    # Min hours between auto-backups
 max_backups = 3        # Max backup copies to keep
@@ -83,19 +102,6 @@ max_history_messages = 1000  # Max messages in chat history ring buffer
 
 [knowledge]
 budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overruns
-
-# Per-role agent overrides (optional)
-# Override thinking_level, compaction_depth, or models for any agent role.
-# Only specified fields override the library defaults.
-[agents.guide]
-thinking_level = "medium"
-compaction_depth = 5
-
-[agents.guide.models]
-anthropic = "claude-opus-4-6"
-
-[agents.conductor.models]
-google = "gemini-2.5-pro"
 ```
 
 ## Sections
@@ -103,16 +109,16 @@ google = "gemini-2.5-pro"
 | Section | Description | TypeScript Type |
 |---------|-------------|-----------------|
 | `[llm]` | Primary provider, fallback order, per-provider keys | `LlmConfig` |
+| `[agents.*]` | Per-role agent overrides (models, thinking, compaction) | `AgentsConfig` |
 | `[services.*]` | External service credentials | `ServicesConfig` |
 | `[tools.*]` | Tool feature flags | `ToolsConfig` |
+| `[databases.*]` | External database connections | `DatabasesConfig` |
 | `[backup]` | Auto-backup frequency and retention | -- |
 | `[session]` | Session file rotation threshold | -- |
 | `[logs]` | Log rotation threshold and archive count | -- |
 | `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
 | `[chat]` | Chat history settings | `ChatConfig` |
 | `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
-| `[agents.*]` | Per-role agent overrides (models, thinking, compaction) | `AgentsConfig` |
-| `[databases.*]` | External database connections | `DatabasesConfig` |
 
 ## LLM Providers
 

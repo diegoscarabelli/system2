@@ -148,5 +148,16 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
 6. **Capture interaction preferences:**
    Throughout the conversation the user may have expressed preferences about how they like to interact: verbosity, level of detail, how much autonomy to take, when to ask vs. act, etc. Save any such preferences to `~/.system2/knowledge/guide.md` so they carry over to future sessions.
 
-7. **Wrap up:**
-   Summarize what was configured: the user's profile, detected infrastructure, data stack, and code repository. Invite the user to review `infrastructure.md` (show it via `show_artifact` if they want). Then ask what they'd like to work on first.
+7. **Walk through config.toml:**
+   Show the user their `~/.system2/config.toml` file (use `show_artifact`) and walk them through the sections so they know what they can adjust later. Present the sections in order, adapting depth to the user's technical level:
+
+   - **`[llm]` and `[llm.<provider>]`**: The providers and API keys configured during CLI onboarding. They can add or remove providers, add multiple labeled keys per provider for rotation, and change the primary/fallback order. Mention that System2 automatically fails over between keys and providers when errors occur.
+   - **`[agents.<role>]`**: Per-role overrides for any agent (guide, conductor, narrator, reviewer, worker). They can change the `thinking_level` (off/minimal/low/medium/high), `compaction_depth` (how many context compactions before pruning), and `models.<provider>` (which model to use on a specific provider). Only specified fields override the library defaults. This is how they can, for example, run the Guide on a more capable model or reduce thinking for a fast-turnaround role.
+   - **`[services.*]` and `[tools.*]`**: Service credentials (e.g. Brave Search) and tool settings (e.g. web search toggle). Mention these briefly.
+   - **`[databases.*]`**: The database connections just configured. Remind them they can add more databases later by adding new sections here and installing the corresponding driver.
+   - **Operational sections** (`[backup]`, `[session]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`): Mention these exist with sensible defaults and rarely need adjustment. Point out `scheduler.daily_summary_interval_minutes` as the one users might want to tune (controls how often the Narrator writes summaries).
+
+   Keep this conversational, not a lecture. A couple of sentences per section is enough. The goal is awareness that config.toml is the single place to tune System2, not memorization of every field.
+
+8. **Wrap up:**
+   Summarize what was configured: the user's profile, detected infrastructure, data stack, and code repository. Then ask what they'd like to work on first.

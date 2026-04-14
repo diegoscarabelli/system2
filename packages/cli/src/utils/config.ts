@@ -33,10 +33,10 @@ export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
  */
 export interface System2Config {
   llm?: LlmConfig;
+  agents?: AgentsConfig;
   services?: ServicesConfig;
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
-  agents?: AgentsConfig;
   backup: {
     /** Hours between automatic backups (default: 24) */
     cooldownHours: number;
@@ -92,31 +92,19 @@ interface TomlConfig {
       compat_reasoning?: boolean;
     };
   };
+  agents?: Record<
+    string,
+    {
+      thinking_level?: string;
+      compaction_depth?: number;
+      models?: Record<string, string>;
+    }
+  >;
   services?: {
     brave_search?: { key?: string };
   };
   tools?: {
     web_search?: { enabled?: boolean; max_results?: number };
-  };
-  backup?: {
-    cooldown_hours?: number;
-    max_backups?: number;
-  };
-  session?: {
-    rotation_threshold_mb?: number;
-  };
-  logs?: {
-    rotation_threshold_mb?: number;
-    max_archives?: number;
-  };
-  scheduler?: {
-    daily_summary_interval_minutes?: number;
-  };
-  chat?: {
-    max_history_messages?: number;
-  };
-  knowledge?: {
-    budget_chars?: number;
   };
   databases?: Record<
     string,
@@ -138,14 +126,26 @@ interface TomlConfig {
       credentials_file?: string;
     }
   >;
-  agents?: Record<
-    string,
-    {
-      thinking_level?: string;
-      compaction_depth?: number;
-      models?: Record<string, string>;
-    }
-  >;
+  backup?: {
+    cooldown_hours?: number;
+    max_backups?: number;
+  };
+  session?: {
+    rotation_threshold_mb?: number;
+  };
+  logs?: {
+    rotation_threshold_mb?: number;
+    max_archives?: number;
+  };
+  scheduler?: {
+    daily_summary_interval_minutes?: number;
+  };
+  chat?: {
+    max_history_messages?: number;
+  };
+  knowledge?: {
+    budget_chars?: number;
+  };
 }
 
 /**
@@ -476,6 +476,10 @@ export function loadConfig(): System2Config {
       config.llm = convertTomlLlm(tomlConfig.llm);
     }
 
+    if (tomlConfig.agents) {
+      config.agents = convertTomlAgents(tomlConfig.agents);
+    }
+
     if (tomlConfig.services) {
       config.services = convertTomlServices(tomlConfig.services);
     }
@@ -486,10 +490,6 @@ export function loadConfig(): System2Config {
 
     if (tomlConfig.databases) {
       config.databases = convertTomlDatabases(tomlConfig.databases);
-    }
-
-    if (tomlConfig.agents) {
-      config.agents = convertTomlAgents(tomlConfig.agents);
     }
 
     return config;
@@ -504,10 +504,10 @@ export function loadConfig(): System2Config {
  */
 export function buildConfigToml(options: {
   llm?: LlmConfig;
+  agents?: AgentsConfig;
   services?: ServicesConfig;
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
-  agents?: AgentsConfig;
   backup?: System2Config['backup'];
   session?: System2Config['session'];
   logs?: System2Config['logs'];
@@ -579,6 +579,34 @@ export function buildConfigToml(options: {
     }
   }
 
+  // Agents section (per-role overrides)
+  if (options.agents) {
+    for (const [role, override] of Object.entries(options.agents)) {
+      const hasScalarFields =
+        override.thinking_level !== undefined || override.compaction_depth !== undefined;
+      const hasModels = override.models && Object.keys(override.models).length > 0;
+
+      if (hasScalarFields) {
+        lines.push(`[agents.${role}]`);
+        if (override.thinking_level !== undefined) {
+          lines.push(`thinking_level = "${override.thinking_level}"`);
+        }
+        if (override.compaction_depth !== undefined) {
+          lines.push(`compaction_depth = ${override.compaction_depth}`);
+        }
+        lines.push('');
+      }
+
+      if (hasModels && override.models) {
+        lines.push(`[agents.${role}.models]`);
+        for (const [provider, model] of Object.entries(override.models)) {
+          lines.push(`${provider} = "${model}"`);
+        }
+        lines.push('');
+      }
+    }
+  }
+
   // Services section
   if (options.services?.brave_search) {
     lines.push('[services.brave_search]');
@@ -615,34 +643,6 @@ export function buildConfigToml(options: {
       if (conn.credentials_file !== undefined)
         lines.push(`credentials_file = "${conn.credentials_file}"`);
       lines.push('');
-    }
-  }
-
-  // Agents section (per-role overrides)
-  if (options.agents) {
-    for (const [role, override] of Object.entries(options.agents)) {
-      const hasScalarFields =
-        override.thinking_level !== undefined || override.compaction_depth !== undefined;
-      const hasModels = override.models && Object.keys(override.models).length > 0;
-
-      if (hasScalarFields) {
-        lines.push(`[agents.${role}]`);
-        if (override.thinking_level !== undefined) {
-          lines.push(`thinking_level = "${override.thinking_level}"`);
-        }
-        if (override.compaction_depth !== undefined) {
-          lines.push(`compaction_depth = ${override.compaction_depth}`);
-        }
-        lines.push('');
-      }
-
-      if (hasModels && override.models) {
-        lines.push(`[agents.${role}.models]`);
-        for (const [provider, model] of Object.entries(override.models)) {
-          lines.push(`${provider} = "${model}"`);
-        }
-        lines.push('');
-      }
     }
   }
 
