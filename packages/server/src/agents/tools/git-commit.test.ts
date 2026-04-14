@@ -93,10 +93,9 @@ describe('commitIfStateDir', () => {
     expect(lastMsg).toBe('cursor: infra.md');
   });
 
-  it('does not commit to the code repo even when run from it', () => {
+  it('does not commit to the code repo even when GIT_DIR points to it', () => {
     initGitRepo(system2Dir);
 
-    // Count commits in the actual code repo before
     const codeRepoRoot = execSync('git rev-parse --show-toplevel', {
       env: gitEnv(),
       encoding: 'utf-8',
@@ -105,7 +104,17 @@ describe('commitIfStateDir', () => {
 
     const filePath = join(system2Dir, 'knowledge', 'test.md');
     writeFileSync(filePath, 'should only go to system2 repo');
-    commitIfStateDir(filePath, 'cursor: test.md');
+
+    // Simulate the bug: parent process sets GIT_DIR / GIT_WORK_TREE
+    // to the code repo (this is what git hooks and dev servers do).
+    process.env.GIT_DIR = join(codeRepoRoot, '.git');
+    process.env.GIT_WORK_TREE = codeRepoRoot;
+    try {
+      commitIfStateDir(filePath, 'cursor: test.md');
+    } finally {
+      delete process.env.GIT_DIR;
+      delete process.env.GIT_WORK_TREE;
+    }
 
     // Code repo commit count must not change
     expect(commitCount(codeRepoRoot)).toBe(beforeCount);
