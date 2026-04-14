@@ -15,7 +15,9 @@ import { useAccentColors } from '../theme/useAccentColors';
 import { KanbanBoard } from './KanbanBoard';
 import { ParticlesBackground } from './ParticlesBackground';
 
-function CodeArtifact({ url }: { url: string }) {
+const MAX_PREVIEW_BYTES = 5 * 1024 * 1024; // 5 MB
+
+function useFetchText(url: string) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,14 +28,30 @@ function CodeArtifact({ url }: { url: string }) {
     fetch(url, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
+        const length = res.headers.get('content-length');
+        if (length && Number(length) > MAX_PREVIEW_BYTES) {
+          throw new Error('File too large to preview');
+        }
         return res.text();
       })
-      .then(setContent)
+      .then((text) => {
+        if (text.length > MAX_PREVIEW_BYTES) {
+          setContent(`${text.slice(0, MAX_PREVIEW_BYTES)}\n\n… (truncated, file exceeds 5 MB)`);
+        } else {
+          setContent(text);
+        }
+      })
       .catch((err) => {
         if (err.name !== 'AbortError') setError(err.message);
       });
     return () => controller.abort();
   }, [url]);
+
+  return { content, error };
+}
+
+function CodeArtifact({ url }: { url: string }) {
+  const { content, error } = useFetchText(url);
 
   if (error) {
     return (
@@ -53,53 +71,27 @@ function CodeArtifact({ url }: { url: string }) {
 
   return (
     <Box
+      as="pre"
       sx={{
+        m: 0,
         p: 3,
-        height: '100%',
+        fontFamily: 'mono',
+        fontSize: 0,
+        lineHeight: 1.5,
+        color: 'fg.default',
+        backgroundColor: 'neutral.muted',
+        borderRadius: 2,
         overflow: 'auto',
+        whiteSpace: 'pre',
       }}
     >
-      <Box
-        as="pre"
-        sx={{
-          m: 0,
-          p: 3,
-          fontFamily: 'mono',
-          fontSize: 0,
-          lineHeight: 1.5,
-          color: 'fg.default',
-          backgroundColor: 'neutral.muted',
-          borderRadius: 2,
-          overflow: 'auto',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}
-      >
-        {content}
-      </Box>
+      {content}
     </Box>
   );
 }
 
 function MarkdownArtifact({ url }: { url: string }) {
-  const [content, setContent] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setContent(null);
-    setError(null);
-    fetch(url, { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
-        return res.text();
-      })
-      .then(setContent)
-      .catch((err) => {
-        if (err.name !== 'AbortError') setError(err.message);
-      });
-    return () => controller.abort();
-  }, [url]);
+  const { content, error } = useFetchText(url);
 
   if (error) {
     return (
