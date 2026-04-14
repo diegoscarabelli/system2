@@ -293,6 +293,17 @@ export function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>)
 
 const VALID_THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high']);
 
+const VALID_MODEL_PROVIDERS = new Set<string>([
+  'anthropic',
+  'cerebras',
+  'google',
+  'groq',
+  'mistral',
+  'openai',
+  'openrouter',
+  'xai',
+]);
+
 /**
  * Convert TOML agents section to AgentsConfig.
  * Each entry is a role name with optional overrides for thinking_level, compaction_depth, and models.
@@ -315,13 +326,29 @@ function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): AgentsConfi
 
     if (entry.compaction_depth !== undefined) {
       const d = Number(entry.compaction_depth);
-      if (Number.isFinite(d) && d >= 0) {
+      if (Number.isInteger(d) && d >= 0) {
         override.compaction_depth = d;
+      } else {
+        console.warn(
+          `[Config] Ignoring invalid compaction_depth "${entry.compaction_depth}" for agent "${role}". Expected an integer >= 0.`
+        );
       }
     }
 
     if (entry.models && Object.keys(entry.models).length > 0) {
-      override.models = entry.models as AgentOverrideConfig['models'];
+      const validModels: Record<string, string> = {};
+      for (const [provider, model] of Object.entries(entry.models as Record<string, string>)) {
+        if (VALID_MODEL_PROVIDERS.has(provider)) {
+          validModels[provider] = model;
+        } else {
+          console.warn(
+            `[Config] Ignoring unknown model provider "${provider}" for agent "${role}". Valid providers: ${[...VALID_MODEL_PROVIDERS].join(', ')}`
+          );
+        }
+      }
+      if (Object.keys(validModels).length > 0) {
+        override.models = validModels as AgentOverrideConfig['models'];
+      }
     }
 
     if (Object.keys(override).length > 0) {

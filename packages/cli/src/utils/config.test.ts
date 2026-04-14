@@ -294,6 +294,73 @@ describe('buildConfigToml', () => {
     expect(result).toContain('socket = "/var/run/postgresql/.s.PGSQL.5432"');
     expect(result).toContain('ssl = true');
   });
+
+  it('includes agents section with thinking_level and compaction_depth', () => {
+    const result = buildConfigToml({
+      agents: {
+        guide: {
+          thinking_level: 'medium',
+          compaction_depth: 5,
+        },
+      },
+    });
+    expect(result).toContain('[agents.guide]');
+    expect(result).toContain('thinking_level = "medium"');
+    expect(result).toContain('compaction_depth = 5');
+  });
+
+  it('includes agents section with per-provider model overrides', () => {
+    const result = buildConfigToml({
+      agents: {
+        conductor: {
+          models: {
+            anthropic: 'claude-opus-4-6',
+            google: 'gemini-2.5-pro',
+          },
+        },
+      },
+    });
+    expect(result).toContain('[agents.conductor.models]');
+    expect(result).toContain('anthropic = "claude-opus-4-6"');
+    expect(result).toContain('google = "gemini-2.5-pro"');
+  });
+
+  it('outputs agents with both scalar fields and models', () => {
+    const result = buildConfigToml({
+      agents: {
+        guide: {
+          thinking_level: 'high',
+          compaction_depth: 3,
+          models: {
+            anthropic: 'claude-opus-4-6',
+          },
+        },
+      },
+    });
+    expect(result).toContain('[agents.guide]');
+    expect(result).toContain('thinking_level = "high"');
+    expect(result).toContain('compaction_depth = 3');
+    expect(result).toContain('[agents.guide.models]');
+    expect(result).toContain('anthropic = "claude-opus-4-6"');
+  });
+
+  it('outputs multiple agent role overrides', () => {
+    const result = buildConfigToml({
+      agents: {
+        guide: { thinking_level: 'medium' },
+        conductor: { models: { google: 'gemini-2.5-pro' } },
+      },
+    });
+    expect(result).toContain('[agents.guide]');
+    expect(result).toContain('thinking_level = "medium"');
+    expect(result).toContain('[agents.conductor.models]');
+    expect(result).toContain('google = "gemini-2.5-pro"');
+  });
+
+  it('omits agents section when not configured', () => {
+    const result = buildConfigToml({});
+    expect(result).not.toContain('[agents.');
+  });
 });
 
 describe('convertTomlDatabases', () => {
