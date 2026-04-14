@@ -274,7 +274,7 @@ See [Scheduler](scheduler.md) for the pipeline that produces project logs and da
 
 **Gitignored:** `app.db` (and WAL/SHM), `sessions/` (JSONL files and per-agent chat caches), `logs/`, `*.log`, `server.pid`, `config.toml` (contains API keys).
 
-**Backup:** The CLI creates timestamped full copies (`~/.system2-auto-backup-*`) on every `system2 start` (24h cooldown, 5 max retention). This covers everything git ignores (database, sessions, config). See [CLI](cli.md) and [Configuration](configuration.md).
+**Backup:** The CLI creates timestamped full copies (`~/.system2-auto-backup-*`) on every `system2 start` (24h cooldown, 3 max retention). This covers everything git ignores (database, sessions, config). See [CLI](cli.md) and [Configuration](configuration.md).
 
 ## Initialization
 
