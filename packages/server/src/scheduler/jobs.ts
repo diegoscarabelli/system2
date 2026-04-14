@@ -8,8 +8,9 @@
  * sender: 0 is a sentinel for system-generated messages (no agent sender).
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { JobExecution } from '@dscarabelli/shared';
 import type { AgentHost } from '../agents/host.js';
 import type { DatabaseClient } from '../db/client.js';
@@ -74,6 +75,21 @@ export function writeFrontmatterField(filePath: string, field: string, value: st
   }
 
   writeFileSync(filePath, lines.join('\n'), 'utf-8');
+}
+
+/**
+ * Git-commit a single knowledge file after a cursor update.
+ * Silently no-ops if the file is not inside a git repo (e.g. in tests).
+ */
+function commitKnowledgeFile(filePath: string, message: string): void {
+  const dir = dirname(filePath);
+  const file = basename(filePath);
+  try {
+    execFileSync('git', ['-C', dir, 'add', file], { stdio: 'ignore', timeout: 5000 });
+    execFileSync('git', ['-C', dir, 'commit', '-m', message], { stdio: 'ignore', timeout: 5000 });
+  } catch {
+    // Not in a git repo or nothing to commit
+  }
 }
 
 /**
@@ -457,6 +473,7 @@ function hasActivity(agentActivity: string, dbChanges: string): boolean {
 
 /**
  * Advance last_narrator_update_ts in the daily summary file and all project log files.
+ * Each file is committed individually so the cursor is durable immediately.
  */
 function advanceFrontmatterCursors(
   dailySummaryPath: string,
@@ -464,9 +481,11 @@ function advanceFrontmatterCursors(
   newRunTs: string
 ): void {
   writeFrontmatterField(dailySummaryPath, 'last_narrator_update_ts', newRunTs);
+  commitKnowledgeFile(dailySummaryPath, `cursor: ${basename(dailySummaryPath)}`);
   for (const pd of projectDataList) {
     if (pd.logFile) {
       writeFrontmatterField(pd.logFile, 'last_narrator_update_ts', newRunTs);
+      commitKnowledgeFile(pd.logFile, `cursor: ${pd.projectName} log`);
     }
   }
 }
@@ -914,4 +933,5 @@ ${messageParts.join('\n\n')}`;
 
   // Server-side cursor advancement for memory.md
   writeFrontmatterField(memoryFile, 'last_narrator_update_ts', newRunTs);
+  commitKnowledgeFile(memoryFile, 'cursor: memory.md');
 }

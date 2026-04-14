@@ -64,7 +64,7 @@ Each project log is a single continuous file per project lifetime (unlike daily 
    - **Project Activity:** included only for projects that have agent JSONL entries or DB changes in the window; inactive projects are omitted entirely. The entire section is omitted when no project has changes.
    - **Non-Project Activity:** Guide JSONL (via `dailySummarySystemAgents`, which excludes Narrator to prevent recursive embedding of its own `custom_message` injections) and DB changes not tied to any active project. Omitted when there is no non-project activity.
 6. **Deliver:** send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
-7. **Advance cursors:** after all deliveries complete (or on skip), the server writes `newRunTs` to `last_narrator_update_ts` in the daily summary file and each project's `log.md` frontmatter. This runs after `agent_end`, so the Narrator has already finished editing the files. On skip (no activity), the cursor still advances to prevent re-scanning the same empty window.
+7. **Advance cursors:** after all deliveries complete (or on skip), the server writes `newRunTs` to `last_narrator_update_ts` in the daily summary file and each project's `log.md` frontmatter, committing each file individually for durability. This runs after `agent_end`, so the Narrator has already finished editing the files. On skip (no activity), the cursor still advances to prevent re-scanning the same empty window.
 
 The Narrator synthesizes each section into narrative summaries, avoiding repetition of project-specific content already covered in project-log entries (which are processed first).
 
@@ -77,7 +77,7 @@ The Narrator synthesizes each section into narrative summaries, avoiding repetit
 3. Read each file and embed its content inline in the message
 4. Deliver to Narrator via `deliverMessage()` with all summary content included
 5. Narrator incorporates summaries into `memory.md`, clears processed Notes
-6. Server advances `last_narrator_update_ts` in `memory.md` frontmatter after delivery completes
+6. Server advances `last_narrator_update_ts` in `memory.md` frontmatter after delivery completes and commits the change
 
 ## Catch-Up on Startup
 
@@ -89,7 +89,7 @@ Croner does **not** catch up missed jobs after laptop sleep or server shutdown. 
 
 This runs once at server start, after agent sessions are initialized. Catch-up executions are tracked in the `job_execution` table with `trigger_type: 'catch-up'`.
 
-Both checks use `last_narrator_update_ts` as a cursor. The server advances the cursor in the file's frontmatter after successful delivery (or on skip when no activity is found), so it does not depend on the Narrator LLM to update it. If a job fails, the cursor stays stale and the next restart will re-trigger catch-up.
+Both checks use `last_narrator_update_ts` as a cursor. The server advances the cursor in the file's frontmatter after successful delivery (or on skip when no activity is found) and commits immediately, so it does not depend on the Narrator LLM to update it. If a job fails, the cursor stays stale and the next restart will re-trigger catch-up.
 
 **Within a single server lifecycle:** if the server starts without network, catch-up is skipped entirely. The `daily-summary` job self-recovers within one cron interval (default 30 min) once the network is back, because its staleness check runs on every cron tick. The `memory-update` catch-up is lost until its next scheduled run (daily at 11 AM), since the cron handler only fires once per day. A server restart recovers both.
 

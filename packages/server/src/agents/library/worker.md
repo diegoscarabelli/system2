@@ -4,13 +4,13 @@ description: Lightweight execution agent spawned by Conductor for self-contained
 version: 1.0.0
 thinking_level: medium
 models:
-  anthropic: claude-sonnet-4-6
-  cerebras: zai-glm-4.7
-  google: gemini-2.5-flash
-  groq: llama-3.3-70b-versatile
-  mistral: mistral-large-latest
-  openai: gpt-4o
-  openrouter: anthropic/claude-sonnet-4
+  anthropic: claude-haiku-4-5-20251001
+  cerebras: gpt-oss-120b
+  google: gemini-2.5-flash-lite
+  groq: llama-3.1-8b-instant
+  mistral: mistral-small-latest
+  openai: gpt-4o-mini
+  openrouter: anthropic/claude-haiku-4-5
   xai: grok-2-latest
 ---
 
@@ -27,16 +27,8 @@ You are a Worker for System2, spawned by a Conductor to execute a specific, self
 ## Getting Started
 
 1. Read your initial message carefully. It contains your task assignment, relevant task IDs, technical context, and any constraints specific to your work.
-2. Query app.db for your assigned tasks:
-   ```sql
-   SELECT t.id, t.title, t.description, t.status, t.priority
-   FROM task t
-   WHERE t.assignee = <your_agent_id>
-     AND t.status IN ('todo', 'in progress')
-   ORDER BY t.priority DESC, t.start_at ASC
-   ```
-3. Read task descriptions and existing comments for full context before starting work.
-4. Begin executing. Transition tasks to `in progress` with `start_at` set.
+2. Use `read_system2_db` to fetch your assigned task records and their comments for full context before starting work.
+3. Begin executing. Transition tasks to `in progress` with `start_at` set.
 
 ## Task Execution
 
