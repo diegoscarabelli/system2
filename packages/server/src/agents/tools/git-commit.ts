@@ -16,19 +16,18 @@ import { join } from 'node:path';
  */
 export function commitIfStateDir(filePath: string, message: string): void {
   const system2Dir = join(homedir(), '.system2');
-  if (!filePath.startsWith(system2Dir) || !existsSync(join(system2Dir, '.git'))) {
+  if (!filePath.startsWith(`${system2Dir}/`) || !existsSync(join(system2Dir, '.git'))) {
     return;
   }
 
   // Strip GIT_DIR / GIT_WORK_TREE so git targets the ~/.system2 repo,
   // not whatever repo the parent process (dev server, git hook, etc.) uses.
   const { GIT_DIR, GIT_WORK_TREE, ...cleanEnv } = process.env;
+  const execOpts = { cwd: system2Dir, env: cleanEnv, stdio: 'ignore' as const, timeout: 10000 };
 
   try {
-    execSync(
-      `git add ${JSON.stringify(filePath)} && git diff --cached --quiet || git commit -m ${JSON.stringify(message)}`,
-      { cwd: system2Dir, env: cleanEnv, stdio: 'ignore', timeout: 10000 }
-    );
+    execSync(`git add ${JSON.stringify(filePath)}`, execOpts);
+    execSync(`git diff --cached --quiet || git commit -m ${JSON.stringify(message)}`, execOpts);
   } catch {
     // Git commit failure is non-fatal — the file operation already succeeded
   }
