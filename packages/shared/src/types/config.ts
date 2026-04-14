@@ -26,6 +26,7 @@ export interface LlmProviderConfig {
   base_url?: string;
   model?: string;
   compat_reasoning?: boolean;
+  routing?: Record<string, string[]>;
 }
 
 export interface LlmConfig {

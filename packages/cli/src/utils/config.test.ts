@@ -106,6 +106,42 @@ describe('buildConfigToml', () => {
     expect(result).toContain('gsk-key');
   });
 
+  it('includes routing section for openrouter provider', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openrouter',
+        fallback: [],
+        providers: {
+          openrouter: {
+            keys: [{ key: 'sk-or-key', label: 'default' }],
+            routing: {
+              google: ['google-vertex/global', 'google-vertex', 'google-ai-studio'],
+            },
+          },
+        },
+      },
+    });
+    expect(result).toContain('[llm.openrouter]');
+    expect(result).toContain('[llm.openrouter.routing]');
+    expect(result).toContain(
+      'google = ["google-vertex/global", "google-vertex", "google-ai-studio"]'
+    );
+  });
+
+  it('omits routing section when not set for openrouter', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openrouter',
+        fallback: [],
+        providers: {
+          openrouter: { keys: [{ key: 'sk-or-key', label: 'default' }] },
+        },
+      },
+    });
+    expect(result).toContain('[llm.openrouter]');
+    expect(result).not.toContain('[llm.openrouter.routing]');
+  });
+
   it('generates TOML with openai-compatible provider including base_url and model', () => {
     const result = buildConfigToml({
       llm: {

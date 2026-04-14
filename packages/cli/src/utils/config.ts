@@ -80,7 +80,10 @@ interface TomlConfig {
     groq?: { keys?: Array<{ key: string; label: string }> };
     mistral?: { keys?: Array<{ key: string; label: string }> };
     openai?: { keys?: Array<{ key: string; label: string }> };
-    openrouter?: { keys?: Array<{ key: string; label: string }> };
+    openrouter?: {
+      keys?: Array<{ key: string; label: string }>;
+      routing?: Record<string, string[]>;
+    };
     xai?: { keys?: Array<{ key: string; label: string }> };
     'openai-compatible'?: {
       keys?: Array<{ key: string; label: string }>;
@@ -187,7 +190,6 @@ function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
     'groq',
     'mistral',
     'openai',
-    'openrouter',
     'xai',
   ] as const) {
     const providerToml = toml[name];
@@ -196,6 +198,19 @@ function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
       if (validKeys.length > 0) {
         providers[name] = { keys: validKeys };
       }
+    }
+  }
+
+  // openrouter has an extra field (routing)
+  const openrouterToml = toml.openrouter;
+  if (openrouterToml?.keys && openrouterToml.keys.length > 0) {
+    const validKeys = openrouterToml.keys.filter((k) => k.key);
+    if (validKeys.length > 0) {
+      const config: LlmProviderConfig = { keys: validKeys };
+      if (openrouterToml.routing && Object.keys(openrouterToml.routing).length > 0) {
+        config.routing = openrouterToml.routing;
+      }
+      providers.openrouter = config;
     }
   }
 
@@ -536,6 +551,15 @@ export function buildConfigToml(options: {
           }
         }
         lines.push(']');
+
+        // openrouter has extra fields
+        if (name === 'openrouter' && provider.routing) {
+          lines.push('');
+          lines.push('[llm.openrouter.routing]');
+          for (const [prefix, order] of Object.entries(provider.routing)) {
+            lines.push(`${prefix} = [${order.map((s) => `"${s}"`).join(', ')}]`);
+          }
+        }
 
         // openai-compatible has extra fields
         if (name === 'openai-compatible') {
