@@ -6,15 +6,15 @@
  * existing file, delete it first (via bash `rm`), then write.
  */
 
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { commitIfStateDir } from './git-commit.js';
 import { resolvePath } from './resolve-path.js';
 
-/** Max characters of existing content to include in the blocked-overwrite preview. */
-const PREVIEW_CHARS = 200;
+/** Max bytes of existing content to include in the blocked-overwrite preview. */
+const PREVIEW_BYTES = 200;
 
 export function createWriteTool() {
   const params = Type.Object({
@@ -51,9 +51,17 @@ export function createWriteTool() {
         try {
           const stats = await stat(filePath);
           if (stats.isFile() && stats.size > 0) {
-            const existing = await readFile(filePath, 'utf-8');
-            const preview =
-              existing.length > PREVIEW_CHARS ? `${existing.slice(0, PREVIEW_CHARS)}...` : existing;
+            // Read only the first PREVIEW_BYTES to avoid loading large files
+            const bytesToRead = Math.min(stats.size, PREVIEW_BYTES);
+            const buf = Buffer.alloc(bytesToRead);
+            const fh = await open(filePath, 'r');
+            try {
+              await fh.read(buf, 0, bytesToRead, 0);
+            } finally {
+              await fh.close();
+            }
+            const preview = buf.toString('utf-8');
+            const truncated = stats.size > PREVIEW_BYTES ? `${preview}...` : preview;
             return {
               content: [
                 {
@@ -61,13 +69,14 @@ export function createWriteTool() {
                   text:
                     `Cannot write: file already exists with content (${stats.size} bytes). ` +
                     `Use the \`edit\` tool to modify it, or delete it first (\`bash\`: \`rm ${params.path}\`) ` +
-                    `then retry this write.\n\nExisting content starts with:\n${preview}`,
+                    `then retry this write.\n\nExisting content starts with:\n${truncated}`,
                 },
               ],
               details: { path: filePath, blocked: true, existingSize: stats.size },
             };
           }
-        } catch {
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
           // File doesn't exist, safe to write
         }
 
