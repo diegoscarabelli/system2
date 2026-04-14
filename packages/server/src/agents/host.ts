@@ -17,7 +17,14 @@ import {
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { LlmConfig, LlmProvider, ServicesConfig, ToolsConfig } from '@dscarabelli/shared';
+import type {
+  AgentsConfig,
+  LlmConfig,
+  LlmProvider,
+  ServicesConfig,
+  ThinkingLevel,
+  ToolsConfig,
+} from '@dscarabelli/shared';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import {
   type AgentSession,
@@ -104,7 +111,7 @@ interface AgentDefinition {
   name: string;
   description: string;
   version: string;
-  thinking_level?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+  thinking_level?: ThinkingLevel;
   compaction_depth?: number;
   models: {
     anthropic: string;
@@ -125,6 +132,7 @@ export interface AgentHostConfig {
   llmConfig: LlmConfig;
   servicesConfig?: ServicesConfig;
   toolsConfig?: ToolsConfig;
+  agentsConfig?: AgentsConfig;
   spawner?: AgentSpawner;
   resurrector?: AgentResurrector;
   chatMaxMessages?: number;
@@ -181,6 +189,7 @@ export class AgentHost {
   private contextWindow = 0;
   private contextOverflowHandled = false;
   private agentModels: Record<string, string> = {};
+  private agentsConfig?: AgentsConfig;
   private reminderManager?: ReminderManager;
   private knowledgeBudgetChars: number;
   private unsubscribeSession: (() => void) | null = null;
@@ -194,6 +203,7 @@ export class AgentHost {
     this.registry = config.registry;
     this.servicesConfig = config.servicesConfig;
     this.toolsConfig = config.toolsConfig;
+    this.agentsConfig = config.agentsConfig;
     this.spawner = config.spawner;
     this.resurrector = config.resurrector;
     this.chatMaxMessages = config.chatMaxMessages ?? 1000;
@@ -286,6 +296,22 @@ export class AgentHost {
     const definitionFile = readFileSync(definitionPath, 'utf-8');
     const { data: agentMeta, content: agentPrompt } = matter(definitionFile);
     const agentConfig = agentMeta as AgentDefinition;
+
+    // Apply per-role overrides from config.toml ([agents.<role>] sections).
+    // Config values take precedence over library frontmatter defaults.
+    const roleOverride = this.agentsConfig?.[agentRecord.role];
+    if (roleOverride) {
+      if (roleOverride.thinking_level !== undefined) {
+        agentConfig.thinking_level = roleOverride.thinking_level;
+      }
+      if (roleOverride.compaction_depth !== undefined) {
+        agentConfig.compaction_depth = roleOverride.compaction_depth;
+      }
+      if (roleOverride.models) {
+        agentConfig.models = { ...agentConfig.models, ...roleOverride.models };
+      }
+    }
+
     this.agentModels = agentConfig.models ?? {};
     // Static parts of the system prompt (loaded once)
     const staticPrompt = `${agentsRefContent}\n\n${agentPrompt}`;
@@ -295,6 +321,7 @@ export class AgentHost {
     log.info('[AgentHost] Agent config loaded:', {
       name: agentConfig.name,
       models: agentConfig.models,
+      overrides: roleOverride ? Object.keys(roleOverride) : [],
       provider: llmProvider,
     });
 

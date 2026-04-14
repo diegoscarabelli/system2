@@ -45,7 +45,7 @@ models:
 Instructions for the agent...
 ```
 
-The `models` map specifies which model to use for each LLM provider.
+The `models` map specifies which model to use for each LLM provider. These are defaults: users can override `models`, `thinking_level`, and `compaction_depth` per role via `[agents.<role>]` sections in config.toml. See [Configuration: Agent Overrides](configuration.md#agent-overrides).
 
 ## System Prompt Construction
 
@@ -75,9 +75,9 @@ Prompt caching (where supported by the provider) optimizes the static prefix: on
 2. Create session directory (`~/.system2/sessions/{role}_{id}/`)
 3. Rotate session file if it exceeds 10MB
 4. Load shared reference (`agents.md`) and agent identity/instructions (`library/{role}.md`)
-5. Parse YAML frontmatter for model selection
+5. Parse YAML frontmatter for model selection, then apply per-role overrides from config.toml (`[agents.<role>]`)
 6. Create `DefaultResourceLoader` with `systemPromptOverride` callback and store it for per-prompt reloading
-7. Create session via `createAgentSession()` with JSONL persistence, custom tools, and `thinkingLevel: 'high'`
+7. Create session via `createAgentSession()` with JSONL persistence, custom tools, and resolved `thinkingLevel`
 8. Subscribe to session events for error detection, busy state tracking, and listener forwarding
 
 ### Methods

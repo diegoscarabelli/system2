@@ -78,6 +78,19 @@ max_history_messages = 1000  # Max messages in chat history ring buffer
 
 [knowledge]
 budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overruns
+
+# Per-role agent overrides (optional)
+# Override thinking_level, compaction_depth, or models for any agent role.
+# Only specified fields override the library defaults.
+[agents.guide]
+thinking_level = "medium"
+compaction_depth = 5
+
+[agents.guide.models]
+anthropic = "claude-opus-4-6"
+
+[agents.conductor.models]
+google = "gemini-2.5-pro"
 ```
 
 ## Sections
@@ -93,6 +106,7 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 | `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
 | `[chat]` | Chat history settings | `ChatConfig` |
 | `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
+| `[agents.*]` | Per-role agent overrides (models, thinking, compaction) | `AgentsConfig` |
 | `[databases.*]` | External database connections | `DatabasesConfig` |
 
 ## LLM Providers
@@ -132,6 +146,42 @@ When API errors occur, System2 automatically retries and fails over:
 **Cooldown recovery:** Rate limit and transient failures enter a 5-minute cooldown. Keys become available again automatically after cooldown expires. Auth errors (invalid/revoked keys) are permanent until you edit config.toml.
 
 See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
+
+## Agent Overrides
+
+Each agent role (guide, conductor, narrator, reviewer, worker) has default settings defined in its library file (`packages/server/src/agents/library/{role}.md`). You can override these defaults per role in config.toml under `[agents.<role>]` sections without modifying the source code.
+
+### Overridable fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `thinking_level` | `off`, `minimal`, `low`, `medium`, `high` | Controls extended thinking depth for the agent's LLM calls |
+| `compaction_depth` | integer >= 0 | Number of auto-compactions before pruning old context (0 disables) |
+| `models.<provider>` | string | Model ID to use when running on a specific provider |
+
+All fields are optional. Only specified fields override the library defaults; unspecified fields keep their defaults.
+
+### Example
+
+```toml
+# Use Opus instead of Sonnet for the Guide on Anthropic
+[agents.guide]
+thinking_level = "medium"
+compaction_depth = 5
+
+[agents.guide.models]
+anthropic = "claude-opus-4-6"
+
+# Use Gemini 2.5 Pro for the Conductor on Google
+[agents.conductor.models]
+google = "gemini-2.5-pro"
+```
+
+### How it works
+
+During agent initialization, `AgentHost` reads the library frontmatter first, then applies any matching `[agents.<role>]` overrides from config.toml. For models, the merge is per-provider: `{ ...libraryModels, ...configModels }`. For scalar fields (`thinking_level`, `compaction_depth`), the config value replaces the library default.
+
+This means you can override a single provider's model without affecting the others, or change the thinking level for one role without touching the rest.
 
 ## Databases
 

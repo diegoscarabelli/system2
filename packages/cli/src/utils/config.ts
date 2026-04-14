@@ -12,12 +12,15 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type {
+  AgentOverrideConfig,
+  AgentsConfig,
   DatabaseConnectionConfig,
   DatabasesConfig,
   LlmConfig,
   LlmProvider,
   LlmProviderConfig,
   ServicesConfig,
+  ThinkingLevel,
   ToolsConfig,
 } from '@dscarabelli/shared';
 import TOML from '@iarna/toml';
@@ -33,6 +36,7 @@ export interface System2Config {
   services?: ServicesConfig;
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
+  agents?: AgentsConfig;
   backup: {
     /** Hours between automatic backups (default: 24) */
     cooldownHours: number;
@@ -129,6 +133,14 @@ interface TomlConfig {
       schema?: string;
       project?: string;
       credentials_file?: string;
+    }
+  >;
+  agents?: Record<
+    string,
+    {
+      thinking_level?: string;
+      compaction_depth?: number;
+      models?: Record<string, string>;
     }
   >;
 }
@@ -279,6 +291,47 @@ export function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>)
   return databases;
 }
 
+const VALID_THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high']);
+
+/**
+ * Convert TOML agents section to AgentsConfig.
+ * Each entry is a role name with optional overrides for thinking_level, compaction_depth, and models.
+ */
+function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): AgentsConfig {
+  const agents: AgentsConfig = {};
+
+  for (const [role, entry] of Object.entries(toml)) {
+    const override: AgentOverrideConfig = {};
+
+    if (entry.thinking_level !== undefined) {
+      if (VALID_THINKING_LEVELS.has(entry.thinking_level as ThinkingLevel)) {
+        override.thinking_level = entry.thinking_level as ThinkingLevel;
+      } else {
+        console.warn(
+          `[Config] Ignoring invalid thinking_level "${entry.thinking_level}" for agent "${role}". Valid values: ${[...VALID_THINKING_LEVELS].join(', ')}`
+        );
+      }
+    }
+
+    if (entry.compaction_depth !== undefined) {
+      const d = Number(entry.compaction_depth);
+      if (Number.isFinite(d) && d >= 0) {
+        override.compaction_depth = d;
+      }
+    }
+
+    if (entry.models && Object.keys(entry.models).length > 0) {
+      override.models = entry.models as AgentOverrideConfig['models'];
+    }
+
+    if (Object.keys(override).length > 0) {
+      agents[role] = override;
+    }
+  }
+
+  return agents;
+}
+
 /**
  * Convert TOML operational sections (snake_case) to camelCase.
  */
@@ -393,6 +446,10 @@ export function loadConfig(): System2Config {
       config.databases = convertTomlDatabases(tomlConfig.databases);
     }
 
+    if (tomlConfig.agents) {
+      config.agents = convertTomlAgents(tomlConfig.agents);
+    }
+
     return config;
   } catch (_error) {
     console.warn('[Config] Failed to parse config.toml, using defaults');
@@ -408,6 +465,7 @@ export function buildConfigToml(options: {
   services?: ServicesConfig;
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
+  agents?: AgentsConfig;
   backup?: System2Config['backup'];
   session?: System2Config['session'];
   logs?: System2Config['logs'];
@@ -506,6 +564,34 @@ export function buildConfigToml(options: {
       if (conn.credentials_file !== undefined)
         lines.push(`credentials_file = "${conn.credentials_file}"`);
       lines.push('');
+    }
+  }
+
+  // Agents section (per-role overrides)
+  if (options.agents) {
+    for (const [role, override] of Object.entries(options.agents)) {
+      const hasScalarFields =
+        override.thinking_level !== undefined || override.compaction_depth !== undefined;
+      const hasModels = override.models && Object.keys(override.models).length > 0;
+
+      if (hasScalarFields) {
+        lines.push(`[agents.${role}]`);
+        if (override.thinking_level !== undefined) {
+          lines.push(`thinking_level = "${override.thinking_level}"`);
+        }
+        if (override.compaction_depth !== undefined) {
+          lines.push(`compaction_depth = ${override.compaction_depth}`);
+        }
+        lines.push('');
+      }
+
+      if (hasModels && override.models) {
+        lines.push(`[agents.${role}.models]`);
+        for (const [provider, model] of Object.entries(override.models)) {
+          lines.push(`${provider} = "${model}"`);
+        }
+        lines.push('');
+      }
     }
   }
 
