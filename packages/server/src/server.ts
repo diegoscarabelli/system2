@@ -497,8 +497,9 @@ export class Server {
 
     // Send a startup prompt to the Guide so its system-prompt logic kicks in
     // (onboarding for fresh installs, greeting for returning users).
-    // prompt() queues the message and returns immediately; the response streams
-    // into the chat cache and reaches UI clients on WebSocket connect.
+    // prompt() queues the message and returns immediately; once the turn
+    // completes, the response is persisted in the chat cache and included
+    // in chat_history for any UI client that connects afterward.
     this.agentHost.prompt('Session started.').catch((err) => {
       log.error('[Server] Guide welcome prompt failed:', err);
     });
