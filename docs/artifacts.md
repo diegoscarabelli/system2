@@ -74,9 +74,10 @@ The tool technically accepts any file path, not just registered artifacts. This 
 **Rendering by file type:**
 
 - `.html`, `.htm`: rendered in a sandboxed iframe (best experience for dashboards and interactive content)
-- `.md`: rendered as styled markdown (via react-markdown)
-- Images, PDFs: rendered natively by the browser in the iframe
-- Plain text (`.txt`, `.csv`, `.py`, etc.): displayed as raw text in the iframe (readable but unstyled, no syntax highlighting)
+- `.md`, `.markdown`: rendered as styled markdown (via react-markdown)
+- `.toml`, `.yaml`, `.yml`, `.json`, `.jsonl`, `.xml`, `.csv`, `.txt`, `.log`, `.sql`, `.py`, `.sh`, `.css`, `.ts`, `.tsx`, `.js`, `.jsx`: rendered as monospaced text in a styled code block
+- `.pdf`: rendered in a native browser iframe (scrollable, no dark mode filter)
+- `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.bmp`: rendered as an inline image
 - Multiple artifacts can be open simultaneously in tabs
 
 **Live reload:** when `show_artifact` is called, the server starts an `fs.watch` on the file. Any modification triggers an automatic UI refresh of the corresponding tab (cache-busted URL). Only one artifact is watched at a time; showing a new artifact closes the previous watcher.

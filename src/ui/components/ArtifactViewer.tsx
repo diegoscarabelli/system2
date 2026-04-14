@@ -15,7 +15,9 @@ import { useAccentColors } from '../theme/useAccentColors';
 import { KanbanBoard } from './KanbanBoard';
 import { ParticlesBackground } from './ParticlesBackground';
 
-function MarkdownArtifact({ url }: { url: string }) {
+const MAX_PREVIEW_BYTES = 5 * 1024 * 1024; // 5 MB
+
+function useFetchText(url: string) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,14 +28,70 @@ function MarkdownArtifact({ url }: { url: string }) {
     fetch(url, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
+        const length = res.headers.get('content-length');
+        if (length && Number(length) > MAX_PREVIEW_BYTES) {
+          throw new Error('File too large to preview');
+        }
         return res.text();
       })
-      .then(setContent)
+      .then((text) => {
+        if (text.length > MAX_PREVIEW_BYTES) {
+          setContent(`${text.slice(0, MAX_PREVIEW_BYTES)}\n\n… (truncated, file exceeds 5 MB)`);
+        } else {
+          setContent(text);
+        }
+      })
       .catch((err) => {
         if (err.name !== 'AbortError') setError(err.message);
       });
     return () => controller.abort();
   }, [url]);
+
+  return { content, error };
+}
+
+function CodeArtifact({ url }: { url: string }) {
+  const { content, error } = useFetchText(url);
+
+  if (error) {
+    return (
+      <Box sx={{ p: 4, color: 'danger.fg' }}>
+        <Text>{error}</Text>
+      </Box>
+    );
+  }
+
+  if (content === null) {
+    return (
+      <Box sx={{ p: 4, color: 'fg.muted' }}>
+        <Text>Loading…</Text>
+      </Box>
+    );
+  }
+
+  return (
+    <Box
+      as="pre"
+      sx={{
+        m: 0,
+        p: 3,
+        fontFamily: 'mono',
+        fontSize: 0,
+        lineHeight: 1.5,
+        color: 'fg.default',
+        backgroundColor: 'neutral.muted',
+        borderRadius: 2,
+        overflow: 'auto',
+        whiteSpace: 'pre',
+      }}
+    >
+      {content}
+    </Box>
+  );
+}
+
+function MarkdownArtifact({ url }: { url: string }) {
+  const { content, error } = useFetchText(url);
 
   if (error) {
     return (
@@ -286,6 +344,10 @@ export function ArtifactViewer() {
                 <KanbanBoard />
               ) : /\.(?:md|markdown)$/i.test(activeTab.filePath) ? (
                 <MarkdownArtifact url={activeTab.url} />
+              ) : /\.(?:toml|ya?ml|jsonl?|xml|csv|txt|log|sql|py|sh|css|ts|tsx|js|jsx)$/i.test(
+                  activeTab.filePath
+                ) ? (
+                <CodeArtifact url={activeTab.url} />
               ) : /\.html?$/i.test(activeTab.filePath) ? (
                 <iframe
                   ref={iframeRef}
@@ -301,6 +363,33 @@ export function ArtifactViewer() {
                     filter: isLight ? 'none' : 'invert(1) hue-rotate(180deg)',
                   }}
                 />
+              ) : /\.pdf$/i.test(activeTab.filePath) ? (
+                <iframe
+                  src={activeTab.url}
+                  sandbox="allow-same-origin"
+                  title={activeTab.title}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    border: 'none',
+                  }}
+                />
+              ) : /\.(?:png|jpe?g|gif|svg|webp|avif|ico|bmp)$/i.test(activeTab.filePath) ? (
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '100%',
+                    p: 3,
+                  }}
+                >
+                  <img
+                    src={activeTab.url}
+                    alt={activeTab.title}
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                  />
+                </Box>
               ) : (
                 <Box
                   sx={{
