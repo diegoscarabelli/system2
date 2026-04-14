@@ -20,10 +20,14 @@ export function commitIfStateDir(filePath: string, message: string): void {
     return;
   }
 
+  // Strip GIT_DIR / GIT_WORK_TREE so git targets the ~/.system2 repo,
+  // not whatever repo the parent process (dev server, git hook, etc.) uses.
+  const { GIT_DIR, GIT_WORK_TREE, ...cleanEnv } = process.env;
+
   try {
     execSync(
       `git add ${JSON.stringify(filePath)} && git diff --cached --quiet || git commit -m ${JSON.stringify(message)}`,
-      { cwd: system2Dir, stdio: 'ignore', timeout: 10000 }
+      { cwd: system2Dir, env: cleanEnv, stdio: 'ignore', timeout: 10000 }
     );
   } catch {
     // Git commit failure is non-fatal — the file operation already succeeded

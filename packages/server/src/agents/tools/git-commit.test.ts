@@ -35,13 +35,22 @@ describe('commitIfStateDir', () => {
     }
   });
 
+  // Strip GIT_DIR / GIT_WORK_TREE so test helpers target the temp repo,
+  // not the code repo (git hooks set these in the environment).
+  function gitEnv() {
+    const { GIT_DIR, GIT_WORK_TREE, ...clean } = process.env;
+    return clean;
+  }
+
   function initGitRepo(dir: string): void {
-    execSync('git init', { cwd: dir, stdio: 'ignore' });
-    execSync('git commit --allow-empty -m "init"', { cwd: dir, stdio: 'ignore' });
+    execSync('git init', { cwd: dir, env: gitEnv(), stdio: 'ignore' });
+    execSync('git commit --allow-empty -m "init"', { cwd: dir, env: gitEnv(), stdio: 'ignore' });
   }
 
   function commitCount(dir: string): number {
-    return Number(execSync('git rev-list --all --count', { cwd: dir, encoding: 'utf-8' }).trim());
+    return Number(
+      execSync('git rev-list --all --count', { cwd: dir, env: gitEnv(), encoding: 'utf-8' }).trim()
+    );
   }
 
   it('skips when filePath is outside ~/.system2/', () => {
@@ -75,6 +84,7 @@ describe('commitIfStateDir', () => {
     expect(commitCount(system2Dir)).toBe(2); // init + our commit
     const lastMsg = execSync('git log -1 --format=%s', {
       cwd: system2Dir,
+      env: gitEnv(),
       encoding: 'utf-8',
     }).trim();
     expect(lastMsg).toBe('cursor: infra.md');
@@ -84,7 +94,10 @@ describe('commitIfStateDir', () => {
     initGitRepo(system2Dir);
 
     // Count commits in the actual code repo before
-    const codeRepoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim();
+    const codeRepoRoot = execSync('git rev-parse --show-toplevel', {
+      env: gitEnv(),
+      encoding: 'utf-8',
+    }).trim();
     const beforeCount = commitCount(codeRepoRoot);
 
     const filePath = join(system2Dir, 'knowledge', 'test.md');
