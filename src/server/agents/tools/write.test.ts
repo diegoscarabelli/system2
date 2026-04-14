@@ -51,17 +51,18 @@ describe('write tool', () => {
     expect(readFileSync(file, 'utf-8')).toBe('nested');
   });
 
-  it('overwrites an existing file', async () => {
+  it('writes to an existing empty file', async () => {
     const dir = trackDir(makeTmpDir());
-    const file = join(dir, 'existing.txt');
-    writeFileSync(file, 'old content');
+    const file = join(dir, 'empty.txt');
+    writeFileSync(file, '');
 
-    await exec({ path: file, content: 'new content' });
+    const result = await exec({ path: file, content: 'now has content' });
 
-    expect(readFileSync(file, 'utf-8')).toBe('new content');
+    expect((result.content[0] as { text: string }).text).toContain('Successfully wrote');
+    expect(readFileSync(file, 'utf-8')).toBe('now has content');
   });
 
-  it('warns when overwriting an existing file with content', async () => {
+  it('blocks overwriting an existing file with content', async () => {
     const dir = trackDir(makeTmpDir());
     const file = join(dir, 'existing.txt');
     writeFileSync(file, 'important existing content');
@@ -69,22 +70,27 @@ describe('write tool', () => {
     const result = await exec({ path: file, content: 'replacement' });
     const text = (result.content[0] as { text: string }).text;
 
-    expect(text).toContain('WARNING: Overwrote existing file');
+    // Should block the write
+    expect(text).toContain('Cannot write: file already exists with content');
     expect(text).toContain('important existing content');
-    expect(text).toContain('Use the `edit` tool');
+    expect(text).toContain('edit');
+    expect(text).toContain('delete it first');
+    // Original content should be preserved
+    expect(readFileSync(file, 'utf-8')).toBe('important existing content');
   });
 
-  it('does not warn when creating a new file', async () => {
+  it('includes file size in blocked overwrite message', async () => {
     const dir = trackDir(makeTmpDir());
-    const file = join(dir, 'brand-new.txt');
+    const file = join(dir, 'sized.txt');
+    writeFileSync(file, 'hello world');
 
-    const result = await exec({ path: file, content: 'fresh' });
+    const result = await exec({ path: file, content: 'replacement' });
     const text = (result.content[0] as { text: string }).text;
 
-    expect(text).not.toContain('WARNING');
+    expect(text).toContain('11 bytes');
   });
 
-  it('truncates long existing content in overwrite warning', async () => {
+  it('truncates long existing content in blocked overwrite preview', async () => {
     const dir = trackDir(makeTmpDir());
     const file = join(dir, 'big.txt');
     const longContent = 'x'.repeat(500);
@@ -93,9 +99,21 @@ describe('write tool', () => {
     const result = await exec({ path: file, content: 'short' });
     const text = (result.content[0] as { text: string }).text;
 
-    expect(text).toContain('WARNING: Overwrote existing file (500 bytes)');
+    expect(text).toContain('500 bytes');
     expect(text).toContain('...');
     // Preview should be truncated, not the full 500 chars
     expect(text.indexOf('x'.repeat(201))).toBe(-1);
+    // Original content should be preserved
+    expect(readFileSync(file, 'utf-8')).toBe(longContent);
+  });
+
+  it('sets blocked flag in details when overwrite is prevented', async () => {
+    const dir = trackDir(makeTmpDir());
+    const file = join(dir, 'flagged.txt');
+    writeFileSync(file, 'content');
+
+    const result = await exec({ path: file, content: 'replacement' });
+
+    expect((result.details as Record<string, unknown>).blocked).toBe(true);
   });
 });

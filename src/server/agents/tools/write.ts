@@ -2,6 +2,8 @@
  * Write Tool
  *
  * Writes content to files on the filesystem.
+ * Refuses to overwrite existing files that contain data. To replace an
+ * existing file, delete it first (via bash `rm`), then write.
  */
 
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
@@ -11,8 +13,8 @@ import { Type } from '@sinclair/typebox';
 import { commitIfStateDir } from './git-commit.js';
 import { resolvePath } from './resolve-path.js';
 
-/** Max bytes of existing content to include in the overwrite warning. */
-const PREVIEW_BYTES = 200;
+/** Max characters of existing content to include in the blocked-overwrite preview. */
+const PREVIEW_CHARS = 200;
 
 export function createWriteTool() {
   const params = Type.Object({
@@ -34,28 +36,39 @@ export function createWriteTool() {
     name: 'write',
     label: 'Write File',
     description:
-      'Write content to a file. Creates parent directories if needed. Best for creating new files or intentionally rewriting an existing file from scratch. WARNING: this tool REPLACES the entire file content. If the file already exists, read it first so you know what you are replacing and can preserve any content that should be kept. To add a section to an existing file (e.g. adding a [databases.<name>] entry to config.toml), use the `edit` tool with `append: true` so you do not destroy existing sections. For modifying specific parts, use `edit`. For bulk replacements, use `bash` with `sed` or `awk`.',
+      'Create a new file or write to an empty file. Creates parent directories if needed. ' +
+      'This tool REFUSES to overwrite an existing file that already contains data. ' +
+      'To modify part of a file, use the `edit` tool. ' +
+      'To append content (e.g. adding a [databases.<name>] entry to config.toml), use `edit` with `append: true`. ' +
+      'To intentionally replace a file entirely, delete it first with `bash` (`rm <path>`), then use this tool. ' +
+      'For bulk find-and-replace, use `bash` with `sed` or `awk`.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
         const filePath = resolvePath(params.path);
 
-        // Check if we're about to overwrite an existing file
-        let overwriteWarning = '';
+        // Block overwriting existing files that contain data
         try {
           const stats = await stat(filePath);
           if (stats.isFile() && stats.size > 0) {
             const existing = await readFile(filePath, 'utf-8');
             const preview =
-              existing.length > PREVIEW_BYTES ? `${existing.slice(0, PREVIEW_BYTES)}...` : existing;
-            overwriteWarning =
-              `\n\nWARNING: Overwrote existing file (${stats.size} bytes). ` +
-              `Previous content started with:\n${preview}\n\n` +
-              'If this was unintentional, the existing content is now lost. ' +
-              'Use the `edit` tool to modify files without replacing them entirely.';
+              existing.length > PREVIEW_CHARS ? `${existing.slice(0, PREVIEW_CHARS)}...` : existing;
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    `Cannot write: file already exists with content (${stats.size} bytes). ` +
+                    `Use the \`edit\` tool to modify it, or delete it first (\`bash\`: \`rm ${params.path}\`) ` +
+                    `then retry this write.\n\nExisting content starts with:\n${preview}`,
+                },
+              ],
+              details: { path: filePath, blocked: true, existingSize: stats.size },
+            };
           }
         } catch {
-          // File doesn't exist, no warning needed
+          // File doesn't exist, safe to write
         }
 
         const dir = dirname(filePath);
@@ -71,7 +84,7 @@ export function createWriteTool() {
           content: [
             {
               type: 'text',
-              text: `Successfully wrote ${params.content.length} bytes to ${params.path}${overwriteWarning}`,
+              text: `Successfully wrote ${params.content.length} bytes to ${params.path}`,
             },
           ],
           details: { path: filePath, size: params.content.length },
