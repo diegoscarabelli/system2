@@ -79,16 +79,31 @@ export function writeFrontmatterField(filePath: string, field: string, value: st
 
 /**
  * Git-commit a single knowledge file after a cursor update.
- * Silently no-ops if the file is not inside a git repo (e.g. in tests).
+ * Best-effort: the cursor is durable in the filesystem regardless; the git
+ * commit provides version-tracking. Silently no-ops outside a git repo (tests).
  */
 function commitKnowledgeFile(filePath: string, message: string): void {
   const dir = dirname(filePath);
   const file = basename(filePath);
   try {
-    execFileSync('git', ['-C', dir, 'add', file], { stdio: 'ignore', timeout: 5000 });
-    execFileSync('git', ['-C', dir, 'commit', '-m', message], { stdio: 'ignore', timeout: 5000 });
+    execFileSync('git', ['-C', dir, 'add', file], { stdio: 'pipe', timeout: 5000 });
   } catch {
-    // Not in a git repo or nothing to commit
+    return; // Not in a git repo or file unchanged
+  }
+  try {
+    execFileSync('git', ['-C', dir, 'commit', '-m', message], { stdio: 'pipe', timeout: 5000 });
+  } catch (err) {
+    // Commit failed (lock contention, nothing to commit, etc.): unstage to
+    // prevent the file from leaking into a subsequent unrelated commit.
+    try {
+      execFileSync('git', ['-C', dir, 'reset', 'HEAD', file], { stdio: 'ignore', timeout: 5000 });
+    } catch {
+      // reset failed too; log below covers it
+    }
+    const stderr = (err as { stderr?: Buffer })?.stderr?.toString().trim();
+    if (stderr && !stderr.includes('nothing to commit')) {
+      log.info(`[Scheduler] commitKnowledgeFile: git commit failed for ${file}: ${stderr}`);
+    }
   }
 }
 
@@ -473,7 +488,7 @@ function hasActivity(agentActivity: string, dbChanges: string): boolean {
 
 /**
  * Advance last_narrator_update_ts in the daily summary file and all project log files.
- * Each file is committed individually so the cursor is durable immediately.
+ * Each file is committed individually (best-effort) for version tracking.
  */
 function advanceFrontmatterCursors(
   dailySummaryPath: string,
