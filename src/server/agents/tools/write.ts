@@ -31,7 +31,7 @@ export function createWriteTool() {
     name: 'write',
     label: 'Write File',
     description:
-      'Write content to a file. Creates parent directories if needed. Overwrites the entire file. Use this for creating new files or complete rewrites. For modifying specific parts of an existing file, prefer the `edit` tool. For appending content, use `edit` with `append: true`. For bulk replacements and similar operations, use `bash` with `sed`, `awk`, or similar.',
+      'Write content to a file. Creates parent directories if needed. WARNING: this tool REPLACES the entire file content. Any existing content not included in `content` will be permanently lost. Use this ONLY for creating new files or complete rewrites where you provide ALL content. To add a section to an existing file (e.g. adding a [databases.*] entry to config.toml), use the `edit` tool with `append: true` so you do not destroy existing sections. For modifying specific parts, use `edit`. For bulk replacements, use `bash` with `sed` or `awk`.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
