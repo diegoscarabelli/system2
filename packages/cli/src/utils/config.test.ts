@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildConfigToml, convertTomlDatabases } from './config.js';
+import { buildConfigToml, convertTomlAgents, convertTomlDatabases } from './config.js';
 
 describe('buildConfigToml', () => {
   it('generates valid TOML with LLM config', () => {
@@ -104,6 +104,75 @@ describe('buildConfigToml', () => {
     expect(result).toContain('sk-or-key');
     expect(result).toContain('[llm.groq]');
     expect(result).toContain('gsk-key');
+  });
+
+  it('includes routing section for openrouter provider', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openrouter',
+        fallback: [],
+        providers: {
+          openrouter: {
+            keys: [{ key: 'sk-or-key', label: 'default' }],
+            routing: {
+              google: ['google-vertex/global', 'google-vertex', 'google-ai-studio'],
+            },
+          },
+        },
+      },
+    });
+    expect(result).toContain('[llm.openrouter]');
+    expect(result).toContain('[llm.openrouter.routing]');
+    expect(result).toContain(
+      'google = ["google-vertex/global", "google-vertex", "google-ai-studio"]'
+    );
+  });
+
+  it('quotes routing keys containing special characters', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openrouter',
+        fallback: [],
+        providers: {
+          openrouter: {
+            keys: [{ key: 'sk-or-key', label: 'default' }],
+            routing: { 'google/': ['google-vertex/global', 'google-ai-studio'] },
+          },
+        },
+      },
+    });
+    expect(result).toContain('"google/" = ["google-vertex/global", "google-ai-studio"]');
+  });
+
+  it('does not quote bare-safe routing keys', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openrouter',
+        fallback: [],
+        providers: {
+          openrouter: {
+            keys: [{ key: 'sk-or-key', label: 'default' }],
+            routing: { google: ['google-vertex'] },
+          },
+        },
+      },
+    });
+    expect(result).toContain('google = ["google-vertex"]');
+    expect(result).not.toContain('"google"');
+  });
+
+  it('omits routing section when not set for openrouter', () => {
+    const result = buildConfigToml({
+      llm: {
+        primary: 'openrouter',
+        fallback: [],
+        providers: {
+          openrouter: { keys: [{ key: 'sk-or-key', label: 'default' }] },
+        },
+      },
+    });
+    expect(result).toContain('[llm.openrouter]');
+    expect(result).not.toContain('[llm.openrouter.routing]');
   });
 
   it('generates TOML with openai-compatible provider including base_url and model', () => {
@@ -294,6 +363,73 @@ describe('buildConfigToml', () => {
     expect(result).toContain('socket = "/var/run/postgresql/.s.PGSQL.5432"');
     expect(result).toContain('ssl = true');
   });
+
+  it('includes agents section with thinking_level and compaction_depth', () => {
+    const result = buildConfigToml({
+      agents: {
+        guide: {
+          thinking_level: 'medium',
+          compaction_depth: 5,
+        },
+      },
+    });
+    expect(result).toContain('[agents.guide]');
+    expect(result).toContain('thinking_level = "medium"');
+    expect(result).toContain('compaction_depth = 5');
+  });
+
+  it('includes agents section with per-provider model overrides', () => {
+    const result = buildConfigToml({
+      agents: {
+        conductor: {
+          models: {
+            anthropic: 'claude-opus-4-6',
+            google: 'gemini-2.5-pro',
+          },
+        },
+      },
+    });
+    expect(result).toContain('[agents.conductor.models]');
+    expect(result).toContain('anthropic = "claude-opus-4-6"');
+    expect(result).toContain('google = "gemini-2.5-pro"');
+  });
+
+  it('outputs agents with both scalar fields and models', () => {
+    const result = buildConfigToml({
+      agents: {
+        guide: {
+          thinking_level: 'high',
+          compaction_depth: 3,
+          models: {
+            anthropic: 'claude-opus-4-6',
+          },
+        },
+      },
+    });
+    expect(result).toContain('[agents.guide]');
+    expect(result).toContain('thinking_level = "high"');
+    expect(result).toContain('compaction_depth = 3');
+    expect(result).toContain('[agents.guide.models]');
+    expect(result).toContain('anthropic = "claude-opus-4-6"');
+  });
+
+  it('outputs multiple agent role overrides', () => {
+    const result = buildConfigToml({
+      agents: {
+        guide: { thinking_level: 'medium' },
+        conductor: { models: { google: 'gemini-2.5-pro' } },
+      },
+    });
+    expect(result).toContain('[agents.guide]');
+    expect(result).toContain('thinking_level = "medium"');
+    expect(result).toContain('[agents.conductor.models]');
+    expect(result).toContain('google = "gemini-2.5-pro"');
+  });
+
+  it('omits agents section when not configured', () => {
+    const result = buildConfigToml({});
+    expect(result).not.toContain('[agents.');
+  });
 });
 
 describe('convertTomlDatabases', () => {
@@ -399,5 +535,129 @@ describe('convertTomlDatabases', () => {
     expect(conn?.schema).toBe('s');
     expect(conn?.project).toBe('p');
     expect(conn?.credentials_file).toBe('/path/to/creds.json');
+  });
+});
+
+describe('convertTomlAgents', () => {
+  it('converts valid overrides with all fields', () => {
+    const result = convertTomlAgents({
+      guide: {
+        thinking_level: 'high',
+        compaction_depth: 3,
+        models: { anthropic: 'claude-opus-4-6', google: 'gemini-2.5-pro' },
+      },
+    });
+    expect(result).toEqual({
+      guide: {
+        thinking_level: 'high',
+        compaction_depth: 3,
+        models: { anthropic: 'claude-opus-4-6', google: 'gemini-2.5-pro' },
+      },
+    });
+  });
+
+  it('converts partial overrides (only thinking_level)', () => {
+    const result = convertTomlAgents({
+      conductor: { thinking_level: 'low' },
+    });
+    expect(result).toEqual({ conductor: { thinking_level: 'low' } });
+  });
+
+  it('converts partial overrides (only models)', () => {
+    const result = convertTomlAgents({
+      reviewer: { models: { openai: 'gpt-4o' } },
+    });
+    expect(result).toEqual({ reviewer: { models: { openai: 'gpt-4o' } } });
+  });
+
+  it('ignores invalid thinking_level with warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlAgents({
+      guide: { thinking_level: 'turbo' as never },
+    });
+    expect(result).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Ignoring invalid thinking_level')
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('rejects non-integer compaction_depth with warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlAgents({
+      guide: { compaction_depth: 2.5 },
+    });
+    expect(result).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Ignoring invalid compaction_depth')
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('rejects negative compaction_depth with warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlAgents({
+      guide: { compaction_depth: -1 },
+    });
+    expect(result).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Ignoring invalid compaction_depth')
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('filters out unknown model providers with warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlAgents({
+      guide: { models: { anthropic: 'claude-opus-4-6', 'openai-compatible': 'local-model' } },
+    });
+    expect(result).toEqual({ guide: { models: { anthropic: 'claude-opus-4-6' } } });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Ignoring unknown model provider')
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('rejects non-string model values with warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlAgents({
+      guide: { models: { anthropic: 42 as never } },
+    });
+    expect(result).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid model'));
+    warnSpy.mockRestore();
+  });
+
+  it('rejects empty-string model values with warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlAgents({
+      guide: { models: { anthropic: '' } },
+    });
+    expect(result).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid model'));
+    warnSpy.mockRestore();
+  });
+
+  it('skips roles with no valid overrides', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlAgents({
+      guide: { thinking_level: 'bogus' as never },
+      conductor: { thinking_level: 'medium' },
+    });
+    expect(result).toEqual({ conductor: { thinking_level: 'medium' } });
+    warnSpy.mockRestore();
+  });
+
+  it('handles multiple roles', () => {
+    const result = convertTomlAgents({
+      guide: { thinking_level: 'high', compaction_depth: 5 },
+      conductor: { models: { google: 'gemini-2.5-pro' } },
+      narrator: { thinking_level: 'off' },
+    });
+    expect(result).toEqual({
+      guide: { thinking_level: 'high', compaction_depth: 5 },
+      conductor: { models: { google: 'gemini-2.5-pro' } },
+      narrator: { thinking_level: 'off' },
+    });
   });
 });

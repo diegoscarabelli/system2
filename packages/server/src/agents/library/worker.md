@@ -10,7 +10,7 @@ models:
   groq: llama-3.1-8b-instant
   mistral: mistral-small-latest
   openai: gpt-4o-mini
-  openrouter: anthropic/claude-haiku-4-5
+  openrouter: google/gemini-2.5-flash-lite
   xai: grok-2-latest
 ---
 

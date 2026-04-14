@@ -39,6 +39,12 @@ keys = [{ key = "sk-...", label = "default" }]
 [llm.openrouter]
 keys = [{ key = "sk-or-...", label = "default" }]
 
+# Upstream provider routing for OpenRouter models (optional).
+# Keys are model ID prefixes; quote them when they contain special characters (e.g. "/").
+# Values are provider order arrays.
+[llm.openrouter.routing]
+google = ["google-vertex/global", "google-vertex", "google-ai-studio"]
+
 [llm.xai]
 keys = [{ key = "xai-...", label = "default" }]
 
@@ -49,6 +55,19 @@ base_url = "http://localhost:4000/v1"
 model = "my-model"
 compat_reasoning = true  # optional, default true
 
+# Per-role agent overrides (optional)
+# Override thinking_level, compaction_depth, or models for any agent role.
+# Only specified fields override the library defaults.
+[agents.guide]
+thinking_level = "medium"
+compaction_depth = 5
+
+[agents.guide.models]
+anthropic = "claude-opus-4-6"
+
+[agents.conductor.models]
+google = "gemini-2.5-pro"
+
 # Service credentials
 [services.brave_search]
 key = "BSA..."
@@ -58,7 +77,13 @@ key = "BSA..."
 enabled = true
 max_results = 5
 
-# Operational settings
+# Database connections (added during onboarding)
+# [databases.my_postgres]
+# type = "postgres"
+# database = "analytics"
+# user = "readonly"
+
+# Operational settings (defaults are fine for most users)
 [backup]
 cooldown_hours = 24    # Min hours between auto-backups
 max_backups = 3        # Max backup copies to keep
@@ -85,15 +110,16 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 | Section | Description | TypeScript Type |
 |---------|-------------|-----------------|
 | `[llm]` | Primary provider, fallback order, per-provider keys | `LlmConfig` |
+| `[agents.*]` | Per-role agent overrides (models, thinking, compaction) | `AgentsConfig` |
 | `[services.*]` | External service credentials | `ServicesConfig` |
 | `[tools.*]` | Tool feature flags | `ToolsConfig` |
+| `[databases.*]` | External database connections | `DatabasesConfig` |
 | `[backup]` | Auto-backup frequency and retention | -- |
 | `[session]` | Session file rotation threshold | -- |
 | `[logs]` | Log rotation threshold and archive count | -- |
 | `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
 | `[chat]` | Chat history settings | `ChatConfig` |
 | `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
-| `[databases.*]` | External database connections | `DatabasesConfig` |
 
 ## LLM Providers
 
@@ -110,6 +136,8 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 | `xai` | Grok |
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
+
+The `openrouter` provider supports an optional `[llm.openrouter.routing]` section that controls upstream provider routing. Keys are model ID prefixes matched against the resolved model (longest prefix wins), values are arrays of OpenRouter provider slugs tried in order. Prefixes containing special characters like `/` must be quoted in TOML (e.g. `"google/" = [...]`). For example, `google = ["google-vertex/global", "google-vertex", "google-ai-studio"]` routes all `google/*` models through Vertex AI first. If no prefix matches, no routing preference is set and OpenRouter uses its default load balancing.
 
 The `openai-compatible` provider requires `base_url` and `model` fields in addition to keys. Use it for self-hosted proxies or providers not listed above. The optional `compat_reasoning` field (default `true`) declares whether the model supports extended thinking. For built-in providers (anthropic, openai, etc.), the SDK already knows which models support reasoning; `compat_reasoning` only applies to `openai-compatible` since the SDK has no way to know the capabilities of an arbitrary endpoint. Setting it to `true` for a model that doesn't support reasoning is safe: the SDK only sends `reasoning_effort` when the provider's compatibility layer confirms support, and most backends ignore unknown parameters.
 
@@ -132,6 +160,42 @@ When API errors occur, System2 automatically retries and fails over:
 **Cooldown recovery:** Rate limit and transient failures enter a 5-minute cooldown. Keys become available again automatically after cooldown expires. Auth errors (invalid/revoked keys) are permanent until you edit config.toml.
 
 See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
+
+## Agent Overrides
+
+Each agent role (guide, conductor, narrator, reviewer, worker) has default settings defined in its library file (`packages/server/src/agents/library/{role}.md`). You can override these defaults per role in config.toml under `[agents.<role>]` sections without modifying the source code.
+
+### Overridable fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `thinking_level` | `off`, `minimal`, `low`, `medium`, `high` | Controls extended thinking depth for the agent's LLM calls |
+| `compaction_depth` | integer >= 0 | Number of auto-compactions before pruning old context (0 disables) |
+| `models.<provider>` | string | Model ID to use when running on a specific provider |
+
+All fields are optional. Only specified fields override the library defaults; unspecified fields keep their defaults.
+
+### Example
+
+```toml
+# Use Opus instead of Sonnet for the Guide on Anthropic
+[agents.guide]
+thinking_level = "medium"
+compaction_depth = 5
+
+[agents.guide.models]
+anthropic = "claude-opus-4-6"
+
+# Use Gemini 2.5 Pro for the Conductor on Google
+[agents.conductor.models]
+google = "gemini-2.5-pro"
+```
+
+### How it works
+
+During agent initialization, `AgentHost` reads the library frontmatter first, then applies any matching `[agents.<role>]` overrides from config.toml. For models, the merge is per-provider: `{ ...libraryModels, ...configModels }`. For scalar fields (`thinking_level`, `compaction_depth`), the config value replaces the library default.
+
+This means you can override a single provider's model without affecting the others, or change the thinking level for one role without touching the rest.
 
 ## Databases
 
