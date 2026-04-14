@@ -157,7 +157,11 @@ export class WebSocketHandler {
         const newAgentId = message.agentId;
         const host = this.agentRegistry.get(newAgentId);
         if (!host) {
-          this.sendError(`Agent ${newAgentId} not found or terminated`);
+          this.send({
+            type: 'error',
+            message: `Agent ${newAgentId} not found or terminated`,
+            agentId: newAgentId,
+          });
           return;
         }
 
