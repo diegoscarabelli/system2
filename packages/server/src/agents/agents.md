@@ -267,6 +267,18 @@ For ad-hoc SQL not covered by the named operations above (bulk updates, complex 
 
 Most content is git-tracked. `app.db`, `sessions/`, `logs/`, and `config.toml` are gitignored.
 
+### Configuration (`config.toml`)
+
+`~/.system2/config.toml` is the single configuration file for System2. It contains API keys, so it has `0600` permissions and is gitignored. Sections, in order:
+
+- **`[llm]` and `[llm.<provider>]`**: LLM providers, API keys, primary/fallback order, and provider-specific settings (e.g. OpenRouter routing, OpenAI-compatible endpoint).
+- **`[agents.<role>]`**: Per-role overrides for `thinking_level`, `compaction_depth`, and `models.<provider>`. These take precedence over the defaults in agent library frontmatter.
+- **`[services.*]` and `[tools.*]`**: Service credentials (Brave Search) and tool settings (web search).
+- **`[databases.<name>]`**: External database connections. Each entry declares a `type` (postgres, mysql, sqlite, mssql, clickhouse, duckdb, snowflake, bigquery), connection parameters (`host`, `port`, `database`, `user`, etc.), and optional settings (`query_timeout`, `max_rows`, `ssl`). Credentials are not stored here; they go in native credential files (e.g. `~/.pgpass`). The `<name>` key is the identifier used everywhere in System2: in the postMessage bridge's `database` field for HTML artifact live queries, and in `infrastructure.md` where the Guide documents the user's data stack. These must match. Each configured database also needs its Node.js driver package installed in `~/.system2/node_modules/` (e.g. `npm install --prefix ~/.system2 pg` for postgres). If the user adds a new database after onboarding, the Guide should install the driver and update `infrastructure.md`.
+- **Operational sections** (`[backup]`, `[session]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`): Housekeeping defaults that rarely need adjustment.
+
+Agents do not read `config.toml` directly. The server parses it at startup and threads the resolved configuration to AgentHost, AuthResolver, and the query bridge. Agents learn about the user's databases from `infrastructure.md`, which is refreshed into the system prompt on every LLM call.
+
 ### Artifacts
 
 Artifacts are files produced as **published results** of analytical work: EDA notebooks, dashboards, plots, PDFs, markdown reports, and similar deliverables meant for the user to read and see. The distinction is intent: a Python script that performs data analysis and produces a report is an artifact; a data pipeline script that transforms and loads data belongs in its code repository as part of the infrastructure. Pipeline code, utility scripts, and intermediate data files are not artifacts; they belong in the [Scratchpad](#scratchpad).
