@@ -495,6 +495,14 @@ export class Server {
     await this.agentHost.initialize();
     await this.narratorHost.initialize();
 
+    // Send a startup prompt to the Guide so its system-prompt logic kicks in
+    // (onboarding for fresh installs, greeting for returning users).
+    // prompt() queues the message and returns immediately; the response streams
+    // into the chat cache and reaches UI clients on WebSocket connect.
+    this.agentHost.prompt('Session started.').catch((err) => {
+      log.error('[Server] Guide welcome prompt failed:', err);
+    });
+
     // Initialize conversation summarizer (uses narrator's model for cheap summarization)
     try {
       const narratorModel = this.resolveNarratorModel();
