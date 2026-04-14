@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-.pnpm-store/
 
 # Build outputs
 dist/
@@ -11,7 +10,7 @@ dist/
 .env
 .env.local
 
-# IDE
+# IDE and tools
 .vscode/
 .idea/
 .claude/
@@ -27,9 +26,6 @@ coverage/
 
 # Logs
 *.log
-npm-debug.log*
-pnpm-debug.log*
 
-# Temporary files
-.tmp/
-temp/
+# Lock files (this project uses pnpm)
+package-lock.json
