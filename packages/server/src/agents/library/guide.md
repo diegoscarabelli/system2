@@ -11,7 +11,7 @@ models:
   groq: llama-3.3-70b-versatile
   mistral: mistral-large-latest
   openai: gpt-4o
-  openrouter: anthropic/claude-sonnet-4
+  openrouter: google/gemini-2.5-flash
   xai: grok-2-latest
 ---
 
