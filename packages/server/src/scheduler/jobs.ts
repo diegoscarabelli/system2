@@ -8,11 +8,11 @@
  * sender: 0 is a sentinel for system-generated messages (no agent sender).
  */
 
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { JobExecution } from '@dscarabelli/shared';
 import type { AgentHost } from '../agents/host.js';
+import { commitIfStateDir } from '../agents/tools/git-commit.js';
 import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js';
 import { log } from '../utils/logger.js';
@@ -75,36 +75,6 @@ export function writeFrontmatterField(filePath: string, field: string, value: st
   }
 
   writeFileSync(filePath, lines.join('\n'), 'utf-8');
-}
-
-/**
- * Git-commit a single knowledge file after a cursor update.
- * Best-effort: the cursor is durable in the filesystem regardless; the git
- * commit provides version-tracking. Silently no-ops outside a git repo (tests).
- */
-function commitKnowledgeFile(filePath: string, message: string): void {
-  const dir = dirname(filePath);
-  const file = basename(filePath);
-  try {
-    execFileSync('git', ['-C', dir, 'add', file], { stdio: 'pipe', timeout: 5000 });
-  } catch {
-    return; // Not in a git repo or file unchanged
-  }
-  try {
-    execFileSync('git', ['-C', dir, 'commit', '-m', message], { stdio: 'pipe', timeout: 5000 });
-  } catch (err) {
-    // Commit failed (lock contention, nothing to commit, etc.): unstage to
-    // prevent the file from leaking into a subsequent unrelated commit.
-    try {
-      execFileSync('git', ['-C', dir, 'reset', 'HEAD', file], { stdio: 'ignore', timeout: 5000 });
-    } catch {
-      // reset failed too; log below covers it
-    }
-    const stderr = (err as { stderr?: Buffer })?.stderr?.toString().trim();
-    if (stderr && !stderr.includes('nothing to commit')) {
-      log.info(`[Scheduler] commitKnowledgeFile: git commit failed for ${file}: ${stderr}`);
-    }
-  }
 }
 
 /**
@@ -496,11 +466,11 @@ function advanceFrontmatterCursors(
   newRunTs: string
 ): void {
   writeFrontmatterField(dailySummaryPath, 'last_narrator_update_ts', newRunTs);
-  commitKnowledgeFile(dailySummaryPath, `cursor: ${basename(dailySummaryPath)}`);
+  commitIfStateDir(dailySummaryPath, `cursor: ${basename(dailySummaryPath)}`);
   for (const pd of projectDataList) {
     if (pd.logFile) {
       writeFrontmatterField(pd.logFile, 'last_narrator_update_ts', newRunTs);
-      commitKnowledgeFile(pd.logFile, `cursor: ${pd.projectName} log`);
+      commitIfStateDir(pd.logFile, `cursor: ${pd.projectName} log`);
     }
   }
 }
@@ -948,5 +918,5 @@ ${messageParts.join('\n\n')}`;
 
   // Server-side cursor advancement for memory.md
   writeFrontmatterField(memoryFile, 'last_narrator_update_ts', newRunTs);
-  commitKnowledgeFile(memoryFile, 'cursor: memory.md');
+  commitIfStateDir(memoryFile, 'cursor: memory.md');
 }
