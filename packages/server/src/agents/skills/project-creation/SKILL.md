@@ -36,7 +36,7 @@ Follow these steps end-to-end whenever you decide that a user request needs its 
 
 5. **Spawn Reviewer** via `spawn_agent`:
    - role: `"reviewer"`, project_id: `<new project id>`
-   - initial_message: project ID, your role is to review the Conductor's analytical work for correctness and statistical rigor
+   - initial_message: project ID, the Conductor's agent ID (from step 4), and your role is to review the Conductor's analytical work for correctness and statistical rigor
 
 6. **Message Conductor** with the Reviewer's agent ID so it can coordinate reviews.
 

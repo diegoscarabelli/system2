@@ -34,12 +34,12 @@ export default defineConfig({
 
     mkdirSync(destLibrary, { recursive: true });
 
-    const agentFiles = ['guide.md', 'conductor.md', 'narrator.md', 'reviewer.md'];
+    const agentFiles = readdirSync(srcLibrary).filter((f) => f.endsWith('.md'));
     for (const file of agentFiles) {
       copyFileSync(join(srcLibrary, file), join(destLibrary, file));
     }
 
-    console.log('✓ Copied agent library files to dist/');
+    console.log(`✓ Copied ${agentFiles.length} agent library file(s) to dist/`);
 
     // Copy built-in skill subdirectories to dist/agents/skills/
     // Each skill is a subdirectory containing SKILL.md (Agent Skills standard)
