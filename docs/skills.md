@@ -3,10 +3,10 @@
 Skills are reusable workflow instructions following the [Agent Skills standard](https://agentskills.io/specification). Each skill is a subdirectory containing a `SKILL.md` file. They fill the gap between tools (single actions) and knowledge (accumulated facts) by capturing multi-step procedures that agents can follow when performing recurring tasks.
 
 **Key source files:**
-- `packages/server/src/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`)
-- `packages/server/src/agents/host.ts`: SDK wiring via `additionalSkillPaths` and `skillsOverride`
-- `packages/server/src/agents/agents.md`: agent-facing documentation (## Skills section)
-- `packages/server/src/knowledge/init.ts`: `~/.system2/skills/` directory creation
+- `src/server/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`)
+- `src/server/agents/host.ts`: SDK wiring via `additionalSkillPaths` and `skillsOverride`
+- `src/server/agents/agents.md`: agent-facing documentation (## Skills section)
+- `src/server/knowledge/init.ts`: `~/.system2/skills/` directory creation
 
 ## Skill Structure
 
@@ -54,7 +54,7 @@ Skills are loaded from two directories:
 
 | Source | Path | Precedence |
 | ------ | ---- | ---------- |
-| Built-in | `packages/server/src/agents/skills/` (copied to `dist/agents/skills/` at build) | Lower |
+| Built-in | `src/server/agents/skills/` (copied to `dist/agents/skills/` at build) | Lower |
 | User | `~/.system2/skills/` | Higher |
 
 When a user skill has the same `name` as a built-in skill, the user skill takes precedence. This allows users (or agents) to override or customize built-in workflows.
@@ -93,7 +93,7 @@ The litmus test agents apply: "Am I writing down a fact, or a workflow I'd want 
 
 ## Built-in Skills
 
-Built-in skills live in `packages/server/src/agents/skills/`:
+Built-in skills live in `src/server/agents/skills/`:
 
 | Skill | Roles | Description |
 | ----- | ----- | ----------- |
@@ -113,7 +113,7 @@ Built-in skills live in `packages/server/src/agents/skills/`:
 
 ## Build Configuration
 
-Built-in skill subdirectories are copied from `src/agents/skills/` to `dist/agents/skills/` during the tsup build (`packages/server/tsup.config.ts`). The copy is dynamic (reads the directory at build time), so adding a new built-in skill only requires creating a `skill-name/SKILL.md` subdirectory in the source directory.
+Built-in skill subdirectories are copied from `src/server/agents/skills/` to `dist/agents/skills/` during the tsup build (`tsup.config.ts`). The copy is dynamic (reads the directory at build time), so adding a new built-in skill only requires creating a `skill-name/SKILL.md` subdirectory in the source directory.
 
 ## See Also
 

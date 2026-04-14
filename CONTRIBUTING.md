@@ -15,20 +15,18 @@ Thank you for your interest in contributing to System2! This document provides g
   - [Development Workflow](#development-workflow)
   - [Commands Reference](#commands-reference)
 - [Building](#building)
-  - [Package Outputs](#package-outputs)
-  - [Building Individual Packages](#building-individual-packages)
+  - [Build Outputs](#build-outputs)
 - [Code Quality](#code-quality)
   - [Commands](#commands)
   - [Formatting Rules](#formatting-rules)
 - [Testing](#testing)
-- [Releasing](#releasing)
 - [Before Committing](#before-committing)
 - [Commit Messages](#commit-messages)
 - [Code Review Process](#code-review-process)
 
 ## Developer Documentation
 
-Before diving into the code, read through the [developer docs](docs/README.md). They cover the architecture, each package's internals, the agent system, database schema, WebSocket protocol, and more.
+Before diving into the code, read through the [developer docs](docs/README.md). They cover the architecture, the agent system, database schema, WebSocket protocol, and more.
 
 ## How to Contribute
 
@@ -104,7 +102,7 @@ Before submitting a PR, ensure:
 2. All quality checks pass: `pnpm check`
 3. Tests pass: `pnpm test`
 4. Build succeeds: `pnpm build`
-5. Documentation is updated if needed — changes to architecture, packages, tools, configuration, or the WebSocket protocol should be reflected in the relevant [docs/](docs/README.md) pages and, where applicable, in [README.md](README.md)
+5. Documentation is updated if needed — changes to architecture, tools, configuration, or the WebSocket protocol should be reflected in the relevant [docs/](docs/README.md) pages and, where applicable, in [README.md](README.md)
 
 ## Development Setup
 
@@ -112,7 +110,7 @@ Before submitting a PR, ensure:
 
 - Node.js >= 20
 - pnpm >= 8
-- System2 installed globally (`npm install -g @dscarabelli/cli`) and onboarded (`system2 onboard`)
+- System2 installed globally (`npm install -g system2`) and onboarded (`system2 onboard`)
 
 ### Initial Setup
 
@@ -147,8 +145,7 @@ This starts the system2 server on port 3000. Keep it running.
 
 **Terminal 2 — Start the UI dev server with hot reload:**
 ```bash
-cd packages/ui
-pnpm dev
+pnpm dev:ui
 ```
 
 This starts Vite on `http://localhost:3001`. Open this URL in your browser.
@@ -157,16 +154,16 @@ This starts Vite on `http://localhost:3001`. Open this URL in your browser.
 
 | Change | Hot reload? | What to do |
 |--------|------------|------------|
-| UI components (`packages/ui/src/`) | Yes | Saves automatically reflect in the browser |
-| Server code (`packages/server/src/`) | No | Rebuild and restart: `pnpm build && system2 stop && system2 start` |
-| CLI code (`packages/cli/src/`) | No | Rebuild: `pnpm --filter @dscarabelli/cli build` |
-| Shared types (`packages/shared/src/`) | No | Rebuild: `pnpm build` (all packages depend on it) |
+| UI components (`src/ui/`) | Yes | Saves automatically reflect in the browser |
+| Server code (`src/server/`) | No | Rebuild and restart: `pnpm build && system2 stop && system2 start` |
+| CLI code (`src/cli/`) | No | Rebuild: `pnpm build` |
+| Shared types (`src/shared/`) | No | Rebuild: `pnpm build` |
 
 ### Commands Reference
 
 ```bash
-pnpm build        # Build all packages
-pnpm dev          # Run all packages in watch/dev mode (alternative to the two-terminal setup)
+pnpm build        # Build the project
+pnpm dev          # Run in watch/dev mode (alternative to the two-terminal setup)
 pnpm typecheck    # Run TypeScript type checking
 pnpm check        # Run format check and lint
 pnpm format       # Auto-fix formatting
@@ -176,29 +173,20 @@ pnpm test:watch   # Run tests in watch mode
 
 ## Building
 
-The monorepo uses [tsup](https://tsup.egoist.dev/) for TypeScript packages and [Vite](https://vite.dev/) for the UI.
+The project uses [tsup](https://tsup.egoist.dev/) for TypeScript compilation and [Vite](https://vite.dev/) for the UI.
 
 ```bash
-pnpm build        # Build all packages (respects dependency order)
+pnpm build        # Build the project
 ```
 
-Build order: `shared` → `server` + `ui` (parallel) → `cli`
+### Build Outputs
 
-### Package Outputs
-
-| Package | Build tool | Output |
-|---------|------------|--------|
-| `packages/shared` | tsup | `dist/index.js` - shared types and utilities |
-| `packages/server` | tsup | `dist/index.js` - HTTP server and agent runtime |
-| `packages/ui` | Vite | `dist/` - static assets (copied to CLI) |
-| `packages/cli` | tsup | `dist/index.js` - CLI entry point |
-
-### Building Individual Packages
-
-```bash
-pnpm --filter @dscarabelli/server build   # Build only server
-pnpm --filter @dscarabelli/cli build      # Build only CLI
-```
+| Component | Build tool | Output |
+|-----------|------------|--------|
+| CLI (`src/cli/`) | tsup | `dist/cli/index.js` - CLI entry point |
+| Server (`src/server/`) | tsup | `dist/server/index.js` - HTTP server and agent runtime |
+| Shared (`src/shared/`) | tsup | `dist/shared/index.js` - shared types and utilities |
+| UI (`src/ui/`) | Vite | `dist/ui/` - static assets |
 
 ## Code Quality
 
@@ -223,7 +211,7 @@ pnpm check        # Run both format check and lint
 
 ## Testing
 
-System2 uses [Vitest](https://vitest.dev/) for testing, configured as a workspace across the `server` and `cli` packages.
+System2 uses [Vitest](https://vitest.dev/) for testing.
 
 ### Running Tests
 
@@ -237,8 +225,8 @@ pnpm test:watch   # Run tests in watch mode (re-runs on file changes)
 Test files live alongside the source files they test, using the `.test.ts` suffix:
 
 ```
-packages/server/src/agents/retry.ts        # Source
-packages/server/src/agents/retry.test.ts   # Tests
+src/server/agents/retry.ts        # Source
+src/server/agents/retry.test.ts   # Tests
 ```
 
 When adding new functionality, add tests for any exported logic — especially pure functions, state machines, and data transformations. Tests that touch the filesystem should use `tmpdir()` with cleanup in `afterEach`.
@@ -260,27 +248,6 @@ When adding new functionality, add tests for any exported logic — especially p
 ### CI
 
 A GitHub Actions workflow runs on every push and PR. It executes `pnpm check`, `pnpm typecheck`, `pnpm build`, and `pnpm test`. A local pre-push git hook runs the same checks before code leaves your machine.
-
-## Releasing
-
-Packages are published to npm under the `@dscarabelli` scope (private, restricted access). Publishing is automated via GitHub Actions.
-
-### How to release
-
-1. Bump the `version` field in all four `packages/*/package.json` files to the same version.
-2. Commit the version bump: `git commit -m "chore: bump version to 0.2.0"`
-3. Push to `main`.
-4. Go to **GitHub > Releases > Create a new release**.
-5. Create a new tag matching the version (e.g., `v0.2.0`), write release notes, and click **Publish release**.
-6. The `release.yml` workflow runs automatically: builds, tests, and publishes all packages to npm.
-
-### Adding users
-
-To grant someone install access without exposing source code:
-
-1. Go to **npmjs.com > Your org > Members**.
-2. Invite them as a **read-only** member.
-3. They run `npm login`, then `npm install -g @dscarabelli/cli`.
 
 ## Before Committing
 

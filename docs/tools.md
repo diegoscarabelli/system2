@@ -1,10 +1,10 @@
 # Agent Tools
 
-Agents interact with the system through custom tools defined in `packages/server/src/agents/tools/`. Each tool is a factory function returning a [pi-coding-agent](https://github.com/badlogic/pi-mono) `AgentTool` with typed parameters (via [@sinclair/typebox](https://github.com/sinclairzx81/typebox)) and an async `execute` method.
+Agents interact with the system through custom tools defined in `src/server/agents/tools/`. Each tool is a factory function returning a [pi-coding-agent](https://github.com/badlogic/pi-mono) `AgentTool` with typed parameters (via [@sinclair/typebox](https://github.com/sinclairzx81/typebox)) and an async `execute` method.
 
 ## Tool Registration
 
-Tools are built in `AgentHost.buildTools()` (`packages/server/src/agents/host.ts`):
+Tools are built in `AgentHost.buildTools()` (`src/server/agents/host.ts`):
 
 - Eight tools are always included: `bash`, `read`, `edit`, `write`, `read_system2_db`, `write_system2_db`, `message_agent`, `web_fetch`
 - `show_artifact` is included for all agents: any agent can display files in the UI artifact viewer
@@ -291,4 +291,4 @@ Resurrect an archived agent: restore its session from persisted JSONL history, r
 - [Agents](agents.md): agent roles, lifecycle, spawn/terminate/resurrect, work management
 - [Database](database.md): schema for `read_system2_db` and `write_system2_db`
 - [Configuration](configuration.md): web search configuration
-- [UI](packages/ui.md): artifact display and postMessage bridge
+- [UI](ui.md): artifact display and postMessage bridge

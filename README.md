@@ -211,7 +211,7 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 
 | Doc | Contents |
 | --- | -------- |
-| [Architecture](docs/architecture.md) | Monorepo structure, runtime, request lifecycle, trust model |
+| [Architecture](docs/architecture.md) | Project structure, runtime, request lifecycle, trust model |
 | [Agents](docs/agents.md) | Agent roles, lifecycle, messaging, failover, session management |
 | [Tools](docs/tools.md) | Agent tools: filesystem, database, web, messaging, artifacts |
 | [Database](docs/database.md) | `app.db` schema: projects, tasks, agents, comments, artifacts |
@@ -230,10 +230,10 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 
 ```text
 system2/
-├── packages/
+├── src/
 │   ├── cli/       # system2 CLI: onboard, start, stop, status
 │   ├── server/    # HTTP + WebSocket server, agent hosting, scheduler
-│   ├── shared/    # TypeScript types shared across packages
+│   ├── shared/    # TypeScript types shared across the project
 │   └── ui/        # React chat interface, kanban board, artifact viewer
 └── docs/          # Developer documentation
 ```

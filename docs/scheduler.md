@@ -3,9 +3,9 @@
 System2 runs an in-process scheduler using [Croner](https://github.com/Hexagon/croner) for periodic Narrator jobs. Jobs pre-compute deterministic data and deliver it to the Narrator via `deliverMessage()`.
 
 **Key source files:**
-- `packages/server/src/scheduler/scheduler.ts`: Scheduler class
-- `packages/server/src/scheduler/jobs.ts`: job definitions and data collection
-- `packages/server/src/scheduler/network.ts`: network connectivity check
+- `src/server/scheduler/scheduler.ts`: Scheduler class
+- `src/server/scheduler/jobs.ts`: job definitions and data collection
+- `src/server/scheduler/network.ts`: network connectivity check
 
 ## Scheduler Class
 
@@ -31,7 +31,7 @@ The `daily-summary` interval is configurable via `[scheduler].daily_summary_inte
 
 Each job checks network connectivity via a DNS lookup (`dns.google`) before executing. If the network is unreachable, the job is silently skipped and nothing is written to the Narrator's JSONL session. This prevents session bloat and context pollution when the laptop is sleeping (macOS Power Nap wakes the process periodically, but the network may not be available).
 
-The check lives in each job handler, not in the Scheduler class, so future jobs can opt in or out individually. See `isNetworkAvailable()` in `packages/server/src/scheduler/network.ts`.
+The check lives in each job handler, not in the Scheduler class, so future jobs can opt in or out individually. See `isNetworkAvailable()` in `src/server/scheduler/network.ts`.
 
 ## Daily Summary Pipeline
 
@@ -116,4 +116,4 @@ The `trigger_type` column distinguishes how the execution was initiated:
 - [Knowledge System](knowledge-system.md): files that the Narrator updates
 - [Agents](agents.md): `deliverMessage()` and delivery modes
 - [Configuration](configuration.md): `daily_summary_interval_minutes`
-- [Server](packages/server.md): catch-up logic in `start()`
+- [Server](server.md): catch-up logic in `start()`

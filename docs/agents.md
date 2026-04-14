@@ -3,12 +3,12 @@
 System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/pi-mono) SDK, which provides the core agent loop, tool execution, and JSONL session persistence. System2 adds multi-agent orchestration, LLM failover, dynamic knowledge injection, and inter-agent messaging.
 
 **Key source files:**
-- `packages/server/src/agents/host.ts`: AgentHost class
-- `packages/server/src/agents/registry.ts`: AgentRegistry
-- `packages/server/src/agents/auth-resolver.ts`: AuthResolver
-- `packages/server/src/agents/library/`: agent identity and system instructions (Markdown + YAML frontmatter)
-- `packages/server/src/agents/agents.md`: shared reference prepended to all system prompts
-- `packages/server/src/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`); discovery and XML injection are handled by the pi-coding-agent SDK
+- `src/server/agents/host.ts`: AgentHost class
+- `src/server/agents/registry.ts`: AgentRegistry
+- `src/server/agents/auth-resolver.ts`: AuthResolver
+- `src/server/agents/library/`: agent identity and system instructions (Markdown + YAML frontmatter)
+- `src/server/agents/agents.md`: shared reference prepended to all system prompts
+- `src/server/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`); discovery and XML injection are handled by the pi-coding-agent SDK
 
 ## Agent Roles
 
@@ -28,7 +28,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 ## Agent Identity and System Instructions
 
-Each agent's identity and system instructions are defined as a Markdown file with YAML frontmatter in `packages/server/src/agents/library/`:
+Each agent's identity and system instructions are defined as a Markdown file with YAML frontmatter in `src/server/agents/library/`:
 
 ```yaml
 ---

@@ -1,6 +1,6 @@
 # Architecture Overview
 
-System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/badlogic/pi-mono), a SDK for building LLM-powered coding agents. The SDK provides the core agent loop, tool execution, session management (JSONL persistence), and auto-compaction. System2 adds multi-agent orchestration, LLM failover, a knowledge/memory system, custom tools, a [scheduler](scheduler.md), and a web UI.
+System2 is a TypeScript project built on [pi-coding-agent](https://github.com/badlogic/pi-mono), a SDK for building LLM-powered coding agents. The SDK provides the core agent loop, tool execution, session management (JSONL persistence), and auto-compaction. System2 adds multi-agent orchestration, LLM failover, a knowledge/memory system, custom tools, a [scheduler](scheduler.md), and a web UI.
 
 ## Key Design Decisions
 
@@ -8,7 +8,7 @@ System2 is a TypeScript monorepo built on [pi-coding-agent](https://github.com/b
 
 **No chat sessions, continuous interaction.** There is no concept of starting a new chat. The Guide maintains a single persistent session and a structured memory system, creating an unbroken thread of interaction that accumulates memories over time rather than resetting between conversations. See [Agents](agents.md#session-management) | [Knowledge System](knowledge-system.md).
 
-**Artifact canvas for interactive content.** The UI provides a dedicated display area where the Guide or user can surface rich, interactive content on demand: charts, dashboards, custom UIs, or any HTML/JS artifact. Artifacts are stored as files and tracked with metadata (title, description, timestamps) so they can be revisited and  refined in later conversations. See [UI](packages/ui.md)
+**Artifact canvas for interactive content.** The UI provides a dedicated display area where the Guide or user can surface rich, interactive content on demand: charts, dashboards, custom UIs, or any HTML/JS artifact. Artifacts are stored as files and tracked with metadata (title, description, timestamps) so they can be revisited and  refined in later conversations. See [UI](ui.md)
 
 **Orchestrated multi-agent work.** Agents are spawned on demand based on the scope and nature of the work; others run continuously in the background. Work is broken into tasks stored in the database, then distributed and coordinated via two channels: direct messages for real-time steering and task comments for a permanent audit trail. A dedicated review role provides critical assessment before work is considered complete. Tools are gated by role and project scope. A background agent (the Narrator) continuously maintains long-term memory by writing project logs, daily summaries, and project stories, so knowledge accumulates without user involvement. See [Agents](agents.md) | [Tools](tools.md) | [Database](database.md) | [Scheduler](scheduler.md) | [Knowledge System](knowledge-system.md).
 
@@ -93,26 +93,23 @@ Most content is git-tracked. `app.db`, `sessions/`, `logs/`, and `config.toml` a
 
 See [Configuration](configuration.md) for `config.toml` settings and API keys.
 
-## Monorepo Structure
+## Project Structure
 
 ```
 system2/
-├── packages/
-│   ├── shared/    @dscarabelli/shared    Shared TypeScript types
-│   ├── server/    @dscarabelli/server    HTTP/WS server + agent runtime
-│   ├── ui/        @dscarabelli/ui        React chat interface
-│   └── cli/       @dscarabelli/cli       CLI entry point
-├── docs/                              Developer documentation
-├── biome.json                         Formatting/linting config
-├── tsconfig.json                      Root TypeScript config
-└── pnpm-workspace.yaml                Workspace declaration
+├── src/
+│   ├── shared/    Shared TypeScript types
+│   ├── server/    HTTP/WS server + agent runtime
+│   ├── ui/        React chat interface
+│   └── cli/       CLI entry point
+├── docs/          Developer documentation
+├── biome.json     Formatting/linting config
+└── tsconfig.json  TypeScript config
 ```
 
-**Dependency graph:** `shared` -> `server` + `ui` -> `cli`
+**Build:** `pnpm build` runs `tsup && vite build`, producing the server/CLI bundle and UI static assets in a single step.
 
-**Build order:** `shared` first, then `server` + `ui` in parallel, then `cli` last.
-
-See individual package docs: [shared](packages/shared.md) | [server](packages/server.md) | [ui](packages/ui.md) | [cli](packages/cli.md)
+See detailed docs: [shared](shared.md) | [server](server.md) | [ui](ui.md) | [cli](cli.md)
 
 ## Request Lifecycle
 

@@ -14,7 +14,7 @@ The [`CONTRIBUTING.md`](CONTRIBUTING.md) file contains development guidelines. K
 
 - **How to Contribute**: Fork-based workflow, branch naming conventions, PR process.
 - **Development Setup**: Prerequisites (Node.js >= 20, pnpm >= 8) and setup commands.
-- **Building**: Package build order and outputs.
+- **Building**: Build outputs.
 - **Code Quality**: Biome formatting/linting rules and commands.
 - **Before Committing**: Required quality checks before every commit.
 - **Code Review Process**: How PRs are reviewed and merged.
@@ -25,7 +25,7 @@ The [`docs/`](docs/) directory contains in-depth documentation. Start with [`doc
 
 | File | Description |
 | ---- | ----------- |
-| [`architecture.md`](docs/architecture.md) | Monorepo structure, runtime components, pi-coding-agent integration |
+| [`architecture.md`](docs/architecture.md) | Project structure, runtime components, pi-coding-agent integration |
 | [`agents.md`](docs/agents.md) | Multi-agent orchestration, LLM failover, inter-agent messaging |
 | [`tools.md`](docs/tools.md) | Custom agent tools: typed parameters, factory pattern, execution |
 | [`database.md`](docs/database.md) | SQLite schema, WAL mode, better-sqlite3 usage |
@@ -36,29 +36,22 @@ The [`docs/`](docs/) directory contains in-depth documentation. Start with [`doc
 | [`skills.md`](docs/skills.md) | Reusable agent workflow instructions, SKILL.md format, discovery and injection |
 | [`scheduler.md`](docs/scheduler.md) | Cron-based Narrator jobs via Croner |
 | [`configuration.md`](docs/configuration.md) | `config.toml` settings and API keys |
-| [`packages/cli.md`](docs/packages/cli.md) | CLI: onboarding, daemon management, status |
-| [`packages/server.md`](docs/packages/server.md) | Server: HTTP, WebSocket, agents, scheduler |
-| [`packages/shared.md`](docs/packages/shared.md) | Shared TypeScript type definitions |
-| [`packages/ui.md`](docs/packages/ui.md) | React UI: real-time chat, artifacts |
+| [`cli.md`](docs/cli.md) | CLI: onboarding, daemon management, status |
+| [`server.md`](docs/server.md) | Server: HTTP, WebSocket, agents, scheduler |
+| [`shared.md`](docs/shared.md) | Shared TypeScript type definitions |
+| [`ui.md`](docs/ui.md) | React UI: real-time chat, artifacts |
 
 ## Command Reference
 
 ```bash
 pnpm install              # Install dependencies
-pnpm build                # Build all packages
-pnpm dev                  # Run all packages in dev mode
+pnpm build                # Build the project
+pnpm dev                  # Run in dev mode
 pnpm check                # Run format check and lint
 pnpm format               # Auto-fix formatting
 pnpm typecheck            # Run TypeScript type checking
 pnpm test                 # Run all tests (vitest)
 pnpm test:watch           # Run tests in watch mode
-```
-
-Build individual packages:
-
-```bash
-pnpm --filter @dscarabelli/server build
-pnpm --filter @dscarabelli/cli build
 ```
 
 ## Before Committing
