@@ -8,6 +8,7 @@ export interface Project {
   id: number;
   name: string;
   description: string;
+  dir_path: string | null;
   status: 'todo' | 'in progress' | 'review' | 'done' | 'abandoned';
   labels: string[];
   start_at: string | null;

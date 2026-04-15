@@ -38,7 +38,7 @@ import type {
 } from '../../shared/index.js';
 import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
-import { resolveProjectDir } from '../projects/dir.js';
+import { resolveProjectDir } from '../projects/dir.js'; // used for backfilling dir_path on legacy projects
 import type { ReminderManager } from '../reminders/manager.js';
 import { filterByRole } from '../skills/loader.js';
 import { log } from '../utils/logger.js';
@@ -246,9 +246,14 @@ export class AgentHost {
     if (this.agentProject !== null) {
       const projectRecord = this.db.getProject(this.agentProject);
       if (projectRecord) {
-        const projectsDir = join(SYSTEM2_DIR, 'projects');
-        const projectDir = resolveProjectDir(projectsDir, projectRecord.id, projectRecord.name);
-        this.agentProjectDirName = basename(projectDir);
+        if (projectRecord.dir_path) {
+          this.agentProjectDirName = projectRecord.dir_path;
+        } else {
+          // Legacy fallback: project created before dir_path was tracked
+          const projectsDir = join(SYSTEM2_DIR, 'projects');
+          const projectDir = resolveProjectDir(projectsDir, projectRecord.id, projectRecord.name);
+          this.agentProjectDirName = basename(projectDir);
+        }
       }
     }
     this.agentRole = agentRecord.role;

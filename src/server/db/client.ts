@@ -17,6 +17,7 @@ import type {
   TaskComment,
   TaskLink,
 } from '../../shared/index.js';
+import { slugify } from '../projects/dir.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -41,21 +42,31 @@ export class DatabaseClient {
   }
 
   // Project operations
-  createProject(project: Omit<Project, 'id' | 'created_at' | 'updated_at'>): Project {
-    const stmt = this.db.prepare(`
-      INSERT INTO project (name, description, status, labels, start_at, end_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-      RETURNING *
-    `);
+  createProject(project: Omit<Project, 'id' | 'dir_path' | 'created_at' | 'updated_at'>): Project {
+    const txn = this.db.transaction(() => {
+      const insertStmt = this.db.prepare(`
+        INSERT INTO project (name, description, status, labels, start_at, end_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        RETURNING *
+      `);
 
-    return stmt.get(
-      project.name,
-      project.description,
-      project.status,
-      JSON.stringify(project.labels),
-      project.start_at,
-      project.end_at
-    ) as Project;
+      const row = insertStmt.get(
+        project.name,
+        project.description,
+        project.status,
+        JSON.stringify(project.labels),
+        project.start_at,
+        project.end_at
+      ) as Project;
+
+      // Compute and persist the slugified directory name
+      const dirPath = `${row.id}_${slugify(row.name)}`;
+      const updateStmt = this.db.prepare(
+        'UPDATE project SET dir_path = ? WHERE id = ? RETURNING *'
+      );
+      return updateStmt.get(dirPath, row.id) as Project;
+    });
+    return txn();
   }
 
   getProject(id: number): Project | null {
@@ -86,6 +97,9 @@ export class DatabaseClient {
     if (updates.name !== undefined) {
       fields.push('name = ?');
       values.push(updates.name);
+      // Keep dir_path in sync with the slugified name
+      fields.push('dir_path = ?');
+      values.push(`${id}_${slugify(updates.name)}`);
     }
     if (updates.description !== undefined) {
       fields.push('description = ?');

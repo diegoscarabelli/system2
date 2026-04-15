@@ -9,9 +9,14 @@
  * This is NOT for writing to data pipeline databases — use bash for those.
  */
 
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
+import { resolveProjectDir } from '../../projects/dir.js';
+
+const SYSTEM2_DIR = join(homedir(), '.system2');
 
 const PROJECT_STATUSES = ['todo', 'in progress', 'review', 'done', 'abandoned'] as const;
 const TASK_PRIORITIES = ['low', 'medium', 'high'] as const;
@@ -238,6 +243,8 @@ export function createWriteSystem2DbTool(
               start_at: params.start_at ?? null,
               end_at: params.end_at ?? null,
             });
+            // Ensure the project directory exists on disk
+            resolveProjectDir(join(SYSTEM2_DIR, 'projects'), result.id, result.name);
             return ok(result, 'project');
           }
 
@@ -267,7 +274,10 @@ export function createWriteSystem2DbTool(
               ...(params.end_at !== undefined && { end_at: params.end_at }),
             });
             if (!result) return err(`No project found with id ${params.id}`);
-
+            // Rename directory on disk when the project name changes
+            if (params.name !== undefined) {
+              resolveProjectDir(join(SYSTEM2_DIR, 'projects'), result.id, result.name);
+            }
             return ok(result, 'project');
           }
 

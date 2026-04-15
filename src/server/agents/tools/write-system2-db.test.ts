@@ -10,6 +10,13 @@ import type {
 import type { DatabaseClient } from '../../db/client.js';
 import { createWriteSystem2DbTool } from './write-system2-db.js';
 
+// Mock resolveProjectDir so no real directories are created
+vi.mock('../../projects/dir.js', () => ({
+  resolveProjectDir: vi.fn(
+    (_dir: string, id: number, name: string) => `/tmp/fake-projects/${id}_${name}`
+  ),
+}));
+
 // Minimal mock DatabaseClient with controllable return values
 function createMockDb() {
   const agents = new Map<number, Agent>();
@@ -38,7 +45,13 @@ function createMockDb() {
 
     createProject: (p: Partial<Project>) => {
       const id = nextId++;
-      const project = { id, ...p, created_at: 'now', updated_at: 'now' } as Project;
+      const project = {
+        id,
+        ...p,
+        dir_path: `${id}_project`,
+        created_at: 'now',
+        updated_at: 'now',
+      } as Project;
       projects.set(id, project);
       return project;
     },
@@ -168,6 +181,7 @@ function addProject(db: MockDb, id: number) {
     id,
     name: 'Project',
     description: 'Desc',
+    dir_path: `${id}_project`,
     status: 'todo',
     labels: '[]',
     start_at: null,

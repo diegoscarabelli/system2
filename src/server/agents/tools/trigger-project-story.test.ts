@@ -20,6 +20,7 @@ vi.mock('node:fs', async (importOriginal) => {
   return {
     ...actual,
     existsSync: vi.fn().mockReturnValue(false),
+    mkdirSync: vi.fn(),
     readFileSync: vi.fn().mockReturnValue(''),
   };
 });
@@ -33,6 +34,7 @@ function makeProject(id: number, name: string): Project {
     id,
     name,
     description: 'test project',
+    dir_path: `${id}_${name}`,
     status: 'in progress',
     labels: [],
     start_at: 'now',

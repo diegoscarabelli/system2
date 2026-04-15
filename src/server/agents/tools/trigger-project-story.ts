@@ -12,13 +12,13 @@
  * (writes the project story using the provided data + the log entry it just wrote).
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
-import { resolveProjectDir } from '../../projects/dir.js';
+import { resolveProjectDir } from '../../projects/dir.js'; // used for backfilling dir_path on legacy projects
 import {
   collectAgentActivity,
   collectProjectDbChanges,
@@ -109,12 +109,13 @@ export function createTriggerProjectStoryTool(
           };
         }
 
-        // Resolve project directory (handles renames)
-        const projectDir = resolveProjectDir(
-          join(SYSTEM2_DIR, 'projects'),
-          project.id,
-          project.name
-        );
+        // Use persisted dir_path, falling back to resolveProjectDir for legacy projects
+        const dirName =
+          project.dir_path ??
+          basename(resolveProjectDir(join(SYSTEM2_DIR, 'projects'), project.id, project.name));
+        const projectDir = join(SYSTEM2_DIR, 'projects', dirName);
+        mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
+        mkdirSync(join(projectDir, 'scratchpad'), { recursive: true });
         const logFile = join(projectDir, 'log.md');
 
         // Read timestamps

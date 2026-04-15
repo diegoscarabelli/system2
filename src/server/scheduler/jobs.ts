@@ -14,7 +14,7 @@ import type { JobExecution } from '../../shared/index.js';
 import type { AgentHost } from '../agents/host.js';
 import { commitIfStateDir } from '../agents/tools/git-commit.js';
 import type { DatabaseClient } from '../db/client.js';
-import { resolveProjectDir } from '../projects/dir.js';
+import { resolveProjectDir } from '../projects/dir.js'; // used for backfilling dir_path on legacy projects
 import { log } from '../utils/logger.js';
 import { isNetworkAvailable } from './network.js';
 import type { Scheduler } from './scheduler.js';
@@ -560,16 +560,22 @@ export async function buildAndDeliverDailySummary(
 
   // 5. Find active projects (conductor not archived) and deliver project logs
   const activeProjects = db.query(
-    `SELECT DISTINCT p.id, p.name FROM project p
+    `SELECT DISTINCT p.id, p.name, p.dir_path FROM project p
      JOIN agent a ON a.project = p.id
      WHERE a.role = 'conductor' AND a.status != 'archived'`
-  ) as Array<{ id: number; name: string }>;
+  ) as Array<{ id: number; name: string; dir_path: string | null }>;
 
   const projectDataList: ProjectActivityData[] = [];
   const deliveries: Promise<void>[] = [];
 
   for (const project of activeProjects) {
-    const projectDir = resolveProjectDir(join(system2Dir, 'projects'), project.id, project.name);
+    // Use persisted dir_path, falling back to resolveProjectDir for legacy projects
+    const dirName =
+      project.dir_path ??
+      basename(resolveProjectDir(join(system2Dir, 'projects'), project.id, project.name));
+    const projectDir = join(system2Dir, 'projects', dirName);
+    mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
+    mkdirSync(join(projectDir, 'scratchpad'), { recursive: true });
     const logFile = join(projectDir, 'log.md');
 
     // Create log file if needed

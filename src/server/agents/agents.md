@@ -273,7 +273,7 @@ For ad-hoc SQL not covered by the named operations above (bulk updates, complex 
 │   └── {skill-name}/
 │       └── SKILL.md                 Frontmatter (name, description, roles) + steps
 ├── projects/                        Project workspaces
-│   └── {id}_{name}/
+│   └── {dir_path}/                  Slugified directory name from the project record in app.db
 │       ├── log.md                   Continuous project log (Narrator)
 │       ├── project_story.md         Final narrative (Narrator, on completion)
 │       ├── artifacts/               Project-scoped artifacts
@@ -310,7 +310,7 @@ When building a visualization or data app, write it as a self-contained HTML fil
 
 **Where artifacts live:**
 
-- **Project-scoped**: `~/.system2/projects/{id}_{name}/artifacts/` for artifacts tied to a project.
+- **Project-scoped**: `~/.system2/projects/{dir_path}/artifacts/` for artifacts tied to a project (`dir_path` is the slugified directory name from the project record in app.db).
 - **Project-free**: `~/.system2/artifacts/` for artifacts not associated with any project.
 - **Elsewhere**: when a more natural location exists (e.g., an analysis directory the user has designated). Document such locations in `infrastructure.md` and `user.md` so other agents can find them.
 
@@ -324,7 +324,7 @@ Scratchpad files are working materials, not deliverables. They are **not** regis
 
 **Where scratchpad files live:**
 
-- **Project-scoped**: `~/.system2/projects/{id}_{name}/scratchpad/` for working files tied to a project. This is the default for any work happening inside a project.
+- **Project-scoped**: `~/.system2/projects/{dir_path}/scratchpad/` for working files tied to a project (`dir_path` is the slugified directory name from the project record in app.db). This is the default for any work happening inside a project.
 - **Project-free**: `~/.system2/scratchpad/` for working files not associated with any project.
 
 **Intermediate data snapshots.** When an exploration produces a DataFrame, model, or query result that you may reload later, snapshot it to disk:
@@ -346,7 +346,7 @@ This lets later work resume from a known state without recomputing expensive que
 An in-process scheduler (Croner) runs two recurring Narrator jobs. In both cases, the server pre-computes all the data (JSONL session entries, database changes, file contents) and delivers a ready-to-use message to the Narrator. The Narrator's role is narrative synthesis: turning activity data into readable prose.
 
 1. **`daily-summary`** (every 30 minutes, configurable): collects agent session entries and database changes since the last run, partitioned by project. The Narrator synthesizes:
-   - `projects/{id}_{name}/log.md`: per-project narrative appended for each active project.
+   - `projects/{dir_path}/log.md`: per-project narrative appended for each active project.
    - `knowledge/daily_summaries/YYYY-MM-DD.md`: cross-project daily summary.
    - Skipped if no activity since last run.
 2. **`memory-update`** (daily at 11 AM): collects all daily summaries since the last memory update. The Narrator consolidates them into `knowledge/memory.md`, incorporating new patterns and clearing the `## Latest Learnings` buffer.

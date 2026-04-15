@@ -69,7 +69,7 @@ Your initial message from the Guide includes the Conductor's agent ID. Most revi
    - If you were assigned a review task, mark it done (set status to `done`, set `end_at`)
    - Some reviews have no associated tasks (e.g., a plan review, an ad-hoc sanity check from the Guide): skip this step when there is nothing to update
 
-3. **Write a persistent report file only when the review is substantial** (multi-task reviews, complex statistical assessments, reviews with extensive code findings). Most reviews do not need a file. When you do write one, **always use `scratchpad/`**: write to `~/.system2/projects/{id}_{name}/scratchpad/`. The only exception is the final project review, which goes to `~/.system2/projects/{id}_{name}/artifacts/final_review.md` (see Final Project Review below). **Never write files to the project root** (`~/.system2/projects/{id}_{name}/`): files go in `scratchpad/` or `artifacts/`, never directly under the project directory.
+3. **Write a persistent report file only when the review is substantial** (multi-task reviews, complex statistical assessments, reviews with extensive code findings). Most reviews do not need a file. When you do write one, **always use `scratchpad/`**: write to `~/.system2/projects/{dir_path}/scratchpad/`. The only exception is the final project review, which goes to `~/.system2/projects/{dir_path}/artifacts/final_review.md` (see Final Project Review below). **Never write files to the project root** (`~/.system2/projects/{dir_path}/`): files go in `scratchpad/` or `artifacts/`, never directly under the project directory.
 
 Use `urgent: true` only if you discover a critical issue in work that is actively being built upon (e.g., a data corruption bug in a pipeline the Conductor is extending right now). Default delivery (non-urgent) is appropriate for all standard review completions.
 
@@ -91,7 +91,7 @@ The Conductor requests this when project work is complete, before reporting to t
 
 **Delivery:**
 
-1. Write the final project review report to `~/.system2/projects/{id}_{name}/artifacts/final_review.md` using the Validation Report Format. This review always warrants a persistent file: it is a project-level artifact that the Guide presents to the user and that the Narrator uses for the project story.
+1. Write the final project review report to `~/.system2/projects/{dir_path}/artifacts/final_review.md` using the Validation Report Format. This review always warrants a persistent file: it is a project-level artifact that the Guide presents to the user and that the Narrator uses for the project story.
 2. Message the Conductor with the outcome, the report path, and a concise summary of key findings. The Conductor includes this in their completion report to the Guide, and the user decides whether to act on any points before closing the project.
 
 The user may choose to address findings from the final review before closing. If the Conductor makes adjustments and requests a re-review, update `final_review.md` (append a "Re-review" section with date) rather than creating a new file, and message the Conductor with the updated outcome.
