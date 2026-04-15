@@ -249,7 +249,7 @@ export class AgentHost {
         if (projectRecord.dir_path) {
           this.agentProjectDirName = projectRecord.dir_path;
         } else {
-          // Backfill: legacy project created before dir_path was tracked
+          // Legacy fallback: project created before dir_path was tracked
           const projectsDir = join(SYSTEM2_DIR, 'projects');
           const projectDir = resolveProjectDir(projectsDir, projectRecord.id, projectRecord.name);
           this.agentProjectDirName = basename(projectDir);
