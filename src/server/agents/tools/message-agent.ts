@@ -95,7 +95,7 @@ export function createMessageAgentTool(
           content: [
             {
               type: 'text',
-              text: `Message delivered to ${receiverAgent.role}_${agent_id}.`,
+              text: `Message delivered to ${receiverAgent.role}_${agent_id}. If you expect a response, set a 30-second reminder (set_reminder with delay_minutes: 0.5) to follow up.`,
             },
           ],
           details: { delivered: true, agent_id, timestamp },

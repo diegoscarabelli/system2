@@ -49,7 +49,7 @@ Iterate until major technical decisions are resolved. Do not build the plan unti
 
 ### 3. Plan and Approval
 
-Once aligned, write a narrative plan at `~/.system2/projects/{dir_path}/plan_{uuid}.md` covering phases, technology decisions, expected outputs, and risks. Send it to the Reviewer for feedback and incorporate their input. Then message the Guide with the plan file path and ask them to present it to the user.
+Once aligned, write the plan as a **new file** at `~/.system2/projects/{dir_path}/artifacts/plan_{uuid}.md` (generate a short UUID for `{uuid}`). This is a separate document from `scratchpad/notes.md`: notes are your working research; the plan is the formal proposal the user approves. The plan should cover phases, technology decisions, expected outputs, and risks. Send it to the Reviewer for feedback and incorporate their input. Then message the Guide with the plan file path and ask them to present it to the user.
 
 **Wait for explicit approval.** DO NOT create tasks or begin execution until the Guide confirms user approval!
 
