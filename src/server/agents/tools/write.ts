@@ -77,7 +77,7 @@ export function createWriteTool() {
               }
               // StringDecoder handles incomplete multi-byte sequences at the boundary
               const decoder = new StringDecoder('utf8');
-              const preview = decoder.write(buf);
+              const preview = decoder.write(buf) + decoder.end();
               const suffix = stats.size > PREVIEW_BYTES ? '...' : '';
               previewSection = `\n\nExisting content starts with:\n${preview}${suffix}`;
             }
