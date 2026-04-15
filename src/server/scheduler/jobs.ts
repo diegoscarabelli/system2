@@ -511,12 +511,7 @@ export async function buildAndDeliverDailySummary(
     );
   }
 
-  // 2. Read full content of today's daily summary file
-  let dailySummaryContent = '(none)';
-  const content = readFileSync(filePath, 'utf-8');
-  if (content.trim()) dailySummaryContent = content;
-
-  // 3. Resolve last_run_ts
+  // 2. Resolve last_run_ts
   let lastRunTs = readFrontmatterField(filePath, 'last_narrator_update_ts');
   if (!lastRunTs) {
     lastRunTs = getMostRecentSummaryTimestamp(summariesDir);
@@ -587,11 +582,6 @@ export async function buildAndDeliverDailySummary(
       );
     }
 
-    // Read most recent log.md content (last 10,000 characters)
-    let projectLogContext = '(none)';
-    const logTail = readTailChars(logFile, 10_000);
-    if (logTail.trim()) projectLogContext = logTail;
-
     // Project-scoped agents (Conductor, Reviewer, specialists)
     const projectScopedAgents = allAgents.filter(
       (a) => a.project_name === project.name
@@ -636,10 +626,6 @@ last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
 IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
-
-## Most recent log.md content
-
-${projectLogContext}
 
 ## Agent Activity
 
@@ -687,11 +673,7 @@ file: ${filePath}
 last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
-IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
-
-## Current daily summary file content
-
-${dailySummaryContent}`,
+IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.`,
   ];
 
   const activeProjectParts: string[] = [];
