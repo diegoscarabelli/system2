@@ -33,6 +33,7 @@ function makeProject(id: number, name: string): Project {
     id,
     name,
     description: 'test project',
+    dir_path: `${id}_${name}`,
     status: 'in progress',
     labels: [],
     start_at: 'now',

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS project (
   id INTEGER PRIMARY KEY,                -- Auto-incrementing unique identifier
   name TEXT NOT NULL,                     -- Project name
   description TEXT NOT NULL,              -- Project description
+  dir_path TEXT,                          -- Slugified directory name under ~/.system2/projects/ (e.g. "1_my-project")
   status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo', 'in progress', 'review', 'done', 'abandoned')), -- Current progress state
   labels TEXT NOT NULL DEFAULT '[]',      -- JSON array of string labels for categorization
   start_at TEXT,                          -- ISO 8601 timestamp when work began
