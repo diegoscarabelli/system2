@@ -45,6 +45,61 @@ system2 stop             # graceful shutdown
 
 ---
 
+## Builtin tools
+
+Every agent has access to a core set of tools. Some tools are restricted by role or require configuration.
+
+| Category | Tools | Description |
+| -------- | ----- | ----------- |
+| Filesystem | `bash`, `read`, `edit`, `write` | Shell commands with streaming output and safety guards (blocks recursive `rm`, `mkfs`, `dd`, direct `sqlite3` on app.db). File read, exact-match edit, and full-file write with auto-commit support for knowledge files. |
+| Database | `read_system2_db`, `write_system2_db` | Query app.db (read-only SELECT) and manage records (create/update projects, tasks, comments, artifacts) through named operations with scope checks. |
+| Communication | `message_agent` | Send messages between agents with `urgent` (interrupt) or `followUp` (queue) delivery modes. |
+| Web | `web_fetch`, `web_search` | Fetch any URL and extract readable text via Mozilla Readability. Search the web via Brave Search API (requires API key in config). |
+| UI | `show_artifact` | Display an artifact in the viewer panel with live reload on file changes. |
+| Scheduling | `set_reminder`, `cancel_reminder`, `list_reminders` | Agents schedule delayed messages to their future selves (0.5 min to 7 days) for follow-ups, retries, and condition checks. |
+| Agent lifecycle | `spawn_agent`, `terminate_agent`, `resurrect_agent` | Guide and Conductor spawn, terminate, and resurrect agents. Conductors are scoped to their own project. The Guide can resurrect archived agents with full session history. |
+| Narration | `trigger_project_story` | Kick off the Narrator's project story workflow: collects all project activity, agent logs, and DB changes into a data package for the Narrator to write a journalistic reconstruction. |
+
+See [docs/tools.md](docs/tools.md) for the full reference.
+
+---
+
+## Builtin skills
+
+Skills are reusable workflow instructions that agents load on demand. Each skill is a `SKILL.md` file with step-by-step procedures, scoped to specific agent roles. System2 ships with built-in skills covering its own workflows, data infrastructure, and analytical rigor. Agents can also create new skills at runtime, stored in `~/.system2/skills/` (user-created skills override built-in ones by name).
+
+**System2 workflows**
+
+| Skill | Roles | What it does |
+| ----- | ----- | ------------ |
+| `system2-onboarding` | Guide | First-launch setup: learns about the user, detects the data stack, configures the environment, captures interaction preferences. |
+| `project-creation` | Guide | Gathers requirements, creates the project in app.db, spawns Conductor and Reviewer, schedules a follow-up reminder. |
+| `project-completion` | Guide | Shows the Reviewer's final report, gets user confirmation, triggers close-project and project story, terminates agents. |
+| `project-restart` | Guide | Helps weigh resurrection vs. a new project, then resurrects the original agents with context intact. |
+| `ui-reference` | Guide | Reference for the System2 UI layout: sidebar, artifact viewer, chat panel, kanban board. |
+| `db-schema-reference` | All | Column-level schema for all app.db tables, so agents can write correct queries. |
+
+**Data infrastructure**
+
+| Skill | Roles | What it does |
+| ----- | ----- | ------------ |
+| `airflow` | Conductor, Reviewer, Worker | Apache Airflow v3: DAG design, TaskFlow API, dynamic task mapping, scheduling, production checklist. |
+| `prefect` | Conductor, Reviewer, Worker | Prefect v3: flows, tasks, deployments, work pools, concurrency, error handling. |
+| `timescaledb` | Conductor, Reviewer, Worker | Hypertables, chunk sizing, compression, continuous aggregates, retention policies, ingestion tuning. |
+| `sql-schema-modeling` | Conductor, Reviewer, Worker | Normalization, dimensional modeling, data types, indexing patterns, partitioning, materialization. |
+
+**Analysis and review**
+
+| Skill | Roles | What it does |
+| ----- | ----- | ------------ |
+| `statistical-analysis` | Conductor, Reviewer | Frequentist and Bayesian workflows, test selection, effect sizes, power analysis, time series, reporting standards. |
+| `code-review` | Conductor, Reviewer, Worker | Structured review: conventions, design, correctness, security (OWASP top 10), performance, SQL, testing, readability. |
+| `reasoning-fallacy-review` | Conductor, Reviewer | Cognitive bias detection: WYSIATI, confirmation bias, anchoring, narrative fallacy, premortem, Analysis of Competing Hypotheses. |
+
+See [docs/skills.md](docs/skills.md) for the full reference and the SKILL.md format.
+
+---
+
 ## See it in action
 
 A walkthrough of a real project: building a health and fitness pipeline from a smartwatch API, orchestrated by Prefect, stored in TimescaleDB, with an analytical dashboard at the end.
@@ -179,6 +234,22 @@ The Conductor's role-specific knowledge file now contains a note: "Garmin Connec
 
 ---
 
+## Automatic backups
+
+Every time `system2 start` runs, the system creates a timestamped backup of `~/.system2/` before the server initializes. Backups are full copies stored in your home directory as `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`. A cooldown period (default: 24 hours) prevents redundant copies on frequent restarts, and old backups are automatically pruned to keep only the most recent copies (default: 3).
+
+Both settings are configurable in `config.toml`:
+
+```toml
+[backup]
+cooldown_hours = 24   # minimum hours between backups
+max_backups = 3       # number of backup copies to retain
+```
+
+The backup covers the entire `~/.system2/` directory: database, knowledge files, project artifacts, skills, sessions, configuration, and the shared Python environment. If something goes wrong, you can restore by copying a backup directory back to `~/.system2/`.
+
+---
+
 ## Configuration
 
 All settings live in `~/.system2/config.toml`, created during onboarding.
@@ -186,6 +257,7 @@ All settings live in `~/.system2/config.toml`, created during onboarding.
 - **`[llm]`**: primary provider, fallback order, per-provider API keys with automatic rotation
 - **`[services.brave_search]`**: optional web search via Brave Search API
 - **`[scheduler]`**: Narrator frequency (default: every 30 minutes)
+- **`[backup]`**: backup cooldown and retention (default: every 24 hours, keep 3)
 
 **Supported LLM providers:** Anthropic, Google Gemini, OpenAI, Cerebras, Groq, Mistral, OpenRouter, xAI, and any OpenAI-compatible endpoint.
 
