@@ -251,6 +251,24 @@ export class AuthResolver {
   }
 
   /**
+   * Clear cooldowns that were set for transient errors (client-error and server-error
+   * categories). Auth and rate-limit cooldowns are preserved.
+   *
+   * Used as a last resort when all providers are exhausted due to 400 errors that may
+   * have been context overflow misclassified as client errors. Clearing only transient
+   * cooldowns is safe: auth failures should remain blocked, and rate-limit cooldowns
+   * should remain to respect provider backoff windows.
+   */
+  clearTransientCooldowns(): void {
+    for (const [keyId, cooldown] of this.cooldowns) {
+      if (cooldown.reason === 'transient') {
+        this.cooldowns.delete(keyId);
+        log.info(`[AuthResolver] Cleared transient cooldown for ${keyId}`);
+      }
+    }
+  }
+
+  /**
    * Clear expired cooldowns and check if any keys are available again.
    */
   clearExpiredCooldowns(): void {

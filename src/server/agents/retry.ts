@@ -86,16 +86,25 @@ export function categorizeError(error: unknown): ErrorCategory {
 
 /**
  * Check if an error message indicates context window overflow.
- * Matches patterns from Google, OpenAI, Anthropic, and other providers.
+ * Matches patterns from all supported providers.
  */
 function isContextOverflow(message: string): boolean {
   return (
     // Google: "The input token count (N) exceeds the maximum number of tokens allowed (N)"
     /input token count.*exceeds.*maximum/.test(message) ||
-    // OpenAI: "maximum context length is N tokens"
+    // OpenAI, Groq, Cerebras, OpenRouter, Mistral:
+    //   "This model's maximum context length is N tokens"
+    //   "This endpoint's maximum context length is N tokens" (OpenRouter)
+    //   "too large for model with N maximum context length" (Mistral)
     /maximum context length/.test(message) ||
     // Anthropic: "prompt is too long: N tokens > N maximum"
-    /prompt is too long.*tokens/.test(message)
+    /prompt is too long.*tokens/.test(message) ||
+    // xAI/Grok: "This model's maximum prompt length is N but the request contains M tokens"
+    /maximum prompt length/.test(message) ||
+    // OpenAI Responses API: "Your input exceeds the context window of this model"
+    /exceeds the context window/.test(message) ||
+    // Providers that surface the error code verbatim in the message
+    /context.?length.?exceeded/.test(message)
   );
 }
 

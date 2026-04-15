@@ -98,6 +98,46 @@ describe('categorizeError', () => {
     );
   });
 
+  it('returns "context_overflow" for xAI/Grok maximum prompt length errors', () => {
+    expect(
+      categorizeError(
+        new Error(
+          'This model\'s maximum prompt length is 131072 but the request contains 136973 tokens.'
+        )
+      )
+    ).toBe('context_overflow');
+  });
+
+  it('returns "context_overflow" for OpenAI Responses API context window errors', () => {
+    expect(
+      categorizeError(
+        new Error('Your input exceeds the context window of this model. Please adjust your input.')
+      )
+    ).toBe('context_overflow');
+  });
+
+  it('returns "context_overflow" when error code appears verbatim in message', () => {
+    expect(categorizeError(new Error('context_length_exceeded: reduce your prompt'))).toBe(
+      'context_overflow'
+    );
+  });
+
+  it('returns "context_overflow" for Mistral token count errors', () => {
+    expect(
+      categorizeError(
+        new Error('Prompt contains 65673 tokens, too large for model with 32768 maximum context length')
+      )
+    ).toBe('context_overflow');
+  });
+
+  it('returns "context_overflow" for OpenRouter endpoint context length errors', () => {
+    expect(
+      categorizeError(
+        new Error("This endpoint's maximum context length is 131072 tokens. However, you requested about 138956 tokens.")
+      )
+    ).toBe('context_overflow');
+  });
+
   it('returns "client" for non-overflow 400 errors', () => {
     expect(categorizeError({ status: 400, message: 'Invalid request body' })).toBe('client');
   });
