@@ -47,7 +47,7 @@ On receiving your initial message from Guide:
 
 Iterate until major technical decisions are resolved. Do not build the plan until you have enough clarity to write detailed task descriptions.
 
-### 3. Plan and Approval
+### 3. Plan, Approval, and Task Breakdown
 
 Once aligned, write the plan as a **new file** at `~/.system2/projects/{dir_path}/artifacts/plan_{uuid}.md` (generate a short UUID for `{uuid}`). This is a separate document from `scratchpad/notes.md`: notes are your working research; the plan is the formal proposal the user approves. The plan should cover phases, technology decisions, expected outputs, and risks. Send it to the Reviewer for feedback and incorporate their input. Then message the Guide with the plan file path and ask them to present it to the user.
 
