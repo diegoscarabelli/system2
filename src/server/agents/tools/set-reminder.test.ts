@@ -5,7 +5,9 @@ import { createSetReminderTool } from './set-reminder.js';
 function setup(existingReminderCount = 0) {
   const reminderManager = {
     schedule: vi.fn().mockReturnValue({ id: 1, fireAt: new Date('2026-01-01T12:05:00Z') }),
-    listForAgent: vi.fn().mockReturnValue(Array.from({ length: existingReminderCount }, (_, i) => i)),
+    listForAgent: vi
+      .fn()
+      .mockReturnValue(Array.from({ length: existingReminderCount }, (_, i) => i)),
   } as unknown as ReminderManager;
   const tool = createSetReminderTool(1, reminderManager);
   return { tool, reminderManager };
