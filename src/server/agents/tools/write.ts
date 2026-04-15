@@ -71,7 +71,7 @@ export function createWriteTool() {
                   type: 'text',
                   text:
                     `Cannot write: file already exists with content (${stats.size} bytes). ` +
-                    `Use the \`edit\` tool to modify it, or delete it first (\`bash\`: \`rm ${params.path}\`) ` +
+                    `Use the \`edit\` tool to modify it, or delete it first (\`bash\`: \`rm "${params.path}"\`) ` +
                     `then retry this write.\n\nExisting content starts with:\n${preview}${suffix}`,
                 },
               ],
