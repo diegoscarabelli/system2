@@ -56,14 +56,15 @@ export function createWriteTool() {
             const bytesToRead = Math.min(stats.size, PREVIEW_BYTES);
             const buf = Buffer.alloc(bytesToRead);
             const fh = await open(filePath, 'r');
+            let bytesRead = 0;
             try {
-              await fh.read(buf, 0, bytesToRead, 0);
+              ({ bytesRead } = await fh.read(buf, 0, bytesToRead, 0));
             } finally {
               await fh.close();
             }
             // StringDecoder handles incomplete multi-byte sequences at the boundary
             const decoder = new StringDecoder('utf8');
-            const preview = decoder.write(buf) + decoder.end();
+            const preview = decoder.write(buf.subarray(0, bytesRead)) + decoder.end();
             const suffix = stats.size > PREVIEW_BYTES ? '...' : '';
             return {
               content: [
