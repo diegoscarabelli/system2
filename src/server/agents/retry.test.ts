@@ -102,7 +102,7 @@ describe('categorizeError', () => {
     expect(
       categorizeError(
         new Error(
-          'This model\'s maximum prompt length is 131072 but the request contains 136973 tokens.'
+          "This model's maximum prompt length is 131072 but the request contains 136973 tokens."
         )
       )
     ).toBe('context_overflow');
@@ -125,7 +125,9 @@ describe('categorizeError', () => {
   it('returns "context_overflow" for Mistral token count errors', () => {
     expect(
       categorizeError(
-        new Error('Prompt contains 65673 tokens, too large for model with 32768 maximum context length')
+        new Error(
+          'Prompt contains 65673 tokens, too large for model with 32768 maximum context length'
+        )
       )
     ).toBe('context_overflow');
   });
@@ -133,7 +135,9 @@ describe('categorizeError', () => {
   it('returns "context_overflow" for OpenRouter endpoint context length errors', () => {
     expect(
       categorizeError(
-        new Error("This endpoint's maximum context length is 131072 tokens. However, you requested about 138956 tokens.")
+        new Error(
+          "This endpoint's maximum context length is 131072 tokens. However, you requested about 138956 tokens."
+        )
       )
     ).toBe('context_overflow');
   });
