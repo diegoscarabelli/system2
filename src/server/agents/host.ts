@@ -1068,21 +1068,28 @@ export class AgentHost {
       createReadTool(),
       createEditTool(),
       createWriteTool(),
-      createWebFetchTool(),
     ];
+
+    // Narrator is a background narration agent: it reads files and writes summaries.
+    // It has no use for web access, artifact display, or reminders.
+    const isNarrator = this.agentRole === 'narrator';
+
+    if (!isNarrator) {
+      tools.push(createWebFetchTool());
+    }
 
     // web_search requires a Brave Search API key
     const braveKey = this.servicesConfig?.brave_search?.key;
-    if (braveKey && this.toolsConfig?.web_search?.enabled !== false) {
+    if (!isNarrator && braveKey && this.toolsConfig?.web_search?.enabled !== false) {
       tools.push(createWebSearchTool(braveKey, this.toolsConfig?.web_search?.max_results));
       log.info('[AgentHost] web_search tool enabled');
     }
 
-    // All agents can show artifacts — any agent can now interact with the user directly
-    tools.push(createShowArtifactTool(this.db));
+    if (!isNarrator) {
+      tools.push(createShowArtifactTool(this.db));
+    }
 
-    // All agents can set, cancel, and list reminders
-    if (this.reminderManager) {
+    if (!isNarrator && this.reminderManager) {
       tools.push(createSetReminderTool(this.agentId, this.reminderManager));
       tools.push(createCancelReminderTool(this.agentId, this.reminderManager));
       tools.push(createListRemindersTool(this.agentId, this.reminderManager));
