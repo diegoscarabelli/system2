@@ -43,9 +43,11 @@ Synthesize the pre-computed activity data in the message into a concise but comp
 
 **Workflow:**
 
-1. **Review provided data:** Read through the message metadata, Agent Activity (the Guide's activity may span multiple projects; focus on what is relevant to this one), and Database Changes.
+1. **Check for duplicate delivery.** The message header includes the log file path and `new_run_ts`. Before appending, read the last 20 lines of the log file and check whether a section heading with the same `new_run_ts` timestamp already exists (this can happen when the server restarts before the cursor is advanced). If the heading already exists, skip this delivery without appending.
 
-2. **Append narrative section:** Use `edit` with `append: true` and `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to add a new timestamped section at the end of the file.
+2. **Review provided data:** Read through the message metadata, Agent Activity (the Guide's activity may span multiple projects; focus on what is relevant to this one), and Database Changes.
+
+3. **Append narrative section:** Use `edit` with `append: true` and `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to add a new timestamped section at the end of the file.
 
    ```text
    ## YYYY-MM-DDTHH:MMZ

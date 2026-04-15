@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ReminderManager } from '../../reminders/manager.js';
 import { createSetReminderTool } from './set-reminder.js';
 
-function setup() {
+function setup(existingReminderCount = 0) {
   const reminderManager = {
     schedule: vi.fn().mockReturnValue({ id: 1, fireAt: new Date('2026-01-01T12:05:00Z') }),
+    listForAgent: vi.fn().mockReturnValue(Array.from({ length: existingReminderCount }, (_, i) => i)),
   } as unknown as ReminderManager;
   const tool = createSetReminderTool(1, reminderManager);
   return { tool, reminderManager };
@@ -55,11 +56,21 @@ describe('set_reminder tool', () => {
     expect((result.content[0] as { text: string }).text).toContain('must be between');
   });
 
+  it('rejects when per-agent limit is reached', async () => {
+    const { tool, reminderManager } = setup(10);
+
+    const result = await exec(tool, { delay_minutes: 1, message: 'one more' });
+
+    expect(reminderManager.schedule).not.toHaveBeenCalled();
+    expect((result.content[0] as { text: string }).text).toContain('limit');
+  });
+
   it('handles manager errors gracefully', async () => {
     const reminderManager = {
       schedule: vi.fn().mockImplementation(() => {
         throw new Error('timer failed');
       }),
+      listForAgent: vi.fn().mockReturnValue([]),
     } as unknown as ReminderManager;
     const tool = createSetReminderTool(1, reminderManager);
 

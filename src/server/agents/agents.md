@@ -226,6 +226,8 @@ Your chat text output is visible only to the user, not to other agents. Always u
 3. **When the reminder fires:** if the expected response has arrived in your conversation since you set the reminder, the follow-up is satisfied; move on. If not, re-send or escalate, and set another reminder. Keep re-scheduling until the thread resolves or circumstances change.
 4. **Cancel reminders you no longer need.** If the response arrives before the reminder fires, cancel it with `cancel_reminder` to keep your reminder list clean.
 
+Keep your active reminder count low. A single pending question rarely warrants more than one or two outstanding reminders. Before setting a new reminder, check `list_reminders` if you are unsure how many you already have. The system enforces a hard per-agent limit — if you hit it, cancel stale reminders first.
+
 ### Database Operations (`write_system2_db`)
 
 | Operation | Required | Optional | Restrictions |

@@ -4,6 +4,7 @@ import type { ReminderManager } from '../../reminders/manager.js';
 
 const MIN_DELAY_MINUTES = 0.5; // 30 seconds
 const MAX_DELAY_MINUTES = 10_080; // 7 days
+const MAX_REMINDERS_PER_AGENT = 10;
 
 export function createSetReminderTool(agentId: number, reminderManager: ReminderManager) {
   const params = Type.Object({
@@ -34,6 +35,19 @@ export function createSetReminderTool(agentId: number, reminderManager: Reminder
             },
           ],
           details: { error: 'invalid_delay' },
+        };
+      }
+
+      const existing = reminderManager.listForAgent(agentId);
+      if (existing.length >= MAX_REMINDERS_PER_AGENT) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error: you have ${existing.length} pending reminders (limit: ${MAX_REMINDERS_PER_AGENT}). Cancel some with cancel_reminder before setting new ones. Use list_reminders to see what is pending.`,
+            },
+          ],
+          details: { error: 'reminder_limit_exceeded', current_count: existing.length },
         };
       }
 

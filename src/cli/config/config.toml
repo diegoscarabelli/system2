@@ -104,6 +104,24 @@ max_backups = 3
 # database = "my_dataset"
 # credentials_file = "/path/to/service-account.json"
 
+# Per-agent overrides for model, thinking level, and compaction depth.
+# These take precedence over the defaults in each agent's library frontmatter.
+# Supported roles: guide, conductor, reviewer, narrator, worker
+#
+# [agents.conductor]
+# thinking_level = "high"        # off | minimal | low | medium | high
+# compaction_depth = 8           # keep N auto-compactions in sliding window
+#
+# [agents.conductor.models]
+# anthropic = "claude-opus-4-6"  # override model for a specific provider
+# google = "gemini-2.5-pro"
+#
+# [agents.guide]
+# thinking_level = "high"
+#
+# [agents.guide.models]
+# anthropic = "claude-opus-4-6"
+
 [session]
 # Session file size threshold for rotation in MB
 rotation_threshold_mb = 10

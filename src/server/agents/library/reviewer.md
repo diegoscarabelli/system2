@@ -65,7 +65,8 @@ Your initial message from the Guide includes the Conductor's agent ID. Most revi
    - References to the specific tasks, artifacts, or work items that were reviewed (by ID, file path, or whatever the requester used to identify them)
 
 2. **Update task records** if the review request was associated with specific tasks:
-   - Post a task comment on each reviewed task with the outcome
+   - Post a task comment on each reviewed task with the outcome. Note the comment ID — you will include it in your message to the requester.
+   - When messaging the requesting agent with the outcome, reference the task comment ID(s) you posted so the recipient can locate the full record without querying.
    - If you were assigned a review task, mark it done (set status to `done`, set `end_at`)
    - Some reviews have no associated tasks (e.g., a plan review, an ad-hoc sanity check from the Guide): skip this step when there is nothing to update
 
