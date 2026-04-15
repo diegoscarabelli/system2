@@ -276,8 +276,8 @@ For ad-hoc SQL not covered by the named operations above (bulk updates, complex 
 │   └── {id}_{name}/
 │       ├── log.md                   Continuous project log (Narrator)
 │       ├── project_story.md         Final narrative (Narrator, on completion)
-│       ├── plan_{uuid}.md           Conductor's proposal document
 │       ├── artifacts/               Project-scoped artifacts
+│       │   └── plan_{uuid}.md      Conductor's proposal document
 │       └── scratchpad/              Project-scoped working files
 ├── sessions/                        Conversation history as JSONL (gitignored)
 │   └── {role}_{id}/
@@ -492,7 +492,7 @@ Your system prompt is built from these layers on every LLM call:
 
 ### Projects and Tasks
 
-All planning and tracking happens in `app.db`. The narrative plan (`plan_{uuid}.md` in the project directory) is a proposal document for user approval; once approved, the task hierarchy in the database becomes the authoritative plan. **The task hierarchy is the plan.**
+All planning and tracking happens in `app.db`. The narrative plan (`artifacts/plan_{uuid}.md`) is a proposal document for user approval; once approved, the task hierarchy in the database becomes the authoritative plan. **The task hierarchy is the plan.**
 
 **Status transitions** for both projects and tasks: `todo` -> `in progress` -> `review` -> `done` (or `abandoned`).
 
@@ -517,7 +517,7 @@ Every project follows a mandatory research, discuss, plan, approve, execute flow
 
 1. **Research**: Read the project record, consult `infrastructure.md`, inspect the data pipeline code repository for existing patterns, and investigate the problem domain (data sources, APIs, formats, volumes).
 2. **Discuss**: Engage the Guide in a detailed technical back-and-forth. Present implementation options with concrete trade-offs. Ground technology choices in the existing stack.
-3. **Plan**: Write the narrative plan as `plan_{uuid}.md` in the project directory: phases, technology choices, expected outputs, risks.
+3. **Plan**: Write the narrative plan as `artifacts/plan_{uuid}.md`: phases, technology choices, expected outputs, risks.
 4. **Present**: Send the plan file path to the Guide, who displays it to the user and walks them through it.
 5. **Approve**: Wait for explicit user approval relayed by the Guide. Do not build the task hierarchy or execute before approval. Revise the plan if changes are requested.
 6. **Execute**: Build the task hierarchy in `app.db`, then work through tasks in dependency order, spawning specialist agents as needed.
