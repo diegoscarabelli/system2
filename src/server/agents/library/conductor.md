@@ -53,7 +53,24 @@ Once aligned, write the plan as a **new file** at `~/.system2/projects/{dir_path
 
 **Wait for explicit approval.** DO NOT create tasks or begin execution until the Guide confirms user approval!
 
-After approval, create the task hierarchy in app.db: top-level tasks for phases, subtasks via `parent`. Populate every available field on each record: `assignee`, `priority`, `labels`, `blocked_by` for sequencing, and a `description` covering the technical approach, target systems, expected data volumes, and acceptance criteria. Best-effort completeness: sparse records are harder to track and review than dense ones.
+After approval, create the task hierarchy in app.db. The hierarchy has two levels:
+
+- **Phase tasks (top-level):** One per phase. These are groupings, not work items. A phase task's status reflects the aggregate of its subtasks. Never assign a phase task directly to a worker — workers execute subtasks.
+- **Subtasks (children via `parent`):** One per numbered step in the approved plan. This is where the real tracking happens. Every step you wrote in the plan — not just the phase headings — must have a corresponding subtask. If Phase 1 has four steps in the plan, Phase 1 has four subtasks in the database. A subtask should represent a single focused deliverable: one script, one schema, one transformation, one loaded table. A reviewer should be able to look at the subtask description and know exactly what "done" means without reading the rest of the plan.
+
+**Scope check:** If a subtask cannot be described with a clear input, a clear output, and a concrete acceptance criterion, split it further or make the description more specific. If you are tempted to create a subtask called "Phase 1 work" with a vague description, that is a sign you have not decomposed the plan sufficiently.
+
+**Example — under-decomposed (wrong):**
+- Task: "Phase 1: Data Acquisition and Preparation" (no subtasks, or one vague subtask)
+
+**Example — properly decomposed (correct), where Phase 1 has four plan steps:**
+- Task: "Phase 1: Data Acquisition and Preparation" (phase grouping)
+  - Subtask: "Design SQL schema for target table" — output: `schema.sql` committed to repo; acceptance: table created in dev DB with correct types and constraints
+  - Subtask: "Extract raw data from source API" — output: raw files in `scratchpad/raw/`; acceptance: row counts and date ranges match source
+  - Subtask: "Transform raw data" — output: `scratchpad/transformed.parquet`; acceptance: no nulls in required columns, spot-check values correct
+  - Subtask: "Load processed data into target table" — output: rows in DB; acceptance: row count matches transformed data, spot-check queries return expected values
+
+Populate every available field on each record: `assignee`, `priority`, `labels`, `blocked_by` for sequencing, and a `description` covering the technical approach, target systems, expected data volumes, and acceptance criteria. Best-effort completeness: sparse records are harder to track and review than dense ones.
 
 ### 4. Execute
 
