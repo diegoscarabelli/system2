@@ -69,9 +69,11 @@ Synthesize each section into a concise but comprehensive narrative. Since projec
 
 1. **Parse metadata:** Extract `file`, `last_run_ts`, `new_run_ts` from the message header.
 
-2. **Review provided data:** Read through the Current daily summary file content (to avoid repeating what was already narrated), Project Activity sections, and Non-Project Activity.
+2. **Check for duplicate delivery.** Read the last 30 lines of the daily summary file and check whether a section heading matching the `new_run_ts` time (e.g. `## HH:MMZ`) already exists. If it does, this delivery was already processed — skip without appending.
 
-3. **Proactive investigation:** Based on the provided data, decide if additional information would improve the summary. Examples:
+3. **Review provided data:** Read through the current daily summary file content (to avoid repeating what was already narrated), Project Activity sections, and Non-Project Activity.
+
+4. **Proactive investigation:** Based on the provided data, decide if additional information would improve the summary. Examples:
 
    ```bash
    git -C ~/.system2 log --since="<last_run_ts>" --until="<new_run_ts>" --oneline
@@ -79,7 +81,7 @@ Synthesize each section into a concise but comprehensive narrative. Since projec
 
    Or run additional database queries for broader context.
 
-4. **Write the narrative section.** Use `edit` with `append: true` and `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to add the new section.
+5. **Write the narrative section.** Use `edit` with `append: true` and `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to add the new section.
 
    Section format:
 
