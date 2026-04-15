@@ -66,12 +66,14 @@ Use `labels` to indicate which phase a task belongs to (e.g. `phase:1`) and `blo
 - "Phase 1: Data Acquisition and Preparation"
 - "Set up data pipeline"
 
-**Example — correct (one task per plan step, four steps in Phase 1):**
+**Example — correct (typical data pipeline project broken into focused tasks):**
 
-- "Design SQL schema for target table" — output: `schema.sql` committed to repo; acceptance: table created in dev DB with correct types and constraints
-- "Extract raw data from source API" — output: raw files in `scratchpad/raw/`; acceptance: row counts and date ranges match source
-- "Transform raw data" — output: `scratchpad/transformed.parquet`; acceptance: no nulls in required columns, spot-check values correct
-- "Load processed data into target table" — output: rows in DB; acceptance: row count matches transformed data, spot-check queries return expected values
+- "Explore source API and response shape" — output: ad hoc script(s) in `scratchpad/` confirming authentication, pagination, field names, and data volumes; acceptance: script runs end-to-end and documents any surprises
+- "Design SQL schema for target table" — output: `schema.sql` committed to the pipeline repo; acceptance: table created in the database with correct types, constraints, and indexes
+- "Write data pipeline" — output: pipeline script/DAG committed to the pipeline repo; acceptance: runs locally against the database, loads expected row count for a test date range
+- "Test data pipeline" — output: test results documented in a task comment; acceptance: edge cases covered (empty response, duplicate keys, schema drift), pipeline passes all checks
+- "Deploy pipeline to orchestrator" — output: DAG/flow active in the orchestrator; acceptance: first scheduled run completes without errors, rows appear in the database
+- "Run analysis and publish artifact" — output: artifact registered in system2 (chart, report, or notebook); acceptance: analysis queries the live database table, artifact is visible in the UI
 
 Populate every available field on each record: `assignee`, `priority`, `labels`, `blocked_by` for sequencing, and a `description` covering the technical approach, target systems, expected data volumes, and acceptance criteria. Best-effort completeness: sparse records are harder to track and review than dense ones.
 
