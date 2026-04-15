@@ -289,9 +289,10 @@ describe('buildConfigToml', () => {
     expect(result).toContain('max_rows = 50000');
   });
 
-  it('omits databases section when not configured', () => {
+  it('shows commented database hint when no databases configured', () => {
     const result = buildConfigToml({});
-    expect(result).not.toContain('[databases.');
+    expect(result).toContain('# [databases.');
+    expect(result).not.toMatch(/^\[databases\./m);
   });
 
   it('serializes snowflake-specific fields (account, warehouse, role, schema)', () => {
@@ -426,9 +427,10 @@ describe('buildConfigToml', () => {
     expect(result).toContain('google = "gemini-2.5-pro"');
   });
 
-  it('omits agents section when not configured', () => {
+  it('shows commented agents hint when not configured', () => {
     const result = buildConfigToml({});
-    expect(result).not.toContain('[agents.');
+    expect(result).toContain('# [agents.');
+    expect(result).not.toMatch(/^\[agents\./m);
   });
 });
 
