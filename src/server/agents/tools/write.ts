@@ -2,14 +2,20 @@
  * Write Tool
  *
  * Writes content to files on the filesystem.
+ * Refuses to overwrite existing files that contain data. To replace an
+ * existing file, delete it first (via bash `rm`), then write.
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, open, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import { commitIfStateDir } from './git-commit.js';
 import { resolvePath } from './resolve-path.js';
+
+/** Max bytes of existing content to include in the blocked-overwrite preview. */
+const PREVIEW_BYTES = 200;
 
 export function createWriteTool() {
   const params = Type.Object({
@@ -31,11 +37,52 @@ export function createWriteTool() {
     name: 'write',
     label: 'Write File',
     description:
-      'Write content to a file. Creates parent directories if needed. WARNING: this tool REPLACES the entire file content. Any existing content not included in `content` will be permanently lost. Use this ONLY for creating new files or complete rewrites where you provide ALL content. To add a section to an existing file (e.g. adding a [databases.*] entry to config.toml), use the `edit` tool with `append: true` so you do not destroy existing sections. For modifying specific parts, use `edit`. For bulk replacements, use `bash` with `sed` or `awk`.',
+      'Create a new file or write to an empty file. Creates parent directories if needed. ' +
+      'This tool REFUSES to overwrite an existing file that already contains data. ' +
+      'To modify part of a file, use the `edit` tool. ' +
+      'To append content (e.g. adding a [databases.<name>] entry to config.toml), use `edit` with `append: true`. ' +
+      'To intentionally replace a file entirely, delete it first with `bash` (`rm <path>`), then use this tool. ' +
+      'For bulk find-and-replace, use `bash` with `sed` or `awk`.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
       try {
         const filePath = resolvePath(params.path);
+
+        // Block overwriting existing files that contain data
+        try {
+          const stats = await stat(filePath);
+          if (stats.isFile() && stats.size > 0) {
+            // Read only the first PREVIEW_BYTES to avoid loading large files
+            const bytesToRead = Math.min(stats.size, PREVIEW_BYTES);
+            const buf = Buffer.alloc(bytesToRead);
+            const fh = await open(filePath, 'r');
+            let bytesRead = 0;
+            try {
+              ({ bytesRead } = await fh.read(buf, 0, bytesToRead, 0));
+            } finally {
+              await fh.close();
+            }
+            // StringDecoder handles incomplete multi-byte sequences at the boundary
+            const decoder = new StringDecoder('utf8');
+            const preview = decoder.write(buf.subarray(0, bytesRead)) + decoder.end();
+            const suffix = stats.size > PREVIEW_BYTES ? '...' : '';
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    `Cannot write: file already exists with content (${stats.size} bytes). ` +
+                    `Use the \`edit\` tool to modify it, or delete it first (\`bash\`: \`rm "${params.path}"\`) ` +
+                    `then retry this write.\n\nExisting content starts with:\n${preview}${suffix}`,
+                },
+              ],
+              details: { path: filePath, blocked: true, existingSize: stats.size },
+            };
+          }
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+          // File doesn't exist, safe to write
+        }
 
         const dir = dirname(filePath);
         await mkdir(dir, { recursive: true });
