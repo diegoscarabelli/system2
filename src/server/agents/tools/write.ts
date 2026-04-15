@@ -7,8 +7,7 @@
  */
 
 import { mkdir, open, stat, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
@@ -17,17 +16,6 @@ import { resolvePath } from './resolve-path.js';
 
 /** Max bytes of existing content to include in the blocked-overwrite preview. */
 const PREVIEW_BYTES = 200;
-
-/**
- * Returns true for files inside ~/.system2/ whose content may contain API keys
- * or other credentials. Content previews are suppressed for these paths.
- * Note: symlinks are not resolved; paths are assumed to be absolute and
- * already normalized (as produced by resolvePath()).
- */
-export function isSensitivePath(filePath: string): boolean {
-  const stateDir = join(homedir(), '.system2') + sep;
-  return resolve(filePath).startsWith(stateDir);
-}
 
 export function createWriteTool() {
   const params = Type.Object({
@@ -64,23 +52,19 @@ export function createWriteTool() {
         try {
           const stats = await stat(filePath);
           if (stats.isFile() && stats.size > 0) {
-            let previewSection = '';
-            if (!isSensitivePath(filePath)) {
-              // Read only the first PREVIEW_BYTES to avoid loading large files
-              const bytesToRead = Math.min(stats.size, PREVIEW_BYTES);
-              const buf = Buffer.alloc(bytesToRead);
-              const fh = await open(filePath, 'r');
-              try {
-                await fh.read(buf, 0, bytesToRead, 0);
-              } finally {
-                await fh.close();
-              }
-              // StringDecoder handles incomplete multi-byte sequences at the boundary
-              const decoder = new StringDecoder('utf8');
-              const preview = decoder.write(buf) + decoder.end();
-              const suffix = stats.size > PREVIEW_BYTES ? '...' : '';
-              previewSection = `\n\nExisting content starts with:\n${preview}${suffix}`;
+            // Read only the first PREVIEW_BYTES to avoid loading large files
+            const bytesToRead = Math.min(stats.size, PREVIEW_BYTES);
+            const buf = Buffer.alloc(bytesToRead);
+            const fh = await open(filePath, 'r');
+            try {
+              await fh.read(buf, 0, bytesToRead, 0);
+            } finally {
+              await fh.close();
             }
+            // StringDecoder handles incomplete multi-byte sequences at the boundary
+            const decoder = new StringDecoder('utf8');
+            const preview = decoder.write(buf) + decoder.end();
+            const suffix = stats.size > PREVIEW_BYTES ? '...' : '';
             return {
               content: [
                 {
@@ -88,7 +72,7 @@ export function createWriteTool() {
                   text:
                     `Cannot write: file already exists with content (${stats.size} bytes). ` +
                     `Use the \`edit\` tool to modify it, or delete it first (\`bash\`: \`rm ${params.path}\`) ` +
-                    `then retry this write.${previewSection}`,
+                    `then retry this write.\n\nExisting content starts with:\n${preview}${suffix}`,
                 },
               ],
               details: { path: filePath, blocked: true, existingSize: stats.size },

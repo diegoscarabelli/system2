@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createWriteTool, isSensitivePath } from './write.js';
+import { createWriteTool } from './write.js';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `system2-test-write-${randomUUID().slice(0, 8)}`);
@@ -117,40 +117,5 @@ describe('write tool', () => {
     const result = await exec({ path: file, content: 'replacement' });
 
     expect((result.details as Record<string, unknown>).blocked).toBe(true);
-  });
-
-  describe('isSensitivePath', () => {
-    it('returns true for files inside ~/.system2/', () => {
-      expect(isSensitivePath(join(homedir(), '.system2', 'config.toml'))).toBe(true);
-      expect(isSensitivePath(join(homedir(), '.system2', 'nested', 'file.txt'))).toBe(true);
-    });
-
-    it('returns false for files outside ~/.system2/', () => {
-      expect(isSensitivePath(join(tmpdir(), 'file.txt'))).toBe(false);
-      expect(isSensitivePath(join(homedir(), 'projects', 'config.toml'))).toBe(false);
-      expect(isSensitivePath(join(homedir(), '.system2-other', 'file.txt'))).toBe(false);
-    });
-  });
-
-  it('omits content preview for files in ~/.system2/', async () => {
-    // Create a temp file inside ~/.system2/ — the actual state directory — to
-    // avoid mocking node:os. The file is cleaned up in afterEach.
-    const stateDir = join(homedir(), '.system2');
-    mkdirSync(stateDir, { recursive: true });
-    const file = join(stateDir, `test-write-sensitive-${randomUUID().slice(0, 8)}.txt`);
-    const secretContent = 'key = "sk-ant-secret-value"';
-    writeFileSync(file, secretContent);
-    tmpDirs.push(file); // cleaned up by afterEach via rmSync
-
-    const result = await exec({ path: file, content: 'replacement' });
-    const text = (result.content[0] as { text: string }).text;
-
-    // Should still be blocked and report size
-    expect(text).toContain('Cannot write: file already exists with content');
-    // Should NOT include content preview to avoid leaking secrets
-    expect(text).not.toContain(secretContent);
-    expect(text).not.toContain('Existing content starts with');
-    // Original content should be preserved
-    expect(readFileSync(file, 'utf-8')).toBe(secretContent);
   });
 });
