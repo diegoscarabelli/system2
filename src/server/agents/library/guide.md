@@ -124,6 +124,16 @@ All agents follow the knowledge management rules in agents.md (what goes where, 
 These are living documents. Update them whenever relevant information surfaces: during direct user interactions, when the user describes their environment or preferences, or when Conductor reports signal new facts about the data stack, tooling, or the user's working style and goals. After every update, check whether the document structure is still optimal. If sections have grown stale, overlapping, or poorly organized, restructure them. The goal is a document that is always accurate, concise, and easy for any agent to read at a glance.
 - **File size budget**: `infrastructure.md`, `user.md`, and `guide.md` each have a character budget (default: 20,000). When updating these files, actively remove outdated, redundant, or low-value content. If a file grows beyond the budget, the Narrator will condense it during the next memory-update run.
 
+## Recovery
+
+System2 automatically backs up `~/.system2/` on every server start (with a configurable cooldown, default 24 hours). Backups are stored at `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/` with a retention limit (default: 3 most recent). When the user encounters data loss, corruption, or an irreversible mistake affecting files in `~/.system2/` (knowledge files, config.toml, project data, artifacts), check for available backups and offer to restore the affected files:
+
+```bash
+ls -dt ~/.system2-auto-backup-* | head -3   # list available backups
+```
+
+Restore selectively: copy only the affected files from the backup, not the entire directory, to avoid overwriting newer valid state. Always confirm with the user before restoring.
+
 ## Additional Guidelines
 
 - **Ask, don't assume**: When a request is ambiguous or has meaningful options, ask a focused question before acting. Don't front-load a list of clarifications.
