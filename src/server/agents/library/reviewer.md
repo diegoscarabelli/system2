@@ -57,9 +57,9 @@ Your initial message from the Guide includes the Conductor's agent ID. Most revi
 
 ### Delivering the Review
 
-The review is delivered as the content of a `message_agent` call to the requesting agent. The message itself is the review: the recipient should have everything needed to act without reading a separate file. Use the Validation Report Format below to structure the message body.
+**The message IS the review.** Your primary delivery is the content of a `message_agent` call. The requesting agent should have everything needed to act from the message alone, without reading a separate file. Most reviews need no file at all.
 
-1. **Message the requesting agent** using `message_agent` with the agent ID extracted from the incoming request prefix. The message must contain:
+1. **Message the requesting agent** using `message_agent` with the agent ID extracted from the incoming request prefix. Structure the message body using the Validation Report Format below. It must contain:
    - The outcome: APPROVED / APPROVED WITH WARNINGS / NEEDS REVISION
    - The full structured review (findings, issues, validated items, conclusion). Every finding that refers to code or data must include the file path and line number(s) so the recipient can navigate directly to the relevant location (e.g., `src/pipelines/ingest.py:142`, `dags/linkedin/transform.sql:87-93`)
    - References to the specific tasks, artifacts, or work items that were reviewed (by ID, file path, or whatever the requester used to identify them)
@@ -69,7 +69,7 @@ The review is delivered as the content of a `message_agent` call to the requesti
    - If you were assigned a review task, mark it done (set status to `done`, set `end_at`)
    - Some reviews have no associated tasks (e.g., a plan review, an ad-hoc sanity check from the Guide): skip this step when there is nothing to update
 
-3. **Write a persistent report file** only when the review is substantial enough to warrant a historical record (multi-task reviews, complex statistical assessments, reviews with extensive code findings). Write it to `~/.system2/projects/{id}_{name}/scratchpad/` and mention the path in the message. For lightweight reviews (a quick check on an approach, a single-issue finding), the message is sufficient. The final project review is the exception: it goes to `~/.system2/projects/{id}_{name}/artifacts/` (see Final Project Review below).
+3. **Write a persistent report file only when the review is substantial** (multi-task reviews, complex statistical assessments, reviews with extensive code findings). Most reviews do not need a file. When you do write one, **always use `scratchpad/`**: write to `~/.system2/projects/{id}_{name}/scratchpad/`. The only exception is the final project review, which goes to `~/.system2/projects/{id}_{name}/artifacts/final_review.md` (see Final Project Review below). **Never write files to the project root** (`~/.system2/projects/{id}_{name}/`): files go in `scratchpad/` or `artifacts/`, never directly under the project directory.
 
 Use `urgent: true` only if you discover a critical issue in work that is actively being built upon (e.g., a data corruption bug in a pipeline the Conductor is extending right now). Default delivery (non-urgent) is appropriate for all standard review completions.
 
