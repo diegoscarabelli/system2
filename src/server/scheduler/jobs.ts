@@ -574,6 +574,8 @@ export async function buildAndDeliverDailySummary(
       project.dir_path ??
       basename(resolveProjectDir(join(system2Dir, 'projects'), project.id, project.name));
     const projectDir = join(system2Dir, 'projects', dirName);
+    mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
+    mkdirSync(join(projectDir, 'scratchpad'), { recursive: true });
     const logFile = join(projectDir, 'log.md');
 
     // Create log file if needed

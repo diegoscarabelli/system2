@@ -12,7 +12,7 @@
  * (writes the project story using the provided data + the log entry it just wrote).
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
@@ -114,6 +114,8 @@ export function createTriggerProjectStoryTool(
           project.dir_path ??
           basename(resolveProjectDir(join(SYSTEM2_DIR, 'projects'), project.id, project.name));
         const projectDir = join(SYSTEM2_DIR, 'projects', dirName);
+        mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
+        mkdirSync(join(projectDir, 'scratchpad'), { recursive: true });
         const logFile = join(projectDir, 'log.md');
 
         // Read timestamps

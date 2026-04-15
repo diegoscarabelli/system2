@@ -43,25 +43,30 @@ export class DatabaseClient {
 
   // Project operations
   createProject(project: Omit<Project, 'id' | 'dir_path' | 'created_at' | 'updated_at'>): Project {
-    const insertStmt = this.db.prepare(`
-      INSERT INTO project (name, description, status, labels, start_at, end_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-      RETURNING *
-    `);
+    const txn = this.db.transaction(() => {
+      const insertStmt = this.db.prepare(`
+        INSERT INTO project (name, description, status, labels, start_at, end_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        RETURNING *
+      `);
 
-    const row = insertStmt.get(
-      project.name,
-      project.description,
-      project.status,
-      JSON.stringify(project.labels),
-      project.start_at,
-      project.end_at
-    ) as Project;
+      const row = insertStmt.get(
+        project.name,
+        project.description,
+        project.status,
+        JSON.stringify(project.labels),
+        project.start_at,
+        project.end_at
+      ) as Project;
 
-    // Compute and persist the slugified directory name
-    const dirPath = `${row.id}_${slugify(row.name)}`;
-    const updateStmt = this.db.prepare('UPDATE project SET dir_path = ? WHERE id = ? RETURNING *');
-    return updateStmt.get(dirPath, row.id) as Project;
+      // Compute and persist the slugified directory name
+      const dirPath = `${row.id}_${slugify(row.name)}`;
+      const updateStmt = this.db.prepare(
+        'UPDATE project SET dir_path = ? WHERE id = ? RETURNING *'
+      );
+      return updateStmt.get(dirPath, row.id) as Project;
+    });
+    return txn();
   }
 
   getProject(id: number): Project | null {

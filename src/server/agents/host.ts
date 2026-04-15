@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import {
@@ -252,7 +252,7 @@ export class AgentHost {
           // Backfill: legacy project created before dir_path was tracked
           const projectsDir = join(SYSTEM2_DIR, 'projects');
           const projectDir = resolveProjectDir(projectsDir, projectRecord.id, projectRecord.name);
-          this.agentProjectDirName = projectDir.split('/').pop() ?? null;
+          this.agentProjectDirName = basename(projectDir);
         }
       }
     }

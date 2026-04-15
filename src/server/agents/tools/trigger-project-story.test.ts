@@ -20,6 +20,7 @@ vi.mock('node:fs', async (importOriginal) => {
   return {
     ...actual,
     existsSync: vi.fn().mockReturnValue(false),
+    mkdirSync: vi.fn(),
     readFileSync: vi.fn().mockReturnValue(''),
   };
 });
