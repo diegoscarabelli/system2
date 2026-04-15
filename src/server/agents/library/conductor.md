@@ -66,7 +66,7 @@ Use `labels` to indicate which phase a task belongs to (e.g. `phase:1`) and `blo
 - "Phase 1: Data Acquisition and Preparation"
 - "Set up data pipeline"
 
-**Example — correct (typical data pipeline project broken into focused tasks):**
+**Example — correct (illustrative tasks for a typical data pipeline project; adapt to the actual plan):**
 
 - "Explore source API and response shape" — output: ad hoc script(s) in `scratchpad/` confirming authentication, pagination, field names, and data volumes; acceptance: script runs end-to-end and documents any surprises
 - "Design SQL schema for target table" — output: `schema.sql` committed to the pipeline repo; acceptance: table created in the database with correct types, constraints, and indexes
