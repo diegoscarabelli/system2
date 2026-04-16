@@ -375,7 +375,7 @@ When building a new pipeline in this repository, follow the conventions in the `
 
 ### Directory conventions
 
-Each pipeline lives under `pipelines/{name}/` and exposes a `dag.py` that instantiates config and calls `create_dag()`. Keep the DAG file thin (~10 lines); all logic lives in `lib/` or `pipelines/{name}/process.py`.
+Each pipeline lives under `dags/pipelines/{name}/` and exposes a `dag.py` that instantiates config and calls `create_dag()`. Keep the DAG file thin (~10 lines); all logic lives in `dags/lib/` or `dags/pipelines/{name}/process.py`. Astro CLI and native Airflow both hardcode `dags/` as the DAGs folder and auto-add it to PYTHONPATH, so `from lib.xxx import yyy` and `from pipelines.{name}.process import ...` resolve without any extra configuration.
 
 ### Mapping standard tasks to Airflow operators
 
@@ -401,7 +401,7 @@ task_process = PythonOperator.partial(
 ).expand(op_args=task_batch.output)
 ```
 
-`process_wrapper` deserializes the file set batch from `op_args[0]`, instantiates `config.processor_class`, and calls `.process()`.
+`process_wrapper` deserializes a single `FileSet` from `op_args[0]`, instantiates `config.processor_class` with that `file_set`, and returns `{"files": [...], "success": bool, "error": str|None}`. The Processor takes a **singular** `file_set` — fan-out happens at the Airflow layer via `.expand()`, so each mapped task instance receives one `FileSet`.
 
 ### XCom and large data
 

@@ -69,12 +69,23 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
    **macOS (Homebrew)** — fresh install:
    ```bash
    brew install postgresql@17
-   brew install timescaledb-tools
-   # Configure timescaledb in postgresql.conf automatically:
-   timescaledb-tune --quiet --yes
    brew services start postgresql@17
+
+   # TimescaleDB lives in a third-party tap:
+   brew tap timescale/tap
+   brew install timescaledb           # extension (compiled against postgresql@17)
+   brew install timescaledb-tools     # provides timescaledb-tune
+
+   # Move the extension files into PostgreSQL's extension/lib directories:
+   timescaledb_move.sh
+
+   # Auto-configure shared_preload_libraries and tuned memory settings:
+   timescaledb-tune --quiet --yes
+   brew services restart postgresql@17
+
    # Verify:
    psql postgres -c "SELECT version();"
+   psql postgres -c "CREATE EXTENSION IF NOT EXISTS timescaledb; SELECT extversion FROM pg_extension WHERE extname='timescaledb';"
    ```
 
    **Linux (Ubuntu/Debian)** — fresh install:
@@ -98,7 +109,7 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
    ```
 
    **PostgreSQL already installed but TimescaleDB missing**:
-   - macOS: `brew install timescaledb-tools && timescaledb-tune --quiet --yes && brew services restart postgresql@17`
+   - macOS: `brew tap timescale/tap && brew install timescaledb timescaledb-tools && timescaledb_move.sh && timescaledb-tune --quiet --yes && brew services restart postgresql@17`
    - Linux: install `timescaledb-2-postgresql-$(pg_config --version | awk '{print $2}' | cut -d. -f1)` and restart
 
    **PostgreSQL already fully configured**: confirm the connection works (`psql -U postgres -c "SELECT 1;"`) and move on. Do not re-run setup steps.
@@ -144,7 +155,7 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
    pip install prefect
    ```
 
-   **Development mode** (no server, runs locally with no persistence): flows run directly with `python -m pipelines.example.flow`. Good for initial development.
+   **Development mode** (no server, runs locally with no persistence): flows run directly with `PYTHONPATH=dags python -m pipelines.example.flow` (the `PYTHONPATH=dags` is required so `from lib.xxx import yyy` resolves; Airflow/Astro auto-adds `dags/` to the path, but Prefect does not). Good for initial development.
 
    **Server mode** (persistent runs, UI, recommended for ongoing use):
    ```bash
@@ -171,34 +182,54 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
    Install the Astro CLI:
    ```bash
    # macOS:
-   brew install astronomer/tap/astro
+   brew install astro
    # Linux:
    curl -sSL install.astronomer.io | sudo bash -s
    # Windows:
    winget install -e --id Astronomer.Astro
    ```
 
-   Initialize an Astro project in the pipeline repository:
+   Initialize an Astro project inside the pipeline repository:
    ```bash
    cd ~/repos/system2_data_pipelines
    astro dev init
    ```
-   This creates `Dockerfile`, `airflow_settings.yaml`, `dags/`, `plugins/`, etc.
+   This creates `.astro/config.yaml`, `Dockerfile`, `airflow_settings.yaml`, `packages.txt`, `plugins/`, and a placeholder `dags/exampledag.py`. Delete the placeholder — the scaffold already ships real DAGs under `dags/pipelines/<name>/dag.py`:
+   ```bash
+   rm dags/exampledag.py
+   ```
 
-   Configure `dags_folder` so Airflow finds `pipelines/*/dag.py`. Edit `.astro/config.yaml`:
+   Astro's hardcoded default DAGs folder is `dags/`, which matches the scaffold layout, so no `dags_folder` override is needed. Airflow auto-adds `/usr/local/airflow/dags` to PYTHONPATH inside the container, so imports like `from lib.xxx import yyy` resolve without any further configuration.
+
+   Edit `.astro/config.yaml` to pin a port that does not collide with a local Postgres on 5432 (Astro uses the metadata DB port here, not Airflow's webserver):
    ```yaml
    project:
      name: system2_data_pipelines
+   postgres:
+     port: 5433
    ```
-   And in `airflow_settings.yaml` or by setting the env var `AIRFLOW__CORE__DAGS_FOLDER=/usr/local/airflow` (the default in the Astro container), add a volume mount or copy step in the Dockerfile to make the repo root available as the dags folder.
 
-   Start the local Airflow environment:
+   If the pipeline writes to or reads from a directory on the host (via the `DATA_DIR` env var), add a `docker-compose.override.yml` at the repo root so the path is mounted into the scheduler and dag-processor containers. Example:
+   ```yaml
+   services:
+     scheduler:
+       environment:
+         - DATA_DIR=/usr/local/airflow/data
+       volumes:
+         - ${DATA_DIR:-./data}:/usr/local/airflow/data
+     dag-processor:
+       environment:
+         - DATA_DIR=/usr/local/airflow/data
+   ```
+
+   Start Astro. Docker Compose does not auto-load `.env`, so export it first so the volume-mount variable substitution works:
    ```bash
+   export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
    astro dev start
    ```
-   UI available at http://localhost:8080 (default credentials: admin/admin).
+   UI available at http://localhost:8080 (default credentials: admin/admin). Re-run the export before every `astro dev start`.
 
-   If Airflow is already installed (not via Astronomer): run `airflow version`. Check `airflow config get-value core dags_folder` and update it to the repo root path if needed.
+   If Airflow is already installed (not via Astronomer): run `airflow version`. Check `airflow config get-value core dags_folder` and point it at `<repo>/dags` if it's not already there.
    - Save all findings and configurations to `~/.system2/knowledge/infrastructure.md`
    - For each database discovered or installed, perform two additional actions:
 
@@ -284,7 +315,7 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
 
    Ask whether the user has an existing data pipeline repository:
 
-   - **If yes**: get the local path and remote URL (if applicable). Read `README.md` and `CONTRIBUTING.md` (if present) and note the top-level structure. Note the path in `infrastructure.md`. If `lib/` and `pipelines/` are already present, the scaffold is not needed — skip the clone step.
+   - **If yes**: get the local path and remote URL (if applicable). Read `README.md` and `CONTRIBUTING.md` (if present) and note the top-level structure. Note the path in `infrastructure.md`. If `dags/lib/` and `dags/pipelines/` are already present, the scaffold is not needed — skip the clone step.
 
    - **If no**: ask if they want to create a `system2_data_pipelines` repository with a starter scaffold. If yes:
 

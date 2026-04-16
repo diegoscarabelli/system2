@@ -15,40 +15,42 @@ Guide clones it to create the user's `system2_data_pipelines` repository.
 ## Repository Layout
 
 ```
-lib/                     # Shared utilities — one copy, used by every pipeline
-  pipeline_config.py     # PipelineConfig dataclass
-  task_utils.py          # Standard task implementations (ingest/batch/process_wrapper/store)
-  sql_utils.py           # SQLAlchemy helpers (make_base, fkey, upsert_model_instances)
-  filesystem_utils.py    # File state machine (DataState, ETLDataDirectories, FileSet)
-  processor.py           # Processor ABC
-  airflow_utils.py       # Airflow 3 DAG factory (create_dag)
-  prefect_utils.py       # Prefect flow factory (create_flow)
-  logging_utils.py       # Simple logger
-  __init__.py
-
-pipelines/
-  {name}/                # One subdirectory per pipeline
-    constants.py         # FileType enum with compiled regex patterns
-    process.py           # Processor subclass (domain logic)
-    sqla_models.py       # SQLAlchemy ORM models
-    tables.ddl           # DDL for pipeline-specific tables
-    dag.py               # Airflow 3 entry point (~10 lines)
-    flow.py              # Prefect entry point (~10 lines)
-    README.md
+dags/                          # Matches the DAGs folder Astro/Airflow hardcode.
+  lib/                         # Shared utilities — one copy, used by every pipeline.
+    pipeline_config.py         # PipelineConfig dataclass
+    task_utils.py              # Standard task implementations (ingest/batch/process_wrapper/store)
+    sql_utils.py               # SQLAlchemy helpers (make_base, fkey, upsert_model_instances)
+    filesystem_utils.py        # File state machine (DataState, ETLDataDirectories, FileSet)
+    processor.py               # Processor ABC
+    airflow_utils.py           # Airflow 3 DAG factory (create_dag)
+    prefect_utils.py           # Prefect flow factory (create_flow)
+    logging_utils.py           # Simple logger
     __init__.py
+  pipelines/
+    {name}/                    # One subdirectory per pipeline.
+      constants.py             # FileType enum with compiled regex patterns
+      process.py               # Processor subclass (domain logic)
+      sqla_models.py           # SQLAlchemy ORM models
+      tables.ddl               # DDL for pipeline-specific tables
+      dag.py                   # Airflow 3 entry point (~10 lines)
+      flow.py                  # Prefect entry point (~10 lines)
+      README.md
+      __init__.py
 
-data/                    # Runtime data dirs (gitignored); path set via DATA_DIR env var
+data/                          # Runtime data dirs (gitignored); path set via DATA_DIR env var.
   {pipeline_id}/
     ingest/
     process/
     store/
     quarantine/
 
-schemas.ddl              # CREATE SCHEMA IF NOT EXISTS for all schemas
-database.ddl             # CREATE DATABASE (run once, by hand)
+schemas.ddl                    # CREATE SCHEMA IF NOT EXISTS for all schemas.
+database.ddl                   # CREATE DATABASE (run once, by hand).
 requirements.txt
-.env.example             # DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, DATA_DIR
+.env.example                   # DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, DATA_DIR.
 ```
+
+Everything lives under `dags/` because Astro CLI and native Airflow both hardcode `dags/` as the DAGs folder and auto-add it to PYTHONPATH, so `from lib.xxx import yyy` resolves without any config. Prefect is indifferent to the folder name — run flows locally with `PYTHONPATH=dags python -m pipelines.{name}.flow`.
 
 Naming conventions: directory and module names are `lowercase_snake_case`; classes are `PascalCase`; pipeline IDs are `lowercase_snake_case` and match the directory name exactly.
 
@@ -81,17 +83,18 @@ ingest → batch → process → store
 
 **`batch`**: groups files in `process/` into `FileSet` objects — one per logical processing unit (e.g., one export CSV, one day's sensor data). Returns serialized batches. Default groups by file timestamp; override via `config.batch_callable` (e.g., to group by `(user_id, date)`).
 
-**`process`**: fans out over batches — one task instance per batch (dynamic task mapping). Instantiates `config.processor_class` and calls `process()`. Returns `{"files": [...], "success": bool, "error": str|None}` — never raises, so all batches are attempted even if one fails.
+**`process`**: fans out over batches — one task instance per `FileSet` (dynamic task mapping). Each task instance instantiates `config.processor_class` with that single `FileSet` and calls `process()`. Returns `{"files": [...], "success": bool, "error": str|None}` — never raises, so all batches are attempted even if one fails.
 
 **`store`**: collects the return values from all `process` task instances (via XCom in Airflow, task futures in Prefect) and routes files: `success=True` → `store/`, `success=False` → `quarantine/`.
 
 The factory function (`create_dag` / `create_flow`) wires these four tasks and returns the orchestration object. A pipeline entry point is ~10 lines:
 
 ```python
+# dags/pipelines/linkedin/dag.py (or flow.py for Prefect)
 from lib.airflow_utils import create_dag        # or lib.prefect_utils for Prefect
 from lib.pipeline_config import PipelineConfig
-from pipelines.linkedin.constants import LinkedInFileTypes
-from pipelines.linkedin.process import LinkedInProcessor
+from .constants import LinkedInFileTypes
+from .process import LinkedInProcessor
 
 config = PipelineConfig(
     pipeline_id="linkedin",
@@ -159,19 +162,19 @@ class LinkedInFileTypes(Enum):
 ```python
 @dataclass
 class FileSet:
-    files: dict[Enum, list[Path]]
+    files: dict[str, list[Path]]        # key is the FileType enum member NAME (str)
 
     def get_files(self, file_type: Enum) -> list[Path]:
-        return self.files.get(file_type, [])
+        return self.files.get(file_type.name, [])
 ```
 
-The `process` task deserializes a list of `FileSet` objects and distributes them across task instances. Inside the processor:
+The dict key is the enum member name (a string), not the enum member itself. This keeps `FileSet` JSON-serializable without custom encoding — `to_serializable()` / `from_serializable()` are implemented on the dataclass and round-trip through plain `str` keys and path strings, which is what XCom (Airflow) and task results (Prefect) both accept.
+
+The `batch` task produces a list of serialized `FileSet` strings. The `process` task is dynamically mapped over that list — one task instance per `FileSet` — and each instance instantiates the `Processor` with a single `file_set`. Inside the processor:
 
 ```python
 csv_files = file_set.get_files(LinkedInFileTypes.CONNECTIONS)
 ```
-
-`FileSet` must be serializable (for XCom in Airflow, or result storage in Prefect). Implement `to_serializable()` / `from_serializable()` helpers that convert `Path` and `Enum` to JSON-safe primitives.
 
 ## Processor ABC
 
@@ -181,26 +184,39 @@ csv_files = file_set.get_files(LinkedInFileTypes.CONNECTIONS)
 from abc import ABC, abstractmethod
 
 class Processor(ABC):
-    def __init__(self, config: PipelineConfig, run_id: str, start_date: datetime,
-                 file_sets: list[FileSet], **kwargs):
+    def __init__(self, config: PipelineConfig, run_id: str,
+                 start_date: datetime, file_set: FileSet):
         self.config = config
-        self.file_sets = file_sets
-        self.results = ETLResult(pipeline_id=config.pipeline_id, run_id=run_id, ...)
+        self.run_id = run_id
+        self.start_date = start_date
+        self.file_set = file_set
 
-    def process(self) -> None:
-        """Template method: iterate file sets, call process_file_set, submit results."""
-        for file_set in self.file_sets:
-            with Session(get_engine(config=self.config)) as session:
-                self._try_process_file_set(file_set, session)
-        self.results.submit()
+    def process(self) -> dict:
+        """Template method: open a DB session and call process_file_set().
+
+        Returns {"success": True, "error": None} on success, or
+                {"success": False, "error": <traceback>} on failure.
+        Never raises — the store task uses the return value to route files.
+        """
+        engine = get_engine(schema=self.config.db_schema)
+        try:
+            with Session(engine) as session:
+                self.process_file_set(self.file_set, session)
+            return {"success": True, "error": None}
+        except Exception:
+            return {"success": False, "error": format_exc()}
 
     @abstractmethod
     def process_file_set(self, file_set: FileSet, session: Session) -> None:
-        """Domain logic: parse files, build ORM instances, upsert to database."""
+        """Domain logic: parse files, build ORM instances, upsert to database.
+
+        Raise any exception to signal failure. The template method catches it
+        and the store task routes the files to quarantine/.
+        """
         ...
 ```
 
-`_try_process_file_set` wraps `process_file_set` in a try/except, records success or failure (with full traceback) via `self.results.add(...)`, and never raises — all errors are captured, not propagated. The template method ensures every file set gets a result record regardless of outcome.
+The Processor is instantiated once per `FileSet`, not once per run — fan-out happens at the orchestrator layer via dynamic task mapping. The template method opens a DB session, calls `process_file_set`, and translates any raised exception into `{"success": False, "error": <traceback>}`. The `store` task reads that dict and moves files to `store/` or `quarantine/` accordingly.
 
 ## SQLAlchemy Integration
 

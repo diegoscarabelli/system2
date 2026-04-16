@@ -386,7 +386,14 @@ When building a new pipeline in this repository, follow the conventions in the `
 
 ### Directory conventions
 
-Each pipeline lives under `pipelines/{name}/` and exposes a `flow.py` that instantiates config and calls `create_flow()`. Keep the flow file thin (~10 lines); all logic lives in `lib/` or `pipelines/{name}/process.py`.
+Each pipeline lives under `dags/pipelines/{name}/` and exposes a `flow.py` that instantiates config and calls `create_flow()`. Keep the flow file thin (~10 lines); all logic lives in `dags/lib/` or `dags/pipelines/{name}/process.py`.
+
+Prefect is indifferent to the folder name — everything lives under `dags/` only because Astro CLI and native Airflow hardcode that directory. Prefect does **not** auto-add `dags/` to PYTHONPATH, so:
+
+- **Local dev**: `PYTHONPATH=dags python -m pipelines.{name}.flow`
+- **Deployments**: `cd dags && prefect deploy pipelines/{name}/flow.py:flow --name {name}-prod --work-pool default`
+
+Workers run the entrypoint from the directory Prefect recorded at deploy time, so deploying from `dags/` keeps the `from lib.xxx import yyy` imports resolvable at runtime.
 
 ### Mapping standard tasks to Prefect
 
@@ -394,8 +401,8 @@ Each pipeline lives under `pipelines/{name}/` and exposes a `flow.py` that insta
 |---|---|
 | `ingest` | `@task def ingest(config)` — scans `ingest/`, routes files, raises `Abort` or returns count |
 | `batch` | `@task def batch(config)` — returns a list of serialized `FileSet` objects |
-| `process` | `@task def process_batch(serialized_batch, config)` — mapped via `process_batch.map(...)` |
-| `store` | `@task def store(all_results, config)` — collects mapped process futures, routes files |
+| `process` | `@task def process_batch(serialized_batch, config)` — mapped via `process_batch.map(...)`, one instance per `FileSet` |
+| `store` | `@task def store(all_results, config)` — collects mapped process return values, routes files to `store/` or `quarantine/` |
 
 ### Dynamic task mapping (process task)
 
@@ -403,20 +410,22 @@ Use `task.map()` to fan out over batches at runtime:
 
 ```python
 @task(cache_policy=NONE)
-def process_batch(serialized_batch: str, config: PipelineConfig) -> None:
-    file_sets = FileSet.from_serializable(serialized_batch)
-    processor = config.processor_class(config=config, run_id=..., file_sets=[file_sets])
-    processor.process()
+def process_batch(serialized_batch: str, config: PipelineConfig) -> dict:
+    file_set = FileSet.from_serializable(serialized_batch)
+    processor = config.processor_class(
+        config=config, run_id=..., start_date=..., file_set=file_set,
+    )
+    return processor.process()  # {"success": bool, "error": str|None}
 
 @flow
 def pipeline(config: PipelineConfig) -> None:
     ingest(config)
     batches = batch(config)
-    process_batch.map(batches, unmapped(config))
-    store(config)
+    results = process_batch.map(batches, unmapped(config))
+    store(results, config)
 ```
 
-Set `cache_policy=NONE` on `process_batch` — it writes files and database rows, so caching would silently skip work on repeated calls.
+Set `cache_policy=NONE` on `process_batch` — it writes files and database rows, so caching would silently skip work on repeated calls. Note the Processor takes a **singular** `file_set` (not a list); fan-out happens at the Prefect layer via `task.map()`, and each mapped instance gets one `FileSet`.
 
 ### Result passing and large data
 
