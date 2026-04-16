@@ -628,13 +628,25 @@ export function buildConfigToml(options: {
     lines.push('# Per-agent model and behavior overrides. Uncomment and edit to customize.');
     lines.push('# Supported roles: guide, conductor, reviewer, narrator, worker');
     lines.push('#');
+    lines.push('# Example 1: override thinking level and pin a specific model');
     lines.push('# [agents.conductor]');
-    lines.push('# thinking_level = "high"        # off | minimal | low | medium | high');
-    lines.push('# compaction_depth = 8           # keep N auto-compactions in sliding window');
+    lines.push('# thinking_level = "high"              # off | minimal | low | medium | high');
+    lines.push(
+      '# compaction_depth = 8                 # keep N auto-compactions in sliding window'
+    );
     lines.push('#');
     lines.push('# [agents.conductor.models]');
-    lines.push('# anthropic = "claude-opus-4-6"  # override model for a specific provider');
-    lines.push('# google = "gemini-2.5-pro"');
+    lines.push('# anthropic = "claude-opus-4-6"        # pin a model for a specific provider');
+    lines.push('#');
+    lines.push(
+      '# Example 2: route a role through OpenRouter to a specific upstream (e.g. Vertex AI)'
+    );
+    lines.push('# [agents.conductor.models]');
+    lines.push('# openrouter = "google/gemini-2.5-pro" # model ID as listed on openrouter.ai');
+    lines.push('#');
+    lines.push('# To control which upstream providers OpenRouter uses for a model prefix:');
+    lines.push('# [llm.openrouter.routing]');
+    lines.push('# "google/" = ["google-vertex/global", "google-vertex", "google-ai-studio"]');
     lines.push('');
   }
 

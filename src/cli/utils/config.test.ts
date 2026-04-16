@@ -172,7 +172,9 @@ describe('buildConfigToml', () => {
       },
     });
     expect(result).toContain('[llm.openrouter]');
-    expect(result).not.toContain('[llm.openrouter.routing]');
+    // The agents hint may contain a commented example with '[llm.openrouter.routing]',
+    // so only assert the actual (uncommented) section is absent.
+    expect(result).not.toMatch(/^\[llm\.openrouter\.routing\]/m);
   });
 
   it('generates TOML with openai-compatible provider including base_url and model', () => {
