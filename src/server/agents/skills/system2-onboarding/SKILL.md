@@ -56,18 +56,149 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
    - Adapt explanations to user's skill level
    - Ask whether the user has remote machines (VPS, home server, cloud instances) where infrastructure runs or could run. If so, understand how to access them (SSH, Tailscale, etc.).
    - Inventory what already exists: databases, orchestration tools, visualization tools. For each, understand where it is deployed (local, remote), how to connect, and what access level System2 can have.
-   - If the user has no data stack, propose and install a minimal one locally:
-     - PostgreSQL with TimescaleDB extension (time-series analytics). Install natively via the platform package manager, not in a container.
-     - Python 3 and pip if not already installed. Install via the platform package manager.
-     - Create a shared System2 virtual environment at `~/.system2/venv/` using `python3 -m venv`. This holds the orchestrator, notebook tooling, and the core data libraries listed below. Project-specific environments come later: when a project needs a library not in the shared env (or a conflicting version), the Conductor creates a project-local venv.
-     - Activate the shared env and install:
-       - Orchestrator: Prefect by default (`pip install prefect`), unless user prefers Airflow/Dagster/etc.
-       - Notebooks: `jupyterlab`, `ipykernel`, `ipywidgets` (the last is needed for interactive Plotly figures)
-       - Data: `pandas`, `numpy`, `pyarrow`
-       - Database: `sqlalchemy`, `psycopg[binary]`
-       - HTTP and config: `httpx`, `python-dotenv`
-       - Visualization: `plotly`, `dash[jupyter]` (the `[jupyter]` extra enables running Dash apps inline in JupyterLab)
-     - Register the shared env as a Jupyter kernel: `python -m ipykernel install --user --name system2 --display-name "System2"`
+   - If the user has no data stack, propose and install a minimal one locally. Walk through each component below, skipping or adapting based on what is already installed.
+
+   **4a. PostgreSQL + TimescaleDB**
+
+   First check what is already present:
+   ```bash
+   psql --version                                   # is PostgreSQL installed?
+   psql -U postgres -c "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';"
+   ```
+
+   **macOS (Homebrew)** — fresh install:
+   ```bash
+   brew install postgresql@17
+   brew install timescaledb-tools
+   # Configure timescaledb in postgresql.conf automatically:
+   timescaledb-tune --quiet --yes
+   brew services start postgresql@17
+   # Verify:
+   psql postgres -c "SELECT version();"
+   ```
+
+   **Linux (Ubuntu/Debian)** — fresh install:
+   ```bash
+   sudo apt install -y gnupg postgresql-common apt-transport-https lsb-release wget
+   sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+   sudo apt install -y timescaledb-2-postgresql-17
+   sudo timescaledb-tune --quiet --yes
+   sudo systemctl restart postgresql
+   # Verify:
+   sudo -u postgres psql -c "SELECT version();"
+   ```
+
+   **Linux (RHEL/Fedora)**:
+   ```bash
+   sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+   sudo dnf install -y postgresql17-server timescaledb_17
+   sudo /usr/pgsql-17/bin/postgresql-17-setup initdb
+   sudo timescaledb-tune --quiet --yes
+   sudo systemctl enable --now postgresql-17
+   ```
+
+   **PostgreSQL already installed but TimescaleDB missing**:
+   - macOS: `brew install timescaledb-tools && timescaledb-tune --quiet --yes && brew services restart postgresql@17`
+   - Linux: install `timescaledb-2-postgresql-$(pg_config --version | awk '{print $2}' | cut -d. -f1)` and restart
+
+   **PostgreSQL already fully configured**: confirm the connection works (`psql -U postgres -c "SELECT 1;"`) and move on. Do not re-run setup steps.
+
+   **After install — initial database setup** (run as superuser):
+   ```bash
+   psql -U postgres -f database.ddl       # creates the database (once)
+   psql -U postgres -d system2_pipelines_db -f schemas.ddl
+   psql -U postgres -d system2_pipelines_db -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+   ```
+
+   Create the `system2_pipelines` app user (read/write, no DDL):
+   ```sql
+   CREATE USER system2_pipelines WITH PASSWORD '<generate_strong_password>';
+   GRANT CONNECT ON DATABASE system2_pipelines_db TO system2_pipelines;
+   -- After running each pipeline's tables.ddl, also run:
+   -- GRANT USAGE ON SCHEMA {pipeline} TO system2_pipelines;
+   -- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {pipeline} TO system2_pipelines;
+   -- ALTER DEFAULT PRIVILEGES IN SCHEMA {pipeline} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO system2_pipelines;
+   ```
+   Store the generated password in the pipeline repo's `.env` (gitignored). Record the path to `.env` in `infrastructure.md`.
+
+   **4b. Python environment**
+
+   - Python 3 and pip if not already installed. Install via the platform package manager.
+   - Create a shared System2 virtual environment at `~/.system2/venv/` using `python3 -m venv`. This holds the orchestrator, notebook tooling, and the core data libraries listed below. Project-specific environments come later: when a project needs a library not in the shared env (or a conflicting version), the Conductor creates a project-local venv.
+   - Activate the shared env and install:
+     - Notebooks: `jupyterlab`, `ipykernel`, `ipywidgets` (the last is needed for interactive Plotly figures)
+     - Data: `pandas`, `numpy`, `pyarrow`
+     - Database: `sqlalchemy`, `psycopg[binary]`
+     - HTTP and config: `httpx`, `python-dotenv`
+     - Visualization: `plotly`, `dash[jupyter]` (the `[jupyter]` extra enables running Dash apps inline in JupyterLab)
+   - Register the shared env as a Jupyter kernel: `python -m ipykernel install --user --name system2 --display-name "System2"`
+
+   **4c. Orchestrator**
+
+   Ask which orchestrator the user wants. Default to Prefect. Airflow (via Astronomer) is the alternative. Other tools (Dagster, Luigi, etc.) are supported but not detailed here — install via pip and configure manually.
+
+   **Prefect (default)**:
+
+   Install into the shared venv:
+   ```bash
+   pip install prefect
+   ```
+
+   **Development mode** (no server, runs locally with no persistence): flows run directly with `python -m pipelines.example.flow`. Good for initial development.
+
+   **Server mode** (persistent runs, UI, recommended for ongoing use):
+   ```bash
+   # Start the server (keep running in a background terminal or as a service):
+   prefect server start
+   # Configure the CLI to use it:
+   prefect config set PREFECT_API_URL=http://localhost:4200/api
+   # Create a work pool and start a worker:
+   prefect work-pool create default --type process
+   prefect worker start --pool default
+   ```
+   UI available at http://localhost:4200.
+
+   **Prefect Cloud** (managed, no local server to maintain): `prefect cloud login` (browser auth). Recommended for production or users who don't want to manage server infrastructure.
+
+   If Prefect is already installed, run `prefect version` and check whether a server or Cloud profile is configured (`prefect config view`). If already fully set up, skip installation.
+
+   **Airflow 3 via Astronomer (if user prefers Airflow)**:
+
+   Astronomer is the recommended way to run Airflow 3 locally — it handles all Docker setup.
+
+   Requirements: Docker Desktop running.
+
+   Install the Astro CLI:
+   ```bash
+   # macOS:
+   brew install astronomer/tap/astro
+   # Linux:
+   curl -sSL install.astronomer.io | sudo bash -s
+   # Windows:
+   winget install -e --id Astronomer.Astro
+   ```
+
+   Initialize an Astro project in the pipeline repository:
+   ```bash
+   cd ~/repos/system2_data_pipelines
+   astro dev init
+   ```
+   This creates `Dockerfile`, `airflow_settings.yaml`, `dags/`, `plugins/`, etc.
+
+   Configure `dags_folder` so Airflow finds `pipelines/*/dag.py`. Edit `.astro/config.yaml`:
+   ```yaml
+   project:
+     name: system2_data_pipelines
+   ```
+   And in `airflow_settings.yaml` or by setting the env var `AIRFLOW__CORE__DAGS_FOLDER=/usr/local/airflow` (the default in the Astro container), add a volume mount or copy step in the Dockerfile to make the repo root available as the dags folder.
+
+   Start the local Airflow environment:
+   ```bash
+   astro dev start
+   ```
+   UI available at http://localhost:8080 (default credentials: admin/admin).
+
+   If Airflow is already installed (not via Astronomer): run `airflow version`. Check `airflow config get-value core dags_folder` and update it to the repo root path if needed.
    - Save all findings and configurations to `~/.system2/knowledge/infrastructure.md`
    - For each database discovered or installed, perform two additional actions:
 
@@ -136,14 +267,59 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
      After writing the config entries, verify each connection works by using the `bash` tool to run a simple test query (e.g. `SELECT 1`). If a connection fails, troubleshoot with the user before moving on.
 
 5. **Configure development environment:**
-   - Check whether the user has a GitHub account (needed for remote git operations).
-   - Ask the user if they have an existing git repository relevant to data work:
-     - If yes: get the local path and remote URL. Read its `README.md`, `CONTRIBUTING.md` (if present), and directory structure.
-     - If no: create a new repo at `~/repos/system2_data_pipelines` (or user-specified location), initialize with standard structure depending on the choice of pipeline orchestration tool.
-   - Check for AI agent instruction files that may contain coding conventions or preferences:
-     - Per-repo: `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.github/copilot-instructions.md`
-     - Global: `~/.claude/CLAUDE.md`, `~/.cursor/rules/`
+
+   **5a. GitHub account and gh CLI**
+
+   Run `gh auth status` and `git config user.email` to detect existing GitHub authentication.
+
+   - If already authenticated: confirm the GitHub username. Install `gh` if missing (`brew install gh` / `sudo apt install gh` / `winget install GitHub.cli`).
+   - If not authenticated or no account detected:
+     - Explain what a GitHub account enables: pushing pipeline code to a remote, collaborating on open-source projects, cloning via SSH (no token expiry), forking repositories to maintain a customized version.
+     - Ask whether the user has a GitHub account.
+     - If yes: install `gh` via the platform package manager if absent, then run `gh auth login` interactively to authenticate. Confirm the username after login.
+     - If no: ask if they would like help creating one. If yes, direct them to github.com to sign up, then return and run `gh auth login`. If they prefer to skip GitHub entirely, note that HTTPS cloning works without an account but pushing to remotes will not be available until they authenticate later.
+   - Save GitHub username (or "none") and preferred clone method (SSH / HTTPS) to `~/.system2/knowledge/infrastructure.md`.
+
+   **5b. Pipeline repository**
+
+   Ask whether the user has an existing data pipeline repository:
+
+   - **If yes**: get the local path and remote URL (if applicable). Read `README.md` and `CONTRIBUTING.md` (if present) and note the top-level structure. Note the path in `infrastructure.md`. If `lib/` and `pipelines/` are already present, the scaffold is not needed — skip the clone step.
+
+   - **If no**: ask if they want to create a `system2_data_pipelines` repository with a starter scaffold. If yes:
+
+     1. Clone the scaffold (no GitHub account required — it is public HTTPS):
+        ```bash
+        git clone https://github.com/diegoscarabelli/openetl_scaffold.git ~/repos/system2_data_pipelines
+        cd ~/repos/system2_data_pipelines
+        git remote remove origin
+        ```
+        Use a user-specified path instead of `~/repos/system2_data_pipelines` if requested.
+
+     2. Copy `.env.example` to `.env` and fill in the DB credentials from step 4a:
+        ```bash
+        cp .env.example .env
+        # Fill in: DB_HOST, DB_PORT, DB_NAME=system2_pipelines_db,
+        #           DB_USER=system2_pipelines, DB_PASSWORD=<password from step 4a>
+        ```
+
+     3. If the user has a GitHub account, offer to create a private remote:
+        ```bash
+        gh repo create system2_data_pipelines --private --source=. --remote=origin --push
+        ```
+        If no GitHub account, the repo works as a local git repo only — a remote can be added later.
+
+     4. Note the local path in `infrastructure.md`.
+
+   - **If no to both**: note that the Conductor will create pipeline files in the working directory when the first pipeline project starts.
+
+   **5c. Agent instruction files**
+
+   Check for AI agent instruction files that may contain coding conventions or preferences:
+   - Per-repo: `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.github/copilot-instructions.md`
+   - Global: `~/.claude/CLAUDE.md`, `~/.cursor/rules/`
    - Save all findings and configurations to `~/.system2/knowledge/infrastructure.md`
+
 
 6. **Capture interaction preferences:**
    Throughout the conversation the user may have expressed preferences about how they like to interact: verbosity, level of detail, how much autonomy to take, when to ask vs. act, etc. Save any such preferences to `~/.system2/knowledge/guide.md` so they carry over to future sessions.

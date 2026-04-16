@@ -380,6 +380,67 @@ Highest precedence first:
 
 Key settings: `PREFECT_API_URL`, `PREFECT_API_KEY`, `PREFECT_RESULTS_PERSIST_BY_DEFAULT`, `PREFECT_LOGGING_LOG_PRINTS`, `PREFECT_TASK_DEFAULT_RETRIES`, `PREFECT_WORKER_QUERY_SECONDS`.
 
+## Pipeline Structure
+
+When building a new pipeline in this repository, follow the conventions in the `pipeline-design` skill. That skill defines the orchestrator-agnostic layer: file state machine, standard task sequence, config dataclass, per-pipeline directory layout, SQLAlchemy integration, and ETL result monitoring. The sections below describe how those abstractions map to Prefect specifically.
+
+### Directory conventions
+
+Each pipeline lives under `pipelines/{name}/` and exposes a `flow.py` that instantiates config and calls `create_flow()`. Keep the flow file thin (~10 lines); all logic lives in `lib/` or `pipelines/{name}/process.py`.
+
+### Mapping standard tasks to Prefect
+
+| Pipeline task | Prefect implementation |
+|---|---|
+| `ingest` | `@task def ingest(config)` — scans `ingest/`, routes files, raises `Abort` or returns count |
+| `batch` | `@task def batch(config)` — returns a list of serialized `FileSet` objects |
+| `process` | `@task def process_batch(serialized_batch, config)` — mapped via `process_batch.map(...)` |
+| `store` | `@task def store(all_results, config)` — collects mapped process futures, routes files |
+
+### Dynamic task mapping (process task)
+
+Use `task.map()` to fan out over batches at runtime:
+
+```python
+@task(cache_policy=NONE)
+def process_batch(serialized_batch: str, config: PipelineConfig) -> None:
+    file_sets = FileSet.from_serializable(serialized_batch)
+    processor = config.processor_class(config=config, run_id=..., file_sets=[file_sets])
+    processor.process()
+
+@flow
+def pipeline(config: PipelineConfig) -> None:
+    ingest(config)
+    batches = batch(config)
+    process_batch.map(batches, unmapped(config))
+    store(config)
+```
+
+Set `cache_policy=NONE` on `process_batch` — it writes files and database rows, so caching would silently skip work on repeated calls.
+
+### Result passing and large data
+
+Pass serialized `FileSet` objects (JSON strings) between tasks, not raw `Path` objects or DataFrames. For large file inventories, write the batch list to a shared filesystem and pass only the path between `batch` and `process_batch`.
+
+Use `cache_result_in_memory=False` on tasks that return large intermediate results.
+
+### Skip vs. fail
+
+When `ingest` finds no files, raise `Abort` (marks the flow run as cancelled, not failed) or return early and have downstream tasks check a sentinel value. Do not raise a bare exception for an empty inbox — that would mark the flow as failed and trigger alerts.
+
+### Config → flow parameters
+
+`PipelineConfig` is a plain dataclass. Pass it directly to `@flow` functions — Prefect serializes dataclass parameters automatically. For scheduled deployments, store the config as a `Variable` or embed it in the deployment's `parameters` dict:
+
+```python
+flow.deploy(
+    name="linkedin-prod",
+    work_pool_name="process-pool",
+    parameters={"config": asdict(linkedin_config)},
+    schedules=[CronSchedule(cron="0 9 * * *", timezone="UTC")],
+)
+```
+
 ## Production Checklist
 
 - **API server**: Prefect Cloud or self-hosted Prefect server (never rely on ephemeral mode)
