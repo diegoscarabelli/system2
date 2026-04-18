@@ -54,7 +54,7 @@ Everything lives under `dags/` because Astro CLI and native Airflow both hardcod
 
 Naming conventions: directory and module names are `lowercase_snake_case`; classes are `PascalCase`; pipeline IDs are `lowercase_snake_case` and match the directory name exactly.
 
-**Database credentials**: stored in `.env` (gitignored), read at runtime via `python-dotenv`. Never hard-code credentials in Python files. The pipeline app user (`system2_pipelines`) has `SELECT/INSERT/UPDATE/DELETE` on data schemas only — no `CREATE TABLE` or admin privileges. DDL is run by hand (or by the Conductor) using the Postgres superuser.
+**Database credentials**: stored in `.env` (gitignored), read at runtime via `python-dotenv`. Never hard-code credentials in Python files. The pipeline app user (`data_pipelines`) has `SELECT/INSERT/UPDATE/DELETE` on data schemas only — no `CREATE TABLE` or admin privileges. DDL is run by hand (or by the Conductor) using the Postgres superuser.
 
 ## File State Machine
 
@@ -294,7 +294,7 @@ CREATE TABLE IF NOT EXISTS linkedin.connection (
 );
 ```
 
-Run order: `database.ddl` → `schemas.ddl` → per-pipeline `tables.ddl`. Each file is idempotent (`CREATE IF NOT EXISTS`). Run as the Postgres superuser; the `system2_pipelines` app user only needs `SELECT/INSERT/UPDATE/DELETE` on the data schemas, granted after DDL is applied.
+Run order: `database.ddl` → `schemas.ddl` → per-pipeline `tables.ddl`. Each file is idempotent (`CREATE IF NOT EXISTS`). Run as the Postgres superuser; the `data_pipelines` app user only needs `SELECT/INSERT/UPDATE/DELETE` on the data schemas, granted after DDL is applied.
 
 ## Anti-Patterns to Avoid
 

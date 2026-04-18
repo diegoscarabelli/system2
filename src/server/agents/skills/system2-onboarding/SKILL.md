@@ -256,7 +256,7 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
      git remote remove origin
      ```
 
-     **2. Initialize the database** using the scaffold's DDL scripts (run as superuser, e.g. `postgres`). Before running `iam.sql`, edit the passwords for `system2_pipelines` and `read_only` users inside that file. Run once per target database (`lens` for production, `lens_dev` for development):
+     **2. Initialize the database** using the scaffold's DDL scripts (run as superuser, e.g. `postgres`). Before running `iam.sql`, edit the passwords for `data_pipelines` and `read_only` users inside that file. Run once per target database (`lens` for production, `lens_dev` for development):
      ```bash
      # Create the databases:
      psql -U postgres -f database.ddl
@@ -273,7 +273,7 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
      psql -U postgres -d lens_dev -f iam.sql
      psql -U postgres -d lens_dev -f dags/pipelines/example/tables.ddl
      ```
-     The `iam.sql` script creates a `readers` role, a `read_only` user, and the `system2_pipelines` app user with `pg_read_all_data` + `pg_write_all_data` grants (PostgreSQL 14+ predefined roles for blanket read/write across all schemas).
+     The `iam.sql` script creates a `readers` role, a `read_only` user, and the `data_pipelines` app user with `pg_read_all_data` + `pg_write_all_data` grants (PostgreSQL 14+ predefined roles for blanket read/write across all schemas).
 
      **3. Configure credentials:**
      ```bash
@@ -284,10 +284,10 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
      SQL_DB_HOST=localhost
      SQL_DB_PORT=5432
      SQL_DB_NAME=lens
-     SQL_DB_USER=system2_pipelines
+     SQL_DB_USER=data_pipelines
      SQL_DB_PASSWORD=<password set in iam.sql>
      ```
-     Store the `system2_pipelines` password in `~/.pgpass` as well (format: `localhost:5432:*:system2_pipelines:<password>`, `chmod 600 ~/.pgpass`). Record the `.env` path in `infrastructure.md`.
+     Store the `data_pipelines` password in `~/.pgpass` as well (format: `localhost:5432:*:data_pipelines:<password>`, `chmod 600 ~/.pgpass`). Record the `.env` path in `infrastructure.md`.
 
      **4. Python environment:**
      ```bash
