@@ -242,4 +242,4 @@ system2/
 
 ## License
 
-This project is proprietary software. All rights reserved.
+AGPL-3.0-only. See [LICENSE](LICENSE).
