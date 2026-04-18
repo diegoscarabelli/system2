@@ -114,28 +114,12 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
 
    **PostgreSQL already fully configured**: confirm the connection works (`psql -U postgres -c "SELECT 1;"`) and move on. Do not re-run setup steps.
 
-   **After install — initial database setup** (run as superuser):
-   ```bash
-   psql -U postgres -f database.ddl       # creates the database (once)
-   psql -U postgres -d system2_pipelines_db -f schemas.ddl
-   psql -U postgres -d system2_pipelines_db -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
-   ```
-
-   Create the `system2_pipelines` app user (read/write, no DDL):
-   ```sql
-   CREATE USER system2_pipelines WITH PASSWORD '<generate_strong_password>';
-   GRANT CONNECT ON DATABASE system2_pipelines_db TO system2_pipelines;
-   -- After running each pipeline's tables.ddl, also run:
-   -- GRANT USAGE ON SCHEMA {pipeline} TO system2_pipelines;
-   -- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {pipeline} TO system2_pipelines;
-   -- ALTER DEFAULT PRIVILEGES IN SCHEMA {pipeline} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO system2_pipelines;
-   ```
-   Store the generated password in the pipeline repo's `.env` (gitignored). Record the path to `.env` in `infrastructure.md`.
+   **After install**: verify the connection works (`psql -U postgres -c "SELECT 1;"`) and note the version in `infrastructure.md`. Database creation, schema initialization, and IAM configuration happen in step 5b after the pipeline repository is cloned, using the scaffold's DDL scripts (`database.ddl`, `schemas.ddl`, `iam.sql`).
 
    **4b. Python environment**
 
    - Python 3 and pip if not already installed. Install via the platform package manager.
-   - Create a shared System2 virtual environment at `~/.system2/venv/` using `python3 -m venv`. This holds the orchestrator, notebook tooling, and the core data libraries listed below. Project-specific environments come later: when a project needs a library not in the shared env (or a conflicting version), the Conductor creates a project-local venv.
+   - Create a shared System2 virtual environment at `~/.system2/venv/` using `python3 -m venv`. This holds notebook tooling, visualization libraries, and core data libraries. The orchestrator is added in step 4c. Pipeline-specific dependencies live in a separate repo-local `.venv/` created in step 5b.
    - Activate the shared env and install:
      - Notebooks: `jupyterlab`, `ipykernel`, `ipywidgets` (the last is needed for interactive Plotly figures)
      - Data: `pandas`, `numpy`, `pyarrow`
@@ -155,27 +139,13 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
    pip install prefect
    ```
 
-   **Development mode** (no server, runs locally with no persistence): flows run directly with `PYTHONPATH=dags python -m pipelines.example.flow` (the `PYTHONPATH=dags` is required so `from lib.xxx import yyy` resolves; Airflow/Astro auto-adds `dags/` to the path, but Prefect does not). Good for initial development.
-
-   **Server mode** (persistent runs, UI, recommended for ongoing use):
-   ```bash
-   # Start the server (keep running in a background terminal or as a service):
-   prefect server start
-   # Configure the CLI to use it:
-   prefect config set PREFECT_API_URL=http://localhost:4200/api
-   # Create a work pool and start a worker:
-   prefect work-pool create default --type process
-   prefect worker start --pool default
-   ```
-   UI available at http://localhost:4200.
-
-   **Prefect Cloud** (managed, no local server to maintain): `prefect cloud login` (browser auth). Recommended for production or users who don't want to manage server infrastructure.
-
    If Prefect is already installed, run `prefect version` and check whether a server or Cloud profile is configured (`prefect config view`). If already fully set up, skip installation.
+
+   Prefect server/worker setup and flow deployment happen in step 5b after the pipeline repository is cloned.
 
    **Airflow 3 via Astronomer (if user prefers Airflow)**:
 
-   Astronomer is the recommended way to run Airflow 3 locally — it handles all Docker setup.
+   Astronomer is the recommended way to run Airflow 3 locally: it handles all Docker setup.
 
    Requirements: Docker Desktop running.
 
@@ -189,47 +159,7 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
    winget install -e --id Astronomer.Astro
    ```
 
-   Initialize an Astro project inside the pipeline repository:
-   ```bash
-   cd ~/repos/system2_data_pipelines
-   astro dev init
-   ```
-   This creates `.astro/config.yaml`, `Dockerfile`, `airflow_settings.yaml`, `packages.txt`, `plugins/`, and a placeholder `dags/exampledag.py`. Delete the placeholder — the scaffold already ships real DAGs under `dags/pipelines/<name>/dag.py`:
-   ```bash
-   rm dags/exampledag.py
-   ```
-
-   Astro's hardcoded default DAGs folder is `dags/`, which matches the scaffold layout, so no `dags_folder` override is needed. Airflow auto-adds `/usr/local/airflow/dags` to PYTHONPATH inside the container, so imports like `from lib.xxx import yyy` resolve without any further configuration.
-
-   Edit `.astro/config.yaml` to pin a port that does not collide with a local Postgres on 5432 (Astro uses the metadata DB port here, not Airflow's webserver):
-   ```yaml
-   project:
-     name: system2_data_pipelines
-   postgres:
-     port: 5433
-   ```
-
-   If the pipeline writes to or reads from a directory on the host (via the `DATA_DIR` env var), add a `docker-compose.override.yml` at the repo root so the path is mounted into the scheduler and dag-processor containers. Example:
-   ```yaml
-   services:
-     scheduler:
-       environment:
-         - DATA_DIR=/usr/local/airflow/data
-       volumes:
-         - ${DATA_DIR:-./data}:/usr/local/airflow/data
-     dag-processor:
-       environment:
-         - DATA_DIR=/usr/local/airflow/data
-   ```
-
-   Start Astro. Docker Compose does not auto-load `.env`, so export it first so the volume-mount variable substitution works:
-   ```bash
-   export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
-   astro dev start
-   ```
-   UI available at http://localhost:8080 (default credentials: admin/admin). Re-run the export before every `astro dev start`.
-
-   If Airflow is already installed (not via Astronomer): run `airflow version`. Check `airflow config get-value core dags_folder` and point it at `<repo>/dags` if it's not already there.
+   If Airflow is already installed (not via Astronomer): run `airflow version` and note it. Astro project initialization and startup happen in step 5b after the pipeline repository is cloned (the scaffold already ships the required Astro configuration files).
    - Save all findings and configurations to `~/.system2/knowledge/infrastructure.md`
    - For each database discovered or installed, perform two additional actions:
 
@@ -315,32 +245,104 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
 
    Ask whether the user has an existing data pipeline repository:
 
-   - **If yes**: get the local path and remote URL (if applicable). Read `README.md` and `CONTRIBUTING.md` (if present) and note the top-level structure. Note the path in `infrastructure.md`. If `dags/lib/` and `dags/pipelines/` are already present, the scaffold is not needed — skip the clone step.
+   - **If yes**: get the local path and remote URL (if applicable). Read `README.md` and `CONTRIBUTING.md` (if present) and note the top-level structure. Note the path in `infrastructure.md`. If `dags/lib/` and `dags/pipelines/` are already present, the scaffold is not needed: skip the clone step.
 
-   - **If no**: ask if they want to create a `system2_data_pipelines` repository with a starter scaffold. If yes:
+   - **If no**: ask if they want to create a `system2_data_pipelines` repository with a starter scaffold. If yes, follow the sequence below. Use a user-specified path instead of `~/repos/system2_data_pipelines` if requested.
 
-     1. Clone the scaffold (no GitHub account required — it is public HTTPS):
-        ```bash
-        git clone https://github.com/diegoscarabelli/openetl_scaffold.git ~/repos/system2_data_pipelines
-        cd ~/repos/system2_data_pipelines
-        git remote remove origin
-        ```
-        Use a user-specified path instead of `~/repos/system2_data_pipelines` if requested.
+     **1. Clone and detach:**
+     ```bash
+     git clone https://github.com/diegoscarabelli/openetl_scaffold.git ~/repos/system2_data_pipelines
+     cd ~/repos/system2_data_pipelines
+     git remote remove origin
+     ```
 
-     2. Copy `.env.example` to `.env` and fill in the DB credentials from step 4a:
-        ```bash
-        cp .env.example .env
-        # Fill in: DB_HOST, DB_PORT, DB_NAME=system2_pipelines_db,
-        #           DB_USER=system2_pipelines, DB_PASSWORD=<password from step 4a>
-        ```
+     **2. Initialize the database** using the scaffold's DDL scripts (run as superuser, e.g. `postgres`). Before running `iam.sql`, edit the passwords for `system2_pipelines` and `read_only` users inside that file. Run once per target database (`lens` for production, `lens_dev` for development):
+     ```bash
+     # Create the databases:
+     psql -U postgres -f database.ddl
 
-     3. If the user has a GitHub account, offer to create a private remote:
-        ```bash
-        gh repo create system2_data_pipelines --private --source=. --remote=origin --push
-        ```
-        If no GitHub account, the repo works as a local git repo only — a remote can be added later.
+     # For each database (lens and lens_dev):
+     psql -U postgres -d lens -f schemas.ddl
+     psql -U postgres -d lens -f iam.sql
 
-     4. Note the local path in `infrastructure.md`.
+     # Per-pipeline table DDL (example pipeline):
+     psql -U postgres -d lens -f dags/pipelines/example/tables.ddl
+
+     # Repeat for lens_dev:
+     psql -U postgres -d lens_dev -f schemas.ddl
+     psql -U postgres -d lens_dev -f iam.sql
+     psql -U postgres -d lens_dev -f dags/pipelines/example/tables.ddl
+     ```
+     The `iam.sql` script creates a `readers` role, a `read_only` user, and the `system2_pipelines` app user with `pg_read_all_data` + `pg_write_all_data` grants (PostgreSQL 14+ predefined roles for blanket read/write across all schemas).
+
+     **3. Configure credentials:**
+     ```bash
+     cp .env.template .env
+     ```
+     Fill in the `.env` file. The scaffold uses the `SQL_DB_*` prefix (not `DB_*`) to avoid conflicts with Airflow's entrypoint health-check script which reserves `DB_HOST`:
+     ```
+     SQL_DB_HOST=localhost
+     SQL_DB_PORT=5432
+     SQL_DB_NAME=lens
+     SQL_DB_USER=system2_pipelines
+     SQL_DB_PASSWORD=<password set in iam.sql>
+     ```
+     Store the `system2_pipelines` password in `~/.pgpass` as well (format: `localhost:5432:*:system2_pipelines:<password>`, `chmod 600 ~/.pgpass`). Record the `.env` path in `infrastructure.md`.
+
+     **4. Python environment:**
+     ```bash
+     make venv
+     source .venv/bin/activate
+     ```
+     This creates a project-local `.venv/` with the dependencies from `requirements.txt`. The orchestrator lines in `requirements.txt` are commented out by default: uncomment the one matching the user's chosen orchestrator, then re-run `make venv`.
+
+     Note: this `.venv/` is separate from the shared `~/.system2/venv/` created in step 4b. The shared env holds notebooks and visualization tools; the repo `.venv/` holds pipeline-specific dependencies (SQLAlchemy, orchestrator, etc.).
+
+     **5. Orchestrator setup:**
+
+     **If Prefect:**
+
+     Development mode (no server, good for initial testing):
+     ```bash
+     PYTHONPATH=dags python -m pipelines.example.flow
+     ```
+     The `PYTHONPATH=dags` is required so `from lib.xxx import yyy` resolves (Airflow/Astro auto-adds `dags/` to the path, but Prefect does not).
+
+     Server mode (persistent runs, UI, recommended for ongoing use):
+     ```bash
+     prefect server start                                        # keep running in background
+     prefect config set PREFECT_API_URL=http://localhost:4200/api
+     prefect work-pool create default --type process
+     prefect worker start --pool default                         # keep running in background
+     ```
+     UI at http://localhost:4200.
+
+     Prefect Cloud (managed, no local server): `prefect cloud login` (browser auth).
+
+     **If Airflow (Astronomer):**
+
+     The scaffold already ships the required Astro configuration files (`.astro/config.yaml`, `Dockerfile`, `docker-compose.override.yml`). Do NOT run `astro dev init` as it would overwrite them. The pre-configured ports are: Astro metadata DB on 5434 and webserver on 8081, avoiding collisions with the local PostgreSQL on 5432.
+
+     The `docker-compose.override.yml` already mounts the `DATA_DIR` volume and passes `SQL_DB_*` env vars to the scheduler and dag-processor containers. It also sets `AIRFLOW__LOGGING__ENABLE_TASK_CONTEXT_LOGGER=False` to suppress a known warning on Airflow 3.
+
+     Start Astro (Docker Compose does not auto-load `.env`, so export first):
+     ```bash
+     export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
+     astro dev start
+     ```
+     UI at http://localhost:8081 (default credentials: admin/admin). Re-run the export before every `astro dev start`.
+
+     **6. Verify the example pipeline:**
+     Run the example pipeline to confirm the full stack works end-to-end. For Prefect: `PYTHONPATH=dags python -m pipelines.example.flow`. For Airflow: trigger the `example` DAG from the Astro UI. Check that data lands in the `wid` schema of the `lens` database.
+
+     **7. Optional GitHub remote:**
+     If the user has a GitHub account (from step 5a), offer to create a private remote:
+     ```bash
+     gh repo create system2_data_pipelines --private --source=. --remote=origin --push
+     ```
+     If no GitHub account, the repo works as a local git repo only: a remote can be added later.
+
+     **8.** Note the local path, orchestrator choice, and database names in `infrastructure.md`.
 
    - **If no to both**: note that the Conductor will create pipeline files in the working directory when the first pipeline project starts.
 
