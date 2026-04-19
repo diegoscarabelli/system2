@@ -1,6 +1,6 @@
 ---
 name: system2-onboarding
-description: Run on first launch (when ~/.system2/knowledge/infrastructure.md is still the template) or whenever the user explicitly asks to re-onboard. Greets the user, learns about them, detects the system, configures the data stack, sets up the development environment, and captures interaction preferences.
+description: Run on first launch (when ~/.system2/knowledge/infrastructure.md is still the template) or whenever the user explicitly asks to re-onboard. Greets the user, learns about them, detects the system, installs and configures the data stack (database, orchestrator, Python environments), scaffolds the pipeline repository, and captures interaction preferences.
 roles: [guide]
 ---
 
@@ -11,15 +11,20 @@ This skill defines the one-time setup the Guide runs on first launch. The goal i
 - A populated `~/.system2/knowledge/user.md` describing who they are and what they want.
 - A populated `~/.system2/knowledge/infrastructure.md` describing their machine, data stack, and code repository.
 - A populated `~/.system2/knowledge/guide.md` capturing any interaction preferences the user expressed.
-- A working shared Python environment under `~/.system2/venv/` registered as a Jupyter kernel.
+- A working analytics database with schemas, users, and permissions initialized (PostgreSQL + TimescaleDB by default, but adapts to whatever the user already has or needs).
+- A shared Python environment at `~/.system2/venv/` with notebooks, data libraries, and visualization tools, registered as a Jupyter kernel.
+- An orchestrator installed and configured (Prefect by default, Airflow via Astronomer as alternative, or whatever the user already runs).
+- A pipeline repository (cloned from openetl_scaffold or existing repo identified) with database tables created, credentials in `.env` and `~/.pgpass`, a repo-local `.venv/`, and the example pipeline verified end-to-end.
+- Database connections registered in `~/.system2/config.toml` with Node.js drivers installed.
+- The user oriented on `config.toml` so they know where to tune System2 later.
 
 If the session is interrupted partway through, the next Guide session should re-invoke this skill, inspect what is already populated in those files, and resume from where it left off rather than starting over.
 
 ## Steps
 
-The knowledge files in `~/.system2/knowledge/` are seeded with structural templates. **Always read the entire file before editing it** so you see what is already populated and do not overwrite existing content. Preserve the template's section headings and structure: fill in sections rather than replacing them, and add new sections beyond the templated ones whenever the user's setup warrants it (e.g. a `## Streaming` section under Infrastructure, a `## Constraints` section under User Profile). Likewise, the JSON blocks in `infrastructure.md` are starting points: add fields as needed to accurately describe the user's infrastructure (e.g. `tunnel`, `read_replica`, `tls`, `package_manager`). The schemas are illustrative, not rigid.
+The knowledge files in `~/.system2/knowledge/` are seeded with structural templates. **Always read the entire file before editing it** so you see what is already populated and do not overwrite existing content. Preserve the template's section headings and structure. Lines starting with `>` are section descriptions explaining what belongs there: keep them as-is and write the actual content below them. Add new sections beyond the templated ones whenever the user's setup warrants it (e.g. a `## Streaming` section under Infrastructure, a `## Constraints` section under User Profile). Likewise, the JSON blocks in `infrastructure.md` are starting points: add fields as needed to accurately describe the user's infrastructure (e.g. `tunnel`, `read_replica`, `tls`, `package_manager`). The schemas are illustrative, not rigid.
 
-**Handling credentials.** Many users will already have credentials configured in standard locations (e.g. `~/.pgpass` already exists, AWS is already set up via `aws configure`, GitHub via `gh auth login`). In those cases, simply point the `credentials` field in `infrastructure.md` at the existing file and move on: do not create, modify, or read the file. If the user instead shares a secret directly during the conversation, never write it to `infrastructure.md` or any other file under `~/.system2/knowledge/` (those files are git-tracked). Write the secret to the system's native credential location (creating the file with `chmod 600` if it does not already exist), then record the *path* to that location in the JSON block under a `credentials` field. Use the canonical native location for each system:
+**Handling credentials.** Many users will already have credentials configured in standard locations (e.g. `~/.pgpass` already exists, AWS is already set up via `aws configure`, GitHub via `gh auth login`). In those cases, simply point the `credentials` field in `infrastructure.md` at the existing file and move on. If the user instead shares a secret directly during the conversation, never write it to `infrastructure.md` or any other file under `~/.system2/knowledge/` (those files are git-tracked). Write the secret to the system's native credential location (creating the file with `chmod 600` if it does not already exist), then record the *path* to that location in the JSON block under a `credentials` field. Use the canonical native location for each system:
 
 | System | Native location |
 |--------|----------------|
@@ -41,7 +46,7 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
    Keep it conversational, not corporate. End by inviting the user to tell you about themselves.
 
 2. **Get to know the user:**
-   Ask about their background, what kind of work they do, what they hope to accomplish with System2. Follow the user's lead: some people want to share their full story, others just want to get started. Either is fine. Listen for: technical level (data engineer, analyst, researcher, business user), domain expertise, goals, and communication preferences. Save what you learn to `~/.system2/knowledge/user.md`. Do not front-load a list of questions; have a conversation.
+   Ask about their background, what kind of work they do, what they hope to accomplish with System2. Follow the user's lead: some people want to share their full story, others just want to get started. Either is fine. Listen for: technical level (data engineer, analyst, researcher, business user), domain expertise, goals, and communication preferences. Save what you learn to `~/.system2/knowledge/user.md`, following the instructions for editing knowledge files provided earlier. Do not front-load a list of questions; have a conversation.
 
 3. **Detect system information:**
    Tell the user you're going to take a quick look at their system, then run:
@@ -50,7 +55,7 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
    - Check installed tools: `git --version`, `python3 --version`, `pip3 --version`, `docker --version`, `psql --version`
    - Detect the platform package manager (macOS: `brew`, Linux: `apt`/`dnf`/distro equivalent, Windows: `winget` or `choco`)
    - Share a brief summary of what you found with the user
-   - Save findings to `~/.system2/knowledge/infrastructure.md` (template already exists)
+   - Save findings to `~/.system2/knowledge/infrastructure.md`, following the instructions for editing knowledge files provided earlier. 
 
 4. **Configure data stack collaboratively:**
    - Adapt explanations to user's skill level

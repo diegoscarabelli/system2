@@ -17,6 +17,11 @@ export const INFRASTRUCTURE_TEMPLATE = `# Infrastructure
 > notebook-driven exploration vs production pipelines). This is the human-readable summary
 > the rest of the document elaborates on.
 
+## System
+
+> The local machine (and any remote machines) where System2 and the data stack run.
+> OS, architecture, CPU, RAM, disk, package manager, installed runtimes and tools.
+
 ## Databases
 
 > One subsection per database. Each starts with a JSON block describing connection details,
