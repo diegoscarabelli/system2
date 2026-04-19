@@ -332,8 +332,23 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
      ```
      UI at http://localhost:8081 (default credentials: admin/admin). Re-run the export before every `astro dev start`.
 
+     Managing Astro:
+     ```bash
+     astro dev restart   # picks up Python code changes without rebuilding
+     astro dev stop      # stop all containers
+     ```
+
+     Triggering and monitoring DAGs:
+     ```bash
+     astro dev run dags unpause <dag_id>                          # required before first trigger
+     astro dev run dags trigger <dag_id>                          # trigger a DAG run
+     astro dev run tasks states-for-dag-run <dag_id> "<run_id>"   # check task states
+     ```
+
+     If a DAG run is in `running` state when Astronomer restarts, it becomes orphaned and may block new runs due to `max_active_runs`. Mark it as failed via the Airflow UI or API to unblock scheduling.
+
      **6. Verify the example pipeline:**
-     Run the example pipeline to confirm the full stack works end-to-end. For Prefect: `PYTHONPATH=dags python -m pipelines.example.flow`. For Airflow: trigger the `example` DAG from the Astro UI. Check that data lands in the `wid` schema of the `lens` database.
+     Run the example pipeline to confirm the full stack works end-to-end. For Prefect: `PYTHONPATH=dags python -m pipelines.example.flow`. For Airflow: unpause and trigger the `example` DAG (`astro dev run dags unpause example && astro dev run dags trigger example`). Check that data lands in the `wid` schema of the `lens` database.
 
      **7. Optional GitHub remote:**
      If the user has a GitHub account (from step 5a), offer to create a private remote:
