@@ -356,6 +356,37 @@ airflow dags list-import-errors
 
 **Task stuck in "running"**: worker may have died without reporting. Check for zombie tasks in the metadata DB. The scheduler has zombie detection.
 
+## Astro CLI
+
+The local Airflow environment runs via [Astro CLI](https://www.astronomer.io/docs/astro/cli/install-cli). The scaffold ships `.astro/config.yaml` (metadata DB on port 5434, webserver on 8081), `Dockerfile`, and `docker-compose.override.yml` pre-configured. Do not run `astro dev init` in the scaffold repo.
+
+### Environment management
+
+```bash
+astro dev start     # start Astronomer (builds containers on first run)
+astro dev restart   # picks up Python code changes without rebuilding
+astro dev stop      # stop all containers
+```
+
+`astro dev restart` is the fastest way to reload DAG code and Python changes. Use it after editing pipeline code, adding dependencies, or modifying the Dockerfile.
+
+### Running and monitoring DAGs
+
+```bash
+# Unpause a DAG (new DAGs are paused by default)
+astro dev run dags unpause <dag_id>
+
+# Trigger a manual run
+astro dev run dags trigger <dag_id>
+
+# Check task states for a specific run
+astro dev run tasks states-for-dag-run <dag_id> "<run_id>"
+```
+
+The Airflow webserver UI is available at `http://localhost:8081` (configured in `.astro/config.yaml`).
+
+**Orphaned runs**: if Astronomer is stopped while a DAG run is in progress, the run stays in `running` state. Because `max_active_runs=1`, the next trigger will be blocked. Clear the orphaned run from the UI or CLI before re-triggering.
+
 ## Useful Jinja Template Variables
 
 | Variable | Description |
