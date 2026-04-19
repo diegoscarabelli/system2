@@ -110,7 +110,7 @@ Before submitting a PR, ensure:
 
 - Node.js >= 20
 - pnpm >= 8
-- System2 installed globally (`npm install -g system2`) and onboarded (`system2 onboard`)
+- System2 installed globally (`pnpm add -g system2`) and onboarded (`system2 onboard`)
 
 ### Initial Setup
 

@@ -2,11 +2,24 @@
   "name": "system2",
   "version": "0.1.0",
   "description": "A multi-agent data platform for solo analysts",
+  "author": "Diego Scarabelli",
   "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/diegoscarabelli/system2#readme",
   "repository": {
     "type": "git",
     "url": "https://github.com/diegoscarabelli/system2.git"
   },
+  "bugs": {
+    "url": "https://github.com/diegoscarabelli/system2/issues"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "data-engineering",
+    "data-analysis",
+    "multi-agent",
+    "llm"
+  ],
   "type": "module",
   "bin": {
     "system2": "./dist/cli/index.js"
