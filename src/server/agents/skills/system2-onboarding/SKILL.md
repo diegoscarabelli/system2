@@ -317,6 +317,20 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
      ```
      UI at http://localhost:4200.
 
+     Deploying and running flows:
+     ```bash
+     cd dags
+     prefect deploy pipelines/<name>/flow.py:flow --name <name>-dev --work-pool default
+     prefect deployment run '<flow-name>/<name>-dev'
+     ```
+
+     Monitoring:
+     ```bash
+     prefect flow-run ls                           # list recent runs with state
+     prefect flow-run inspect <flow-run-id>        # logs, task states, parameters
+     prefect deployment ls                         # list deployments and schedules
+     ```
+
      Prefect Cloud (managed, no local server): `prefect cloud login` (browser auth).
 
      **If Airflow (Astronomer):**

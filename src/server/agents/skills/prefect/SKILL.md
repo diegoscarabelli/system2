@@ -370,6 +370,52 @@ prefect version
 
 **Tasks not visible in UI**: ensure they use `@task` decorator (plain function calls are not tracked). Check that `log_prints=True` is set if expecting print output.
 
+## Local Server and Deployments
+
+### Starting the server
+
+```bash
+prefect server start                                        # runs on http://localhost:4200
+prefect config set PREFECT_API_URL=http://localhost:4200/api # point CLI at local server
+```
+
+The Prefect UI is available at `http://localhost:4200` once the server is running.
+
+### Work pool and worker
+
+A work pool + worker pair is required for deployments (not needed for `flow.serve()` or direct `python -m` runs):
+
+```bash
+prefect work-pool create default --type process
+prefect worker start --pool default                         # keep running in background
+```
+
+### Running flows
+
+```bash
+# Direct execution (no server needed, good for development)
+PYTHONPATH=dags python -m pipelines.<name>.flow
+
+# Via deployment (requires server + worker)
+cd dags
+prefect deploy pipelines/<name>/flow.py:flow --name <name>-dev --work-pool default
+prefect deployment run '<flow-name>/<name>-dev'
+```
+
+`PYTHONPATH=dags` is required so `from lib.xxx import yyy` resolves. Airflow/Astro auto-adds `dags/` to the path, but Prefect does not.
+
+### Monitoring
+
+```bash
+prefect flow-run ls                           # list recent runs with state
+prefect flow-run inspect <flow-run-id>        # logs, task states, parameters
+prefect deployment ls                         # list deployments and schedules
+```
+
+### Prefect Cloud
+
+For managed orchestration (no local server): `prefect cloud login` (browser auth). All CLI commands work the same against Cloud.
+
 ## Configuration Hierarchy
 
 Highest precedence first:
