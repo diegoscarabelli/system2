@@ -335,16 +335,47 @@ The knowledge files in `~/.system2/knowledge/` are seeded with structural templa
 
      **If Airflow (Astronomer):**
 
-     The scaffold already ships the required Astro configuration files (`.astro/config.yaml`, `Dockerfile`, `docker-compose.override.yml`). Do NOT run `astro dev init` as it would overwrite them. The pre-configured ports are: Astro metadata DB on 5434 and webserver on 8081, avoiding collisions with the local PostgreSQL on 5432.
-
-     The `docker-compose.override.yml` already mounts the `DATA_DIR` volume and passes `SQL_DB_*` env vars to the scheduler and dag-processor containers. It also sets `AIRFLOW__LOGGING__ENABLE_TASK_CONTEXT_LOGGER=False` to suppress a known warning on Airflow 3.
-
-     Start Astro (Docker Compose does not auto-load `.env`, so export first):
+     Initialize Astro CLI inside the scaffold repo, then clean up the placeholder DAG:
      ```bash
-     export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
+     astro dev init
+     rm dags/exampledag.py
+     ```
+
+     Configure `.astro/config.yaml` to avoid port collisions with the local PostgreSQL on 5432:
+     ```yaml
+     postgres:
+         port: "5434"
+     webserver:
+         port: "8081"
+     ```
+
+     Create `docker-compose.override.yml` to pass database credentials and mount the data directory into the scheduler container. Use `host.docker.internal` (macOS/Windows) or `172.17.0.1` (Linux) for `SQL_DB_HOST` so containers can reach the host database:
+     ```yaml
+     services:
+       scheduler:
+         environment:
+           - SQL_DB_HOST=host.docker.internal
+           - SQL_DB_PORT=${SQL_DB_PORT}
+           - SQL_DB_NAME=${SQL_DB_NAME}
+           - SQL_DB_USER=${SQL_DB_USER}
+           - SQL_DB_PASSWORD=${SQL_DB_PASSWORD}
+           - DATA_DIR=/usr/local/airflow/data
+           - AIRFLOW__LOGGING__ENABLE_TASK_CONTEXT_LOGGER=False
+         volumes:
+           - ${DATA_DIR:-./data}:/usr/local/airflow/data
+
+       dag-processor:
+         environment:
+           - DATA_DIR=/usr/local/airflow/data
+           - AIRFLOW__LOGGING__ENABLE_TASK_CONTEXT_LOGGER=False
+     ```
+     The `${VAR}` references are resolved from the `.env` file in the project root.
+
+     Start Astronomer:
+     ```bash
      astro dev start
      ```
-     UI at http://localhost:8081 (default credentials: admin/admin). Re-run the export before every `astro dev start`.
+     UI at http://localhost:8081 (default credentials: admin/admin).
 
      Managing Astro:
      ```bash

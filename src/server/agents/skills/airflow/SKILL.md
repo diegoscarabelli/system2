@@ -371,7 +371,7 @@ airflow dags list-import-errors
 
 ## Astro CLI
 
-The local Airflow environment runs via [Astro CLI](https://www.astronomer.io/docs/astro/cli/install-cli). The scaffold ships `.astro/config.yaml` (metadata DB on port 5434, webserver on 8081), `Dockerfile`, and `docker-compose.override.yml` pre-configured. Do not run `astro dev init` in the scaffold repo.
+The local Airflow environment runs via [Astro CLI](https://www.astronomer.io/docs/astro/cli/install-cli). After cloning the scaffold, run `astro dev init` to generate `.astro/`, `Dockerfile`, etc., then delete the placeholder `dags/exampledag.py`. Configure `.astro/config.yaml` to use port 5434 for the metadata DB and 8081 for the webserver (avoiding collisions with the local PostgreSQL on 5432). Create a `docker-compose.override.yml` to pass `SQL_DB_*` env vars and mount the data directory into the scheduler container. See the scaffold README for the full YAML content.
 
 ### Environment management
 
