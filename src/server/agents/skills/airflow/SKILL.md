@@ -300,6 +300,19 @@ Multiple assets can be combined: `schedule=[Asset("a"), Asset("b")]` triggers wh
 
 For schedules cron cannot express (business days, irregular intervals), implement a custom timetable by subclassing `Timetable`.
 
+## Useful Jinja Template Variables
+
+| Variable | Description |
+| -------- | ----------- |
+| `{{ ds }}` | Logical date as `YYYY-MM-DD` |
+| `{{ data_interval_start }}` | Start of the data interval |
+| `{{ data_interval_end }}` | End of the data interval |
+| `{{ dag_run.run_id }}` | Unique run identifier |
+| `{{ dag_run.conf }}` | DAG run configuration (from trigger) |
+| `{{ prev_data_interval_end_success }}` | End of previous successful run's interval |
+| `{{ var.value.my_variable }}` | Airflow Variables access |
+| `{{ conn.my_conn.host }}` | Connection attribute access |
+
 ## Testing
 
 ### DAG integrity tests
@@ -386,19 +399,6 @@ astro dev run tasks states-for-dag-run <dag_id> "<run_id>"
 The Airflow webserver UI is available at `http://localhost:8081` (configured in `.astro/config.yaml`).
 
 **Orphaned runs**: if Astronomer is stopped while a DAG run is in progress, the run stays in `running` state. Because `max_active_runs=1`, the next trigger will be blocked. Clear the orphaned run from the UI or CLI before re-triggering.
-
-## Useful Jinja Template Variables
-
-| Variable | Description |
-| -------- | ----------- |
-| `{{ ds }}` | Logical date as `YYYY-MM-DD` |
-| `{{ data_interval_start }}` | Start of the data interval |
-| `{{ data_interval_end }}` | End of the data interval |
-| `{{ dag_run.run_id }}` | Unique run identifier |
-| `{{ dag_run.conf }}` | DAG run configuration (from trigger) |
-| `{{ prev_data_interval_end_success }}` | End of previous successful run's interval |
-| `{{ var.value.my_variable }}` | Airflow Variables access |
-| `{{ conn.my_conn.host }}` | Connection attribute access |
 
 ## Pipeline Structure
 

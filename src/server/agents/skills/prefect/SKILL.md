@@ -252,45 +252,15 @@ session = creds.get_boto3_session()
 
 Use `SecretStr`/`SecretDict` in custom blocks for obfuscated display.
 
-## Deployment Patterns
+## Configuration Hierarchy
 
-### Docker (prefect.yaml)
+Highest precedence first:
 
-```yaml
-build:
-  - prefect_docker.deployments.steps.build_docker_image:
-      id: build-image
-      image_name: "{{ $IMAGE_NAME }}"
-      tag: latest
-      dockerfile: auto
-      platform: "linux/amd64"  # IMPORTANT on ARM machines
+1. Environment variables (`PREFECT_*`)
+2. `.env` files in working directory
+3. Profiles (`~/.prefect/profiles.toml`)
 
-deployments:
-  - name: prod-etl
-    entrypoint: flows/etl.py:run_etl
-    work_pool:
-      name: docker-pool
-      job_variables:
-        image: "{{ build-image.image }}"
-    schedules:
-      - cron: "0 6 * * *"
-        timezone: America/New_York
-```
-
-### Git-based source
-
-```python
-my_flow.from_source(
-    source="https://github.com/org/repo.git",
-    entrypoint="flows/etl.py:etl_pipeline",
-).deploy(name="prod-etl", work_pool_name="k8s-pool")
-```
-
-### CI/CD
-
-```bash
-prefect deploy --all --no-prompt
-```
+Key settings: `PREFECT_API_URL`, `PREFECT_API_KEY`, `PREFECT_RESULTS_PERSIST_BY_DEFAULT`, `PREFECT_LOGGING_LOG_PRINTS`, `PREFECT_TASK_DEFAULT_RETRIES`, `PREFECT_WORKER_QUERY_SECONDS`.
 
 ## Scheduling
 
@@ -404,27 +374,49 @@ prefect deployment run '<flow-name>/<name>-dev'
 
 `PYTHONPATH=dags` is required so `from lib.xxx import yyy` resolves. Airflow/Astro auto-adds `dags/` to the path, but Prefect does not.
 
-### Monitoring
-
-```bash
-prefect flow-run ls                           # list recent runs with state
-prefect flow-run inspect <flow-run-id>        # logs, task states, parameters
-prefect deployment ls                         # list deployments and schedules
-```
-
 ### Prefect Cloud
 
 For managed orchestration (no local server): `prefect cloud login` (browser auth). All CLI commands work the same against Cloud.
 
-## Configuration Hierarchy
+## Deployment Patterns
 
-Highest precedence first:
+### Docker (prefect.yaml)
 
-1. Environment variables (`PREFECT_*`)
-2. `.env` files in working directory
-3. Profiles (`~/.prefect/profiles.toml`)
+```yaml
+build:
+  - prefect_docker.deployments.steps.build_docker_image:
+      id: build-image
+      image_name: "{{ $IMAGE_NAME }}"
+      tag: latest
+      dockerfile: auto
+      platform: "linux/amd64"  # IMPORTANT on ARM machines
 
-Key settings: `PREFECT_API_URL`, `PREFECT_API_KEY`, `PREFECT_RESULTS_PERSIST_BY_DEFAULT`, `PREFECT_LOGGING_LOG_PRINTS`, `PREFECT_TASK_DEFAULT_RETRIES`, `PREFECT_WORKER_QUERY_SECONDS`.
+deployments:
+  - name: prod-etl
+    entrypoint: flows/etl.py:run_etl
+    work_pool:
+      name: docker-pool
+      job_variables:
+        image: "{{ build-image.image }}"
+    schedules:
+      - cron: "0 6 * * *"
+        timezone: America/New_York
+```
+
+### Git-based source
+
+```python
+my_flow.from_source(
+    source="https://github.com/org/repo.git",
+    entrypoint="flows/etl.py:etl_pipeline",
+).deploy(name="prod-etl", work_pool_name="k8s-pool")
+```
+
+### CI/CD
+
+```bash
+prefect deploy --all --no-prompt
+```
 
 ## Pipeline Structure
 
