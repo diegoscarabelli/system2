@@ -12,7 +12,7 @@ function makeProject(id: number): Project {
     id,
     name: 'Project',
     description: 'Desc',
-    dir_path: `${id}_project`,
+    dir_name: `${id}_project`,
     status: 'todo',
     labels: '[]',
     start_at: null,

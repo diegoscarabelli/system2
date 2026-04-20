@@ -42,7 +42,7 @@ export class DatabaseClient {
   }
 
   // Project operations
-  createProject(project: Omit<Project, 'id' | 'dir_path' | 'created_at' | 'updated_at'>): Project {
+  createProject(project: Omit<Project, 'id' | 'dir_name' | 'created_at' | 'updated_at'>): Project {
     const txn = this.db.transaction(() => {
       const insertStmt = this.db.prepare(`
         INSERT INTO project (name, description, status, labels, start_at, end_at)
@@ -60,11 +60,11 @@ export class DatabaseClient {
       ) as Project;
 
       // Compute and persist the slugified directory name
-      const dirPath = `${row.id}_${slugify(row.name)}`;
+      const dirName = `${row.id}_${slugify(row.name)}`;
       const updateStmt = this.db.prepare(
-        'UPDATE project SET dir_path = ? WHERE id = ? RETURNING *'
+        'UPDATE project SET dir_name = ? WHERE id = ? RETURNING *'
       );
-      return updateStmt.get(dirPath, row.id) as Project;
+      return updateStmt.get(dirName, row.id) as Project;
     });
     return txn();
   }
@@ -97,8 +97,8 @@ export class DatabaseClient {
     if (updates.name !== undefined) {
       fields.push('name = ?');
       values.push(updates.name);
-      // Keep dir_path in sync with the slugified name
-      fields.push('dir_path = ?');
+      // Keep dir_name in sync with the slugified name
+      fields.push('dir_name = ?');
       values.push(`${id}_${slugify(updates.name)}`);
     }
     if (updates.description !== undefined) {

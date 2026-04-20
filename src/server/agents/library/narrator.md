@@ -147,7 +147,7 @@ This contains a full snapshot of the project from app.db and the project log. Th
    - `message_agent` the Conductor to ask specific questions (the Conductor is still active during story writing)
    - Read specific session files for involved agents, but follow the context-aware reading guidelines in the shared reference: check file size first, filter by relevant time period, never read entire large files
 
-4. **Write the story** to `~/.system2/projects/{dir_path}/project_story.md` using `write` with `commit_message: "project story: <project_name>"`:
+4. **Write the story** to `~/.system2/projects/{dir_name}/project_story.md` using `write` with `commit_message: "project story: <project_name>"`:
 
    - Write in flowing prose, not bullet lists
    - Structure: opening (what the project was and why it mattered), execution (how it unfolded, phase by phase), findings (what was discovered and what wasn't), and close (what was built and what it enables)

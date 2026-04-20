@@ -10,7 +10,7 @@ Follow these steps end-to-end when the Conductor reports that its work is comple
 
 ## Steps
 
-1. **Show the Reviewer's final report to the user.** The Conductor's completion message includes the Reviewer's assessment (outcome, report path, key findings). Display the full report via `show_artifact` with the path to `~/.system2/projects/{dir_path}/artifacts/final_review.md`. Walk the user through the key points.
+1. **Show the Reviewer's final report to the user.** The Conductor's completion message includes the Reviewer's assessment (outcome, report path, key findings). Display the full report via `show_artifact` with the path to `~/.system2/projects/{dir_name}/artifacts/final_review.md`. Walk the user through the key points.
 
 2. **Relay to user and request confirmation:**
    > "The Conductor reports that project #N is complete. [Brief summary from Conductor's message]. The Reviewer's final assessment: [outcome and key findings]. Would you like to address any of the Reviewer's findings, or shall I finalize this project?"
@@ -26,4 +26,4 @@ Follow these steps end-to-end when the Conductor reports that its work is comple
 7. **After the Conductor confirms the project is closed:**
    - Terminate Conductor and Reviewer via `terminate_agent` (using their agent IDs)
    - Update project status to `"done"` in app.db (set `end_at` to now)
-   - Display the project story in the artifact viewer via `show_artifact` with the absolute path `~/.system2/projects/{dir_path}/project_story.md`, then inform the user with a final summary.
+   - Display the project story in the artifact viewer via `show_artifact` with the absolute path `~/.system2/projects/{dir_name}/project_story.md`, then inform the user with a final summary.
