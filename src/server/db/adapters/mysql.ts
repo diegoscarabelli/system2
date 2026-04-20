@@ -42,6 +42,7 @@ export const createAdapter: AdapterFactory = (
       port: config.port,
       database: config.database,
       user: config.user,
+      password: config.password,
       socketPath: config.socket,
       ssl: config.ssl ? {} : undefined,
       connectionLimit: 5,

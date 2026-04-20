@@ -5,8 +5,8 @@
  * behind the DatabaseAdapter interface. Creates a ConnectionPool lazily on
  * first query and tears it down after 5 minutes of inactivity.
  *
- * Credentials must be passed via environment variables (MSSQL_USER, MSSQL_PASSWORD)
- * or Azure AD authentication. The mssql package has no native credential file.
+ * Credentials can be provided via the `password` field in config.toml,
+ * environment variables (MSSQL_USER, MSSQL_PASSWORD), or Azure AD authentication.
  */
 
 import type { DatabaseConnectionConfig } from '../../../shared/index.js';
@@ -45,6 +45,7 @@ export const createAdapter: AdapterFactory = (
       port: config.port ?? 1433,
       database: config.database,
       user: config.user,
+      password: config.password,
       options: {
         encrypt: config.ssl ?? false,
         trustServerCertificate: !config.ssl,

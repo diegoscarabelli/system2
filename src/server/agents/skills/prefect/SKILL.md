@@ -453,7 +453,7 @@ def process_batch(serialized_batch: str, config: PipelineConfig) -> dict:
     processor = config.processor_class(
         config=config, run_id=..., start_date=..., file_set=file_set,
     )
-    return processor.process()  # {"success": bool, "error": str|None}
+    return processor.process()  # {"files": [...], "success": bool, "error": str|None}
 
 @flow
 def pipeline(config: PipelineConfig) -> None:

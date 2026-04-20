@@ -224,20 +224,20 @@ Database drivers are not bundled with System2. The Guide installs the required d
 
 ### Credentials
 
-Database credentials are **not** stored in config.toml. Each driver uses its native credential location:
+For adapters that use traditional host/user/password connections (postgres, mysql, mssql, clickhouse), passwords can be stored directly in config.toml via the `password` field. Since config.toml is created with `0600` permissions and gitignored, this is safe for personal use. Alternatively, each driver also supports its native credential mechanism as a fallback when no `password` is configured:
 
 | Type | Credential source |
 |------|------------------|
-| `postgres` | `~/.pgpass` (or `PGPASSWORD` env var) |
-| `mysql` | `~/.my.cnf` `[client]` section (or `MYSQL_PWD` env var) |
+| `postgres` | `password` field in config.toml, `~/.pgpass`, or `PGPASSWORD` env var |
+| `mysql` | `password` field in config.toml, `~/.my.cnf` `[client]` section, or `MYSQL_PWD` env var |
 | `sqlite` | No credentials needed |
-| `mssql` | Environment variables (`MSSQL_USER`, `MSSQL_PASSWORD`) or Azure AD |
-| `clickhouse` | Username/password in ClickHouse server config |
+| `mssql` | `password` field in config.toml, environment variables (`MSSQL_PASSWORD`), or Azure AD |
+| `clickhouse` | `password` field in config.toml, or server-side default credentials |
 | `duckdb` | No credentials needed (local files); `MOTHERDUCK_TOKEN` env var for MotherDuck |
 | `snowflake` | `SNOWFLAKE_PASSWORD` env var, key-pair via `credentials_file`, or `~/.snowflake/connections.toml` |
 | `bigquery` | `credentials_file` (service account JSON), `GOOGLE_APPLICATION_CREDENTIALS` env var, or gcloud ADC |
 
-This keeps secrets out of config.toml entirely, relying on well-established credential mechanisms that users and ops teams already know.
+When the `password` field is omitted, drivers fall back to their native credential mechanisms (env vars, credential files, etc.).
 
 ### Configuration fields
 
@@ -250,6 +250,7 @@ This keeps secrets out of config.toml entirely, relying on well-established cred
 | `host` | no | `localhost` | Server hostname or IP (postgres, mysql, mssql, clickhouse) |
 | `port` | no | Driver default | Server port (postgres: 5432, mysql: 3306, mssql: 1433, clickhouse: 8123) |
 | `user` | no | Current OS user | Authentication user |
+| `password` | no | -- | Authentication password (postgres, mysql, mssql, clickhouse) |
 | `socket` | no | -- | Unix domain socket path, overrides host/port (postgres, mysql) |
 | `ssl` | no | `false` | Enable SSL/TLS (postgres, mysql, mssql, clickhouse) |
 | `query_timeout` | no | `30` | Query timeout in seconds |
@@ -290,6 +291,7 @@ host = "db.example.com"
 port = 5432
 database = "warehouse"
 user = "readonly"
+password = "s3cret"
 query_timeout = 60
 max_rows = 50000
 
