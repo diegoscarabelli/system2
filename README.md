@@ -51,7 +51,7 @@ Every agent has access to a core set of tools. Some tools are restricted by role
 
 | Category | Tools | Description |
 | -------- | ----- | ----------- |
-| Filesystem | `bash`, `read`, `edit`, `write` | Shell commands with streaming output and safety guards (blocks recursive `rm`, `mkfs`, `dd`, direct `sqlite3` on app.db). File read, exact-match edit, and full-file write with auto-commit support for knowledge files. |
+| Filesystem | `bash`, `read`, `edit`, `write` | Shell commands with streaming output and safety guards (blocks recursive `rm`, `mkfs`, `dd`, direct `sqlite3` on app.db). File read, exact-match edit, and file write/create operations; `write` does not overwrite existing non-empty files. Auto-commit via `commit_message` applies to files under `~/.system2/`. |
 | Database | `read_system2_db`, `write_system2_db` | Query app.db (read-only SELECT) and manage records (create/update projects, tasks, comments, artifacts) through named operations with scope checks. |
 | Communication | `message_agent` | Send messages between agents with `urgent` (interrupt) or `followUp` (queue) delivery modes. |
 | Web | `web_fetch`, `web_search` | Fetch any URL and extract readable text via Mozilla Readability. Search the web via Brave Search API (requires API key in config). |
@@ -77,7 +77,7 @@ Skills are reusable workflow instructions that agents load on demand. Each skill
 | `project-completion` | Guide | Shows the Reviewer's final report, gets user confirmation, triggers close-project and project story, terminates agents. |
 | `project-restart` | Guide | Helps weigh resurrection vs. a new project, then resurrects the original agents with context intact. |
 | `ui-reference` | Guide | Reference for the System2 UI layout: sidebar, artifact viewer, chat panel, kanban board. |
-| `db-schema-reference` | All | Column-level schema for all app.db tables, so agents can write correct queries. |
+| `db-schema-reference` | Guide, Conductor, Reviewer, Worker | Column-level schema for all app.db tables, so agents can write correct queries. |
 
 **Data infrastructure**
 
