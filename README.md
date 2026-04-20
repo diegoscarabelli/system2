@@ -57,7 +57,7 @@ Every agent has access to a core set of tools. Some tools are restricted by role
 | Web | `web_fetch`, `web_search` | Fetch any URL and extract readable text via Mozilla Readability. Search the web via Brave Search API (requires API key in config). |
 | UI | `show_artifact` | Display an artifact in the viewer panel with live reload on file changes. |
 | Scheduling | `set_reminder`, `cancel_reminder`, `list_reminders` | Agents schedule delayed messages to their future selves (0.5 min to 7 days) for follow-ups, retries, and condition checks. |
-| Agent lifecycle | `spawn_agent`, `terminate_agent`, `resurrect_agent` | Guide and Conductor spawn, terminate, and resurrect agents. Conductors are scoped to their own project. The Guide can resurrect archived agents with full session history. |
+| Agent lifecycle | `spawn_agent`, `terminate_agent`, `resurrect_agent` | Guide and Conductors can spawn and terminate agents; Conductors are limited to their own project. `resurrect_agent` restores an archived agent's persisted session history. The Guide can resurrect any archived non-singleton agent, while Conductors can resurrect only agents in their own project. |
 | Narration | `trigger_project_story` | Kick off the Narrator's project story workflow: collects all project activity, agent logs, and DB changes into a data package for the Narrator to write a journalistic reconstruction. |
 
 See [docs/tools.md](docs/tools.md) for the full reference.
@@ -236,7 +236,7 @@ The Conductor's role-specific knowledge file now contains a note: "Garmin Connec
 
 ## Automatic backups
 
-Every time `system2 start` runs, the system creates a timestamped backup of `~/.system2/` before the server initializes. Backups are full copies stored in your home directory as `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`. A cooldown period (default: 24 hours) prevents redundant copies on frequent restarts, and old backups are automatically pruned to keep only the most recent copies (default: 3).
+On a normal `system2 start`, when the CLI launches the background server process, the system creates a timestamped backup of `~/.system2/` before the server initializes. Backups are full copies stored in your home directory as `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`. A cooldown period (default: 24 hours) prevents redundant copies on frequent restarts, and old backups are automatically pruned to keep only the most recent copies (default: 3).
 
 Both settings are configurable in `config.toml`:
 
