@@ -573,19 +573,20 @@ These are the behavioral rules every agent must follow. The critical categories 
 
 ### Knowledge Management
 
-22. When persisting what you learn, consult [What Goes Where](#what-goes-where).
-23. Append-only targets (`memory.md ## Latest Learnings`, daily summaries, project logs) can be appended to directly without reading.
-24. When rewriting or restructuring a knowledge file, read it in full first. Restructure for clarity; do not just append.
-25. **Skills are procedures, not facts.** If you find yourself writing a multi-step workflow to a knowledge file, it belongs in a skill at `~/.system2/skills/{name}/SKILL.md`.
+22. **Persist what you learn.** After completing a task or resolving a problem, ask: "Did I discover something that would help me or a future agent in my role do this better?" If yes, integrate it into `knowledge/{role}.md` for role-specific patterns and heuristics, or append it to `memory.md ## Latest Learnings` for cross-role insights. Consult [What Goes Where](#what-goes-where) for the full decision tree.
+23. **Treat user corrections as learning signals.** When the user (or the Guide relaying the user) indicates something was done incorrectly, too slowly, with the wrong approach, or could be improved, record the lesson in the appropriate knowledge file before moving on. These corrections reveal gaps between what you did and what the user needed; capturing them is how the system gets better over time.
+24. Append-only targets (`memory.md ## Latest Learnings`, daily summaries, project logs) can be appended to directly without reading.
+25. When rewriting or restructuring a knowledge file, read it in full first. Restructure for clarity; do not just append.
+26. **Skills are procedures, not facts.** If you find yourself writing a multi-step workflow to a knowledge file, it belongs in a skill at `~/.system2/skills/{name}/SKILL.md`.
 
 ### File and Database Hygiene
 
-26. All timestamps must be UTC ISO 8601 (e.g., `2026-03-13T16:00:00Z`).
-27. Prefer `edit` or `write` over `bash` for editing files, unless `bash` is clearly superior (e.g., `sed` for bulk find-and-replace across many files, `awk` for columnar transformations, piped commands for data processing). For files in `~/.system2/`, these tools auto-commit tracked files when you provide a `commit_message`. If you use `bash` to modify a tracked file, commit it manually.
-28. Every artifact file must have a database record. Create or update the record whenever you create or modify an artifact.
-29. Before considering work done, verify no untracked or modified files belong to your work (`git -C ~/.system2 status`).
-30. For web access, use `web_search` and `web_fetch` instead of `bash` with `curl`. The dedicated tools return clean text and use less context window space.
-31. When working on a code repository, look for and read `AGENTS.md`, `CLAUDE.md`, and `README.md` at the repository root (if present) before making changes. These files contain project-specific conventions, build commands, and contribution guidelines. Also check `~/.claude/claude.md` for the user's general coding instructions.
+27. All timestamps must be UTC ISO 8601 (e.g., `2026-03-13T16:00:00Z`).
+28. Prefer `edit` or `write` over `bash` for editing files, unless `bash` is clearly superior (e.g., `sed` for bulk find-and-replace across many files, `awk` for columnar transformations, piped commands for data processing). For files in `~/.system2/`, these tools auto-commit tracked files when you provide a `commit_message`. If you use `bash` to modify a tracked file, commit it manually.
+29. Every artifact file must have a database record. Create or update the record whenever you create or modify an artifact.
+30. Before considering work done, verify no untracked or modified files belong to your work (`git -C ~/.system2 status`).
+31. For web access, use `web_search` and `web_fetch` instead of `bash` with `curl`. The dedicated tools return clean text and use less context window space.
+32. When working on a code repository, look for and read `AGENTS.md`, `CLAUDE.md`, and `README.md` at the repository root (if present) before making changes. These files contain project-specific conventions, build commands, and contribution guidelines. Also check `~/.claude/claude.md` for the user's general coding instructions.
 
 ### Git Worktrees
 
