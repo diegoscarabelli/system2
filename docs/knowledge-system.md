@@ -52,10 +52,11 @@ Project-scoped files live outside `knowledge/`:
 
 ```
 ~/.system2/projects/
-└── {id}_{name}/           # e.g. 1_linkedin-campaign (Conductor creates)
+└── {dir_name}/            # {id}_{slug} from project record (e.g. 1_linkedin-campaign)
     ├── log.md             # Continuous project log (Narrator, append-only)
-    ├── project_story.md   # Final narrative (Narrator, on completion)
     ├── artifacts/         # Reports, dashboards, data exports
+    │   ├── plan_{uuid}.md # Conductor's proposal document
+    │   └── project_story.md # Final narrative (Narrator, on completion)
     └── scratchpad/        # Working files for exploration and prototyping
 ```
 
@@ -69,8 +70,8 @@ Project-scoped files live outside `knowledge/`:
 | `memory.md ## Latest Learnings` | Any agent | Anytime: agents write important facts here |
 | `{role}.md` | Agent of that role (any agent may contribute) | As role-specific lessons and patterns accumulate |
 | `daily_summaries/*.md` | Narrator | Every 30 minutes (configurable) |
-| `projects/{id}_{name}/log.md` | Narrator | Every 30 minutes (same cron as daily summary) |
-| `projects/{id}_{name}/project_story.md` | Narrator | Once, when Conductor calls `trigger_project_story` at project completion |
+| `projects/{dir_name}/log.md` | Narrator | Every 30 minutes (same cron as daily summary) |
+| `projects/{dir_name}/artifacts/project_story.md` | Narrator | Once, when Conductor calls `trigger_project_story` at project completion |
 
 ## File Size Budget
 
@@ -95,7 +96,7 @@ budget_chars = 20000  # default; comment out to use the default
 2. Reads `{role}.md` for the agent's role (guide.md, conductor.md, narrator.md, reviewer.md, worker.md)
 3. Skips empty files; files exceeding the character budget are truncated at the tail with a notice. For knowledge files (`knowledge/*.md`), the Narrator condenses oversized files during the next memory-update run. Daily summaries and project logs are not condensed (they are append-only).
 4. Loads role-aware context based on the agent's project assignment:
-   - **Project-scoped agents** (Conductor, Worker, Reviewer): loads `projects/{id}_{name}/log.md`
+   - **Project-scoped agents** (Conductor, Worker, Reviewer): loads `projects/{dir_name}/log.md`
    - **System-wide agents** (Guide, Narrator): loads the 2 most recent daily summary files (sorted by filename, chronological order)
 5. Returns all content under a `## Knowledge Base` header, separated by `---`
 
@@ -211,7 +212,7 @@ The **## Latest Learnings** section captures durable, cross-project insights: an
 
 ## Project Logs
 
-A single continuous file per project (`projects/{id}_{name}/log.md`), created when the project starts (Conductor is spawned) and appended to until the project is done. Unlike daily summaries, project logs do not rotate by date.
+A single continuous file per project (`projects/{dir_name}/log.md`), created when the project starts (Conductor is spawned) and appended to until the project is done. Unlike daily summaries, project logs do not rotate by date.
 
 ```markdown
 ---
@@ -262,7 +263,7 @@ Written once per project at completion. The Conductor calls `trigger_project_sto
 1. A final project-log update (same format as scheduled project-log messages)
 2. A project story data package (full `app.db` snapshot + `log.md` content)
 
-The Narrator processes Message 1 first (appends a final log entry), then Message 2 (writes the story to `projects/{id}_{name}/project_story.md`). The server pre-computes all data so the Narrator does not need to query for it. When done, the Narrator messages the Conductor, and the Conductor reports back to the Guide.
+The Narrator processes Message 1 first (appends a final log entry), then Message 2 (writes the story to `projects/{dir_name}/artifacts/project_story.md`). The server pre-computes all data so the Narrator does not need to query for it. When done, the Narrator messages the Conductor, and the Conductor reports back to the Guide.
 
 See [Scheduler](scheduler.md) for the pipeline that produces project logs and daily summaries.
 

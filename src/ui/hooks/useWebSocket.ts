@@ -13,7 +13,7 @@ import { useArtifactStore } from '../stores/artifact';
 import { useChatStore } from '../stores/chat';
 import { usePushStore } from '../stores/push';
 
-const WS_URL = `ws://${window.location.hostname}:3000`;
+const WS_URL = `ws://${window.location.hostname}:4242`;
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);

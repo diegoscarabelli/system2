@@ -45,6 +45,7 @@ export const createAdapter: AdapterFactory = (
       url: `${protocol}://${host}:${port}`,
       database: config.database,
       username: config.user ?? 'default',
+      password: config.password,
       request_timeout: timeoutMs,
       clickhouse_settings: {
         max_execution_time: config.query_timeout ?? 30,

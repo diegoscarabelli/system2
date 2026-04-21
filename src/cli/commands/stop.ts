@@ -15,7 +15,7 @@ const execAsync = promisify(exec);
 
 const SYSTEM2_DIR = join(homedir(), '.system2');
 const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
-const DEFAULT_PORT = 3000;
+const DEFAULT_PORT = 4242;
 const IS_WINDOWS = process.platform === 'win32';
 
 /**

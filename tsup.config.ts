@@ -23,15 +23,6 @@ export default defineConfig({
     '@mariozechner/pi-tui',
   ],
   async onSuccess() {
-    // Copy config.toml template to dist/cli/config
-    const configDir = join(__dirname, 'dist', 'cli', 'config');
-    mkdirSync(configDir, { recursive: true });
-    copyFileSync(
-      join(__dirname, 'src', 'cli', 'config', 'config.toml'),
-      join(configDir, 'config.toml')
-    );
-    console.log('✓ Copied config.toml template to dist/cli/config/');
-
     // Copy agent .md files
     const srcAgents = join(__dirname, 'src', 'server', 'agents');
     const destAgents = join(__dirname, 'dist', 'server', 'agents');

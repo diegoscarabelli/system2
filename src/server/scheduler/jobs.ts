@@ -14,7 +14,7 @@ import type { JobExecution } from '../../shared/index.js';
 import type { AgentHost } from '../agents/host.js';
 import { commitIfStateDir } from '../agents/tools/git-commit.js';
 import type { DatabaseClient } from '../db/client.js';
-import { resolveProjectDir } from '../projects/dir.js'; // used for backfilling dir_path on legacy projects
+import { resolveProjectDir } from '../projects/dir.js'; // used for backfilling dir_name on legacy projects
 import { log } from '../utils/logger.js';
 import { isNetworkAvailable } from './network.js';
 import type { Scheduler } from './scheduler.js';
@@ -511,12 +511,7 @@ export async function buildAndDeliverDailySummary(
     );
   }
 
-  // 2. Read full content of today's daily summary file
-  let dailySummaryContent = '(none)';
-  const content = readFileSync(filePath, 'utf-8');
-  if (content.trim()) dailySummaryContent = content;
-
-  // 3. Resolve last_run_ts
+  // 2. Resolve last_run_ts
   let lastRunTs = readFrontmatterField(filePath, 'last_narrator_update_ts');
   if (!lastRunTs) {
     lastRunTs = getMostRecentSummaryTimestamp(summariesDir);
@@ -560,18 +555,18 @@ export async function buildAndDeliverDailySummary(
 
   // 5. Find active projects (conductor not archived) and deliver project logs
   const activeProjects = db.query(
-    `SELECT DISTINCT p.id, p.name, p.dir_path FROM project p
+    `SELECT DISTINCT p.id, p.name, p.dir_name FROM project p
      JOIN agent a ON a.project = p.id
      WHERE a.role = 'conductor' AND a.status != 'archived'`
-  ) as Array<{ id: number; name: string; dir_path: string | null }>;
+  ) as Array<{ id: number; name: string; dir_name: string | null }>;
 
   const projectDataList: ProjectActivityData[] = [];
   const deliveries: Promise<void>[] = [];
 
   for (const project of activeProjects) {
-    // Use persisted dir_path, falling back to resolveProjectDir for legacy projects
+    // Use persisted dir_name, falling back to resolveProjectDir for legacy projects
     const dirName =
-      project.dir_path ??
+      project.dir_name ??
       basename(resolveProjectDir(join(system2Dir, 'projects'), project.id, project.name));
     const projectDir = join(system2Dir, 'projects', dirName);
     mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
@@ -586,11 +581,6 @@ export async function buildAndDeliverDailySummary(
         'utf-8'
       );
     }
-
-    // Read most recent log.md content (last 10,000 characters)
-    let projectLogContext = '(none)';
-    const logTail = readTailChars(logFile, 10_000);
-    if (logTail.trim()) projectLogContext = logTail;
 
     // Project-scoped agents (Conductor, Reviewer, specialists)
     const projectScopedAgents = allAgents.filter(
@@ -636,10 +626,6 @@ last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
 IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
-
-## Most recent log.md content
-
-${projectLogContext}
 
 ## Agent Activity
 
@@ -687,11 +673,7 @@ file: ${filePath}
 last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
-IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
-
-## Current daily summary file content
-
-${dailySummaryContent}`,
+IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.`,
   ];
 
   const activeProjectParts: string[] = [];

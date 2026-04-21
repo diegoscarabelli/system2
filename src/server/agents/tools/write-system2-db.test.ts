@@ -48,7 +48,7 @@ function createMockDb() {
       const project = {
         id,
         ...p,
-        dir_path: `${id}_project`,
+        dir_name: `${id}_project`,
         created_at: 'now',
         updated_at: 'now',
       } as Project;
@@ -181,7 +181,7 @@ function addProject(db: MockDb, id: number) {
     id,
     name: 'Project',
     description: 'Desc',
-    dir_path: `${id}_project`,
+    dir_name: `${id}_project`,
     status: 'todo',
     labels: '[]',
     start_at: null,

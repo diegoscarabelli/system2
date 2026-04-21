@@ -208,6 +208,42 @@ describe('AuthResolver', () => {
     });
   });
 
+  describe('clearTransientCooldowns', () => {
+    it('clears transient cooldowns but preserves auth and rate_limit cooldowns', () => {
+      const resolver = new AuthResolver(makeConfig());
+      resolver.markKeyFailed('anthropic', 'transient');
+      resolver.markKeyFailed('openai', 'auth');
+      resolver.clearTransientCooldowns();
+
+      const status = resolver.getStatus();
+      // Only the auth cooldown remains
+      expect(status.cooldowns).toHaveLength(1);
+      expect(status.cooldowns[0].reason).toBe('auth');
+    });
+
+    it('restores provider availability after clearing transient cooldowns', () => {
+      const resolver = new AuthResolver(makeConfig());
+      // Exhaust all keys with transient failures
+      resolver.markKeyFailed('anthropic', 'transient', undefined, 0);
+      resolver.markKeyFailed('anthropic', 'transient', undefined, 1);
+      resolver.markKeyFailed('openai', 'transient', undefined, 0);
+      expect(resolver.getNextProvider()).toBeUndefined();
+
+      resolver.clearTransientCooldowns();
+      expect(resolver.getNextProvider()).toBe('anthropic');
+    });
+
+    it('is a no-op when there are no transient cooldowns', () => {
+      const resolver = new AuthResolver(makeConfig());
+      resolver.markKeyFailed('anthropic', 'auth');
+      resolver.clearTransientCooldowns();
+
+      const status = resolver.getStatus();
+      expect(status.cooldowns).toHaveLength(1);
+      expect(status.cooldowns[0].reason).toBe('auth');
+    });
+  });
+
   describe('getStatus', () => {
     it('returns current status', () => {
       const resolver = new AuthResolver(makeConfig());

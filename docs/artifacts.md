@@ -37,7 +37,7 @@ Artifact files can live anywhere on the filesystem. The `file_path` column in th
 
 | Location | When to use |
 |----------|-------------|
-| `~/.system2/projects/{id}_{name}/artifacts/` | Artifacts tied to a specific project |
+| `~/.system2/projects/{dir_name}/artifacts/` | Artifacts tied to a specific project |
 | `~/.system2/artifacts/` | Artifacts not associated with any project |
 | Elsewhere on the filesystem | When a more natural location exists (e.g., an analysis directory the user has designated) |
 

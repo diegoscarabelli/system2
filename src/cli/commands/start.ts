@@ -57,7 +57,7 @@ export async function start(options: {
     process.exit(1);
   }
 
-  const port = options.port || 3000;
+  const port = options.port || 4242;
 
   // Automatic backup (only in normal start mode, not foreground spawned by background)
   if (!options.foreground) {
@@ -122,7 +122,7 @@ export async function start(options: {
         'start',
         '--foreground',
         '--no-browser',
-        ...(port !== 3000 ? ['--port', port.toString()] : []),
+        ...(port !== 4242 ? ['--port', port.toString()] : []),
       ],
       {
         detached: true,

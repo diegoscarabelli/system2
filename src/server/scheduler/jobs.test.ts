@@ -893,7 +893,7 @@ describe('buildAndDeliverDailySummary', () => {
     expect(messages.some((m) => m.includes('[Scheduled task: daily-summary]'))).toBe(true);
   });
 
-  it('includes existing file content in the delivered message', async () => {
+  it('does not embed existing file content in the delivered message', async () => {
     const dir = trackTmpDir(makeTmpDir());
     const summariesDir = join(dir, 'knowledge', 'daily_summaries');
     const sessionDir = join(dir, 'sessions', 'guide_1');
@@ -919,7 +919,7 @@ describe('buildAndDeliverDailySummary', () => {
     await buildAndDeliverDailySummary(db, host, 99, dir, 30);
 
     expect(host.calls).toHaveLength(1);
-    expect(host.calls[0].content).toContain('Prior narrative here.');
+    expect(host.calls[0].content).not.toContain('Prior narrative here.');
   });
 
   it('excludes inactive projects from the message', async () => {

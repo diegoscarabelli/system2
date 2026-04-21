@@ -29,6 +29,9 @@ sessions/
 # Scratchpad (transient working files: parquet, pickle, draft notebooks, prototype scripts)
 scratchpad/
 projects/**/scratchpad/
+
+# Python virtual environment
+venv/
 `;
 
 /**

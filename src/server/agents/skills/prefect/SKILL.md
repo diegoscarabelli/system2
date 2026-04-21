@@ -252,45 +252,15 @@ session = creds.get_boto3_session()
 
 Use `SecretStr`/`SecretDict` in custom blocks for obfuscated display.
 
-## Deployment Patterns
+## Configuration Hierarchy
 
-### Docker (prefect.yaml)
+Highest precedence first:
 
-```yaml
-build:
-  - prefect_docker.deployments.steps.build_docker_image:
-      id: build-image
-      image_name: "{{ $IMAGE_NAME }}"
-      tag: latest
-      dockerfile: auto
-      platform: "linux/amd64"  # IMPORTANT on ARM machines
+1. Environment variables (`PREFECT_*`)
+2. `.env` files in working directory
+3. Profiles (`~/.prefect/profiles.toml`)
 
-deployments:
-  - name: prod-etl
-    entrypoint: flows/etl.py:run_etl
-    work_pool:
-      name: docker-pool
-      job_variables:
-        image: "{{ build-image.image }}"
-    schedules:
-      - cron: "0 6 * * *"
-        timezone: America/New_York
-```
-
-### Git-based source
-
-```python
-my_flow.from_source(
-    source="https://github.com/org/repo.git",
-    entrypoint="flows/etl.py:etl_pipeline",
-).deploy(name="prod-etl", work_pool_name="k8s-pool")
-```
-
-### CI/CD
-
-```bash
-prefect deploy --all --no-prompt
-```
+Key settings: `PREFECT_API_URL`, `PREFECT_API_KEY`, `PREFECT_RESULTS_PERSIST_BY_DEFAULT`, `PREFECT_LOGGING_LOG_PRINTS`, `PREFECT_TASK_DEFAULT_RETRIES`, `PREFECT_WORKER_QUERY_SECONDS`.
 
 ## Scheduling
 
@@ -370,15 +340,153 @@ prefect version
 
 **Tasks not visible in UI**: ensure they use `@task` decorator (plain function calls are not tracked). Check that `log_prints=True` is set if expecting print output.
 
-## Configuration Hierarchy
+## Local Server and Deployments
 
-Highest precedence first:
+### Starting the server
 
-1. Environment variables (`PREFECT_*`)
-2. `.env` files in working directory
-3. Profiles (`~/.prefect/profiles.toml`)
+```bash
+prefect server start                                        # runs on http://localhost:4200
+prefect config set PREFECT_API_URL=http://localhost:4200/api # point CLI at local server
+```
 
-Key settings: `PREFECT_API_URL`, `PREFECT_API_KEY`, `PREFECT_RESULTS_PERSIST_BY_DEFAULT`, `PREFECT_LOGGING_LOG_PRINTS`, `PREFECT_TASK_DEFAULT_RETRIES`, `PREFECT_WORKER_QUERY_SECONDS`.
+The Prefect UI is available at `http://localhost:4200` once the server is running.
+
+### Work pool and worker
+
+A work pool + worker pair is required for deployments (not needed for `flow.serve()` or direct `python -m` runs):
+
+```bash
+prefect work-pool create default --type process
+prefect worker start --pool default                         # keep running in background
+```
+
+### Running flows
+
+```bash
+# Direct execution (no server needed, good for development)
+PYTHONPATH=dags python -m pipelines.<name>.flow
+
+# Via deployment (requires server + worker)
+cd dags
+prefect deploy pipelines/<name>/flow.py:flow --name <name>-dev --work-pool default
+prefect deployment run '<flow-name>/<name>-dev'
+```
+
+`PYTHONPATH=dags` is required so `from lib.xxx import yyy` resolves. Airflow/Astro auto-adds `dags/` to the path, but Prefect does not.
+
+### Prefect Cloud
+
+For managed orchestration (no local server): `prefect cloud login` (browser auth). All CLI commands work the same against Cloud.
+
+## Deployment Patterns
+
+### Docker (prefect.yaml)
+
+```yaml
+build:
+  - prefect_docker.deployments.steps.build_docker_image:
+      id: build-image
+      image_name: "{{ $IMAGE_NAME }}"
+      tag: latest
+      dockerfile: auto
+      platform: "linux/amd64"  # IMPORTANT on ARM machines
+
+deployments:
+  - name: prod-etl
+    entrypoint: flows/etl.py:run_etl
+    work_pool:
+      name: docker-pool
+      job_variables:
+        image: "{{ build-image.image }}"
+    schedules:
+      - cron: "0 6 * * *"
+        timezone: America/New_York
+```
+
+### Git-based source
+
+```python
+my_flow.from_source(
+    source="https://github.com/org/repo.git",
+    entrypoint="flows/etl.py:etl_pipeline",
+).deploy(name="prod-etl", work_pool_name="k8s-pool")
+```
+
+### CI/CD
+
+```bash
+prefect deploy --all --no-prompt
+```
+
+## Pipeline Structure
+
+When building a new pipeline in this repository, follow the conventions in the `pipeline-design` skill. That skill defines the orchestrator-agnostic layer: file state machine, standard task sequence, config dataclass, per-pipeline directory layout, SQLAlchemy integration, and ETL result monitoring. The sections below describe how those abstractions map to Prefect specifically.
+
+### Directory conventions
+
+Each pipeline lives under `dags/pipelines/{name}/` and exposes a `flow.py` that instantiates config and calls `create_flow()`. Keep the flow file thin (~10 lines); all logic lives in `dags/lib/` or `dags/pipelines/{name}/process.py`.
+
+Prefect is indifferent to the folder name — everything lives under `dags/` only because Astro CLI and native Airflow hardcode that directory. Prefect does **not** auto-add `dags/` to PYTHONPATH, so:
+
+- **Local dev**: `PYTHONPATH=dags python -m pipelines.{name}.flow`
+- **Deployments**: `cd dags && prefect deploy pipelines/{name}/flow.py:flow --name {name}-prod --work-pool default`
+
+Workers run the entrypoint from the directory Prefect recorded at deploy time, so deploying from `dags/` keeps the `from lib.xxx import yyy` imports resolvable at runtime.
+
+### Mapping standard tasks to Prefect
+
+| Pipeline task | Prefect implementation |
+|---|---|
+| `ingest` | `@task def ingest(config)` — scans `ingest/`, routes files, raises `Abort` or returns count |
+| `batch` | `@task def batch(config)` — returns a list of serialized `FileSet` objects |
+| `process` | `@task def process_batch(serialized_batch, config)` — mapped via `process_batch.map(...)`, one instance per `FileSet` |
+| `store` | `@task def store(all_results, config)` — collects mapped process return values, routes files to `store/` or `quarantine/` |
+
+### Dynamic task mapping (process task)
+
+Use `task.map()` to fan out over batches at runtime:
+
+```python
+@task(cache_policy=NONE)
+def process_batch(serialized_batch: str, config: PipelineConfig) -> dict:
+    file_set = FileSet.from_serializable(serialized_batch)
+    processor = config.processor_class(
+        config=config, run_id=..., start_date=..., file_set=file_set,
+    )
+    return processor.process()  # {"files": [...], "success": bool, "error": str|None}
+
+@flow
+def pipeline(config: PipelineConfig) -> None:
+    ingest(config)
+    batches = batch(config)
+    results = process_batch.map(batches, unmapped(config))
+    store(results, config)
+```
+
+Set `cache_policy=NONE` on `process_batch` — it writes files and database rows, so caching would silently skip work on repeated calls. Note the Processor takes a **singular** `file_set` (not a list); fan-out happens at the Prefect layer via `task.map()`, and each mapped instance gets one `FileSet`.
+
+### Result passing and large data
+
+Pass serialized `FileSet` objects (JSON strings) between tasks, not raw `Path` objects or DataFrames. For large file inventories, write the batch list to a shared filesystem and pass only the path between `batch` and `process_batch`.
+
+Use `cache_result_in_memory=False` on tasks that return large intermediate results.
+
+### Skip vs. fail
+
+When `ingest` finds no files, raise `Abort` (marks the flow run as cancelled, not failed) or return early and have downstream tasks check a sentinel value. Do not raise a bare exception for an empty inbox — that would mark the flow as failed and trigger alerts.
+
+### Config → flow parameters
+
+`PipelineConfig` is a plain dataclass. Pass it directly to `@flow` functions — Prefect serializes dataclass parameters automatically. For scheduled deployments, store the config as a `Variable` or embed it in the deployment's `parameters` dict:
+
+```python
+flow.deploy(
+    name="linkedin-prod",
+    work_pool_name="process-pool",
+    parameters={"config": asdict(linkedin_config)},
+    schedules=[CronSchedule(cron="0 9 * * *", timezone="UTC")],
+)
+```
 
 ## Production Checklist
 

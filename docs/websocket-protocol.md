@@ -9,7 +9,7 @@ The UI communicates with the server over a single WebSocket connection. The serv
 
 ## Connection
 
-WebSocket connects to the server port (default 3000). In development, Vite proxies `ws://localhost:3001/ws` to the backend.
+WebSocket connects to the server port (default 4242). In development, Vite proxies `ws://localhost:3001/ws` to the backend.
 
 On connect, the server sends a `chat_history` message with the Guide agent's recent messages from its per-agent `MessageHistory` (ring buffer, default 1000 messages). The server is the single source of truth for chat history: the UI does not persist messages.
 

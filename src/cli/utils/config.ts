@@ -599,7 +599,7 @@ export function buildConfigToml(options: {
   }
 
   // Agents section (per-role overrides)
-  if (options.agents) {
+  if (options.agents && Object.keys(options.agents).length > 0) {
     for (const [role, override] of Object.entries(options.agents)) {
       const hasScalarFields =
         override.thinking_level !== undefined || override.compaction_depth !== undefined;
@@ -624,6 +624,30 @@ export function buildConfigToml(options: {
         lines.push('');
       }
     }
+  } else {
+    lines.push('# Per-agent model and behavior overrides. Uncomment and edit to customize.');
+    lines.push('# Supported roles: guide, conductor, reviewer, narrator, worker');
+    lines.push('#');
+    lines.push('# Example 1: override thinking level and pin a specific model');
+    lines.push('# [agents.conductor]');
+    lines.push('# thinking_level = "high"              # off | minimal | low | medium | high');
+    lines.push(
+      '# compaction_depth = 8                 # keep N auto-compactions in sliding window'
+    );
+    lines.push('#');
+    lines.push('# [agents.conductor.models]');
+    lines.push('# anthropic = "claude-opus-4-6"        # pin a model for a specific provider');
+    lines.push('#');
+    lines.push(
+      '# Example 2: route a role through OpenRouter to a specific upstream (e.g. Vertex AI)'
+    );
+    lines.push('# [agents.conductor.models]');
+    lines.push('# openrouter = "google/gemini-2.5-pro" # model ID as listed on openrouter.ai');
+    lines.push('#');
+    lines.push('# To control which upstream providers OpenRouter uses for a model prefix:');
+    lines.push('# [llm.openrouter.routing]');
+    lines.push('# "google/" = ["google-vertex/global", "google-vertex", "google-ai-studio"]');
+    lines.push('');
   }
 
   // Services section
@@ -642,7 +666,7 @@ export function buildConfigToml(options: {
   }
 
   // Databases section
-  if (options.databases) {
+  if (options.databases && Object.keys(options.databases).length > 0) {
     for (const [name, conn] of Object.entries(options.databases)) {
       lines.push(`[databases.${name}]`);
       lines.push(`type = "${conn.type}"`);
@@ -663,6 +687,19 @@ export function buildConfigToml(options: {
         lines.push(`credentials_file = "${conn.credentials_file}"`);
       lines.push('');
     }
+  } else {
+    lines.push('# External database connections for the query_database tool.');
+    lines.push('# Each [databases.<name>] section defines a named connection.');
+    lines.push('#');
+    lines.push('# [databases.mydb]');
+    lines.push(
+      '# type = "postgres"              # postgres | mysql | sqlite | mssql | clickhouse | duckdb | snowflake | bigquery'
+    );
+    lines.push('# host = "localhost"');
+    lines.push('# port = 5432');
+    lines.push('# database = "mydb"');
+    lines.push('# user = "readonly"');
+    lines.push('');
   }
 
   // Operational sections

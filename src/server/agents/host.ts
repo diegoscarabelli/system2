@@ -38,7 +38,7 @@ import type {
 } from '../../shared/index.js';
 import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
-import { resolveProjectDir } from '../projects/dir.js'; // used for backfilling dir_path on legacy projects
+import { resolveProjectDir } from '../projects/dir.js'; // used for backfilling dir_name on legacy projects
 import type { ReminderManager } from '../reminders/manager.js';
 import { filterByRole } from '../skills/loader.js';
 import { log } from '../utils/logger.js';
@@ -246,10 +246,10 @@ export class AgentHost {
     if (this.agentProject !== null) {
       const projectRecord = this.db.getProject(this.agentProject);
       if (projectRecord) {
-        if (projectRecord.dir_path) {
-          this.agentProjectDirName = projectRecord.dir_path;
+        if (projectRecord.dir_name) {
+          this.agentProjectDirName = projectRecord.dir_name;
         } else {
-          // Legacy fallback: project created before dir_path was tracked
+          // Legacy fallback: project created before dir_name was tracked
           const projectsDir = join(SYSTEM2_DIR, 'projects');
           const projectDir = resolveProjectDir(projectsDir, projectRecord.id, projectRecord.name);
           this.agentProjectDirName = basename(projectDir);
@@ -755,6 +755,30 @@ export class AgentHost {
         `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable`
       );
       log.info('[AgentHost] No fallback providers available, error will be surfaced to user');
+
+      // Last-resort context overflow recovery: if all providers were exhausted on a
+      // 400 error, the root cause may be context overflow misclassified as a client
+      // error (e.g., a provider whose overflow message doesn't match any known pattern).
+      // Clear transient cooldowns (auth and rate-limit cooldowns are preserved) and
+      // attempt compaction on the primary provider. If recovery succeeds, the session
+      // continues with a reduced context instead of staying stuck.
+      if (statusCode === 400 && !this.contextOverflowHandled) {
+        this.authResolver.clearTransientCooldowns();
+        const recoveryProvider = this.authResolver.getNextProvider();
+        if (recoveryProvider) {
+          log.info(
+            `[AgentHost] All providers exhausted on 400; attempting emergency context overflow recovery on ${recoveryProvider}`
+          );
+          this.contextOverflowHandled = true;
+          const recovered = await this.handleContextOverflow(undefined, recoveryProvider);
+          if (recovered) {
+            this.replayAfterContextOverflow();
+            return;
+          }
+          // Recovery failed — reset guard so a future overflow can try again
+          this.contextOverflowHandled = false;
+        }
+      }
     }
 
     // Context overflow: truncate JSONL, compact, restore tail, reinitialize.
@@ -766,36 +790,7 @@ export class AgentHost {
       this.contextOverflowHandled = true;
       const recovered = await this.handleContextOverflow();
       if (recovered) {
-        // Clear the overflow-causing prompt so a future failover doesn't retry it
-        this.pendingPrompt = null;
-        this.deliverySendCount = 0;
-        // Replay pending deliveries on the recovered session. Don't clear
-        // pendingDeliveries: agent_end will shift each one as turns succeed.
-        if (this.pendingDeliveries.length > 0 && this.session) {
-          for (const delivery of this.pendingDeliveries) {
-            this.deliverySendCount++;
-            this.session
-              .sendCustomMessage(
-                {
-                  customType: 'agent_message',
-                  content: delivery.content,
-                  display: false,
-                  details: delivery.details,
-                },
-                {
-                  deliverAs: delivery.urgent ? 'steer' : 'followUp',
-                  triggerTurn: true,
-                }
-              )
-              .catch((error) => {
-                this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
-                log.error('[AgentHost] Failed to replay delivery after context overflow:', error);
-                const idx = this.pendingDeliveries.indexOf(delivery);
-                if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
-                delivery.reject(error instanceof Error ? error : new Error(String(error)));
-              });
-          }
-        }
+        this.replayAfterContextOverflow();
         return;
       }
       // Recovery was a no-op — reset guard so a future overflow can try again
@@ -1068,21 +1063,28 @@ export class AgentHost {
       createReadTool(),
       createEditTool(),
       createWriteTool(),
-      createWebFetchTool(),
     ];
+
+    // Narrator is a background narration agent: it reads files and writes summaries.
+    // It has no use for web access, artifact display, or reminders.
+    const isNarrator = this.agentRole === 'narrator';
+
+    if (!isNarrator) {
+      tools.push(createWebFetchTool());
+    }
 
     // web_search requires a Brave Search API key
     const braveKey = this.servicesConfig?.brave_search?.key;
-    if (braveKey && this.toolsConfig?.web_search?.enabled !== false) {
+    if (!isNarrator && braveKey && this.toolsConfig?.web_search?.enabled !== false) {
       tools.push(createWebSearchTool(braveKey, this.toolsConfig?.web_search?.max_results));
       log.info('[AgentHost] web_search tool enabled');
     }
 
-    // All agents can show artifacts — any agent can now interact with the user directly
-    tools.push(createShowArtifactTool(this.db));
+    if (!isNarrator) {
+      tools.push(createShowArtifactTool(this.db));
+    }
 
-    // All agents can set, cancel, and list reminders
-    if (this.reminderManager) {
+    if (!isNarrator && this.reminderManager) {
       tools.push(createSetReminderTool(this.agentId, this.reminderManager));
       tools.push(createCancelReminderTool(this.agentId, this.reminderManager));
       tools.push(createListRemindersTool(this.agentId, this.reminderManager));
@@ -1515,6 +1517,44 @@ export class AgentHost {
       // (e.g., invalid API key, no credits). The truncated context fits within the target
       // model's window (split at 50%), so the compact() call will succeed.
       await this.handleContextOverflow(candidateModel.contextWindow, provider);
+    }
+  }
+
+  /**
+   * Reset state and replay pending deliveries after context overflow recovery.
+   * Called after handleContextOverflow() returns true (session successfully recovered).
+   * Callers must return immediately after this — the session is live again.
+   */
+  private replayAfterContextOverflow(): void {
+    // Clear the overflow-causing prompt so a future failover doesn't retry it
+    this.pendingPrompt = null;
+    this.deliverySendCount = 0;
+    // Replay pending deliveries on the recovered session. Don't clear
+    // pendingDeliveries: agent_end will shift each one as turns succeed.
+    if (this.pendingDeliveries.length > 0 && this.session) {
+      for (const delivery of this.pendingDeliveries) {
+        this.deliverySendCount++;
+        this.session
+          .sendCustomMessage(
+            {
+              customType: 'agent_message',
+              content: delivery.content,
+              display: false,
+              details: delivery.details,
+            },
+            {
+              deliverAs: delivery.urgent ? 'steer' : 'followUp',
+              triggerTurn: true,
+            }
+          )
+          .catch((error) => {
+            this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
+            log.error('[AgentHost] Failed to replay delivery after context overflow:', error);
+            const idx = this.pendingDeliveries.indexOf(delivery);
+            if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+            delivery.reject(error instanceof Error ? error : new Error(String(error)));
+          });
+      }
     }
   }
 

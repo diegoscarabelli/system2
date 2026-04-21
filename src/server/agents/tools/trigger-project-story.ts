@@ -18,7 +18,7 @@ import { basename, join } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
-import { resolveProjectDir } from '../../projects/dir.js'; // used for backfilling dir_path on legacy projects
+import { resolveProjectDir } from '../../projects/dir.js'; // used for backfilling dir_name on legacy projects
 import {
   collectAgentActivity,
   collectProjectDbChanges,
@@ -109,9 +109,9 @@ export function createTriggerProjectStoryTool(
           };
         }
 
-        // Use persisted dir_path, falling back to resolveProjectDir for legacy projects
+        // Use persisted dir_name, falling back to resolveProjectDir for legacy projects
         const dirName =
-          project.dir_path ??
+          project.dir_name ??
           basename(resolveProjectDir(join(SYSTEM2_DIR, 'projects'), project.id, project.name));
         const projectDir = join(SYSTEM2_DIR, 'projects', dirName);
         mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
@@ -218,7 +218,7 @@ ${projectDbChanges}`;
             : [];
 
         // Check for an existing project story (from a previous completion cycle)
-        const storyFile = join(projectDir, 'project_story.md');
+        const storyFile = join(projectDir, 'artifacts', 'project_story.md');
         const existingStoryNote = existsSync(storyFile)
           ? `\n## Existing Project Story\n\nA previous project story exists at ${storyFile}. Read it and decide whether to edit or rewrite it to incorporate this new phase of work.\n`
           : '';

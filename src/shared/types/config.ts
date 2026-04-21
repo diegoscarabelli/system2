@@ -70,6 +70,7 @@ export interface DatabaseConnectionConfig {
   port?: number;
   database: string;
   user?: string;
+  password?: string;
   socket?: string;
   ssl?: boolean;
   query_timeout?: number;

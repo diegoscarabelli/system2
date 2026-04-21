@@ -34,7 +34,7 @@ function makeProject(id: number, name: string): Project {
     id,
     name,
     description: 'test project',
-    dir_path: `${id}_${name}`,
+    dir_name: `${id}_${name}`,
     status: 'in progress',
     labels: [],
     start_at: 'now',
@@ -237,7 +237,7 @@ describe('trigger_project_story tool', () => {
 
   it('includes existing story note when project_story.md exists', async () => {
     (existsSync as Mock).mockImplementation(
-      (p: string) => typeof p === 'string' && p.endsWith('project_story.md')
+      (p: string) => typeof p === 'string' && p.endsWith('artifacts/project_story.md')
     );
     try {
       const conductor = makeAgent(2, 'conductor', 1);

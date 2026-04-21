@@ -4,6 +4,7 @@ import type { ReminderManager } from '../../reminders/manager.js';
 
 const MIN_DELAY_MINUTES = 0.5; // 30 seconds
 const MAX_DELAY_MINUTES = 10_080; // 7 days
+const MAX_REMINDERS_PER_AGENT = 10;
 
 export function createSetReminderTool(agentId: number, reminderManager: ReminderManager) {
   const params = Type.Object({
@@ -20,7 +21,7 @@ export function createSetReminderTool(agentId: number, reminderManager: Reminder
     name: 'set_reminder',
     label: 'Set Reminder',
     description:
-      'Schedule a delayed reminder for yourself. After the specified delay, you will receive a follow-up message with your reminder text. Use this to defer actions: set the timer, continue your current work, and handle the reminder when it arrives. Write reminder messages as instructions to your future self, including agent IDs, task IDs, and the action to take. When a reminder fires and the condition it was set for is not yet satisfied (e.g. checking if another agent finished a job), set a new reminder rather than dropping the thread. Keep re-scheduling until the work completes or the situation changes. Reminders are in-memory only and do not survive server restarts; for longer delays, prefer a task comment and a check-on-startup pattern.',
+      'Schedule a delayed reminder for yourself. After the specified delay, you will receive a follow-up message with your reminder text. Use sparingly: only set a reminder when you genuinely need a deferred follow-up (e.g. waiting on another agent). Do not create reminder loops that re-fire indefinitely; if the condition has not resolved after 2-3 re-checks, escalate or stop. Check list_reminders before setting new ones and keep your active count low (1-2 per pending question). Write reminder messages as instructions to your future self, including agent IDs, task IDs, and the action to take. Cancel reminders as soon as the condition is satisfied. Reminders are in-memory only and do not survive server restarts; for longer delays, prefer a task comment and a check-on-startup pattern.',
     parameters: params,
     execute: async (_toolCallId, args) => {
       const { delay_minutes, message } = args;
@@ -34,6 +35,19 @@ export function createSetReminderTool(agentId: number, reminderManager: Reminder
             },
           ],
           details: { error: 'invalid_delay' },
+        };
+      }
+
+      const existing = reminderManager.listForAgent(agentId);
+      if (existing.length >= MAX_REMINDERS_PER_AGENT) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error: you have ${existing.length} pending reminders (limit: ${MAX_REMINDERS_PER_AGENT}). Cancel some with cancel_reminder before setting new ones. Use list_reminders to see what is pending.`,
+            },
+          ],
+          details: { error: 'reminder_limit_exceeded', current_count: existing.length },
         };
       }
 

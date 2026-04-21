@@ -43,7 +43,7 @@ Starts the server process.
 
 | Flag | Description |
 |------|-------------|
-| `-p, --port <number>` | Server port (default: 3000) |
+| `-p, --port <number>` | Server port (default: 4242) |
 | `--no-browser` | Don't open browser after start |
 | `--foreground` | Run in foreground (logs to stdout) |
 

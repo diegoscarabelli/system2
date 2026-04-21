@@ -3,6 +3,7 @@
 Skills are reusable workflow instructions following the [Agent Skills standard](https://agentskills.io/specification). Each skill is a subdirectory containing a `SKILL.md` file. They fill the gap between tools (single actions) and knowledge (accumulated facts) by capturing multi-step procedures that agents can follow when performing recurring tasks.
 
 **Key source files:**
+
 - `src/server/skills/loader.ts`: role-based skill filtering (`extractRoles`, `filterByRole`)
 - `src/server/agents/host.ts`: SDK wiring via `additionalSkillPaths` and `skillsOverride`
 - `src/server/agents/agents.md`: agent-facing documentation (## Skills section)
@@ -103,7 +104,8 @@ Built-in skills live in `src/server/agents/skills/`:
 | `project-restart` | guide | Revisiting a completed project: helps the user weigh resurrection against a new project, then resurrects the original Conductor and Reviewer with their context intact and reopens the project record. |
 | `ui-reference` | guide | UI layout and panel reference: describes the sidebar, artifact viewer, chat panel, agent pane, cron jobs panel, and kanban board so the Guide can give accurate directions when the user asks about the interface. |
 | `db-schema-reference` | all | Column-level schema details for all seven app.db tables: column names, types, constraints, and indexes for writing queries or managing records. |
-| `airflow` | conductor, reviewer, worker | Apache Airflow v3 workflow orchestration: DAG design, TaskFlow API, dynamic task mapping, connections/secrets, scheduling, error handling, debugging, and production checklist. |
+| `pipeline-design` | guide, conductor, reviewer, worker | Framework-agnostic Python ETL/ELT conventions: file state machine (ingest/process/store/quarantine), standard task sequence with customization hooks, config dataclass, per-pipeline directory layout, SQLAlchemy ORM integration (make_base, fkey, upsert). References the openetl_scaffold repo cloned during onboarding. |
+| `airflow` | conductor, reviewer, worker | Apache Airflow v3 workflow orchestration: DAG design, TaskFlow API, dynamic task mapping, connections/secrets, scheduling, error handling, debugging, and production checklist. Includes how standard pipeline-design tasks map to Airflow operators. |
 | `prefect` | conductor, reviewer, worker | Prefect v3 data pipelines: flows, tasks, deployments, work pools, concurrency, error handling, testing, events/automations, and production checklist. |
 | `timescaledb` | conductor, reviewer, worker | TimescaleDB time-series database: hypertables, chunk sizing, compression (segmentby/orderby), continuous aggregates, retention policies, ingestion performance, and monitoring. |
 | `sql-schema-modeling` | conductor, reviewer, worker | SQL schema design: normalization (1NF-BCNF), dimensional modeling (star schema, SCD types), data types, JSON/JSONB columns with indexing, primary key strategy, constraints (CHECK, EXCLUDE, FK cascades), indexing patterns (unique, partial, covering), partitioning (range, list, hash), materialization strategy (materialized views vs pipeline-built tables, incremental patterns, why to avoid triggers/procedures), naming conventions, SQL documentation (COMMENT ON), and anti-patterns (EAV, polymorphic associations). |

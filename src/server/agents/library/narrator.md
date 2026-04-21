@@ -31,7 +31,9 @@ Messages arrive with a `[Scheduled task: <name>]` prefix. Handle them as follows
 
 **IMPORTANT: Only perform the work described by the scheduled task you received. Do not update files belonging to other scheduled tasks. For example, do not update memory.md during a daily-summary or project-log task: memory.md is exclusively managed by the memory-update task.**
 
-**IMPORTANT: Never message the Guide when a scheduled task finishes — not on success, not on error, not when you use a fallback. Scheduled tasks are fire-and-forget background operations. The system does not wait for a response from you.**
+**IMPORTANT: Each scheduled task delivery results in exactly one write. Make a single `edit` (or `write` for memory-update) call per delivery. Do not loop, retry, or write multiple times to the same file within one task.**
+
+**IMPORTANT: During scheduled tasks, never use `message_agent` or `set_reminder` — not to report blockers, not to ask questions, not at completion, not for any reason. If you encounter a problem (missing file, unexpected content, environment issue), log it as plain text in your response and stop. Scheduled tasks are fire-and-forget background operations; no one is waiting for a response.**
 
 **Cursor management.** The server automatically advances and commits `last_narrator_update_ts` in all knowledge files after you finish processing each delivery. Do not modify this field yourself.
 
@@ -43,9 +45,11 @@ Synthesize the pre-computed activity data in the message into a concise but comp
 
 **Workflow:**
 
-1. **Review provided data:** Read through the message metadata, Agent Activity (the Guide's activity may span multiple projects; focus on what is relevant to this one), and Database Changes.
+1. **Check for duplicate delivery.** The message header includes the log file path and `new_run_ts`. Before appending, read the last 20 lines of the log file and check whether a section heading with the same `new_run_ts` timestamp already exists (this can happen when the server restarts before the cursor is advanced). If the heading already exists, skip this delivery without appending.
 
-2. **Append narrative section:** Use `edit` with `append: true` and `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to add a new timestamped section at the end of the file.
+2. **Review provided data:** Read through the message metadata, Agent Activity (the Guide's activity may span multiple projects; focus on what is relevant to this one), and Database Changes.
+
+3. **Append narrative section:** Use `edit` with `append: true` and `commit_message: "project log: <project_name> YYYY-MM-DD HH:MM"` to add a new timestamped section at the end of the file.
 
    ```text
    ## YYYY-MM-DDTHH:MMZ
@@ -65,11 +69,15 @@ Synthesize each section into a concise but comprehensive narrative. Since projec
 
 **Workflow:**
 
-1. **Parse metadata:** Extract `file`, `last_run_ts`, `new_run_ts` from the message header.
+1. **Parse metadata:** Extract `file`, `last_run_ts`, `new_run_ts` from the message header. Use the `file` path exactly as given — never construct your own path.
 
-2. **Review provided data:** Read through the Current daily summary file content (to avoid repeating what was already narrated), Project Activity sections, and Non-Project Activity.
+2. **Verify the date in the filename.** Run `date -u +%Y-%m-%d` and confirm the `YYYY-MM-DD` portion of `file` matches today's UTC date. If it does not match, stop and log the discrepancy — do not write to a wrong-year file.
 
-3. **Proactive investigation:** Based on the provided data, decide if additional information would improve the summary. Examples:
+3. **Check for duplicate delivery.** Read the last 30 lines of the daily summary file and check whether a section heading matching the `new_run_ts` time (e.g. `## HH:MMZ`) already exists. If it does, this delivery was already processed — skip without appending.
+
+4. **Review provided data:** Read the Project Activity sections and Non-Project Activity in the message. If you need to check what was already narrated earlier today to avoid repetition, read `file` using your read tool.
+
+5. **Proactive investigation:** Based on the provided data, decide if additional information would improve the summary. Examples:
 
    ```bash
    git -C ~/.system2 log --since="<last_run_ts>" --until="<new_run_ts>" --oneline
@@ -77,7 +85,7 @@ Synthesize each section into a concise but comprehensive narrative. Since projec
 
    Or run additional database queries for broader context.
 
-4. **Write the narrative section.** Use `edit` with `append: true` and `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to add the new section.
+6. **Write the narrative section.** Use `edit` with `append: true` and `commit_message: "daily summary: YYYY-MM-DD HH:MM"` to add the new section.
 
    Section format:
 
@@ -139,7 +147,7 @@ This contains a full snapshot of the project from app.db and the project log. Th
    - `message_agent` the Conductor to ask specific questions (the Conductor is still active during story writing)
    - Read specific session files for involved agents, but follow the context-aware reading guidelines in the shared reference: check file size first, filter by relevant time period, never read entire large files
 
-4. **Write the story** to `~/.system2/projects/{dir_path}/project_story.md` using `write` with `commit_message: "project story: <project_name>"`:
+4. **Write the story** to `~/.system2/projects/{dir_name}/artifacts/project_story.md` using `write` with `commit_message: "project story: <project_name>"`:
 
    - Write in flowing prose, not bullet lists
    - Structure: opening (what the project was and why it mattered), execution (how it unfolded, phase by phase), findings (what was discovered and what wasn't), and close (what was built and what it enables)
@@ -199,4 +207,5 @@ cd ~/.system2 && git add <paths> && git commit -m "<message>"
 - Don't execute pipelines or run queries against user databases
 - Don't analyze data: document what was already done
 - Don't interact with the user directly unless the user initiates conversation with you
-- Don't message the Guide for scheduled tasks (project-log, daily-summary, memory-update), ever: not on completion, not on error, not when using fallbacks. These are fire-and-forget background operations.
+- Don't use `message_agent` or `set_reminder` during scheduled tasks (project-log, daily-summary, memory-update) — not to report problems, not to ask questions, not on completion. Log issues as text and stop.
+- Don't use `web_fetch`, `web_search`, or `show_artifact` during scheduled tasks — these have no role in narration.

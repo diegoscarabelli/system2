@@ -136,7 +136,7 @@ roles: [conductor, reviewer]
 └──────────────────────────┬──────────────────────────────┘
                            │ HTTPS (multi-provider, failover)
 ┌──────────────────────────▼──────────────────────────────┐
-│  Server (Express + WebSocket on port 3000)              │
+│  Server (Express + WebSocket on port 4242)              │
 │                                                         │
 │  ┌──────────────┐  ┌──────────────┐  + per-project:     │
 │  │ Guide Agent  │  │Narrator Agent│    Conductor(s)     │
@@ -226,6 +226,8 @@ Your chat text output is visible only to the user, not to other agents. Always u
 3. **When the reminder fires:** if the expected response has arrived in your conversation since you set the reminder, the follow-up is satisfied; move on. If not, re-send or escalate, and set another reminder. Keep re-scheduling until the thread resolves or circumstances change.
 4. **Cancel reminders you no longer need.** If the response arrives before the reminder fires, cancel it with `cancel_reminder` to keep your reminder list clean.
 
+Keep your active reminder count low. A single pending question rarely warrants more than one or two outstanding reminders. Before setting a new reminder, check `list_reminders` if you are unsure how many you already have. The system enforces a hard per-agent limit — if you hit it, cancel stale reminders first.
+
 ### Database Operations (`write_system2_db`)
 
 | Operation | Required | Optional | Restrictions |
@@ -255,36 +257,38 @@ For ad-hoc SQL not covered by the named operations above (bulk updates, complex 
 
 ```
 ~/.system2/                          Application directory
-├── config.toml                      Settings and API keys (gitignored)
 ├── app.db                           SQLite database (gitignored)
+├── artifacts/                       Project-free reports, dashboards, exports
+├── config.toml                      Settings and API keys (gitignored)
 ├── knowledge/                       Persistent knowledge (injected into prompts)
-│   ├── infrastructure.md            Data stack, tools, environments
-│   ├── user.md                      User profile, preferences, goals
-│   ├── memory.md                    Long-term memory (Narrator-maintained)
-│   ├── guide.md                     Guide role-specific knowledge
 │   ├── conductor.md                 Conductor role-specific knowledge
+│   ├── daily_summaries/             Daily activity logs
+│   │   └── YYYY-MM-DD.md
+│   ├── guide.md                     Guide role-specific knowledge
+│   ├── infrastructure.md            Data stack, tools, environments
+│   ├── memory.md                    Long-term memory (Narrator-maintained)
 │   ├── narrator.md                  Narrator role-specific knowledge
 │   ├── reviewer.md                  Reviewer role-specific knowledge
-│   └── daily_summaries/             Daily activity logs
-│       └── YYYY-MM-DD.md
-├── artifacts/                       Project-free reports, dashboards, exports
+│   ├── user.md                      User profile, preferences, goals
+│   └── worker.md                    Worker role-specific knowledge
+├── logs/                            Server logs (gitignored)
+├── projects/                        Project workspaces
+│   └── {dir_name}/                  {id}_{slug} from project record (e.g. 1_linkedin-campaign)
+│       ├── artifacts/               Project-scoped artifacts
+│       │   ├── plan_{uuid}.md      Conductor's proposal document
+│       │   └── project_story.md    Final narrative (Narrator, on completion)
+│       ├── log.md                   Continuous project log (Narrator)
+│       └── scratchpad/              Project-scoped working files
 ├── scratchpad/                      Project-free working files (exploration, debugging)
+├── sessions/                        Conversation history as JSONL (gitignored)
+│   └── {role}_{id}/
 ├── skills/                          User-created workflow instructions
 │   └── {skill-name}/
 │       └── SKILL.md                 Frontmatter (name, description, roles) + steps
-├── projects/                        Project workspaces
-│   └── {dir_path}/                  Slugified directory name from the project record in app.db
-│       ├── log.md                   Continuous project log (Narrator)
-│       ├── project_story.md         Final narrative (Narrator, on completion)
-│       ├── artifacts/               Project-scoped artifacts
-│       │   └── plan_{uuid}.md      Conductor's proposal document
-│       └── scratchpad/              Project-scoped working files
-├── sessions/                        Conversation history as JSONL (gitignored)
-│   └── {role}_{id}/
-└── logs/                            Server logs (gitignored)
+└── venv/                            Shared Python environment (gitignored)
 ```
 
-Most content is git-tracked. `app.db`, `sessions/`, `logs/`, and `config.toml` are gitignored.
+Most content is git-tracked. `app.db`, `sessions/`, `logs/`, `venv/`, and `config.toml` are gitignored.
 
 ### Configuration (`config.toml`)
 
@@ -310,7 +314,7 @@ When building a visualization or data app, write it as a self-contained HTML fil
 
 **Where artifacts live:**
 
-- **Project-scoped**: `~/.system2/projects/{dir_path}/artifacts/` for artifacts tied to a project (`dir_path` is the slugified directory name from the project record in app.db).
+- **Project-scoped**: `~/.system2/projects/{dir_name}/artifacts/` for artifacts tied to a project (`dir_name` is the slugified directory name from the project record in app.db).
 - **Project-free**: `~/.system2/artifacts/` for artifacts not associated with any project.
 - **Elsewhere**: when a more natural location exists (e.g., an analysis directory the user has designated). Document such locations in `infrastructure.md` and `user.md` so other agents can find them.
 
@@ -324,7 +328,7 @@ Scratchpad files are working materials, not deliverables. They are **not** regis
 
 **Where scratchpad files live:**
 
-- **Project-scoped**: `~/.system2/projects/{dir_path}/scratchpad/` for working files tied to a project (`dir_path` is the slugified directory name from the project record in app.db). This is the default for any work happening inside a project.
+- **Project-scoped**: `~/.system2/projects/{dir_name}/scratchpad/` for working files tied to a project (`dir_name` is the slugified directory name from the project record in app.db). This is the default for any work happening inside a project.
 - **Project-free**: `~/.system2/scratchpad/` for working files not associated with any project.
 
 **Intermediate data snapshots.** When an exploration produces a DataFrame, model, or query result that you may reload later, snapshot it to disk:
@@ -346,7 +350,7 @@ This lets later work resume from a known state without recomputing expensive que
 An in-process scheduler (Croner) runs two recurring Narrator jobs. In both cases, the server pre-computes all the data (JSONL session entries, database changes, file contents) and delivers a ready-to-use message to the Narrator. The Narrator's role is narrative synthesis: turning activity data into readable prose.
 
 1. **`daily-summary`** (every 30 minutes, configurable): collects agent session entries and database changes since the last run, partitioned by project. The Narrator synthesizes:
-   - `projects/{dir_path}/log.md`: per-project narrative appended for each active project.
+   - `projects/{dir_name}/log.md`: per-project narrative appended for each active project.
    - `knowledge/daily_summaries/YYYY-MM-DD.md`: cross-project daily summary.
    - Skipped if no activity since last run.
 2. **`memory-update`** (daily at 11 AM): collects all daily summaries since the last memory update. The Narrator consolidates them into `knowledge/memory.md`, incorporating new patterns and clearing the `## Latest Learnings` buffer.
@@ -571,19 +575,20 @@ These are the behavioral rules every agent must follow. The critical categories 
 
 ### Knowledge Management
 
-22. When persisting what you learn, consult [What Goes Where](#what-goes-where).
-23. Append-only targets (`memory.md ## Latest Learnings`, daily summaries, project logs) can be appended to directly without reading.
-24. When rewriting or restructuring a knowledge file, read it in full first. Restructure for clarity; do not just append.
-25. **Skills are procedures, not facts.** If you find yourself writing a multi-step workflow to a knowledge file, it belongs in a skill at `~/.system2/skills/{name}/SKILL.md`.
+22. **Persist what you learn.** After completing a task or resolving a problem, ask: "Did I discover something that would help me or a future agent in my role do this better?" If yes, integrate it into `knowledge/{role}.md` for role-specific patterns and heuristics, or append it to `memory.md ## Latest Learnings` for cross-role insights. Consult [What Goes Where](#what-goes-where) for the full decision tree.
+23. **Treat user corrections as learning signals.** When the user (or the Guide relaying the user) indicates something was done incorrectly, too slowly, with the wrong approach, or could be improved, record the lesson in the appropriate knowledge file before moving on. These corrections reveal gaps between what you did and what the user needed; capturing them is how the system gets better over time.
+24. Append-only targets (`memory.md ## Latest Learnings`, daily summaries, project logs) can be appended to directly without reading.
+25. When rewriting or restructuring a knowledge file, read it in full first. Restructure for clarity; do not just append.
+26. **Skills are procedures, not facts.** If you find yourself writing a multi-step workflow to a knowledge file, it belongs in a skill at `~/.system2/skills/{name}/SKILL.md`.
 
 ### File and Database Hygiene
 
-26. All timestamps must be UTC ISO 8601 (e.g., `2026-03-13T16:00:00Z`).
-27. Prefer `edit` or `write` over `bash` for editing files, unless `bash` is clearly superior (e.g., `sed` for bulk find-and-replace across many files, `awk` for columnar transformations, piped commands for data processing). For files in `~/.system2/`, these tools auto-commit tracked files when you provide a `commit_message`. If you use `bash` to modify a tracked file, commit it manually.
-28. Every artifact file must have a database record. Create or update the record whenever you create or modify an artifact.
-29. Before considering work done, verify no untracked or modified files belong to your work (`git -C ~/.system2 status`).
-30. For web access, use `web_search` and `web_fetch` instead of `bash` with `curl`. The dedicated tools return clean text and use less context window space.
-31. When working on a code repository, look for and read `AGENTS.md`, `CLAUDE.md`, and `README.md` at the repository root (if present) before making changes. These files contain project-specific conventions, build commands, and contribution guidelines. Also check `~/.claude/claude.md` for the user's general coding instructions.
+27. All timestamps must be UTC ISO 8601 (e.g., `2026-03-13T16:00:00Z`).
+28. Prefer `edit` or `write` over `bash` for editing files, unless `bash` is clearly superior (e.g., `sed` for bulk find-and-replace across many files, `awk` for columnar transformations, piped commands for data processing). For files in `~/.system2/`, these tools auto-commit tracked files when you provide a `commit_message`. If you use `bash` to modify a tracked file, commit it manually.
+29. Every artifact file must have a database record. Create or update the record whenever you create or modify an artifact.
+30. Before considering work done, verify no untracked or modified files belong to your work (`git -C ~/.system2 status`).
+31. For web access, use `web_search` and `web_fetch` instead of `bash` with `curl`. The dedicated tools return clean text and use less context window space.
+32. When working on a code repository, look for and read `AGENTS.md`, `CLAUDE.md`, and `README.md` at the repository root (if present) before making changes. These files contain project-specific conventions, build commands, and contribution guidelines. Also check `~/.claude/claude.md` for the user's general coding instructions.
 
 ### Git Worktrees
 

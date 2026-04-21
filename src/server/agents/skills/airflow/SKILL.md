@@ -300,6 +300,19 @@ Multiple assets can be combined: `schedule=[Asset("a"), Asset("b")]` triggers wh
 
 For schedules cron cannot express (business days, irregular intervals), implement a custom timetable by subclassing `Timetable`.
 
+## Useful Jinja Template Variables
+
+| Variable | Description |
+| -------- | ----------- |
+| `{{ ds }}` | Logical date as `YYYY-MM-DD` |
+| `{{ data_interval_start }}` | Start of the data interval |
+| `{{ data_interval_end }}` | End of the data interval |
+| `{{ dag_run.run_id }}` | Unique run identifier |
+| `{{ dag_run.conf }}` | DAG run configuration (from trigger) |
+| `{{ prev_data_interval_end_success }}` | End of previous successful run's interval |
+| `{{ var.value.my_variable }}` | Airflow Variables access |
+| `{{ conn.my_conn.host }}` | Connection attribute access |
+
 ## Testing
 
 ### DAG integrity tests
@@ -356,18 +369,95 @@ airflow dags list-import-errors
 
 **Task stuck in "running"**: worker may have died without reporting. Check for zombie tasks in the metadata DB. The scheduler has zombie detection.
 
-## Useful Jinja Template Variables
+## Astro CLI
 
-| Variable | Description |
-| -------- | ----------- |
-| `{{ ds }}` | Logical date as `YYYY-MM-DD` |
-| `{{ data_interval_start }}` | Start of the data interval |
-| `{{ data_interval_end }}` | End of the data interval |
-| `{{ dag_run.run_id }}` | Unique run identifier |
-| `{{ dag_run.conf }}` | DAG run configuration (from trigger) |
-| `{{ prev_data_interval_end_success }}` | End of previous successful run's interval |
-| `{{ var.value.my_variable }}` | Airflow Variables access |
-| `{{ conn.my_conn.host }}` | Connection attribute access |
+The local Airflow environment runs via [Astro CLI](https://www.astronomer.io/docs/astro/cli/install-cli). After cloning the scaffold, run `astro dev init` to generate `.astro/`, `Dockerfile`, etc., then delete the placeholder `dags/exampledag.py`. Configure `.astro/config.yaml` to use port 5434 for the metadata DB and 8081 for the webserver (avoiding collisions with the local PostgreSQL on 5432). Create a `docker-compose.override.yml` to pass `SQL_DB_*` env vars and mount the data directory into the scheduler container. See the scaffold README for the full YAML content.
+
+### Environment management
+
+```bash
+astro dev start     # start Astronomer (builds containers on first run)
+astro dev restart   # picks up Python code changes without rebuilding
+astro dev stop      # stop all containers
+```
+
+`astro dev restart` is the fastest way to reload DAG code and Python changes. Use it after editing pipeline code, adding dependencies, or modifying the Dockerfile.
+
+### Running and monitoring DAGs
+
+```bash
+# Unpause a DAG (new DAGs are paused by default)
+astro dev run dags unpause <dag_id>
+
+# Trigger a manual run
+astro dev run dags trigger <dag_id>
+
+# Check task states for a specific run
+astro dev run tasks states-for-dag-run <dag_id> "<run_id>"
+```
+
+The Airflow webserver UI is available at `http://localhost:8081` (configured in `.astro/config.yaml`).
+
+**Orphaned runs**: if Astronomer is stopped while a DAG run is in progress, the run stays in `running` state. Because `max_active_runs=1`, the next trigger will be blocked. Clear the orphaned run from the UI or CLI before re-triggering.
+
+## Pipeline Structure
+
+When building a new pipeline in this repository, follow the conventions in the `pipeline-design` skill. That skill defines the orchestrator-agnostic layer: file state machine, standard task sequence, config dataclass, per-pipeline directory layout, SQLAlchemy integration, and ETL result monitoring. The sections below describe how those abstractions map to Airflow specifically.
+
+### Directory conventions
+
+Each pipeline lives under `dags/pipelines/{name}/` and exposes a `dag.py` that instantiates config and calls `create_dag()`. Keep the DAG file thin (~10 lines); all logic lives in `dags/lib/` or `dags/pipelines/{name}/process.py`. Astro CLI and native Airflow both hardcode `dags/` as the DAGs folder and auto-add it to PYTHONPATH, so `from lib.xxx import yyy` and `from pipelines.{name}.process import ...` resolve without any extra configuration.
+
+### Mapping standard tasks to Airflow operators
+
+| Pipeline task | Airflow implementation |
+|---|---|
+| `ingest` | `PythonOperator(task_id="ingest", python_callable=ingest, op_kwargs={"config": config})` |
+| `batch` | `PythonOperator(task_id="batch", ...)` — returns serialized batches via XCom |
+| `process` | `PythonOperator.partial(task_id="process", ...).expand(op_args=batch_task.output)` — dynamic task mapping, one instance per batch |
+| `store` | `PythonOperator(task_id="store", ...)` — collects mapped process outputs, routes files |
+
+### Dynamic task mapping (process task)
+
+The `process` task uses `.partial().expand()` to fan out over batches at runtime:
+
+```python
+from airflow.providers.standard.operators.python import PythonOperator
+
+task_process = PythonOperator.partial(
+    task_id="process",
+    python_callable=process_wrapper,
+    op_kwargs={"config": config, "dag_run_id": "{{ dag_run.run_id }}",
+               "dag_start_date": "{{ dag_run.logical_date }}"},
+).expand(op_args=task_batch.output)
+```
+
+`process_wrapper` deserializes a single `FileSet` from `op_args[0]`, instantiates `config.processor_class` with that `file_set`, and returns `{"files": [...], "success": bool, "error": str|None}`. The Processor takes a **singular** `file_set` — fan-out happens at the Airflow layer via `.expand()`, so each mapped task instance receives one `FileSet`.
+
+### XCom and large data
+
+The `batch` task returns a list of serialized `FileSet` objects via XCom (return value in TaskFlow, or `ti.xcom_push` in traditional operators). Keep batches small: XCom is stored in the metadata database. If file set lists are large, store them in a shared filesystem and pass only the path.
+
+### Config → DAG args
+
+`PipelineConfig.dag_args` returns a dict suitable for `DAG(**config.dag_args)`:
+
+```python
+dag = DAG(
+    dag_id=config.pipeline_id,
+    schedule=config.schedule,
+    start_date=config.start_date,
+    catchup=False,
+    max_active_runs=1,
+    default_args={"retries": 2, "retry_delay": timedelta(minutes=5)},
+)
+```
+
+Always set `catchup=False` and `max_active_runs=1` for file-processing pipelines — concurrent runs writing to the same directories will corrupt state.
+
+### Skip vs. fail
+
+In the `ingest` task, raise `AirflowSkipException` when there are no files to process. This marks the entire DAG run as skipped (not failed) and avoids spurious alerts. Use `trigger_rule="none_failed"` on `batch` and downstream tasks if you want them to run even when `ingest` skips.
 
 ## Production Checklist
 

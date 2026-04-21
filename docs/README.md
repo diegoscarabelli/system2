@@ -17,7 +17,7 @@ For installation and usage, see the [project README](../README.md).
 
 ## Core Systems
 
-- [Agents](agents.md): How the four agent roles (Guide, Conductor, Narrator, Reviewer) work together, including their lifecycles, how system prompts are assembled, how LLM failover is handled, and how compaction pruning prevents context bloat in long-running agents.
+- [Agents](agents.md): How the five agent roles (Guide, Conductor, Narrator, Reviewer, Worker) work together, including their lifecycles, how system prompts are assembled, how LLM failover is handled, and how session rotation prevents context bloat in long-running agents.
 - [Tools](tools.md): The tools available to agents, including what each one does, how they are registered, and how permissions are enforced.
 - [Database](database.md): The SQLite schema that stores projects, tasks, agents, and comments, with table definitions, indices, and common query patterns.
 - [Artifacts](artifacts.md): What artifacts are (published analytical outputs), where they live on disk, database registration, UI rendering (iframes, markdown, live reload), and the postMessage bridge for interactive dashboards.
@@ -29,5 +29,5 @@ For installation and usage, see the [project README](../README.md).
 
 ## Reference
 
-- [Configuration](configuration.md): All settings in `config.toml`, including LLM provider credentials, failover chains, application directory paths, and feature flags.
+- [Configuration](configuration.md): All settings in `config.toml`, including LLM provider credentials, failover chains, database connections, per-role agent overrides, and operational settings.
 - [Contributing](../CONTRIBUTING.md): Development setup, code standards, testing, and PR process.
