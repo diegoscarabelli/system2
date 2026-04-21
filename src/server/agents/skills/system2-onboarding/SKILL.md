@@ -269,7 +269,8 @@ UI at http://localhost:4200.
 
 Deploying and running flows:
 ```bash
-prefect deploy dags/pipelines/<name>/flow.py:flow --name <name>-dev --work-pool default
+cd dags
+prefect deploy pipelines/<name>/flow.py:flow --name <name>-dev --work-pool default
 prefect deployment run '<flow-name>/<name>-dev'
 ```
 
