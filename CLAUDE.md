@@ -2,8 +2,6 @@
 
 This file provides guidance to AI coding agents working with code in this repository. The following sections provide references to other files that must be read before any work to acquire critical knowledge about system2.
 
-IMPORTANT: system2 is not released yet, no one installed it. No need to worry about migrations for breaking changes, yet.
-
 ## README.md
 
 The [`README.md`](README.md) file is the project's public-facing landing page: what System2 is, key features, quick start, and links to docs.
