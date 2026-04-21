@@ -56,7 +56,6 @@ jobs:
 
   test-cross-platform:
     name: test (${{ matrix.os }})
-    if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
