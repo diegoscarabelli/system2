@@ -238,7 +238,7 @@ Tracks `colorMode` (light/dark) and `particlesEnabled` (boolean) with localStora
 
 Manages the WebSocket connection to the server with multi-agent routing:
 
-- Connects to `ws://localhost:3000` (or via Vite proxy in dev)
+- Connects to `ws://localhost:4242` (or via Vite proxy in dev)
 - On connect: receives `chat_history` and `provider_info` for Guide; sets `guideAgentId` and `activeAgentId`
 - Routes all incoming `ServerMessage` types to the correct agent's state via `message.agentId` (falls back to `guideAgentId`)
 - Exposes `sendMessage()`, `sendSteering()`, `abort()` (all include `activeAgentId`)
@@ -251,12 +251,12 @@ See [WebSocket Protocol](../websocket-protocol.md) for the full message specific
 
 ## Development
 
-In development, Vite runs on port 3001 and proxies to the backend on port 3000:
+In development, Vite runs on port 3001 and proxies to the backend on port 4242:
 
 | Proxy | Target |
 |-------|--------|
-| `/ws` | `ws://localhost:3000` |
-| `/api` | `http://localhost:3000` |
+| `/ws` | `ws://localhost:4242` |
+| `/api` | `http://localhost:4242` |
 
 UI changes hot-reload instantly. See [Contributing](../../CONTRIBUTING.md) for the full workflow.
 

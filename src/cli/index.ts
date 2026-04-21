@@ -28,7 +28,7 @@ program
 program
   .command('start')
   .description('Start the System2 server (after onboarding)')
-  .option('-p, --port <number>', 'Port to run the server on', '3000')
+  .option('-p, --port <number>', 'Port to run the server on', '4242')
   .option('--no-browser', 'Do not open browser automatically')
   .option('--foreground', 'Run in foreground (for debugging)')
   .action(async (options) => {

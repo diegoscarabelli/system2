@@ -136,7 +136,7 @@ roles: [conductor, reviewer]
 └──────────────────────────┬──────────────────────────────┘
                            │ HTTPS (multi-provider, failover)
 ┌──────────────────────────▼──────────────────────────────┐
-│  Server (Express + WebSocket on port 3000)              │
+│  Server (Express + WebSocket on port 4242)              │
 │                                                         │
 │  ┌──────────────┐  ┌──────────────┐  + per-project:     │
 │  │ Guide Agent  │  │Narrator Agent│    Conductor(s)     │

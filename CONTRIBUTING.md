@@ -127,10 +127,10 @@ During development you run two things: the **system2 server** (backend + agent) 
 
 | Process | Port | What it does |
 |---------|------|-------------|
-| `system2 start` | 3000 | Backend server, WebSocket, agent runtime |
-| Vite dev server | 3001 | Serves UI with hot reload, proxies API/artifacts to port 3000 |
+| `system2 start` | 4242 | Backend server, WebSocket, agent runtime |
+| Vite dev server | 3001 | Serves UI with hot reload, proxies API/artifacts to port 4242 |
 
-**You develop on `localhost:3001`** (not 3000). The Vite dev server proxies WebSocket, artifact, and API requests to the backend automatically.
+**You develop on `localhost:3001`** (not 4242). The Vite dev server proxies WebSocket, artifact, and API requests to the backend automatically.
 
 #### Step-by-step
 
@@ -141,7 +141,7 @@ Open **two terminals** from the repo root:
 system2 start
 ```
 
-This starts the system2 server on port 3000. Keep it running.
+This starts the system2 server on port 4242. Keep it running.
 
 **Terminal 2 — Start the UI dev server with hot reload:**
 ```bash

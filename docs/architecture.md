@@ -24,7 +24,7 @@ System2 is a TypeScript project built on [pi-coding-agent](https://github.com/ba
 └──────────────────────────┬──────────────────────────────┘
                            │ HTTPS (multi-provider, failover)
 ┌──────────────────────────▼──────────────────────────────┐
-│  Server (Express + WebSocket on port 3000)              │
+│  Server (Express + WebSocket on port 4242)              │
 │                                                         │
 │  ┌──────────────┐  ┌──────────────┐  + per-project:     │
 │  │ Guide Agent  │  │Narrator Agent│    Conductor(s)     │
