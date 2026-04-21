@@ -157,21 +157,7 @@ Skills are reusable workflow instructions that agents load on demand. Each skill
 
 See [docs/skills.md](docs/skills.md) for the full reference and the SKILL.md format.
 
----
-
-## Automatic backups
-
-On a normal `system2 start`, when the CLI launches the background server process, the system creates a timestamped backup of `~/.system2/` before the server initializes. Backups are full copies stored in your home directory as `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`. A cooldown period (default: 24 hours) prevents redundant copies on frequent restarts, and old backups are automatically pruned to keep only the most recent copies (default: 3).
-
-Both settings are configurable in `config.toml`:
-
-```toml
-[backup]
-cooldown_hours = 24   # minimum hours between backups
-max_backups = 3       # number of backup copies to retain
-```
-
-The backup covers the entire `~/.system2/` directory: database, knowledge files, project artifacts, skills, sessions, configuration, and the shared Python environment. If something goes wrong, you can restore by copying a backup directory back to `~/.system2/`.
+On every `system2 start`, the system creates a timestamped backup of `~/.system2/` before the server initializes (stored as `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`, with a 24-hour cooldown between copies and automatic pruning to keep only the 3 most recent). Both limits are configurable via `[backup]` in `config.toml`.
 
 ---
 
