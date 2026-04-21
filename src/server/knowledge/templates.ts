@@ -31,23 +31,23 @@ export const INFRASTRUCTURE_TEMPLATE = `# Infrastructure
 > \`credentials\` to point at where the secret lives on disk (e.g. \`~/.pgpass\`, \`.env\`,
 > OS keychain entry name). Never paste the secret itself into this file: it is git-tracked.
 
-### example_db
-
-\`\`\`json
-{
-  "engine": "postgresql",
-  "version": "16",
-  "host": "localhost",
-  "port": 5432,
-  "database": "example",
-  "auth": "scram-sha-256",
-  "credentials": "~/.pgpass",
-  "deployment": "local"
-}
-\`\`\`
-
-Prose describing what lives in this database, important schemas, retention policies,
-gotchas, and how System2 typically queries it.
+> ### example_db
+>
+> \`\`\`json
+> {
+>   "engine": "postgresql",
+>   "version": "16",
+>   "host": "localhost",
+>   "port": 5432,
+>   "database": "example",
+>   "auth": "scram-sha-256",
+>   "credentials": "~/.pgpass",
+>   "deployment": "local"
+> }
+> \`\`\`
+>
+> Prose describing what lives in this database, important schemas, retention policies,
+> gotchas, and how System2 typically queries it.
 
 ## Data Repositories
 
@@ -65,17 +65,17 @@ gotchas, and how System2 typically queries it.
 > JSON dictionary of repositories System2 should know about, keyed by short name. Add fields
 > as needed (e.g. \`default_branch\`, \`package_manager\`, \`language\`).
 
-\`\`\`json
-{
-  "system2_data_pipelines": {
-    "local_path": "~/repos/system2_data_pipelines",
-    "remote": "git@github.com:user/system2_data_pipelines.git",
-    "purpose": "Pipeline definitions and shared data utilities"
-  }
-}
-\`\`\`
-
-Prose describing each repo's role, key directories, and conventions.
+> \`\`\`json
+> {
+>   "system2_data_pipelines": {
+>     "local_path": "~/repos/system2_data_pipelines",
+>     "remote": "git@github.com:user/system2_data_pipelines.git",
+>     "purpose": "Pipeline definitions and shared data utilities"
+>   }
+> }
+> \`\`\`
+>
+> Prose describing each repo's role, key directories, and conventions.
 
 ## Other Tools
 
