@@ -55,6 +55,8 @@ system2 stop             # graceful shutdown
 
 ### Updating
 
+Pull the latest released version:
+
 ```bash
 pnpm update -g system2
 ```
