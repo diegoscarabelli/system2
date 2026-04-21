@@ -1,8 +1,14 @@
 # System2
 
-System2 is a multi-agent system for data engineering, analysis, and statistical reasoning. It adapts to your existing data stack or builds one from scratch. Describe what you want to learn to the Guide, your single point of contact, and it spawns a team of agents that plan the approach, build pipelines, run analyses, review results for statistical fallacies, and produce traceable, interactive output.
+[![CI](https://github.com/diegoscarabelli/system2/actions/workflows/ci.yml/badge.svg)](https://github.com/diegoscarabelli/system2/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
 
-Named for [Kahneman's](https://en.wikipedia.org/wiki/Thinking,_Fast_and_Slow) slow, deliberate mode of reasoning, System2 is the bicycle for your analytical mind. It exists to help people think more clearly about complex questions and empower everyone, regardless of skill, to acquire, interpret, and share rigorous analysis grounded in evidence and methods they can inspect.
+System2 is a multi-agent system for data engineering, analysis, and statistical reasoning. It adapts to your existing data stack or builds one from scratch. You talk to the Guide. It spawns a team that plans, builds pipelines, analyzes data, catches statistical fallacies, and delivers interactive output you can inspect end to end.
+
+Named for [Kahneman's](https://en.wikipedia.org/wiki/Thinking,_Fast_and_Slow) slow, deliberate mode of reasoning, System2 is the bicycle for your analytical mind.
+
+It exists to help people think more clearly about complex questions and empower everyone, regardless of skill, to acquire, interpret, and share rigorous analysis grounded in evidence and methods they can inspect.
 
 <!-- TODO: screenshot/GIF of the full UI: chat panel on the right, artifact viewer with a dashboard on the left, activity bar visible -->
 
@@ -26,7 +32,21 @@ system2 start            # starts the server and opens the browser
 
 `system2 onboard` creates the `~/.system2/` directory and walks you through configuration: pick your LLM provider, enter API keys (you can add multiple for rotation and fallback providers for redundancy), and optionally set up Brave Search. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
 
-`system2 start` launches the server and opens your browser at `http://localhost:4242`. On first launch, the Guide detects that the knowledge files are still templates and runs the onboarding skill through the web UI: it introduces itself, learns about you and your goals, detects your system, and then walks you through setting up a local data stack. Unless you direct it otherwise, the recommended one includes an analytical database (PostgreSQL with TimescaleDB by default), a shared Python environment with notebooks and data libraries, an ETL framework from [openetl_scaffold](https://github.com/diegoscarabelli/openetl_scaffold), and an orchestrator (Prefect or Airflow). The Guide adapts to what you already have: if you have an existing database, orchestrator, or pipeline repo, it integrates with those instead. By the end, you have a working analytical database, a data engineering orchestrator, and a code repository ready to build end-to-end data pipelines, with knowledge files populated with your setup and the Guide ready for your first project.
+`system2 start` launches the server and opens your browser at `http://localhost:4242`. On first launch, the Guide walks you through the UI, learns your preferences, detects your existing infrastructure, and sets up your data stack and development environment.
+
+<details>
+<summary>What happens during first-launch onboarding</summary>
+
+The Guide detects that the knowledge files are still templates and runs the onboarding skill through the web UI. It introduces itself, learns about you and your goals, and detects your system. Unless you direct it otherwise, the recommended stack includes:
+
+- An analytical database (PostgreSQL with TimescaleDB by default)
+- A shared Python environment with notebooks and data libraries
+- An ETL framework from [openetl_scaffold](https://github.com/diegoscarabelli/openetl_scaffold)
+- An orchestrator (Prefect or Airflow)
+
+The Guide adapts to what you already have: if you have an existing database, orchestrator, or pipeline repo, it integrates with those instead. By the end, you have a working data stack, a code repository ready for pipelines, and knowledge files populated with your setup.
+
+</details>
 
 ```bash
 system2 status           # check if the server is running
@@ -37,17 +57,34 @@ system2 stop             # graceful shutdown
 
 ## Key capabilities
 
-**Multi-agent system built for data work.** The Guide is your single point of contact, built to feel like talking to a friendly, trusted colleague: its continuous session gives it long-term memory of your interactions and System2's work. It defers complex work, organized by project, to a Conductor that researches, plans, and orchestrates; a Reviewer that catches statistical fallacies and flawed methodology; and optional Workers that execute tasks in parallel. A Narrator curates short- and long-term memory on a schedule. Agents carry built-in skills for statistical analysis, SQL modeling, and data infrastructure, with system-level rules that require verification before any result is reported and Reviewer sign-off before any analytical task is marked done.
+**Multi-agent system built for data work.** The Guide is your single point of contact with long-term memory of your interactions. Work is organized into projects, each with its own team: a Conductor that plans and orchestrates, a Reviewer that catches statistical fallacies, and optional Workers that execute in parallel. Multiple projects can run concurrently, each with dedicated agents. A Narrator curates memory on a schedule.
 
-**Structured collaboration.** Agents manage work through a database-backed kanban board (visible to the user) with task hierarchies, dependencies, and comment threads, and coordinate through real-time messages. Every project follows a plan-approve-execute cycle: the Conductor researches and proposes, you review and approve before work begins.
+**Structured collaboration.** Agents coordinate through real-time messages and manage work on a database-backed kanban board (visible to you) with task hierarchies, dependencies, and comment threads. Every project follows a plan-approve-execute cycle: the Conductor proposes, you review and approve before work begins.
 
-**Knowledge base that learns and adapts.** Every conversation builds on the last. Agents continuously refine git-tracked markdown files storing user preferences, data infrastructure setup, role-specific lessons, long-term memory, and reusable skills they create alongside the built-in ones. A Narrator synthesizes activity into daily summaries, project logs, and a journalistic-style project story when work concludes. Stop the server, restart it days later: the team picks up where it left off, with project state and accumulated knowledge intact.
+**Knowledge that accumulates.** Every conversation builds on the last. Agents refine git-tracked markdown files storing your preferences, infrastructure setup, lessons learned, and reusable skills. Daily summaries and project stories are written automatically so nothing is lost. Stop the server, restart it days later: the team picks up where it left off.
 
-**Interactive artifacts.** Agents craft whatever the analysis demands: dashboards that query your analytical databases live (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite), research articles, Jupyter notebooks, financial models. Agents surface these in the UI alongside the conversation, so you see the result the moment it is ready and can ask follow-up questions while looking at it.
+**Interactive artifacts.** Agents can build and display anything in the UI on demand: live dashboards querying your databases (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite), research articles, Jupyter notebooks, reports. Artifacts appear alongside the conversation with live reload, so you see results the moment they're ready and iterate on them in place.
 
-**Autonomous scheduling.** Agents set reminders for their future selves to follow up on long-running work, revisit blocked tasks, or re-evaluate conditions. A cron scheduler triggers daily summaries, long-term memory updates, and project stories. Long-running commands emit heartbeat signals to report progress back to the system.
+**Built-in tools and domain skills.** Agents come equipped with shell access, file operations, database queries, web search, inter-agent messaging, and self-scheduling reminders, all with safety guards and role-based restrictions. Built-in skills cover data infrastructure (Airflow, Prefect, TimescaleDB, SQL modeling), statistical analysis, code review, and reasoning fallacy detection. Agents can also create new skills at runtime.
 
-**Any LLM, automatic failover.**  OpenRouter, Anthropic, Google, OpenAI, Cerebras, Mistral, Groq, xAI, and any OpenAI-compatible endpoint. Automatic key rotation, provider failover with exponential backoff, and time-based cooldowns. The system recovers on its own when providers come back.
+**Any LLM, automatic failover.** OpenRouter, Anthropic, Google, OpenAI, Cerebras, Mistral, Groq, xAI, and any OpenAI-compatible endpoint. Automatic key rotation, provider failover with backoff, and time-based cooldowns.
+
+---
+
+## Configuration
+
+All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
+
+- **`[llm]`**: primary provider, fallback order, per-provider API keys with automatic rotation
+- **`[databases.*]`**: analytical database connections (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite) that agents and dashboard artifacts can query
+- **`[agents.*]`**: per-role overrides for thinking level, context compaction depth, and model selection per provider
+- **`[services.brave_search]`**: web search via Brave Search API (highly recommended)
+- **`[scheduler]`**: Narrator frequency (default: every 30 minutes)
+- **`[backup]`**: backup cooldown and retention (default: every 24 hours, keep 3)
+
+**Supported LLM providers:** Anthropic, Google Gemini, OpenAI, OpenRouter, Cerebras, Groq, Mistral, xAI, and any OpenAI-compatible endpoint.
+
+See [docs/configuration.md](docs/configuration.md) for the full reference.
 
 ---
 
@@ -100,81 +137,9 @@ System2's home directory is `~/.system2/`. It holds all system state: configurat
 
 Agents run in a shell and can work with any directory on your machine. For data engineering work, they typically create and manage code in external repositories (e.g. `~/repos/system2_data_pipelines`), keeping pipeline code separate from the System2 home directory.
 
-See [docs/knowledge-system.md](docs/knowledge-system.md) for how knowledge files are injected into agent prompts, file ownership, and the git tracking model. See [docs/architecture.md](docs/architecture.md) for the full runtime directory layout.
-
----
-
-## Builtin tools
-
-Every agent has access to a core set of tools. Some tools are restricted by role or require configuration.
-
-| Category | Tools | Description |
-| -------- | ----- | ----------- |
-| Filesystem | `bash`, `read`, `edit`, `write` | Shell commands with streaming output and safety guards (blocks recursive `rm`, `mkfs`, `dd`, direct `sqlite3` on app.db). File read, exact-match edit, and file write/create operations; `write` does not overwrite existing non-empty files. Auto-commit via `commit_message` applies to files under `~/.system2/`. |
-| App database | `read_system2_db`, `write_system2_db` | Query app.db (read-only SELECT) and manage records (create/update projects, tasks, comments, artifacts) through named operations with scope checks. |
-| Communication | `message_agent` | Send messages between agents with `urgent` (interrupt) or `followUp` (queue) delivery modes. |
-| Web | `web_fetch`, `web_search` | Fetch any URL and extract readable text via Mozilla Readability. Search the web via Brave Search API (requires API key in config). |
-| UI | `show_artifact` | Display an artifact (or any other supported file) in the viewer panel with live reload on file changes. |
-| Scheduling | `set_reminder`, `cancel_reminder`, `list_reminders` | Agents schedule delayed messages to their future selves (0.5 min to 7 days) for follow-ups, retries, and condition checks. |
-| Agent lifecycle | `spawn_agent`, `terminate_agent`, `resurrect_agent` | Guide and Conductors can spawn and terminate agents; Conductors are limited to their own project. `resurrect_agent` restores an archived agent's persisted session history. The Guide can resurrect any archived non-singleton agent, while Conductors can resurrect only agents in their own project. |
-| Narration | `trigger_project_story` | Kick off the Narrator's project story workflow: collects all project activity, agent logs, and DB changes into a data package for the Narrator to write a journalistic reconstruction. |
-
-See [docs/tools.md](docs/tools.md) for the full reference.
-
----
-
-## Builtin skills
-
-Skills are reusable workflow instructions that agents load on demand. Each skill is a `SKILL.md` file with step-by-step procedures, scoped to specific agent roles. System2 ships with built-in skills covering its own workflows, data infrastructure, and analytical rigor. Agents can also create new skills at runtime, stored in `~/.system2/skills/` (user-created skills override built-in ones by name).
-
-**System2 workflows**
-
-| Skill | Roles | What it does |
-| ----- | ----- | ------------ |
-| `system2-onboarding` | Guide | First-launch setup: learns about the user, detects the data stack, configures the environment, captures interaction preferences. |
-| `project-creation` | Guide | Gathers requirements, creates the project in app.db, spawns Conductor and Reviewer, schedules a follow-up reminder. |
-| `project-completion` | Guide | Shows the Reviewer's final report, gets user confirmation, triggers close-project and project story, terminates agents. |
-| `project-restart` | Guide | Helps weigh resurrection vs. a new project, then resurrects the original agents with context intact. |
-| `ui-reference` | Guide | Reference for the System2 UI layout: sidebar, artifact viewer, chat panel, kanban board. |
-| `db-schema-reference` | Guide, Conductor, Reviewer, Worker | Column-level schema for all app.db tables, so agents can write correct queries. |
-
-**Data infrastructure**
-
-| Skill | Roles | What it does |
-| ----- | ----- | ------------ |
-| `airflow` | Conductor, Reviewer, Worker | Apache Airflow v3: DAG design, TaskFlow API, dynamic task mapping, scheduling, production checklist. |
-| `prefect` | Conductor, Reviewer, Worker | Prefect v3: flows, tasks, deployments, work pools, concurrency, error handling. |
-| `timescaledb` | Conductor, Reviewer, Worker | Hypertables, chunk sizing, compression, continuous aggregates, retention policies, ingestion tuning. |
-| `sql-schema-modeling` | Conductor, Reviewer, Worker | Normalization, dimensional modeling, data types, indexing patterns, partitioning, materialization. |
-
-**Analysis and review**
-
-| Skill | Roles | What it does |
-| ----- | ----- | ------------ |
-| `statistical-analysis` | Conductor, Reviewer | Frequentist and Bayesian workflows, test selection, effect sizes, power analysis, time series, reporting standards. |
-| `code-review` | Conductor, Reviewer, Worker | Structured review: conventions, design, correctness, security (OWASP top 10), performance, SQL, testing, readability. |
-| `reasoning-fallacy-review` | Conductor, Reviewer | Cognitive bias detection: WYSIATI, confirmation bias, anchoring, narrative fallacy, premortem, Analysis of Competing Hypotheses. |
-
-See [docs/skills.md](docs/skills.md) for the full reference and the SKILL.md format.
-
 On every `system2 start`, the system creates a timestamped backup of `~/.system2/` before the server initializes (stored as `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`, with a 24-hour cooldown between copies and automatic pruning to keep only the 3 most recent). Both limits are configurable via `[backup]` in `config.toml`.
 
----
-
-## Configuration
-
-All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
-
-- **`[llm]`**: primary provider, fallback order, per-provider API keys with automatic rotation
-- **`[databases.*]`**: analytical database connections (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite) that agents and dashboard artifacts can query
-- **`[agents.*]`**: per-role overrides for thinking level, context compaction depth, and model selection per provider
-- **`[services.brave_search]`**: web search via Brave Search API (highly recommended)
-- **`[scheduler]`**: Narrator frequency (default: every 30 minutes)
-- **`[backup]`**: backup cooldown and retention (default: every 24 hours, keep 3)
-
-**Supported LLM providers:** Anthropic, Google Gemini, OpenAI, OpenRouter, Cerebras, Groq, Mistral, xAI, and any OpenAI-compatible endpoint.
-
-See [docs/configuration.md](docs/configuration.md) for the full reference.
+See [docs/knowledge-system.md](docs/knowledge-system.md) for how knowledge files are injected into agent prompts, file ownership, and the git tracking model. See [docs/architecture.md](docs/architecture.md) for the full runtime directory layout.
 
 ---
 
