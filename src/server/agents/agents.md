@@ -257,36 +257,38 @@ For ad-hoc SQL not covered by the named operations above (bulk updates, complex 
 
 ```
 ~/.system2/                          Application directory
-├── config.toml                      Settings and API keys (gitignored)
 ├── app.db                           SQLite database (gitignored)
+├── artifacts/                       Project-free reports, dashboards, exports
+├── config.toml                      Settings and API keys (gitignored)
 ├── knowledge/                       Persistent knowledge (injected into prompts)
-│   ├── infrastructure.md            Data stack, tools, environments
-│   ├── user.md                      User profile, preferences, goals
-│   ├── memory.md                    Long-term memory (Narrator-maintained)
-│   ├── guide.md                     Guide role-specific knowledge
 │   ├── conductor.md                 Conductor role-specific knowledge
+│   ├── daily_summaries/             Daily activity logs
+│   │   └── YYYY-MM-DD.md
+│   ├── guide.md                     Guide role-specific knowledge
+│   ├── infrastructure.md            Data stack, tools, environments
+│   ├── memory.md                    Long-term memory (Narrator-maintained)
 │   ├── narrator.md                  Narrator role-specific knowledge
 │   ├── reviewer.md                  Reviewer role-specific knowledge
-│   └── daily_summaries/             Daily activity logs
-│       └── YYYY-MM-DD.md
-├── artifacts/                       Project-free reports, dashboards, exports
+│   ├── user.md                      User profile, preferences, goals
+│   └── worker.md                    Worker role-specific knowledge
+├── logs/                            Server logs (gitignored)
+├── projects/                        Project workspaces
+│   └── {dir_name}/                  {id}_{slug} from project record (e.g. 1_linkedin-campaign)
+│       ├── artifacts/               Project-scoped artifacts
+│       │   ├── plan_{uuid}.md      Conductor's proposal document
+│       │   └── project_story.md    Final narrative (Narrator, on completion)
+│       ├── log.md                   Continuous project log (Narrator)
+│       └── scratchpad/              Project-scoped working files
 ├── scratchpad/                      Project-free working files (exploration, debugging)
+├── sessions/                        Conversation history as JSONL (gitignored)
+│   └── {role}_{id}/
 ├── skills/                          User-created workflow instructions
 │   └── {skill-name}/
 │       └── SKILL.md                 Frontmatter (name, description, roles) + steps
-├── projects/                        Project workspaces
-│   └── {dir_name}/                  Slugified directory name from the project record in app.db
-│       ├── log.md                   Continuous project log (Narrator)
-│       ├── project_story.md         Final narrative (Narrator, on completion)
-│       ├── artifacts/               Project-scoped artifacts
-│       │   └── plan_{uuid}.md      Conductor's proposal document
-│       └── scratchpad/              Project-scoped working files
-├── sessions/                        Conversation history as JSONL (gitignored)
-│   └── {role}_{id}/
-└── logs/                            Server logs (gitignored)
+└── venv/                            Shared Python environment (gitignored)
 ```
 
-Most content is git-tracked. `app.db`, `sessions/`, `logs/`, and `config.toml` are gitignored.
+Most content is git-tracked. `app.db`, `sessions/`, `logs/`, `venv/`, and `config.toml` are gitignored.
 
 ### Configuration (`config.toml`)
 

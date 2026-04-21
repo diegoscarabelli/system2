@@ -59,34 +59,36 @@ All runtime state lives in `~/.system2/`:
 
 ```
 ~/.system2/
-├── config.toml                      Settings and API keys (0600, gitignored)
 ├── app.db                           SQLite database (gitignored)
-├── server.pid                       PID file when server is running
+├── artifacts/                       Project-free reports, dashboards, exports
+├── config.toml                      Settings and API keys (0600, gitignored)
 ├── knowledge/                       Persistent knowledge (injected into prompts)
-│   ├── infrastructure.md            Data stack, tools, environments
-│   ├── user.md                      User profile, preferences, goals
-│   ├── memory.md                    Long-term memory (Narrator-maintained)
-│   ├── guide.md                     Guide role-specific knowledge
 │   ├── conductor.md                 Conductor role-specific knowledge
+│   ├── daily_summaries/             Daily activity logs
+│   │   └── YYYY-MM-DD.md
+│   ├── guide.md                     Guide role-specific knowledge
+│   ├── infrastructure.md            Data stack, tools, environments
+│   ├── memory.md                    Long-term memory (Narrator-maintained)
 │   ├── narrator.md                  Narrator role-specific knowledge
 │   ├── reviewer.md                  Reviewer role-specific knowledge
-│   ├── worker.md                    Worker role-specific knowledge
-│   └── daily_summaries/             Daily activity logs
-│       └── YYYY-MM-DD.md
-├── artifacts/                       Project-free reports, dashboards, exports
+│   ├── user.md                      User profile, preferences, goals
+│   └── worker.md                    Worker role-specific knowledge
+├── logs/                            Server logs (gitignored)
+├── projects/                        Project workspaces
+│   └── {dir_name}/                  {id}_{slug} from project record (e.g. 1_linkedin-campaign)
+│       ├── artifacts/               Project-scoped artifacts
+│       │   ├── plan_{uuid}.md       Conductor's proposal document
+│       │   └── project_story.md     Final narrative (Narrator, on completion)
+│       ├── log.md                   Continuous project log (Narrator)
+│       └── scratchpad/              Project-scoped working files (exploration, debugging)
 ├── scratchpad/                      Project-free working files (exploration, debugging)
+├── server.pid                       PID file when server is running
+├── sessions/                        Conversation history as JSONL (gitignored)
+│   └── {role}_{id}/
 ├── skills/                          Reusable workflow instructions
 │   └── {skill-name}/
 │       └── SKILL.md                 Frontmatter (name, description, roles) + steps
-├── projects/                        Project workspaces
-│   └── {id}_{name}/
-│       ├── log.md                   Continuous project log (Narrator)
-│       ├── project_story.md         Final narrative (Narrator)
-│       ├── artifacts/               Project-scoped artifacts
-│       └── scratchpad/              Project-scoped working files (exploration, debugging)
-├── sessions/                        Conversation history as JSONL (gitignored)
-│   └── {role}_{id}/
-└── logs/                            Server logs (gitignored)
+└── venv/                            Shared Python environment (gitignored)
 ```
 
 Most content is git-tracked. `app.db`, `sessions/`, `logs/`, and `config.toml` are gitignored.

@@ -56,7 +56,7 @@ Each agent's system prompt is assembled from five layers:
 | Shared reference | `agents/agents.md` | Once at init |
 | Agent instructions | `agents/library/{role}.md` (body after frontmatter) | Once at init |
 | Knowledge files | `~/.system2/knowledge/` (infrastructure.md, user.md, memory.md) | **Every LLM call** |
-| Role-aware context | Project log (`projects/{id}_{name}/log.md`) for project-scoped agents, or last 2 daily summaries for system-wide agents | **Every LLM call** |
+| Role-aware context | Project log (`projects/{dir_name}/log.md`) for project-scoped agents, or last 2 daily summaries for system-wide agents | **Every LLM call** |
 | Skills index | Built-in (`agents/skills/`) + user (`~/.system2/skills/`), filtered by role, compiled as XML | **Every LLM call** |
 
 The static layers are concatenated into `staticPrompt`. Knowledge is loaded via `loadKnowledgeContext()`, called from the `systemPromptOverride` callback passed to the Pi SDK's `DefaultResourceLoader`. Skills are wired through the SDK via `additionalSkillPaths` (providing both skill directories) and `skillsOverride` (filtering by agent role). Since the SDK only invokes these callbacks during `reload()` (not on every `prompt()` call), `AgentHost` explicitly calls `resourceLoader.reload()` before each prompt to ensure knowledge files and skills are re-read. This means knowledge and skill updates take effect immediately without server restarts.
@@ -276,7 +276,7 @@ If initialization fails, the DB status is rolled back to `archived`.
 
 **Project log resumption:** the scheduler determines active projects by checking for non-archived conductors. Once a conductor is resurrected, the next scheduled run automatically resumes project log updates.
 
-**Project story on re-completion:** if `trigger_project_story` is called for a project that already has a `project_story.md`, the Narrator receives a note about the existing story and decides whether to edit or rewrite it.
+**Project story on re-completion:** if `trigger_project_story` is called for a project that already has an `artifacts/project_story.md`, the Narrator receives a note about the existing story and decides whether to edit or rewrite it.
 
 ### Project Lifecycle
 
@@ -474,5 +474,5 @@ Worker-Extract, Worker-Analyze, and Reviewer work through their tasks in depende
 6. Narrator appends a final project-log entry, then writes the project story. Narrator messages Conductor when done.
 7. Conductor reports back to Guide.
 8. Guide terminates Conductor (#2) and Reviewer (#4), sets project #1 to `done`.
-9. Guide informs user with final summary, artifact location, and story path (`~/.system2/projects/1_linkedin-campaign/project_story.md`).
+9. Guide informs user with final summary, artifact location, and story path (`~/.system2/projects/1_linkedin-campaign/artifacts/project_story.md`).
 
