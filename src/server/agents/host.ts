@@ -608,8 +608,8 @@ export class AgentHost {
             : `${errorPrefix}, switched to ${nextProvider}`;
         const detail =
           nextProvider === this.currentProvider
-            ? `on ${this.currentProvider}, rotating to next key`
-            : `on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}`;
+            ? `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}`
+            : `on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}\n\n${errorMessage}`;
         log.info(
           `[AgentHost] Key ${this.currentProvider}:${this.currentKeyIndex} already in cooldown`
         );
@@ -686,6 +686,7 @@ export class AgentHost {
               }
             )
             .catch((error) => {
+              if (this.session !== session) return;
               this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
               log.error('[AgentHost] Failed to resend delivery after retry:', error);
               const idx = this.pendingDeliveries.indexOf(d);
@@ -719,7 +720,7 @@ export class AgentHost {
         if (nextProvider) {
           if (nextProvider === this.currentProvider) {
             const reason = `${errorPrefix}, rotating to next key`;
-            const detail = `on ${this.currentProvider}, rotating to next key`;
+            const detail = `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}`;
             log.info(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
@@ -737,7 +738,7 @@ export class AgentHost {
             await this.compactForProvider(nextProvider);
 
             const reason = `${errorPrefix}, switched to ${nextProvider}`;
-            const detail = `on ${fromProvider}, switching to ${nextProvider}`;
+            const detail = `on ${fromProvider}, switching to ${nextProvider}\n\n${errorMessage}`;
             log.info(`[AgentHost] Failing over from ${fromProvider} to ${nextProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
@@ -752,7 +753,7 @@ export class AgentHost {
       }
 
       this.pushSystemMessage(
-        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable`
+        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable\n\n${errorMessage}`
       );
       log.info('[AgentHost] No fallback providers available, error will be surfaced to user');
 
@@ -949,6 +950,7 @@ export class AgentHost {
               }
             )
             .catch((error) => {
+              if (this.session !== session) return;
               this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
               log.error('[AgentHost] Failed to replay delivery after failover:', error);
               const idx = this.pendingDeliveries.indexOf(d);
@@ -963,6 +965,15 @@ export class AgentHost {
         const msg = error instanceof Error ? error.message : String(error);
         this.pushSystemMessage(`Failed to switch provider\n\n${msg}`);
       }
+      // Reject all pending deliveries so their promises don't hang forever
+      // (which would leave trackJobExecution stuck in "running" state).
+      const rejectError =
+        error instanceof Error ? error : new Error(`Reinitialize failed: ${String(error)}`);
+      for (const d of this.pendingDeliveries) {
+        d.reject(rejectError);
+      }
+      this.pendingDeliveries = [];
+      this.deliverySendCount = 0;
     } finally {
       this.isReinitializing = false;
     }
@@ -1252,6 +1263,11 @@ export class AgentHost {
         )
       )
       .catch((err) => {
+        // If the session changed (failover/reinit), this catch belongs to a
+        // stale send. The delivery was already captured in deliveriesToRetry
+        // and replayed on the new session — mutating state here would corrupt
+        // the new session's deliverySendCount / pendingDeliveries.
+        if (this.session !== session) return;
         this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
         log.error('[AgentHost] deliverMessage error:', err);
         // Send itself failed (session destroyed, etc.). The message never
