@@ -53,6 +53,12 @@ system2 status           # check if the server is running
 system2 stop             # graceful shutdown
 ```
 
+### Updating
+
+```bash
+pnpm update -g system2
+```
+
 ---
 
 ## Key capabilities
