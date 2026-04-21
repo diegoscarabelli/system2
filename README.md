@@ -26,6 +26,8 @@ system2 start            # starts the server and opens the browser
 
 `system2 onboard` creates the `~/.system2/` directory and walks you through configuration: pick your LLM provider, enter API keys (you can add multiple for rotation and fallback providers for redundancy), and optionally set up Brave Search. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
 
+On first `system2 start`, the Guide detects that the knowledge files are still templates and runs the onboarding skill: it introduces itself, learns about you and your goals, detects your system, and then walks you through setting up a local data stack. Unless you direct it otherwise, the recommended one includes an analytical database (PostgreSQL with TimescaleDB by default), a shared Python environment with notebooks and data libraries, an ETL framework from [openetl_scaffold](https://github.com/diegoscarabelli/openetl_scaffold), and an orchestrator (Prefect or Airflow). The Guide adapts to what you already have: if you have an existing database, orchestrator, or pipeline repo, it integrates with those instead. By the end, you have a working analytical database, a data engineering orchestrator, and a code repository ready to build end-to-end data pipelines, with knowledge files populated with your setup and the Guide ready for your first project.
+
 ```bash
 system2 status           # check if the server is running
 system2 stop             # graceful shutdown
@@ -49,49 +51,6 @@ system2 stop             # graceful shutdown
 
 ---
 
-## What lives where
-
-```text
-~/.system2/
-├── config.toml                      Settings and API keys (0600, gitignored)
-├── app.db                           SQLite database (gitignored)
-├── knowledge/                       Persistent knowledge (git-tracked)
-│   ├── infrastructure.md            Your data stack, servers, tools
-│   ├── user.md                      Your background and preferences
-│   ├── memory.md                    Long-term learnings (Narrator-maintained)
-│   ├── guide.md                     Guide role-specific knowledge
-│   ├── conductor.md                 Conductor role-specific knowledge
-│   ├── narrator.md                  Narrator role-specific knowledge
-│   ├── reviewer.md                  Reviewer role-specific knowledge
-│   └── daily_summaries/             Daily activity logs
-├── projects/
-│   └── {id}_{name}/
-│       ├── plan_{uuid}.md           Conductor's proposal (pre-approval)
-│       ├── log.md                   Continuous project log (Narrator)
-│       ├── project_story.md         Final narrative (Narrator)
-│       ├── artifacts/               Published reports and dashboards
-│       └── scratchpad/              Working files
-├── skills/                          User-created workflow instructions
-├── sessions/                        Agent conversations as JSONL (gitignored)
-└── logs/                            Server logs (gitignored)
-```
-
----
-
-## Configuration
-
-All settings live in `~/.system2/config.toml`, created during onboarding.
-
-- **`[llm]`**: primary provider, fallback order, per-provider API keys with automatic rotation
-- **`[services.brave_search]`**: web search via Brave Search API (highly recommended)
-- **`[scheduler]`**: Narrator frequency (default: every 30 minutes)
-
-**Supported LLM providers:** Anthropic, Google Gemini, OpenAI, Cerebras, Groq, Mistral, OpenRouter, xAI, and any OpenAI-compatible endpoint.
-
-See [docs/configuration.md](docs/configuration.md) for the full reference.
-
----
-
 ## Tech stack
 
 | Layer | Technology |
@@ -103,6 +62,61 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 | UI | React 18, Zustand, Vite |
 | Scheduling | Croner |
 | Package manager | pnpm |
+
+---
+
+## What lives where
+
+System2's home directory is `~/.system2/`. It holds all system state: configuration, the internal database (projects, tasks, agents), knowledge files, project workspaces, chat histories, and logs. The directory is a git repository, so knowledge file changes are version-tracked and reversible.
+
+```text
+~/.system2/
+├── .gitignore
+├── app.db                           SQLite database (gitignored)
+├── config.toml                      Settings and API keys (0600, gitignored)
+├── knowledge/                       Persistent knowledge (git-tracked)
+│   ├── conductor.md                 Conductor role-specific knowledge
+│   ├── daily_summaries/             Daily activity logs
+│   ├── guide.md                     Guide role-specific knowledge
+│   ├── infrastructure.md            Your data stack, servers, tools
+│   ├── memory.md                    Long-term learnings (Narrator-maintained)
+│   ├── narrator.md                  Narrator role-specific knowledge
+│   ├── reviewer.md                  Reviewer role-specific knowledge
+│   ├── user.md                      Your background and preferences
+│   └── worker.md                    Worker role-specific knowledge
+├── logs/                            Server logs (gitignored)
+├── projects/
+│   └── {dir_name}/                  {id}_{slug} from project record (e.g. 1_linkedin-campaign)
+│       ├── artifacts/               Published reports and dashboards
+│       │   ├── plan_{uuid}.md       Conductor's proposal (pre-approval)
+│       │   └── project_story.md     Final narrative (Narrator)
+│       ├── log.md                   Continuous project log (Narrator)
+│       └── scratchpad/              Working files
+├── server.pid                       PID file when server is running (gitignored)
+├── sessions/                        Agent conversations as JSONL (gitignored)
+├── skills/                          User-created workflow instructions
+└── venv/                            Shared Python environment (notebooks, data libraries)
+```
+
+Agents run in a shell and can work with any directory on your machine. For data engineering work, they typically create and manage code in external repositories (e.g. `~/repos/system2_data_pipelines`), keeping pipeline code separate from the System2 home directory.
+
+See [docs/knowledge-system.md](docs/knowledge-system.md) for how knowledge files are injected into agent prompts, file ownership, and the git tracking model. See [docs/architecture.md](docs/architecture.md) for the full runtime directory layout.
+
+---
+
+## Configuration
+
+All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
+
+- **`[llm]`**: primary provider, fallback order, per-provider API keys with automatic rotation
+- **`[databases.*]`**: analytical database connections (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite) that agents and dashboard artifacts can query
+- **`[agents.*]`**: per-role overrides for thinking level, context compaction depth, and model selection per provider
+- **`[services.brave_search]`**: web search via Brave Search API (highly recommended)
+- **`[scheduler]`**: Narrator frequency (default: every 30 minutes)
+
+**Supported LLM providers:** Anthropic, Google Gemini, OpenAI, OpenRouter, Cerebras, Groq, Mistral, xAI, and any OpenAI-compatible endpoint.
+
+See [docs/configuration.md](docs/configuration.md) for the full reference.
 
 ---
 
