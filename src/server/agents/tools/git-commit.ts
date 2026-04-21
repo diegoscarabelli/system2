@@ -25,8 +25,12 @@ export function commitIfStateDir(filePath: string, message: string): void {
   const { GIT_DIR, GIT_WORK_TREE, ...cleanEnv } = process.env;
   const execOpts = { cwd: system2Dir, env: cleanEnv, stdio: 'ignore' as const, timeout: 10000 };
 
+  // Git accepts forward slashes on all platforms; avoid JSON.stringify
+  // double-escaping backslashes when the path is passed through cmd.exe.
+  const gitPath = filePath.replace(/\\/g, '/');
+
   try {
-    execSync(`git add ${JSON.stringify(filePath)}`, execOpts);
+    execSync(`git add "${gitPath}"`, execOpts);
     execSync(`git diff --cached --quiet || git commit -m ${JSON.stringify(message)}`, execOpts);
   } catch {
     // Git commit failure is non-fatal — the file operation already succeeded
