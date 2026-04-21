@@ -296,6 +296,14 @@ describe('bash tool', () => {
       const { heartbeats } = filterHeartbeats('::system2::\n');
       expect(heartbeats).toEqual(['']);
     });
+
+    it('normalizes \\r\\n line endings before filtering', () => {
+      const input = 'line1\r\n::system2:: win-heartbeat\r\nline2\r\n';
+      const { filtered, heartbeats } = filterHeartbeats(input);
+
+      expect(filtered).toBe('line1\nline2\n');
+      expect(heartbeats).toEqual(['win-heartbeat']);
+    });
   });
 
   describe('HEARTBEAT_RE', () => {
