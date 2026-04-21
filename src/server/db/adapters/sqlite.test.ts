@@ -9,6 +9,7 @@ import { createAdapter } from './sqlite.js';
 describe('SQLite adapter', () => {
   let tempDir: string;
   let dbPath: string;
+  let activeAdapter: Awaited<ReturnType<typeof createAdapter>> | undefined;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'sqlite-adapter-test-'));
@@ -24,7 +25,11 @@ describe('SQLite adapter', () => {
     seedDb.close();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    if (activeAdapter?.connected) {
+      await activeAdapter.disconnect();
+    }
+    activeAdapter = undefined;
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -33,43 +38,43 @@ describe('SQLite adapter', () => {
   }
 
   it('connects and queries SELECT 1 as val', async () => {
-    const adapter = createAdapter(makeConfig());
+    activeAdapter = createAdapter(makeConfig());
 
-    await adapter.connect();
-    const rows = await adapter.query('SELECT 1 as val');
+    await activeAdapter.connect();
+    const rows = await activeAdapter.query('SELECT 1 as val');
 
     expect(rows).toEqual([{ val: 1 }]);
   });
 
   it('respects max_rows cap', async () => {
-    const adapter = createAdapter(makeConfig({ max_rows: 5 }));
+    activeAdapter = createAdapter(makeConfig({ max_rows: 5 }));
 
-    await adapter.connect();
-    const rows = await adapter.query('SELECT * FROM items');
+    await activeAdapter.connect();
+    const rows = await activeAdapter.query('SELECT * FROM items');
 
     expect(rows).toHaveLength(5);
   });
 
   it('disconnect sets connected to false', async () => {
-    const adapter = createAdapter(makeConfig());
+    activeAdapter = createAdapter(makeConfig());
 
-    await adapter.connect();
-    expect(adapter.connected).toBe(true);
+    await activeAdapter.connect();
+    expect(activeAdapter.connected).toBe(true);
 
-    await adapter.disconnect();
-    expect(adapter.connected).toBe(false);
+    await activeAdapter.disconnect();
+    expect(activeAdapter.connected).toBe(false);
   });
 
   it('auto-reconnects when querying after disconnect', async () => {
-    const adapter = createAdapter(makeConfig());
+    activeAdapter = createAdapter(makeConfig());
 
-    await adapter.connect();
-    await adapter.disconnect();
-    expect(adapter.connected).toBe(false);
+    await activeAdapter.connect();
+    await activeAdapter.disconnect();
+    expect(activeAdapter.connected).toBe(false);
 
     // query() should re-open the database transparently
-    const rows = await adapter.query('SELECT 1 as val');
+    const rows = await activeAdapter.query('SELECT 1 as val');
     expect(rows).toEqual([{ val: 1 }]);
-    expect(adapter.connected).toBe(true);
+    expect(activeAdapter.connected).toBe(true);
   });
 });
