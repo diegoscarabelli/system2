@@ -84,7 +84,8 @@ export function filterHeartbeats(text: string): {
   filtered: string;
   heartbeats: string[];
 } {
-  const lines = text.split('\n');
+  // Normalize Windows \r\n to \n so the sentinel regex matches cleanly
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
   const kept: string[] = [];
   const heartbeats: string[] = [];
 

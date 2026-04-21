@@ -132,7 +132,7 @@ System2's home directory is `~/.system2/`. It holds all system state: configurat
 ├── server.pid                       PID file when server is running (gitignored)
 ├── sessions/                        Agent conversations as JSONL (gitignored)
 ├── skills/                          User-created workflow instructions
-└── venv/                            Shared Python environment (notebooks, data libraries)
+└── venv/                            Shared Python environment (notebooks, data libraries) (gitignored)
 ```
 
 Agents run in a shell and can work with any directory on your machine. For data engineering work, they typically create and manage code in external repositories (e.g. `~/repos/system2_data_pipelines`), keeping pipeline code separate from the System2 home directory.

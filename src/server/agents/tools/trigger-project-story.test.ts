@@ -237,7 +237,8 @@ describe('trigger_project_story tool', () => {
 
   it('includes existing story note when project_story.md exists', async () => {
     (existsSync as Mock).mockImplementation(
-      (p: string) => typeof p === 'string' && p.endsWith('artifacts/project_story.md')
+      (p: string) =>
+        typeof p === 'string' && p.replace(/\\/g, '/').endsWith('artifacts/project_story.md')
     );
     try {
       const conductor = makeAgent(2, 'conductor', 1);

@@ -296,6 +296,14 @@ describe('bash tool', () => {
       const { heartbeats } = filterHeartbeats('::system2::\n');
       expect(heartbeats).toEqual(['']);
     });
+
+    it('normalizes \\r\\n line endings before filtering', () => {
+      const input = 'line1\r\n::system2:: win-heartbeat\r\nline2\r\n';
+      const { filtered, heartbeats } = filterHeartbeats(input);
+
+      expect(filtered).toBe('line1\nline2\n');
+      expect(heartbeats).toEqual(['win-heartbeat']);
+    });
   });
 
   describe('HEARTBEAT_RE', () => {
@@ -333,8 +341,9 @@ describe('bash tool', () => {
 
     it('uses custom inactivity timeout', async () => {
       // Command that sleeps longer than the inactivity timeout
+      const sleepCmd = isWindows ? 'Start-Sleep -Seconds 15' : 'sleep 15';
       const result = await exec({
-        command: 'sleep 15',
+        command: sleepCmd,
         inactivity_timeout_seconds: 10,
       });
 
@@ -345,7 +354,9 @@ describe('bash tool', () => {
 
     it('uses custom total timeout', async () => {
       // Command that emits output (resets inactivity) but exceeds total timeout
-      const cmd = 'for i in $(seq 1 20); do echo "tick $i"; sleep 1; done';
+      const cmd = isWindows
+        ? '1..20 | ForEach-Object { Write-Output "tick $_"; Start-Sleep -Seconds 1 }'
+        : 'for i in $(seq 1 20); do echo "tick $i"; sleep 1; done';
       const result = await exec({
         command: cmd,
         inactivity_timeout_seconds: 30,
@@ -359,7 +370,9 @@ describe('bash tool', () => {
 
     it('active output prevents inactivity timeout', async () => {
       // Command outputs every second for 3s with a 10s inactivity timeout
-      const cmd = 'for i in 1 2 3; do echo "ping $i"; sleep 1; done';
+      const cmd = isWindows
+        ? '1..3 | ForEach-Object { Write-Output "ping $_"; Start-Sleep -Seconds 1 }'
+        : 'for i in 1 2 3; do echo "ping $i"; sleep 1; done';
       const result = await exec({
         command: cmd,
         inactivity_timeout_seconds: 10,
