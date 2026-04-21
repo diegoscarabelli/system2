@@ -157,6 +157,6 @@ When you believe project work is complete:
 
 7. **Wait for Narrator**: The Narrator messages you when the story is written.
 
-8. **Final report to Guide**: "Project #N closed. Story written at ~/.system2/projects/{dir_name}/project_story.md. All tasks resolved."
+8. **Final report to Guide**: "Project #N closed. Story written at ~/.system2/projects/{dir_name}/artifacts/project_story.md. All tasks resolved."
 
 Do not terminate the Reviewer. The Guide manages agent lifecycle (termination). If a project agent becomes unresponsive, you can resurrect it via `resurrect_agent`.

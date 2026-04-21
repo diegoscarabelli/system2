@@ -26,4 +26,4 @@ Follow these steps end-to-end when the Conductor reports that its work is comple
 7. **After the Conductor confirms the project is closed:**
    - Terminate Conductor and Reviewer via `terminate_agent` (using their agent IDs)
    - Update project status to `"done"` in app.db (set `end_at` to now)
-   - Display the project story in the artifact viewer via `show_artifact` with the absolute path `~/.system2/projects/{dir_name}/project_story.md`, then inform the user with a final summary.
+   - Display the project story in the artifact viewer via `show_artifact` with the absolute path `~/.system2/projects/{dir_name}/artifacts/project_story.md`, then inform the user with a final summary.
