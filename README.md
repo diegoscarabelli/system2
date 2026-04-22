@@ -27,7 +27,7 @@ It exists to help people think more clearly about complex questions and empower 
 Open a terminal and run:
 
 ```bash
-pnpm add -g system2
+pnpm add -g system2      # install System2 globally
 system2 onboard          # one-time setup (see below)
 ```
 
@@ -59,11 +59,17 @@ Once the server is running, you can check on it, stop it, or upgrade System2 at 
 
 ```bash
 system2 status           # check whether the server is running
+```
+
+```bash
 system2 stop             # shut down gracefully
-pnpm update -g system2   # upgrade System2 to the latest release
 ```
 
 When you are done for the day, run `system2 stop`. Agent work in progress is saved, and a backup is created automatically on the next start.
+
+```bash
+pnpm update -g system2   # upgrade System2 to the latest release
+```
 
 ---
 
