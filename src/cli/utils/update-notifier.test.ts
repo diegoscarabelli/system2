@@ -1,27 +1,26 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const TEST_DIR = vi.hoisted(() => {
+  const base = (process.env.TMPDIR || '/tmp').replace(/\/$/, '');
+  return `${base}/system2-update-notifier-test`;
+});
+
+vi.mock('./config.js', () => ({
+  SYSTEM2_DIR: TEST_DIR,
+}));
+
 import { checkForUpdates, fetchLatestVersion, isNewer } from './update-notifier.js';
 
-const SYSTEM2_DIR = join(process.env.HOME || process.env.USERPROFILE || '/tmp', '.system2');
-const CACHE_FILE = join(SYSTEM2_DIR, 'update-check.json');
-
-let cacheBackup: string | undefined;
+const CACHE_FILE = join(TEST_DIR, 'update-check.json');
 
 beforeEach(() => {
-  if (existsSync(CACHE_FILE)) {
-    cacheBackup = readFileSync(CACHE_FILE, 'utf-8');
-  }
+  mkdirSync(TEST_DIR, { recursive: true });
 });
 
 afterEach(() => {
-  // Restore original cache
-  if (cacheBackup !== undefined) {
-    writeFileSync(CACHE_FILE, cacheBackup, 'utf-8');
-    cacheBackup = undefined;
-  } else if (existsSync(CACHE_FILE)) {
-    unlinkSync(CACHE_FILE);
-  }
+  rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
 describe('isNewer', () => {
@@ -107,7 +106,6 @@ describe('checkForUpdates', () => {
   });
 
   it('prints nothing when no cache exists', () => {
-    if (existsSync(CACHE_FILE)) unlinkSync(CACHE_FILE);
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const fakeFetch = vi.fn(async () => ({
       ok: true,
@@ -117,6 +115,22 @@ describe('checkForUpdates', () => {
     checkForUpdates('0.1.0', fakeFetch);
 
     expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('ignores corrupted cache file', () => {
+    writeFileSync(CACHE_FILE, JSON.stringify({ foo: 'bar' }));
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const fakeFetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '9.9.9' }),
+    })) as unknown as typeof fetch;
+
+    checkForUpdates('0.1.0', fakeFetch);
+
+    // Corrupted cache treated as missing: no notice, but triggers refresh
+    expect(spy).not.toHaveBeenCalled();
+    expect(fakeFetch).toHaveBeenCalled();
     spy.mockRestore();
   });
 

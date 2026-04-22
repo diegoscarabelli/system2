@@ -41,7 +41,11 @@ export function isNewer(current: string, latest: string): boolean {
 function readCache(): UpdateCache | undefined {
   try {
     if (!existsSync(CACHE_FILE)) return undefined;
-    return JSON.parse(readFileSync(CACHE_FILE, 'utf-8')) as UpdateCache;
+    const data = JSON.parse(readFileSync(CACHE_FILE, 'utf-8'));
+    if (typeof data?.lastCheck !== 'number' || typeof data?.latestVersion !== 'string') {
+      return undefined;
+    }
+    return data as UpdateCache;
   } catch {
     return undefined;
   }
