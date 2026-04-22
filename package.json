@@ -1,13 +1,13 @@
 {
-  "name": "system2",
-  "version": "0.1.0",
+  "name": "@diegoscarabelli/system2",
+  "version": "0.1.1",
   "description": "A multi-agent data platform for solo analysts",
   "author": "Diego Scarabelli",
   "license": "AGPL-3.0-only",
   "homepage": "https://github.com/diegoscarabelli/system2#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/diegoscarabelli/system2.git"
+    "url": "git+https://github.com/diegoscarabelli/system2.git"
   },
   "bugs": {
     "url": "https://github.com/diegoscarabelli/system2/issues"
@@ -22,7 +22,7 @@
   ],
   "type": "module",
   "bin": {
-    "system2": "./dist/cli/index.js"
+    "system2": "dist/cli/index.js"
   },
   "files": [
     "dist"
