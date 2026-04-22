@@ -29,10 +29,13 @@ Open a terminal and run:
 ```bash
 pnpm add -g system2
 system2 onboard          # one-time setup (see below)
-system2 start            # starts the server and opens the browser
 ```
 
 `system2 onboard` creates the `~/.system2/` directory and walks you through configuration: pick your LLM provider, enter API keys (you can add multiple for rotation and fallback providers for redundancy), and optionally set up Brave Search. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
+
+```bash
+system2 start            # starts the server and opens the browser
+```
 
 `system2 start` launches the server and opens your browser at `http://localhost:4242`. On first launch, the Guide walks you through the UI, learns your preferences, detects your existing infrastructure, and sets up your data stack and development environment.
 
