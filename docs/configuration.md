@@ -66,7 +66,7 @@ compaction_depth = 5
 anthropic = "claude-opus-4-6"
 
 [agents.conductor.models]
-google = "gemini-2.5-pro"
+google = "gemini-3.1-pro-preview"
 
 # Service credentials
 [services.brave_search]
@@ -186,9 +186,9 @@ compaction_depth = 5
 [agents.guide.models]
 anthropic = "claude-opus-4-6"
 
-# Use Gemini 2.5 Pro for the Conductor on Google
+# Use Gemini 3.1 Pro for the Conductor on Google
 [agents.conductor.models]
-google = "gemini-2.5-pro"
+google = "gemini-3.1-pro-preview"
 ```
 
 ### How it works

@@ -334,6 +334,15 @@ prefect config view
 prefect version
 ```
 
+**Checking flow run state programmatically** (preferred over parsing CLI tables):
+
+```bash
+# Get state of a specific flow run via the REST API
+curl -s http://localhost:4200/api/flow_runs/<flow-run-id> | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['state']['type'], r['state'].get('message',''))"
+```
+
+Use this instead of repeatedly running `prefect flow-run ls` and trying to parse truncated table output.
+
 **Flow run stuck in "Pending"**: no worker polling the work pool, or the work pool is paused. Check `prefect work-pool ls` and `prefect worker ls`.
 
 **Flow run stuck in "Running"**: worker may have crashed without reporting. Check worker logs. Runs exceeding `timeout_seconds` are eventually marked as failed.

@@ -7,11 +7,11 @@ compaction_depth: 8
 models:
   anthropic: claude-sonnet-4-6
   cerebras: zai-glm-4.7
-  google: gemini-2.5-flash
+  google: gemini-3.1-pro-preview
   groq: llama-3.3-70b-versatile
   mistral: mistral-large-latest
   openai: gpt-4o
-  openrouter: google/gemini-2.5-flash
+  openrouter: google/gemini-3.1-pro-preview
   xai: grok-2-latest
 ---
 

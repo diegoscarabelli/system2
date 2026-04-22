@@ -137,7 +137,7 @@ npm install --prefix ~/.system2 @google-cloud/bigquery # BigQuery
 # SQLite: no install needed (built-in)
 ```
 
-**Write a config entry** to `~/.system2/config.toml` for each database in the data stack (generally one). Use the `edit` tool with `append: true` to add a `[databases.<name>]` section. NEVER use the `write` tool on config.toml as it replaces the entire file and will destroy existing sections (LLM keys, services, operational settings). Passwords can be included directly in config.toml. Examples:
+**Write a config entry** to `~/.system2/config.toml` for each database in the data stack (generally one). Use the `edit` tool to insert a `[databases.<name>]` section immediately after the commented-out `[databases.mydb]` example block, keeping database entries grouped together. Do NOT use `append: true` (it dumps entries at the bottom, far from the databases section header). NEVER use the `write` tool on config.toml as it replaces the entire file and will destroy existing sections (LLM keys, services, operational settings). Use the database name directly as the section key (e.g. `[databases.lens]`), not prefixed with `system2_` or any other namespace. Passwords can be included directly in config.toml. Examples:
 
 ```toml
 [databases.my_postgres]
@@ -258,6 +258,8 @@ The scaffold ships with Prefect and Airflow support out of the box. If the user 
 
 **If Prefect (default):**
 
+Load the `prefect` skill before proceeding. It contains the canonical CLI reference, deployment patterns, and debugging procedures. Use it throughout the Prefect setup steps below.
+
 Start the server (persistent runs, UI, scheduling). See the [Prefect server docs](https://docs.prefect.io/v3/manage/self-host) for details:
 ```bash
 prefect server start                                        # keep running in background
@@ -284,6 +286,8 @@ prefect deployment ls                         # list deployments and schedules
 Prefect Cloud (managed, no local server): `prefect cloud login` (browser auth).
 
 **If Airflow (only if the user chose Airflow over Prefect):**
+
+Load the `airflow` skill before proceeding. It contains the canonical CLI reference, DAG patterns, and debugging procedures. Use it throughout the Airflow setup steps below.
 
 Astronomer is the recommended way to run Airflow 3 locally: it handles all Docker setup. Requirements: Docker Desktop (macOS/Windows) or Docker Engine (Linux) running.
 
