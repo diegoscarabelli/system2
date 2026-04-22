@@ -411,6 +411,7 @@ async function bootstrap(config: {
   // by AgentHost when agents are initialized, not during onboarding
   await mkdir(join(SYSTEM2_DIR, 'sessions'), { recursive: true });
   await mkdir(join(SYSTEM2_DIR, 'projects'), { recursive: true });
+  await mkdir(join(SYSTEM2_DIR, 'artifacts'), { recursive: true });
 
   // Write config.toml with all settings and secure permissions (0600)
   const tomlContent = buildConfigToml({
