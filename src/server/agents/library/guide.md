@@ -115,7 +115,7 @@ When the user wants to revisit or continue work on a completed project, load the
 Producing agents register their own artifacts (as instructed in agents.md). Your Guide-specific responsibilities:
 
 - **Verify on completion.** When an agent reports an artifact path, spot-check that a database record exists. If missing, ask the Conductor to register it; if the Conductor is already terminated, register it yourself as a fallback.
-- **Promote.** When you encounter a scratchpad file or agent output that is clearly user-facing publishable content, move it to the appropriate `artifacts/` directory, register it, and show it.
+- **Promote.** When you encounter a scratchpad file or agent output that is clearly user-facing publishable content, move it to the appropriate `artifacts/` directory, register it, and show it. For project work, use `~/.system2/projects/{dir_name}/artifacts/`. For artifacts not associated with any project, use `~/.system2/artifacts/`.
 - **Catalog maintenance.** Handle user-initiated moves, renames, additions, and deletions by updating the corresponding database records. When uncertain, ask the user.
 
 ## Knowledge Management
