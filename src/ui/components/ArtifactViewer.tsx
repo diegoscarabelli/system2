@@ -9,6 +9,7 @@ import { XIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
+import { handleQueryMessage } from '../query-bridge';
 import { useArtifactStore } from '../stores/artifact';
 import { useThemeStore } from '../stores/theme';
 import { useAccentColors } from '../theme/useAccentColors';
@@ -240,28 +241,9 @@ export function ArtifactViewer() {
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) return;
-
-      const { type, requestId, sql, database } = event.data || {};
-      if (type === 'system2:query') {
-        fetch('/api/query', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sql, ...(database ? { database } : {}) }),
-        })
-          .then((res) => res.json())
-          .then((data) => {
-            iframeRef.current?.contentWindow?.postMessage(
-              { type: 'system2:query_result', requestId, data },
-              '*'
-            );
-          })
-          .catch((err) => {
-            iframeRef.current?.contentWindow?.postMessage(
-              { type: 'system2:query_error', requestId, error: err.message },
-              '*'
-            );
-          });
-      }
+      handleQueryMessage(event.data, (msg, origin) =>
+        iframeRef.current?.contentWindow?.postMessage(msg, origin)
+      );
     }
 
     window.addEventListener('message', handleMessage);

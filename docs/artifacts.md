@@ -105,7 +105,7 @@ HTML/JS artifacts rendered in iframes can query databases through a postMessage 
 3. The result is posted back to the iframe:
    ```js
    // Success
-   { type: 'system2:query_result', requestId: 'unique-id', data: { rows, count } }
+   { type: 'system2:query_result', requestId: 'unique-id', rows: [...], count: N }
    // Error
    { type: 'system2:query_error', requestId: 'unique-id', error: 'message' }
    ```
