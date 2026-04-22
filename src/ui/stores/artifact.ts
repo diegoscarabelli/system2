@@ -123,7 +123,18 @@ export const useArtifactStore = create<ArtifactState>()(
       },
 
       setActiveTab: (tabId: string) => {
-        set({ activeTabId: tabId });
+        const state = get();
+        const tab = state.tabs.find((t) => t.id === tabId);
+        if (!tab || tab.type === 'native' || tabId === state.activeTabId) {
+          set({ activeTabId: tabId });
+          return;
+        }
+        // Cache-bust the URL so the iframe/content reloads with fresh data
+        const freshUrl = `/api/artifact?path=${encodeURIComponent(tab.filePath)}&t=${Date.now()}`;
+        set({
+          activeTabId: tabId,
+          tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, url: freshUrl } : t)),
+        });
       },
 
       reloadTab: (filePath: string, newUrl: string) => {

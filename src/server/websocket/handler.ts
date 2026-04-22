@@ -7,7 +7,6 @@
  * Assistant message history capture is handled centrally by Server.
  */
 
-import { type FSWatcher, watch } from 'node:fs';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { WebSocket, WebSocketServer } from 'ws';
 import type { ClientMessage, ServerMessage } from '../../shared/index.js';
@@ -24,8 +23,6 @@ export class WebSocketHandler {
   private activeAgentId: number;
   private subscriptions = new Map<number, () => void>();
   private thinkingAgents = new Set<number>();
-  private artifactWatcher?: FSWatcher;
-  private artifactUrl?: string;
   private summarizer?: ConversationSummarizer;
 
   constructor(
@@ -317,7 +314,7 @@ export class WebSocketHandler {
           agentId,
         });
 
-        // If show_artifact completed successfully, emit artifact message and watch
+        // If show_artifact completed successfully, emit artifact message
         if (event.toolName === 'show_artifact' && !event.isError) {
           const details = event.result?.details as
             | { url?: string; absolutePath?: string; title?: string }
@@ -330,7 +327,6 @@ export class WebSocketHandler {
               title: details.title,
               filePath: details.absolutePath,
             });
-            this.watchArtifact(details.url, details.absolutePath);
           } else {
             log.warn('[WebSocket] show_artifact missing details:', details);
           }
@@ -397,40 +393,7 @@ export class WebSocketHandler {
     this.send({ type: 'error', message });
   }
 
-  private watchArtifact(url: string, absolutePath: string): void {
-    // Stop previous watcher if any
-    if (this.artifactWatcher) {
-      this.artifactWatcher.close();
-    }
-
-    this.artifactUrl = url;
-    log.info('[WebSocket] Watching artifact:', absolutePath);
-
-    try {
-      this.artifactWatcher = watch(absolutePath, (eventType, filename) => {
-        log.info('[WebSocket] fs.watch event:', eventType, filename);
-        if (eventType === 'change') {
-          // Cache-bust so the iframe actually reloads (use & since URL already has ?path=)
-          const separator = this.artifactUrl?.includes('?') ? '&' : '?';
-          const bustUrl = `${this.artifactUrl}${separator}t=${Date.now()}`;
-          log.info('[WebSocket] Sending artifact reload:', bustUrl);
-          this.send({ type: 'artifact', url: bustUrl, filePath: absolutePath });
-        }
-      });
-
-      this.artifactWatcher.on('error', (err) => {
-        log.error('[WebSocket] Watcher error:', err);
-      });
-    } catch (error) {
-      log.error('[WebSocket] Failed to watch artifact:', error);
-    }
-  }
-
   private cleanup(): void {
-    if (this.artifactWatcher) {
-      this.artifactWatcher.close();
-      this.artifactWatcher = undefined;
-    }
     for (const unsub of this.subscriptions.values()) {
       unsub();
     }

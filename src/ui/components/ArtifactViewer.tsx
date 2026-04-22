@@ -9,6 +9,7 @@ import { XIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
+import { useArtifactMtimePoll } from '../hooks/useArtifactMtimePoll';
 import { handleQueryMessage } from '../query-bridge';
 import { useArtifactStore } from '../stores/artifact';
 import { useThemeStore } from '../stores/theme';
@@ -194,6 +195,9 @@ export function ArtifactViewer() {
   const isLight = colorMode === 'light';
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
+
+  // Poll for file changes on the active artifact tab
+  useArtifactMtimePoll(activeTab?.type === 'iframe' ? activeTab.filePath : null);
 
   // Resize iframe to its content height so the parent container handles scrolling.
   // Uses ResizeObserver on the iframe body to track dynamic content changes

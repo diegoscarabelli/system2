@@ -71,7 +71,7 @@ type ServerMessage =
 | `assistant_chunk` / `assistant_end` | Streaming response text. `assistant_end` carries `errorMessage` when the LLM stop reason was an error; the UI renders it as a collapsible system message in the chat timeline. |
 | `tool_call_start` / `tool_call_end` | Tool execution lifecycle |
 | `tool_call_progress` | Heartbeat progress from a long-running tool (e.g., bash `::system2::` sentinel). Carries the progress `message` for UI display. |
-| `artifact` | Display artifact in a UI tab. Includes `title` (from DB or filename) and `filePath` (absolute path for tab dedup and reload targeting). Also sent on live reload (file watch). |
+| `artifact` | Display artifact in a UI tab. Includes `title` (from DB or filename) and `filePath` (absolute path for tab dedup). Sent when `show_artifact` completes. |
 | `context_usage` | Context window usage after each agent turn |
 | `provider_info` | Sent on connect/switch: current LLM provider for an agent |
 | `provider_change` | Sent on failover: provider switched. Includes `reason` (e.g., "503 server error, switched to anthropic") and `agentId` so the UI routes the system message to the correct agent chat |
@@ -196,7 +196,7 @@ Each WebSocket connection gets its own `WebSocketHandler` instance. It:
 5. Captures user messages in the target agent's chat cache and broadcasts to other tabs
 6. Handles `switch_agent` by adding a subscription (if not already subscribed) and sending the new agent's state
 7. Records non-Guide user messages in the `ConversationSummarizer` for Guide notification
-8. Watches artifact files for live reload (`fs.watch`)
+8. Emits `artifact` message when `show_artifact` completes (live reload is handled by UI polling)
 
 ## See Also
 

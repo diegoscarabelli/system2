@@ -166,8 +166,7 @@ Display an artifact file in the UI panel. **Guide-only**: the Guide is the only 
 - **DB metadata lookup:** queries the `artifact` table for title. If registered, the DB title is used as the tab label; otherwise, the filename is used.
 - **Unregistered files:** files not in the `artifact` table can still be shown; the filename is used as the tab label.
 - **Missing registered files:** if the file is registered but missing from disk, returns an error with the title and a hint to search for the filename.
-- **Live reload:** the server starts an `fs.watch` on the file; modifications trigger automatic UI refresh of the correct tab.
-- **Only one artifact watched at a time:** showing a new artifact closes the previous watcher.
+- **Live reload:** the UI polls the file's modification time every 2 seconds for the active tab. Switching tabs also triggers a reload.
 
 ### `web_fetch`
 

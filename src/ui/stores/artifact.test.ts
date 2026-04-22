@@ -99,6 +99,40 @@ describe('useArtifactStore', () => {
     });
   });
 
+  describe('setActiveTab', () => {
+    it('cache-busts the URL when switching to an iframe tab', () => {
+      useArtifactStore.setState({
+        tabs: [
+          {
+            id: 'tab-1',
+            type: 'iframe',
+            url: '/api/artifact?path=%2Ffoo.html',
+            filePath: '/foo.html',
+            title: 'foo.html',
+          },
+        ],
+        activeTabId: null,
+      });
+
+      useArtifactStore.getState().setActiveTab('tab-1');
+
+      const tab = useArtifactStore.getState().tabs.find((t) => t.id === 'tab-1');
+      expect(tab?.url).toContain('&t=');
+      expect(tab?.url).toContain('path=%2Ffoo.html');
+    });
+
+    it('does not modify the URL for native tabs', () => {
+      useArtifactStore.getState().openKanbanTab();
+      // Switch away first
+      useArtifactStore.setState({ activeTabId: null });
+
+      useArtifactStore.getState().setActiveTab('kanban');
+
+      const tab = useArtifactStore.getState().tabs.find((t) => t.id === 'kanban');
+      expect(tab?.url).toBe('');
+    });
+  });
+
   describe('toggleCronJobs', () => {
     it('opens the cron jobs panel', () => {
       useArtifactStore.getState().toggleCronJobs();
