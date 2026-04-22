@@ -28,7 +28,14 @@ export async function handleQueryMessage(
       body: JSON.stringify({ sql, ...(database ? { database } : {}) }),
     });
     const result = await res.json();
-    postMessage({ type: 'system2:query_result', requestId, ...result }, '*');
+    if (!res.ok) {
+      postMessage(
+        { type: 'system2:query_error', requestId, error: result.error || 'Query failed' },
+        '*'
+      );
+    } else {
+      postMessage({ type: 'system2:query_result', requestId, ...result }, '*');
+    }
   } catch (err) {
     postMessage({ type: 'system2:query_error', requestId, error: (err as Error).message }, '*');
   }

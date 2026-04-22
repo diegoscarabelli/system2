@@ -97,6 +97,41 @@ describe('handleQueryMessage', () => {
     );
   });
 
+  it('routes HTTP error responses to query_error', async () => {
+    const postMessage = vi.fn();
+    const fetchFn = mockFetch({ error: 'Only SELECT and EXPLAIN queries are allowed' }, false);
+
+    await handleQueryMessage(
+      { type: 'system2:query', requestId: 'req-1', sql: 'DROP TABLE foo' },
+      postMessage,
+      fetchFn
+    );
+
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        type: 'system2:query_error',
+        requestId: 'req-1',
+        error: 'Only SELECT and EXPLAIN queries are allowed',
+      },
+      '*'
+    );
+  });
+
+  it('falls back to generic message when HTTP error has no error field', async () => {
+    const postMessage = vi.fn();
+    const fetchFn = mockFetch({}, false);
+
+    await handleQueryMessage(
+      { type: 'system2:query', requestId: 'req-1', sql: 'SELECT 1' },
+      postMessage,
+      fetchFn
+    );
+
+    const msg = postMessage.mock.calls[0][0] as Record<string, unknown>;
+    expect(msg.type).toBe('system2:query_error');
+    expect(msg.error).toBe('Query failed');
+  });
+
   it('does not nest rows under a data property', async () => {
     const postMessage = vi.fn();
     await handleQueryMessage(
