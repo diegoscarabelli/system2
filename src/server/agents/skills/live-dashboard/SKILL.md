@@ -1,7 +1,7 @@
 ---
 name: live-dashboard
 description: Build interactive HTML dashboard artifacts with live database queries via the postMessage bridge. Includes a copy-paste helper function, workflow steps, and Chart.js integration patterns.
-roles: [conductor, reviewer, worker]
+roles: [guide, conductor, reviewer, worker]
 ---
 
 # Live Dashboard

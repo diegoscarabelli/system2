@@ -20,6 +20,7 @@ export async function handleQueryMessage(
     database?: string;
   };
   if (type !== 'system2:query') return;
+  if (!requestId || !sql) return;
 
   try {
     const res = await fetchFn('/api/query', {

@@ -21,6 +21,26 @@ describe('handleQueryMessage', () => {
     expect(postMessage).not.toHaveBeenCalled();
   });
 
+  it('ignores query messages missing requestId', async () => {
+    const postMessage = vi.fn();
+    await handleQueryMessage(
+      { type: 'system2:query', sql: 'SELECT 1' },
+      postMessage,
+      mockFetch({ rows: [], count: 0 })
+    );
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it('ignores query messages missing sql', async () => {
+    const postMessage = vi.fn();
+    await handleQueryMessage(
+      { type: 'system2:query', requestId: 'req-1' },
+      postMessage,
+      mockFetch({ rows: [], count: 0 })
+    );
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
   it('sends flattened rows and count in success response', async () => {
     const postMessage = vi.fn();
     const rows = [{ id: 1 }, { id: 2 }];
