@@ -191,6 +191,8 @@ export class Server {
 
     // Return file modification time for artifact live-reload polling
     this.app.get('/api/artifact-mtime', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+
       const resolved = resolveArtifactPath(req.query.path);
       if (!resolved) {
         res.status(400).json({ error: 'Missing or invalid path parameter' });
@@ -199,7 +201,6 @@ export class Server {
 
       try {
         const stat = statSync(resolved);
-        res.setHeader('Cache-Control', 'no-store');
         res.json({ mtimeMs: stat.mtimeMs });
       } catch {
         res.status(404).json({ error: 'File not found' });

@@ -28,16 +28,19 @@ export function useArtifactMtimePoll(filePath: string | null): void {
           signal: controller.signal,
           cache: 'no-store',
         });
-        if (!res.ok || controller.signal.aborted) return;
-        const data = (await res.json()) as { mtimeMs: number };
         if (controller.signal.aborted) return;
 
-        if (lastMtime.current === null) {
-          lastMtime.current = data.mtimeMs;
-        } else if (data.mtimeMs !== lastMtime.current) {
-          lastMtime.current = data.mtimeMs;
-          const freshUrl = `/api/artifact?path=${encodeURIComponent(filePath)}&t=${Date.now()}`;
-          useArtifactStore.getState().reloadTab(filePath, freshUrl);
+        if (res.ok) {
+          const data = (await res.json()) as { mtimeMs: number };
+          if (controller.signal.aborted) return;
+
+          if (lastMtime.current === null) {
+            lastMtime.current = data.mtimeMs;
+          } else if (data.mtimeMs !== lastMtime.current) {
+            lastMtime.current = data.mtimeMs;
+            const freshUrl = `/api/artifact?path=${encodeURIComponent(filePath)}&t=${Date.now()}`;
+            useArtifactStore.getState().reloadTab(filePath, freshUrl);
+          }
         }
       } catch {
         // Network or abort error, skip this tick
