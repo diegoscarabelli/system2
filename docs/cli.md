@@ -20,7 +20,8 @@ src/
 ├── utils/
 │   ├── config.ts          # TOML config loading/validation
 │   ├── backup.ts          # Auto-backup on start
-│   └── log-rotation.ts    # Log file rotation
+│   ├── log-rotation.ts    # Log file rotation
+│   └── update-notifier.ts # npm update check
 └── config/
     └── config.toml        # Template config file
 ```
@@ -84,6 +85,10 @@ On every `system2 start`, creates a timestamped copy of `~/.system2/` at `~/.sys
 ### Log Rotation (`utils/log-rotation.ts`)
 
 Rotates `~/.system2/logs/system2.log` when it exceeds the configured threshold (default 10MB). Archived files are named `system2.log.1` through `system2.log.N`.
+
+### Update Notifier (`utils/update-notifier.ts`)
+
+On every CLI invocation, checks whether a newer version of `@diegoscarabelli/system2` is available on npm and prints a one-line notice with the update command. The check is non-blocking: a cached result from the previous run is displayed immediately, and a background fetch refreshes the cache for next time (24h interval). All errors are silently ignored (offline, package not published, pre-onboarding).
 
 ## See Also
 
