@@ -84,7 +84,7 @@ pnpm update -g @diegoscarabelli/system2   # upgrade System2 to the latest releas
 
 **Interactive artifacts.** Agents can build and display anything in the UI on demand: live dashboards querying your databases (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite), research articles, Jupyter notebooks, reports. Artifacts appear alongside the conversation with live reload, so you see results the moment they're ready and iterate on them in place.
 
-**Built-in tools and domain skills.** Agents come equipped with shell access, file operations, database queries, web search, inter-agent messaging, and self-scheduling reminders, all with safety guards and role-based restrictions. Built-in skills cover data infrastructure (Airflow, Prefect, TimescaleDB, SQL modeling), statistical analysis, code review, and reasoning fallacy detection. Agents can also create new skills at runtime.
+**Built-in tools and domain skills.** Agents come equipped with shell access, file operations, database queries, web search, inter-agent messaging, and self-scheduling reminders, all with safety guards and role-based restrictions. Built-in skills cover data infrastructure (Airflow, Prefect, TimescaleDB, SQL modeling), live dashboard building, statistical analysis, code review, and reasoning fallacy detection. Agents can also create new skills at runtime.
 
 **Any LLM, automatic failover.** OpenRouter, Anthropic, Google, OpenAI, Cerebras, Mistral, Groq, xAI, and any OpenAI-compatible endpoint. Automatic key rotation, provider failover with backoff, and time-based cooldowns.
 
