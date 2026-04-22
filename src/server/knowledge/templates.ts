@@ -24,12 +24,13 @@ export const INFRASTRUCTURE_TEMPLATE = `# Infrastructure
 
 ## Databases
 
-> One subsection per database. Each starts with a JSON block describing connection details,
-> followed by prose covering schemas, tables of interest, retention, conventions, and quirks.
-> Add JSON fields as needed (e.g. \`tunnel\`, \`read_replica\`, \`tls\`). Use \`auth\` to
-> describe the mechanism (e.g. \`password\`, \`scram-sha-256\`, \`iam\`, \`peer\`), and
-> \`credentials\` to point at where the secret lives on disk (e.g. \`~/.pgpass\`, \`.env\`,
-> OS keychain entry name). Never paste the secret itself into this file: it is git-tracked.
+> One subsection per database. Each starts with a JSON block describing the database itself
+> (engine, version, deployment, and connection fields appropriate to the type: host/port for
+> on-premise, account/project for cloud services like Snowflake or BigQuery), followed by
+> prose covering what lives in it,
+> schemas, retention policies, conventions, and quirks. After the prose, list every database
+> role under a **Roles** heading with its purpose, auth mechanism, and where the credential
+> lives on disk. Never paste secrets into this file: it is git-tracked.
 
 > ### example_db
 >
@@ -40,14 +41,16 @@ export const INFRASTRUCTURE_TEMPLATE = `# Infrastructure
 >   "host": "localhost",
 >   "port": 5432,
 >   "database": "example",
->   "auth": "scram-sha-256",
->   "credentials": "~/.pgpass",
 >   "deployment": "local"
 > }
 > \`\`\`
 >
 > Prose describing what lives in this database, important schemas, retention policies,
 > gotchas, and how System2 typically queries it.
+>
+> **Roles:**
+> - \`read_only\` (password): read-only access for System2 queries and dashboards. Credentials in \`~/.system2/config.toml [databases.example]\`.
+> - \`app_writer\` (password): read-write access for ETL pipelines. Credentials in \`~/repos/my_pipelines/.env\`.
 
 ## Data Repositories
 

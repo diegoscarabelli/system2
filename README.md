@@ -6,7 +6,7 @@
 
 System2 is a multi-agent system for data engineering, analysis, and statistical reasoning. It adapts to your existing data stack or builds one from scratch. You talk to the Guide. It spawns a team that plans, builds pipelines, analyzes data, catches statistical fallacies, and delivers interactive output you can inspect end to end.
 
-Named for [Kahneman's](https://en.wikipedia.org/wiki/Thinking,_Fast_and_Slow) slow, deliberate mode of reasoning, System2 is the bicycle for your analytical mind.
+Named for Kahneman's slow, deliberate mode of reasoning, System2 is the bicycle for your analytical mind.
 
 It exists to help people think more clearly about complex questions and empower everyone, regardless of skill, to acquire and interpret data, and share rigorous analysis grounded in evidence and methods they can inspect.
 

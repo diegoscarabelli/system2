@@ -137,7 +137,7 @@ npm install --prefix ~/.system2 @google-cloud/bigquery # BigQuery
 # SQLite: no install needed (built-in)
 ```
 
-**Write a config entry** to `~/.system2/config.toml` for each database in the data stack (generally one). Use the `edit` tool to insert a `[databases.<name>]` section immediately after the commented-out `[databases.mydb]` example block, keeping database entries grouped together. Do NOT use `append: true` (it dumps entries at the bottom, far from the databases section header). NEVER use the `write` tool on config.toml as it replaces the entire file and will destroy existing sections (LLM keys, services, operational settings). Use the database name directly as the section key (e.g. `[databases.lens]`), not prefixed with `system2_` or any other namespace. Note: the name `system2` is reserved for the built-in app database; never create a `[databases.system2]` section (it will be silently ignored). Passwords can be included directly in config.toml. Examples:
+**Write a config entry** to `~/.system2/config.toml` for each database in the data stack (generally one). These entries are used by System2's server for read-only querying: agents use them via the `query_database` tool, and HTML dashboard artifacts query through them. Pipelines manage their own database connections independently. Because System2 only reads, use a read-only database user (not the pipeline's write user). Read `~/.system2/config.toml` first, then use the `edit` tool to insert a `[databases.<name>]` section immediately after the commented-out `[databases.mydb]` example block, keeping database entries grouped together. Do NOT use `append: true` (it dumps entries at the bottom, far from the databases section header). NEVER use the `write` tool on config.toml as it replaces the entire file and will destroy existing sections (LLM keys, services, operational settings). Use the database name directly as the section key (e.g. `[databases.lens]`), not prefixed with `system2_` or any other namespace. Note: the name `system2` is reserved for the built-in app database; never create a `[databases.system2]` section (it will be silently ignored). Passwords can be included directly in config.toml. Examples:
 
 ```toml
 [databases.my_postgres]
@@ -362,7 +362,12 @@ Run the example pipeline to confirm the full stack works end-to-end. Inform the 
 
 #### 7h. Save to infrastructure.md
 
-Read once again the `infrastructure.md` and make sure that all data stack details are accurately recorded and their use explained: database type and version, database names,orchestrator choice, repository path, data pipelines environment path.
+Read `infrastructure.md` once more and verify all data stack details are accurately recorded:
+
+- **Databases**: For each database, fill in the JSON block with fields appropriate to the type (engine, version, deployment; host/port for on-premise databases; account/project for cloud services like Snowflake or BigQuery). Add a **Roles** section listing every database role created during setup, its purpose, auth mechanism, and where the credential lives. At minimum there should be a read-only role (used by System2 for queries and dashboards, credentials in config.toml) and a pipeline write role (used by ETL code, credentials in the pipeline repo's `.env` or equivalent). Never paste actual passwords.
+- **Orchestrator**: name, deployment mode, UI URL, flows/DAGs location.
+- **Code repositories**: path, remote URL, purpose.
+- **Data pipelines environment**: venv path.
 
 ### 8. Agent instruction files
 
