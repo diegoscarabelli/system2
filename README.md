@@ -1,6 +1,7 @@
 # System2
 
 [![CI](https://github.com/diegoscarabelli/system2/actions/workflows/ci.yml/badge.svg)](https://github.com/diegoscarabelli/system2/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@diegoscarabelli/system2)](https://www.npmjs.com/package/@diegoscarabelli/system2)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
 
