@@ -73,6 +73,7 @@ All runtime state lives in `~/.system2/`:
 │   ├── reviewer.md                  Reviewer role-specific knowledge
 │   ├── user.md                      User profile, preferences, goals
 │   └── worker.md                    Worker role-specific knowledge
+├── artifacts/                       Project-free artifacts (not tied to any project)
 ├── logs/                            Server logs (gitignored)
 ├── projects/                        Project workspaces
 │   └── {dir_name}/                  {id}_{slug} from project record (e.g. 1_linkedin-campaign)

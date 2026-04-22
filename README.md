@@ -148,6 +148,7 @@ System2's home directory is `~/.system2/`. It holds all system state: configurat
 │       │   └── project_story.md     Final narrative (Narrator)
 │       ├── log.md                   Continuous project log (Narrator)
 │       └── scratchpad/              Working files
+├── artifacts/                       Project-free artifacts (not tied to any project)
 ├── server.pid                       PID file when server is running (gitignored)
 ├── sessions/                        Agent conversations as JSONL (gitignored)
 ├── skills/                          User-created workflow instructions
