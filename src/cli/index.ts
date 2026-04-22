@@ -21,9 +21,8 @@ const program = new Command();
 program
   .name('system2')
   .description('The AI multi-agent system for working with data')
-  .version(pkg.version);
-
-checkForUpdates(pkg.version);
+  .version(pkg.version)
+  .hook('preAction', () => checkForUpdates(pkg.version));
 
 program
   .command('onboard')
