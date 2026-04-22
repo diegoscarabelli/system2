@@ -6,11 +6,11 @@ thinking_level: medium
 models:
   anthropic: claude-haiku-4-5-20251001
   cerebras: gpt-oss-120b
-  google: gemini-2.5-flash-lite
+  google: gemini-3.1-flash-lite-preview
   groq: llama-3.1-8b-instant
   mistral: mistral-small-latest
   openai: gpt-4o-mini
-  openrouter: google/gemini-2.5-flash-lite
+  openrouter: google/gemini-3.1-flash-lite-preview
   xai: grok-2-latest
 ---
 

@@ -22,7 +22,7 @@ If the session is interrupted partway through, the next Guide session should re-
 
 ## Preamble
 
-The knowledge files in `~/.system2/knowledge/` are seeded with structural templates. **Always read the entire file before editing it** so you see what is already populated and do not overwrite existing content. Preserve the template's section headings and structure. Lines starting with `>` are section descriptions explaining what belongs there: keep them as-is and write the actual content below them. Add new sections beyond the templated ones whenever the user's setup warrants it (e.g. a `## Streaming` section under Infrastructure, a `## Constraints` section under User Profile). Likewise, the JSON blocks in `infrastructure.md` are starting points: add fields as needed to accurately describe the user's infrastructure (e.g. `tunnel`, `read_replica`, `tls`, `package_manager`). The schemas are illustrative, not rigid.
+The knowledge files in `~/.system2/knowledge/` are seeded with structural templates. **Always read the entire file before every edit** so you see what is already populated, what the exact current text is, and where to place new content. Never guess at file contents; a failed `edit` (old_string not found) means you did not read first. Preserve the template's section headings and structure. Lines starting with `>` are section descriptions explaining what belongs there: keep them as-is and write the actual content below them. Place content in the correct template section using `edit` with a precise `old_string`; do not use `append: true` on knowledge files (it dumps content at the bottom, outside the template structure). Do not use `write` to overwrite the file; use targeted `edit` calls. Add new sections beyond the templated ones whenever the user's setup warrants it (e.g. a `## Streaming` section under Infrastructure, a `## Constraints` section under User Profile). Likewise, the JSON blocks in `infrastructure.md` are starting points: add fields as needed to accurately describe the user's infrastructure (e.g. `tunnel`, `read_replica`, `tls`, `package_manager`). The schemas are illustrative, not rigid.
 
 **Handling credentials.** Many users will already have credentials configured in standard locations (e.g. `~/.pgpass` already exists, AWS is already set up via `aws configure`, GitHub via `gh auth login`). In those cases, simply point the `credentials` field in `infrastructure.md` at the existing file and move on. If the user instead shares a secret directly during the conversation, never write it to `infrastructure.md` or any other file under `~/.system2/knowledge/` (those files are git-tracked). Write the secret to the system's native credential location (creating the file with `chmod 600` if it does not already exist), then record the *path* to that location in the JSON block under a `credentials` field. Use the canonical native location for each system:
 
@@ -60,7 +60,7 @@ Tell the user you're going to take a quick look at their system, then run:
 - Check installed tools: `git --version`, `python3 --version`, `pip3 --version`, `docker --version`, `psql --version`
 - Detect the platform package manager (macOS: `brew`, Linux: `apt`/`dnf`/distro equivalent, Windows: `winget` or `choco`)
 - Share a brief summary of what you found with the user
-- Save findings to `~/.system2/knowledge/infrastructure.md`, following the instructions for editing knowledge files in the Preamble.
+- Save findings to `~/.system2/knowledge/infrastructure.md`: read the file first, then use `edit` to place content in the correct template section.
 
 ### 4. Inventory existing infrastructure
 
@@ -68,7 +68,7 @@ Before installing anything, understand what the user already has running.
 - Ask whether the user has remote machines (VPS, home server, cloud instances) where infrastructure runs or could run. If so, understand how to access them (SSH, Tailscale, etc.).
 - Inventory existing databases, orchestration tools, and visualization tools (asking the user and checking the system). For each, ask and understand where it is deployed (local, remote), how to connect, and what access level System2 can have.
 - Check for running services: `psql --version`, `prefect version`, `airflow version`, `docker ps`. Note what is already operational. If Airflow is already running locally, this affects the orchestrator recommendation in step 7.
-- Save findings to `~/.system2/knowledge/infrastructure.md`, following the instructions for editing knowledge files in the Preamble.
+- Save findings to `~/.system2/knowledge/infrastructure.md`: read the file first, then use `edit` to place content in the correct template section.
 
 ### 5. GitHub and gh CLI
 
@@ -137,7 +137,7 @@ npm install --prefix ~/.system2 @google-cloud/bigquery # BigQuery
 # SQLite: no install needed (built-in)
 ```
 
-**Write a config entry** to `~/.system2/config.toml` for each database in the data stack (generally one). Use the `edit` tool with `append: true` to add a `[databases.<name>]` section. NEVER use the `write` tool on config.toml as it replaces the entire file and will destroy existing sections (LLM keys, services, operational settings). Passwords can be included directly in config.toml. Examples:
+**Write a config entry** to `~/.system2/config.toml` for each database in the data stack (generally one). These entries are used by System2's server for read-only querying: agents use them via the `query_database` tool, and HTML dashboard artifacts query through them. Pipelines manage their own database connections independently. Because System2 only reads, use a read-only database user (not the pipeline's write user). Read `~/.system2/config.toml` first, then use the `edit` tool to insert a `[databases.<name>]` section immediately after the commented-out `[databases.mydb]` example block, keeping database entries grouped together. Do NOT use `append: true` (it dumps entries at the bottom, far from the databases section header). NEVER use the `write` tool on config.toml as it replaces the entire file and will destroy existing sections (LLM keys, services, operational settings). Use the database name directly as the section key (e.g. `[databases.lens]`), not prefixed with `system2_` or any other namespace. Note: the name `system2` is reserved for the built-in app database; never create a `[databases.system2]` section (it will be silently ignored). Passwords can be included directly in config.toml. Examples:
 
 ```toml
 [databases.my_postgres]
@@ -258,6 +258,8 @@ The scaffold ships with Prefect and Airflow support out of the box. If the user 
 
 **If Prefect (default):**
 
+Load the `prefect` skill before proceeding. It contains the canonical CLI reference, deployment patterns, and debugging procedures. Use it throughout the Prefect setup steps below.
+
 Start the server (persistent runs, UI, scheduling). See the [Prefect server docs](https://docs.prefect.io/v3/manage/self-host) for details:
 ```bash
 prefect server start                                        # keep running in background
@@ -284,6 +286,8 @@ prefect deployment ls                         # list deployments and schedules
 Prefect Cloud (managed, no local server): `prefect cloud login` (browser auth).
 
 **If Airflow (only if the user chose Airflow over Prefect):**
+
+Load the `airflow` skill before proceeding. It contains the canonical CLI reference, DAG patterns, and debugging procedures. Use it throughout the Airflow setup steps below.
 
 Astronomer is the recommended way to run Airflow 3 locally: it handles all Docker setup. Requirements: Docker Desktop (macOS/Windows) or Docker Engine (Linux) running.
 
@@ -358,14 +362,19 @@ Run the example pipeline to confirm the full stack works end-to-end. Inform the 
 
 #### 7h. Save to infrastructure.md
 
-Read once again the `infrastructure.md` and make sure that all data stack details are accurately recorded and their use explained: database type and version, database names,orchestrator choice, repository path, data pipelines environment path.
+Read `infrastructure.md` once more and verify all data stack details are accurately recorded:
+
+- **Databases**: For each database, fill in the JSON block with fields appropriate to the type (engine, version, deployment; host/port for on-premise databases; account/project for cloud services like Snowflake or BigQuery). Add a **Roles** section listing every database role created during setup, its purpose, auth mechanism, and where the credential lives. At minimum there should be a read-only role (used by System2 for queries and dashboards, credentials in config.toml) and a pipeline write role (used by ETL code, credentials in the pipeline repo's `.env` or equivalent). Never paste actual passwords.
+- **Orchestrator**: name, deployment mode, UI URL, flows/DAGs location.
+- **Code repositories**: path, remote URL, purpose.
+- **Data pipelines environment**: venv path.
 
 ### 8. Agent instruction files
 
 Check for AI agent instruction files that may contain coding conventions or preferences:
 - Per-repo: `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.github/copilot-instructions.md`
 - Global: `~/.claude/CLAUDE.md`, `~/.cursor/rules/`
-- Save findings to `~/.system2/knowledge/infrastructure.md`
+- Save findings to `~/.system2/knowledge/infrastructure.md`: read the file first, then use `edit` to place content in the correct template section.
 
 ### 9. Capture interaction preferences
 

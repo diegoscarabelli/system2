@@ -642,7 +642,9 @@ export function buildConfigToml(options: {
       '# Example 2: route a role through OpenRouter to a specific upstream (e.g. Vertex AI)'
     );
     lines.push('# [agents.conductor.models]');
-    lines.push('# openrouter = "google/gemini-2.5-pro" # model ID as listed on openrouter.ai');
+    lines.push(
+      '# openrouter = "google/gemini-3.1-pro-preview" # model ID as listed on openrouter.ai'
+    );
     lines.push('#');
     lines.push('# To control which upstream providers OpenRouter uses for a model prefix:');
     lines.push('# [llm.openrouter.routing]');
