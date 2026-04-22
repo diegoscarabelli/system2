@@ -1462,6 +1462,63 @@ describe('AgentHost', () => {
       expect(pushed.content).toBe('a'.repeat(100));
     });
 
+    it('stale sendCustomMessage catch is a no-op after session change', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        handlePotentialError: ReturnType<typeof vi.fn>;
+        handleCompactionTracking: ReturnType<typeof vi.fn>;
+      };
+
+      // Create a session whose sendCustomMessage rejects after a tick
+      const sendError = new Error('session destroyed');
+      const oldSession = {
+        sendCustomMessage: vi.fn().mockRejectedValue(sendError),
+      };
+      internal.session = oldSession;
+      internal._chatCache = null;
+      internal._sessionDir = null;
+      internal.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+      internal.handleCompactionTracking = vi.fn();
+
+      const details = { sender: 1, receiver: 2, timestamp: Date.now() };
+      // Don't await: we need the catch handler to fire after session swap
+      host.deliverMessage('msg1', details);
+
+      // deliverySendCount was incremented synchronously by deliverMessage
+      expect(internal.deliverySendCount).toBe(1);
+
+      // Simulate failover: swap session to a new object before the catch fires
+      const newSession = { sendCustomMessage: vi.fn() };
+      internal.session = newSession as typeof internal.session;
+
+      // Let the rejected promise's catch handler run
+      await new Promise((r) => setTimeout(r, 0));
+
+      // The catch handler should have been a no-op (session !== session guard).
+      // deliverySendCount should NOT have been decremented by the stale handler.
+      expect(internal.deliverySendCount).toBe(1);
+      // The delivery should still be in the queue (not spliced by the stale handler)
+      expect(internal.pendingDeliveries).toHaveLength(1);
+      expect(internal.pendingDeliveries[0].content).toBe('msg1');
+    });
+
     it('does not push to chatCache when _chatCache is null', () => {
       const host = new AgentHost({
         db: makeDbStub(),
@@ -1530,7 +1587,7 @@ describe('AgentHost', () => {
         null,
         [],
         '429 rate limited, switched to anthropic',
-        'on google, switching to anthropic'
+        'on google, switching to anthropic\n\nError 429: rate limit exceeded'
       );
     });
 
@@ -1576,7 +1633,7 @@ describe('AgentHost', () => {
         null,
         [],
         '429 rate limited, rotating to next key',
-        'on google, rotating to next key'
+        'on google, rotating to next key\n\nError 429: rate limit exceeded'
       );
     });
 
@@ -1620,7 +1677,7 @@ describe('AgentHost', () => {
       const pushed = internal._chatCache.push.mock.calls[0][0];
       expect(pushed.role).toBe('system');
       expect(pushed.content).toBe(
-        '401 auth error, all providers unavailable\n\non cerebras, all providers unavailable'
+        '401 auth error, all providers unavailable\n\non cerebras, all providers unavailable\n\nError 401: Unauthorized'
       );
     });
   });
@@ -1749,7 +1806,7 @@ describe('AgentHost', () => {
         null,
         [],
         '400 client error, switched to google',
-        'on anthropic, switching to google'
+        'on anthropic, switching to google\n\nError 400: credit balance too low'
       );
     });
 
@@ -1801,8 +1858,62 @@ describe('AgentHost', () => {
       // Should show error details in the exhausted message
       const pushed = internal._chatCache.push.mock.calls[0][0];
       expect(pushed.content).toBe(
-        '400 client error, all providers unavailable\n\non anthropic, all providers unavailable'
+        '400 client error, all providers unavailable\n\non anthropic, all providers unavailable\n\nError 400: credit balance too low'
       );
+    });
+
+    it('reinitializeWithProvider failure rejects all pending deliveries', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        deliverySendCount: number;
+        reinitializeWithProvider: (
+          provider: string,
+          prompt: string | null,
+          deliveries: unknown[],
+          reason?: string,
+          detail?: string
+        ) => Promise<void>;
+        isReinitializing: boolean;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        initialize: ReturnType<typeof vi.fn>;
+      };
+
+      // Mock initialize to throw (simulates reinit failure)
+      internal.initialize = vi.fn().mockRejectedValue(new Error('init failed'));
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+
+      const reject1 = vi.fn();
+      const reject2 = vi.fn();
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      internal.pendingDeliveries = [
+        { content: 'msg-A', details, resolve: vi.fn(), reject: reject1 },
+        { content: 'msg-B', details, resolve: vi.fn(), reject: reject2 },
+      ];
+      internal.deliverySendCount = 2;
+
+      await internal.reinitializeWithProvider('google', null, [], 'test reason', 'test detail');
+
+      // Both deliveries should be rejected with the init error
+      expect(reject1).toHaveBeenCalledWith(expect.objectContaining({ message: 'init failed' }));
+      expect(reject2).toHaveBeenCalledWith(expect.objectContaining({ message: 'init failed' }));
+      // Queue and counter should be cleared
+      expect(internal.pendingDeliveries).toHaveLength(0);
+      expect(internal.deliverySendCount).toBe(0);
+      // isReinitializing should be reset (finally block)
+      expect(internal.isReinitializing).toBe(false);
     });
   });
 
