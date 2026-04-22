@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseClient } from '../../db/client.js';
 import { createShowArtifactTool } from './show-artifact.js';
 
-const SYSTEM2_DIR = join(homedir(), '.system2');
+const TEST_DIR = join(
+  (process.env.TMPDIR || '/tmp').replace(/\/$/, ''),
+  'system2-show-artifact-test'
+);
 
 function mockDb(artifact: Record<string, unknown> | null = null): DatabaseClient {
   return {
@@ -20,19 +23,18 @@ type ShowArtifactParams = Parameters<typeof _refTool.execute>[1];
 type ShowArtifactResult = Awaited<ReturnType<typeof _refTool.execute>>;
 
 describe('show_artifact tool', () => {
-  const createdFiles: string[] = [];
+  beforeEach(() => {
+    mkdirSync(TEST_DIR, { recursive: true });
+  });
 
   afterEach(() => {
-    for (const f of createdFiles) rmSync(f, { force: true });
-    createdFiles.length = 0;
+    rmSync(TEST_DIR, { recursive: true, force: true });
   });
 
   it('returns artifact URL for existing file', async () => {
     const filename = `test-artifact-${randomUUID().slice(0, 8)}.html`;
-    const absPath = join(SYSTEM2_DIR, filename);
-    mkdirSync(SYSTEM2_DIR, { recursive: true });
+    const absPath = join(TEST_DIR, filename);
     writeFileSync(absPath, '<html></html>');
-    createdFiles.push(absPath);
 
     const tool = createShowArtifactTool(mockDb());
     const exec = (params: Record<string, unknown>): Promise<ShowArtifactResult> =>
@@ -57,10 +59,8 @@ describe('show_artifact tool', () => {
 
   it('uses DB title when artifact is registered', async () => {
     const filename = `test-artifact-${randomUUID().slice(0, 8)}.html`;
-    const absPath = join(SYSTEM2_DIR, filename);
-    mkdirSync(SYSTEM2_DIR, { recursive: true });
+    const absPath = join(TEST_DIR, filename);
     writeFileSync(absPath, '<html></html>');
-    createdFiles.push(absPath);
 
     const tool = createShowArtifactTool(mockDb({ title: 'My Dashboard', file_path: absPath }));
     const exec = (params: Record<string, unknown>): Promise<ShowArtifactResult> =>
@@ -75,15 +75,18 @@ describe('show_artifact tool', () => {
     const filename = `test-artifact-${randomUUID().slice(0, 8)}.html`;
     const absPath = join(homedir(), filename);
     writeFileSync(absPath, '<html></html>');
-    createdFiles.push(absPath);
 
-    const tool = createShowArtifactTool(mockDb());
-    const exec = (params: Record<string, unknown>): Promise<ShowArtifactResult> =>
-      tool.execute('test-call', params as ShowArtifactParams);
-    const result = await exec({ file_path: `~/${filename}` });
+    try {
+      const tool = createShowArtifactTool(mockDb());
+      const exec = (params: Record<string, unknown>): Promise<ShowArtifactResult> =>
+        tool.execute('test-call', params as ShowArtifactParams);
+      const result = await exec({ file_path: `~/${filename}` });
 
-    expect((result.content[0] as { text: string }).text).toBe('Artifact displayed');
-    expect((result.details as { absolutePath: string }).absolutePath).toBe(absPath);
+      expect((result.content[0] as { text: string }).text).toBe('Artifact displayed');
+      expect((result.details as { absolutePath: string }).absolutePath).toBe(absPath);
+    } finally {
+      rmSync(absPath, { force: true });
+    }
   });
 
   it('returns error for relative path', async () => {
