@@ -48,18 +48,17 @@ The Guide adapts to what you already have: if you have an existing database, orc
 
 </details>
 
-```bash
-system2 status           # check if the server is running
-system2 stop             # graceful shutdown
-```
+### Managing and updating
 
-### Updating
-
-Pull the latest released version:
+Once the server is running, you can check on it, stop it, or upgrade System2 at any time:
 
 ```bash
-pnpm update -g system2
+system2 status           # check whether the server is running
+system2 stop             # shut down gracefully
+pnpm update -g system2   # upgrade System2 to the latest release
 ```
+
+When you are done for the day, run `system2 stop`. Agent work in progress is saved, and a backup is created automatically on the next start.
 
 ---
 
