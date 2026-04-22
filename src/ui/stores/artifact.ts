@@ -125,7 +125,7 @@ export const useArtifactStore = create<ArtifactState>()(
       setActiveTab: (tabId: string) => {
         const state = get();
         const tab = state.tabs.find((t) => t.id === tabId);
-        if (!tab || tab.type === 'native') {
+        if (!tab || tab.type === 'native' || tabId === state.activeTabId) {
           set({ activeTabId: tabId });
           return;
         }
