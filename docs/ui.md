@@ -208,7 +208,8 @@ Key behaviors:
 
 - `openArtifact`: if a tab with the same `filePath` exists, activate it and update its URL; otherwise create a new tab
 - `closeTab`: remove tab, activate next/previous/null
-- `reloadTab`: find tab by `filePath`, update URL (for fs.watch cache-bust reloads)
+- `reloadTab`: find tab by `filePath`, update URL (used by mtime polling and show_artifact reload)
+- `setActiveTab`: activate tab with cache-busted URL (ensures fresh content on tab switch)
 - `openKanbanTab`: create (or activate existing) native kanban tab at position 0
 - `toggleKanbanTab`: close kanban tab if open, otherwise call `openKanbanTab` (used by activity bar button)
 - Tab dedup uses `filePath` with cache-bust query params stripped

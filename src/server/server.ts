@@ -4,7 +4,7 @@
  * HTTP + WebSocket server that hosts the Guide and Narrator agents and serves the UI.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, normalize } from 'node:path';
@@ -190,6 +190,33 @@ export class Server {
 
       res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(resolved);
+    });
+
+    // Return file modification time for artifact live-reload polling
+    this.app.get('/api/artifact-mtime', (req, res) => {
+      const filePath = req.query.path as string;
+      if (!filePath || typeof filePath !== 'string') {
+        res.status(400).json({ error: 'Missing path parameter' });
+        return;
+      }
+
+      let resolved = filePath;
+      if (resolved.startsWith('~/')) {
+        resolved = join(homedir(), resolved.slice(2));
+      }
+      resolved = normalize(resolved);
+
+      if (!isAbsolute(resolved)) {
+        res.status(400).json({ error: 'Path must be absolute' });
+        return;
+      }
+
+      try {
+        const stat = statSync(resolved);
+        res.json({ mtimeMs: stat.mtimeMs });
+      } catch {
+        res.status(404).json({ error: 'File not found' });
+      }
     });
 
     // List all registered artifacts for the catalog UI

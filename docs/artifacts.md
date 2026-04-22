@@ -9,7 +9,7 @@ Pipeline code, utility scripts, intermediate data files, and other working mater
 - `src/server/agents/tools/write-system2-db.ts`: CRUD operations (`createArtifact`, `updateArtifact`, `deleteArtifact`)
 - `src/server/db/client.ts`: database methods (`createArtifact`, `getArtifact`, `getArtifactByPath`, `updateArtifact`, `deleteArtifact`)
 - `src/server/server.ts`: HTTP endpoints (`/api/artifact`, `/api/artifacts`, `/api/query`)
-- `src/server/websocket/handler.ts`: WebSocket artifact events and file watching
+- `src/server/websocket/handler.ts`: WebSocket artifact events
 - `src/ui/components/ArtifactViewer.tsx`: tabbed viewer with iframe/markdown rendering
 - `src/ui/components/ArtifactCatalog.tsx`: browsable catalog panel
 - `src/ui/stores/artifact.ts`: Zustand store for tab state (persisted to localStorage)
@@ -80,7 +80,7 @@ The tool technically accepts any file path, not just registered artifacts. This 
 - `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.bmp`: rendered as an inline image
 - Multiple artifacts can be open simultaneously in tabs
 
-**Live reload:** when `show_artifact` is called, the server starts an `fs.watch` on the file. Any modification triggers an automatic UI refresh of the corresponding tab (cache-busted URL). Only one artifact is watched at a time; showing a new artifact closes the previous watcher.
+**Live reload:** the UI polls the server for the active artifact's file modification time (`GET /api/artifact-mtime?path=...`) every 2 seconds. When `mtimeMs` changes, the tab reloads with a cache-busted URL. Switching tabs also triggers a reload, ensuring fresh content on every tab switch.
 
 ## Interactive Dashboards (postMessage Bridge)
 
@@ -135,7 +135,7 @@ When `show_artifact` completes successfully, the WebSocket handler emits an `art
 }
 ```
 
-The same message type is sent on live reload (with a cache-busting `&t=<timestamp>` appended to the URL).
+Live reload is handled by the UI polling `GET /api/artifact-mtime`, not by additional WebSocket messages.
 
 ## UI Components
 
