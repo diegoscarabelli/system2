@@ -18,11 +18,13 @@ It exists to help people think more clearly about complex questions and empower 
 
 ### Prerequisites
 
-1. **[Node.js 20+](https://nodejs.org/)** and **[pnpm 8+](https://pnpm.io/installation)**
+1. **[Node.js 20+](https://nodejs.org/)** and **[pnpm 8+](https://pnpm.io/installation)** (in a terminal, run `node -v` and `pnpm -v` to check)
 2. **An LLM API key** (required). [OpenRouter](https://openrouter.ai/) is highly recommended: it provides access to multiple models with a single key. Anthropic, Google, OpenAI, and other providers also work.
 3. **Brave Search API key** (highly recommended). Enables agents to search the web and fetch web pages content. This is useful for researching APIs, documentation, and data sources on the web. [Get one here](https://brave.com/search/api/).
 
 ### Install and run
+
+Open a terminal and run:
 
 ```bash
 pnpm add -g system2
