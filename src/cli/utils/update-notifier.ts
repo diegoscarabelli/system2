@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { SYSTEM2_DIR } from './config.js';
 
 const CACHE_FILE = join(SYSTEM2_DIR, 'update-check.json');
-const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const REGISTRY_URL = 'https://registry.npmjs.org/@diegoscarabelli/system2/latest';
 const PACKAGE_NAME = '@diegoscarabelli/system2';
 

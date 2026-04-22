@@ -88,7 +88,7 @@ Rotates `~/.system2/logs/system2.log` when it exceeds the configured threshold (
 
 ### Update Notifier (`utils/update-notifier.ts`)
 
-On every CLI invocation, checks whether a newer version of `@diegoscarabelli/system2` is available on npm and prints a one-line notice with the update command. The check is non-blocking: a cached result from the previous run is displayed immediately, and a background fetch refreshes the cache for next time (24h interval). All errors are silently ignored (offline, package not published, pre-onboarding).
+On every CLI invocation, checks whether a newer version of `@diegoscarabelli/system2` is available on npm and prints a one-line notice with the update command. The check is non-blocking: a cached result from the previous run is displayed immediately, and a background fetch refreshes the cache for next time (1h interval). All errors are silently ignored (offline, package not published, pre-onboarding).
 
 ## See Also
 
