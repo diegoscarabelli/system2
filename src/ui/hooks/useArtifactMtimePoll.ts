@@ -15,37 +15,44 @@ export function useArtifactMtimePoll(filePath: string | null): void {
   const lastMtime = useRef<number | null>(null);
 
   useEffect(() => {
-    // Reset mtime when the active file changes
     lastMtime.current = null;
 
     if (!filePath) return;
 
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
     const poll = async () => {
       try {
-        const res = await fetch(`/api/artifact-mtime?path=${encodeURIComponent(filePath)}`);
-        if (!res.ok) return;
+        const res = await fetch(`/api/artifact-mtime?path=${encodeURIComponent(filePath)}`, {
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+        if (!res.ok || controller.signal.aborted) return;
         const data = (await res.json()) as { mtimeMs: number };
+        if (controller.signal.aborted) return;
 
         if (lastMtime.current === null) {
-          // First poll: store baseline, don't reload
           lastMtime.current = data.mtimeMs;
-          return;
-        }
-
-        if (data.mtimeMs !== lastMtime.current) {
+        } else if (data.mtimeMs !== lastMtime.current) {
           lastMtime.current = data.mtimeMs;
           const freshUrl = `/api/artifact?path=${encodeURIComponent(filePath)}&t=${Date.now()}`;
           useArtifactStore.getState().reloadTab(filePath, freshUrl);
         }
       } catch {
-        // Network error, skip this tick
+        // Network or abort error, skip this tick
+      }
+
+      if (!controller.signal.aborted) {
+        timer = setTimeout(poll, POLL_INTERVAL_MS);
       }
     };
 
-    const timer = setInterval(poll, POLL_INTERVAL_MS);
-    // Run first poll immediately to establish baseline
     poll();
 
-    return () => clearInterval(timer);
+    return () => {
+      controller.abort();
+      if (timer !== null) clearTimeout(timer);
+    };
   }, [filePath]);
 }

@@ -164,22 +164,19 @@ export class Server {
     this.app = express();
     this.app.use(express.json());
 
+    function resolveArtifactPath(raw: unknown): string | null {
+      if (!raw || typeof raw !== 'string') return null;
+      let resolved = raw;
+      if (resolved.startsWith('~/')) resolved = join(homedir(), resolved.slice(2));
+      resolved = normalize(resolved);
+      return isAbsolute(resolved) ? resolved : null;
+    }
+
     // Serve artifact files from anywhere on the filesystem
     this.app.get('/api/artifact', (req, res) => {
-      const filePath = req.query.path as string;
-      if (!filePath || typeof filePath !== 'string') {
-        res.status(400).json({ error: 'Missing path parameter' });
-        return;
-      }
-
-      let resolved = filePath;
-      if (resolved.startsWith('~/')) {
-        resolved = join(homedir(), resolved.slice(2));
-      }
-      resolved = normalize(resolved);
-
-      if (!isAbsolute(resolved)) {
-        res.status(400).json({ error: 'Path must be absolute' });
+      const resolved = resolveArtifactPath(req.query.path);
+      if (!resolved) {
+        res.status(400).json({ error: 'Missing or invalid path parameter' });
         return;
       }
 
@@ -194,25 +191,15 @@ export class Server {
 
     // Return file modification time for artifact live-reload polling
     this.app.get('/api/artifact-mtime', (req, res) => {
-      const filePath = req.query.path as string;
-      if (!filePath || typeof filePath !== 'string') {
-        res.status(400).json({ error: 'Missing path parameter' });
-        return;
-      }
-
-      let resolved = filePath;
-      if (resolved.startsWith('~/')) {
-        resolved = join(homedir(), resolved.slice(2));
-      }
-      resolved = normalize(resolved);
-
-      if (!isAbsolute(resolved)) {
-        res.status(400).json({ error: 'Path must be absolute' });
+      const resolved = resolveArtifactPath(req.query.path);
+      if (!resolved) {
+        res.status(400).json({ error: 'Missing or invalid path parameter' });
         return;
       }
 
       try {
         const stat = statSync(resolved);
+        res.setHeader('Cache-Control', 'no-store');
         res.json({ mtimeMs: stat.mtimeMs });
       } catch {
         res.status(404).json({ error: 'File not found' });

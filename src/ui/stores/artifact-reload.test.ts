@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { useArtifactStore } from '../stores/artifact';
+import { useArtifactStore } from './artifact';
 
 const ARTIFACT_PATH = '/home/user/dashboard.html';
 
-describe('useArtifactMtimePoll (store integration)', () => {
+describe('artifact store reloadTab', () => {
   beforeEach(() => {
     useArtifactStore.setState({
       tabs: [
