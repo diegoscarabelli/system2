@@ -338,7 +338,8 @@ prefect version
 
 ```bash
 # Get state of a specific flow run via the REST API
-curl -s http://localhost:4200/api/flow_runs/<flow-run-id> | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['state']['type'], r['state'].get('message',''))"
+# Uses PREFECT_API_URL if set, otherwise defaults to the local server
+curl -s "${PREFECT_API_URL:-http://localhost:4200/api}/flow_runs/<flow-run-id>" | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['state']['type'], r['state'].get('message',''))"
 ```
 
 Use this instead of repeatedly running `prefect flow-run ls` and trying to parse truncated table output.

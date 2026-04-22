@@ -137,7 +137,7 @@ npm install --prefix ~/.system2 @google-cloud/bigquery # BigQuery
 # SQLite: no install needed (built-in)
 ```
 
-**Write a config entry** to `~/.system2/config.toml` for each database in the data stack (generally one). Use the `edit` tool to insert a `[databases.<name>]` section immediately after the commented-out `[databases.mydb]` example block, keeping database entries grouped together. Do NOT use `append: true` (it dumps entries at the bottom, far from the databases section header). NEVER use the `write` tool on config.toml as it replaces the entire file and will destroy existing sections (LLM keys, services, operational settings). Use the database name directly as the section key (e.g. `[databases.lens]`), not prefixed with `system2_` or any other namespace. Passwords can be included directly in config.toml. Examples:
+**Write a config entry** to `~/.system2/config.toml` for each database in the data stack (generally one). Use the `edit` tool to insert a `[databases.<name>]` section immediately after the commented-out `[databases.mydb]` example block, keeping database entries grouped together. Do NOT use `append: true` (it dumps entries at the bottom, far from the databases section header). NEVER use the `write` tool on config.toml as it replaces the entire file and will destroy existing sections (LLM keys, services, operational settings). Use the database name directly as the section key (e.g. `[databases.lens]`), not prefixed with `system2_` or any other namespace. Note: the name `system2` is reserved for the built-in app database; never create a `[databases.system2]` section (it will be silently ignored). Passwords can be included directly in config.toml. Examples:
 
 ```toml
 [databases.my_postgres]
