@@ -180,7 +180,10 @@ export function useWebSocket() {
             const existingTab = artifactStore.tabs.find((t) => t.filePath === message.filePath);
             if (existingTab) {
               const separator = message.url.includes('?') ? '&' : '?';
-              artifactStore.reloadTab(message.filePath, `${message.url}${separator}t=${Date.now()}`);
+              artifactStore.reloadTab(
+                message.filePath,
+                `${message.url}${separator}t=${Date.now()}`
+              );
             } else {
               artifactStore.openArtifact(message.url, message.title, message.filePath);
             }
