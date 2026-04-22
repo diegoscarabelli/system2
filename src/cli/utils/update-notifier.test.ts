@@ -3,7 +3,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const TEST_DIR = vi.hoisted(() => {
-  const base = (process.env.TMPDIR || '/tmp').replace(/\/$/, '');
+  const base = (process.env.TMPDIR || process.env.TEMP || process.env.TMP || '/tmp').replace(
+    /[/\\]$/,
+    ''
+  );
   return `${base}/system2-update-notifier-test`;
 });
 

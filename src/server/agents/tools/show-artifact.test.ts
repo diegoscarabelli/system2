@@ -1,15 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseClient } from '../../db/client.js';
 import { createShowArtifactTool } from './show-artifact.js';
 
-const TEST_DIR = join(
-  (process.env.TMPDIR || '/tmp').replace(/\/$/, ''),
-  'system2-show-artifact-test'
-);
+const TEST_DIR = join(tmpdir(), 'system2-show-artifact-test');
 
 function mockDb(artifact: Record<string, unknown> | null = null): DatabaseClient {
   return {

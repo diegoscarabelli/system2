@@ -85,6 +85,21 @@ describe('handleQueryMessage', () => {
     expect(body.database).toBeUndefined();
   });
 
+  it('omits empty string database from fetch body', async () => {
+    const postMessage = vi.fn();
+    const fetchFn = mockFetch({ rows: [], count: 0 });
+
+    await handleQueryMessage(
+      { type: 'system2:query', requestId: 'req-1', sql: 'SELECT 1', database: '' },
+      postMessage,
+      fetchFn
+    );
+
+    const body = JSON.parse((fetchFn as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body).toEqual({ sql: 'SELECT 1' });
+    expect(body.database).toBeUndefined();
+  });
+
   it('includes database in fetch body when provided', async () => {
     const postMessage = vi.fn();
     const fetchFn = mockFetch({ rows: [], count: 0 });
@@ -113,6 +128,24 @@ describe('handleQueryMessage', () => {
 
     expect(postMessage).toHaveBeenCalledWith(
       { type: 'system2:query_error', requestId: 'req-1', error: 'Network error' },
+      '*'
+    );
+  });
+
+  it('sends string error when non-Error value is thrown', async () => {
+    const postMessage = vi.fn();
+    const fetchFn = vi.fn(async () => {
+      throw 'plain string error';
+    }) as unknown as typeof fetch;
+
+    await handleQueryMessage(
+      { type: 'system2:query', requestId: 'req-1', sql: 'SELECT 1' },
+      postMessage,
+      fetchFn
+    );
+
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: 'system2:query_error', requestId: 'req-1', error: 'plain string error' },
       '*'
     );
   });

@@ -26,7 +26,10 @@ export async function handleQueryMessage(
     const res = await fetchFn('/api/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql, ...(typeof database === 'string' ? { database } : {}) }),
+      body: JSON.stringify({
+        sql,
+        ...(typeof database === 'string' && database ? { database } : {}),
+      }),
     });
     const result = await res.json();
     if (!res.ok) {
@@ -38,6 +41,13 @@ export async function handleQueryMessage(
       postMessage({ type: 'system2:query_result', requestId, ...result }, '*');
     }
   } catch (err) {
-    postMessage({ type: 'system2:query_error', requestId, error: (err as Error).message }, '*');
+    postMessage(
+      {
+        type: 'system2:query_error',
+        requestId,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      '*'
+    );
   }
 }
