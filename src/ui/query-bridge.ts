@@ -20,13 +20,13 @@ export async function handleQueryMessage(
     database?: string;
   };
   if (type !== 'system2:query') return;
-  if (!requestId || !sql) return;
+  if (typeof requestId !== 'string' || typeof sql !== 'string') return;
 
   try {
     const res = await fetchFn('/api/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql, ...(database ? { database } : {}) }),
+      body: JSON.stringify({ sql, ...(typeof database === 'string' ? { database } : {}) }),
     });
     const result = await res.json();
     if (!res.ok) {
