@@ -10,7 +10,7 @@ Named for Kahneman's slow, deliberate mode of reasoning, System2 is the bicycle 
 
 It exists to help people think more clearly about complex questions and empower everyone, regardless of skill, to acquire and interpret data, and share rigorous analysis grounded in evidence and methods they can inspect.
 
-<!-- TODO: screenshot/GIF of the full UI: chat panel on the right, artifact viewer with a dashboard on the left, activity bar visible -->
+![System2 UI: agents panel, kanban board, and chat](docs/images/screenshot_1.png)
 
 ---
 
