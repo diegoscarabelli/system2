@@ -310,7 +310,31 @@ The `show_artifact` tool displays a file in the artifact viewer with live reload
 
 A built-in postMessage bridge (`system2:query` / `system2:query_result`) provides read-only access to databases from within HTML artifacts. The `database` field in the query message selects which connection to use: omit it (or pass `system2`) to query `app.db` for System2 metadata, or pass the name of any external database configured under `[databases.<name>]` in `config.toml` to query the user's analytical databases (PostgreSQL, MySQL, ClickHouse, DuckDB, Snowflake, BigQuery, MSSQL, SQLite). This is how dashboards display live data: the artifact's JavaScript sends a `system2:query` postMessage, the UI forwards it to the server's `/api/query` endpoint, the server executes the query through the appropriate database adapter, and the result comes back as a `system2:query_result` postMessage. Allowed query forms: `SELECT`, `WITH ... SELECT` (CTEs), and `EXPLAIN`; mutations are rejected. See [Configuration](configuration.md#databases) for how databases are set up.
 
-When building a visualization or data app, write it as a self-contained HTML file. For live data, use the postMessage bridge rather than embedding static data: this way the dashboard shows current data each time it is opened.
+When building a visualization or data app, read the `live-dashboard` skill first: it contains a copy-paste `queryDatabase` helper, workflow steps, Chart.js patterns, and a pre-flight checklist. For live data, use the postMessage bridge rather than embedding static data: this way the dashboard shows current data each time it is opened. Use exactly the field names shown below; the bridge ignores messages with a wrong `type`, and drops messages missing `requestId` or `sql`.
+
+**postMessage bridge protocol:**
+
+```js
+// 1. Send a query from the iframe to System2
+const requestId = crypto.randomUUID();
+window.parent.postMessage({
+  type: 'system2:query',       // required, exact string
+  requestId: requestId,        // required, unique ID to match the response
+  sql: 'SELECT ...',           // required, read-only SQL (SELECT, CTE, EXPLAIN)
+  database: 'my_db'            // optional, defaults to 'system2' (app.db)
+}, '*');
+
+// 2. Listen for the response
+window.addEventListener('message', (event) => {
+  const msg = event.data;
+  if (msg.type === 'system2:query_result' && msg.requestId === requestId) {
+    // msg.rows  = array of row objects
+    // msg.count = number of rows
+  } else if (msg.type === 'system2:query_error' && msg.requestId === requestId) {
+    // msg.error = error message string
+  }
+});
+```
 
 **Where artifacts live:**
 

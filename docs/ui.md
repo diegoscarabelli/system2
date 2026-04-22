@@ -89,10 +89,10 @@ The only native tab is the Kanban board. Its open/closed state is persisted via 
 Supports a `postMessage` bridge for iframe dashboards that need database access:
 
 ```
-Iframe -> postMessage({ type: 'system2:query', requestId, sql })
-  -> ArtifactViewer intercepts -> fetch('/api/query', { sql })
+Iframe -> postMessage({ type: 'system2:query', requestId, sql, database? })
+  -> ArtifactViewer intercepts -> fetch('/api/query', { sql, database })
     -> Server executes SELECT -> returns { rows, count }
-  -> ArtifactViewer posts back -> postMessage({ type: 'system2:query_result', requestId, data })
+  -> ArtifactViewer posts back -> postMessage({ type: 'system2:query_result', requestId, rows, count })
 ```
 
 ### ParticlesBackground

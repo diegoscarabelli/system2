@@ -5,18 +5,24 @@
  * Command-line interface for System2.
  */
 
+import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { onboard } from './commands/onboard.js';
 import { start } from './commands/start.js';
 import { status } from './commands/status.js';
 import { stop } from './commands/stop.js';
+import { checkForUpdates } from './utils/update-notifier.js';
+
+const require = createRequire(import.meta.url);
+const pkg = require('../../package.json') as { version: string };
 
 const program = new Command();
 
 program
   .name('system2')
   .description('The AI multi-agent system for working with data')
-  .version('0.1.0');
+  .version(pkg.version)
+  .hook('preAction', () => checkForUpdates(pkg.version));
 
 program
   .command('onboard')

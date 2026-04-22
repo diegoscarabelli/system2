@@ -151,7 +151,7 @@ Artifact iframe JS
         -> Server: DatabaseAdapterRegistry routes to the named adapter
           -> Adapter executes SELECT query, returns rows
         <- { rows, count }
-      <- postMessage({ type: 'system2:query_result', requestId, data: { rows, count } })
+      <- postMessage({ type: 'system2:query_result', requestId, rows, count })
     or on error:
       <- postMessage({ type: 'system2:query_error', requestId, error: message })
 ```
