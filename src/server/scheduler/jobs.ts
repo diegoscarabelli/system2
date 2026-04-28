@@ -82,13 +82,17 @@ export function truncateOldestToFit(entries: TimestampedEntry[], budget: number)
 /**
  * Format a truncation annotation line to prepend to a delivery body when entries were
  * dropped. Returns an empty string if nothing was dropped.
+ *
+ * @param budget The ACTUAL activity budget used by the truncation (not the global
+ *   CATCH_UP_BUDGET_BYTES constant). After subtracting header + DB-changes overhead the
+ *   effective budget is smaller, and the annotation should report the number callers see.
  */
-function annotateTruncation(result: TruncateResult, catchUpBudgetBytes: number): string {
+function annotateTruncation(result: TruncateResult, budget: number): string {
   if (result.droppedCount === 0 || !result.droppedRange) return '';
   return (
     `\n\n[NOTE: dropped ${result.droppedCount} oldest entries spanning ` +
     `${result.droppedRange.from} → ${result.droppedRange.to} ` +
-    `to fit ${catchUpBudgetBytes.toLocaleString()}-byte delivery budget]\n\n`
+    `to fit ${budget.toLocaleString()}-byte delivery budget]\n\n`
   );
 }
 
@@ -1009,7 +1013,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       projectLogTruncation.kept,
       narratorMessageExcerptBytes
     );
-    const projectLogAnnotation = annotateTruncation(projectLogTruncation, catchUpBudgetBytes);
+    const projectLogAnnotation = annotateTruncation(projectLogTruncation, projectLogActivityBudget);
 
     const projectLogMessage = `${projectLogHeader}${projectLogAnnotation}
 ## Agent Activity
@@ -1124,7 +1128,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
         `from combined daily summary activity to fit ${catchUpBudgetBytes.toLocaleString()}-byte budget`
     );
   }
-  const summaryAnnotation = annotateTruncation(summaryTruncation, catchUpBudgetBytes);
+  const summaryAnnotation = annotateTruncation(summaryTruncation, summaryActivityBudget);
 
   const messageParts: string[] = [
     summaryAnnotation ? `${dailySummaryHeader}${summaryAnnotation}` : dailySummaryHeader,
