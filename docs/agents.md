@@ -216,6 +216,20 @@ Auto-compaction is also configured to fire earlier (at ~50% of the context windo
 
 **Last-resort provider recovery:** after all normal recovery paths (retry, failover, context overflow) are exhausted, `handlePotentialError` checks if a different provider is available before giving up. This covers cases where an agent is stuck on a dead fallback provider (e.g., Anthropic with $0 credits returning 400 `client` errors) while the primary provider's cooldown has expired. `getNextProvider()` iterates in provider order (primary first), so agents naturally gravitate back to the primary when it becomes available.
 
+### Two-Tier Credentials (OAuth + API Keys)
+
+When `[llm.oauth]` is configured, `AuthResolver` walks credentials across two tiers:
+
+1. **OAuth tier** — providers listed in `[llm.oauth].primary` + `fallback`, each with one credential loaded from `~/.system2/oauth/<provider>.json` at startup.
+2. **API key tier** — providers listed in `[llm].primary` + `fallback`, with one or more API keys each.
+
+`getActiveCredential()` returns a `{ tier, provider, keyIndex, label }` tuple. Cooldown keys are namespaced as `${tier}:${provider}:${keyIndex}` so the same provider in both tiers (e.g., Anthropic OAuth and Anthropic API keys) doesn't collide. The OAuth tier is fully exhausted (every credential in cooldown) before the resolver returns a keys-tier credential.
+
+Two extra concerns over plain API keys:
+
+1. **Refresh.** `AuthResolver.ensureFresh()` is awaited before each session creation in `AgentHost.initialize()` and `reinitializeWithProvider()`. If an OAuth access token is within 5 minutes of expiry, the resolver calls the SDK's `refreshAnthropicToken`, updates in-memory state, and persists via the callback registered through `setPersistOAuth()`. Concurrent refreshes per provider are serialized via a Promise lock.
+2. **401 handling.** Normally `auth` errors trigger immediate failover. For OAuth-tier credentials, `AgentHost` first calls `ensureFresh()` and reinitializes the session before falling over — this catches expiry-related 401s without losing the credential. If refresh itself fails, the credential goes into cooldown via the standard path.
+
 ## Session Persistence
 
 Agent sessions are persisted as JSONL files in `~/.system2/sessions/{role}_{id}/`. The pi-coding-agent SDK manages:
