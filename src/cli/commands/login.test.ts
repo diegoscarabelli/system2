@@ -50,4 +50,16 @@ describe('addProviderToOAuthTier', () => {
     expect(result.changed).toBe(false);
     expect(readFileSync(configPath, 'utf-8')).toBe(before);
   });
+
+  it('inserts fallback line when [llm.oauth] has primary but no fallback', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "google"\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const result = addProviderToOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toMatch(/primary\s*=\s*"google"/);
+    expect(content).toMatch(/fallback\s*=\s*\[\s*"anthropic"\s*\]/);
+  });
 });

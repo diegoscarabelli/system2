@@ -56,6 +56,19 @@ export function addProviderToOAuthTier(
   const newFallback = [...(oauth.fallback ?? []), provider];
   const fallbackLine = `fallback = [${newFallback.map((f) => `"${f}"`).join(', ')}]`;
   const replacedSection = match[0].replace(/fallback\s*=\s*\[[^\]]*\]/, fallbackLine);
+
+  // If regex didn't match an existing fallback line, the section is unchanged.
+  // We need to insert the fallback line after the primary line instead.
+  if (replacedSection === match[0]) {
+    const withFallback = match[0].replace(/(primary\s*=\s*"[^"]*"\s*\n)/, `$1${fallbackLine}\n`);
+    if (withFallback === match[0]) {
+      // Could not even find a primary= line — bail.
+      return { changed: false };
+    }
+    writeFileSync(configPath, raw.replace(sectionPattern, withFallback));
+    return { changed: true };
+  }
+
   writeFileSync(configPath, raw.replace(sectionPattern, replacedSection));
   return { changed: true };
 }
