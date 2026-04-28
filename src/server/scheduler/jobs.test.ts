@@ -10,6 +10,7 @@ import {
   buildAndDeliverMemoryUpdate,
   collectAgentActivity,
   collectAgentActivityWithTimestamps,
+  type DbChangeTable,
   formatMarkdownTable,
   JobSkipped,
   NARRATOR_MESSAGE_EXCERPT_BYTES,
@@ -20,6 +21,7 @@ import {
   resolveDailySummaryTimestamp,
   stripSessionEntry,
   trackJobExecution,
+  truncateDbChangesToFit,
   truncateOldestToFit,
   writeFrontmatterField,
 } from './jobs.js';
@@ -300,6 +302,116 @@ describe('truncateOldestToFit', () => {
     expect(result.droppedCount).toBe(1);
     expect(result.droppedRange?.from).toBe('2026-01-01T01:00:00Z');
     expect(result.droppedRange?.to).toBe('2026-01-01T01:00:00Z');
+  });
+});
+
+describe('truncateDbChangesToFit', () => {
+  function makeTable(
+    name: string,
+    timeColumn: string,
+    rows: Record<string, unknown>[]
+  ): DbChangeTable {
+    return { name, sql: `SELECT * FROM ${name}`, rows, timeColumn };
+  }
+
+  it('returns empty result for empty input', () => {
+    const result = truncateDbChangesToFit([], 1024);
+    expect(result.rendered).toBe('');
+    expect(result.droppedTotal).toBe(0);
+    expect(result.droppedRanges).toEqual([]);
+  });
+
+  it('keeps all rows when total is under budget', () => {
+    const rows = [
+      { id: 1, updated_at: '2026-01-01T10:00:00Z', title: 'Task A' },
+      { id: 2, updated_at: '2026-01-01T11:00:00Z', title: 'Task B' },
+    ];
+    const result = truncateDbChangesToFit([makeTable('task', 'updated_at', rows)], 100_000);
+    expect(result.droppedTotal).toBe(0);
+    expect(result.droppedRanges).toEqual([]);
+    expect(result.rendered).toContain('Task A');
+    expect(result.rendered).toContain('Task B');
+    expect(result.rendered).not.toContain('[NOTE: dropped');
+  });
+
+  it('keeps newest rows and drops oldest when over budget', () => {
+    const rows: Record<string, unknown>[] = [];
+    for (let i = 0; i < 50; i++) {
+      rows.push({
+        id: i,
+        updated_at: `2026-01-01T${String(i).padStart(2, '0')}:00:00Z`,
+        payload: 'x'.repeat(200),
+      });
+    }
+    // Budget tight enough to force truncation: each row is ~220 bytes
+    const result = truncateDbChangesToFit([makeTable('task', 'updated_at', rows)], 2_000);
+    expect(result.droppedTotal).toBeGreaterThan(0);
+    expect(result.droppedRanges).toHaveLength(1);
+    expect(result.droppedRanges[0].table).toBe('task');
+    // Annotation is present in the rendered output
+    expect(result.rendered).toContain('[NOTE: dropped');
+    expect(result.rendered).toContain('oldest DB-change rows from task');
+    // Only newest rows kept (highest timestamps survive)
+    expect(result.rendered).toContain('2026-01-01T49:00:00Z');
+    // Oldest row id 0 must not appear as a table row (it may appear in the annotation range)
+    const tableRows = result.rendered
+      .split('\n')
+      .filter((l) => l.startsWith('|') && !l.startsWith('| id') && !l.startsWith('|---'));
+    const rowIds = tableRows.map((l) => Number(l.split('|')[1].trim()));
+    expect(rowIds).not.toContain(0); // id=0 is the oldest row, should be dropped
+  });
+
+  it('handles multiple tables, splitting budget evenly', () => {
+    const taskRows: Record<string, unknown>[] = [];
+    const commentRows: Record<string, unknown>[] = [];
+    for (let i = 0; i < 30; i++) {
+      taskRows.push({
+        id: i,
+        updated_at: `2026-01-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
+        payload: 'a'.repeat(200),
+      });
+      commentRows.push({
+        id: i + 100,
+        created_at: `2026-01-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
+        payload: 'b'.repeat(200),
+      });
+    }
+    const tables = [
+      makeTable('task', 'updated_at', taskRows),
+      makeTable('task_comment', 'created_at', commentRows),
+    ];
+    // Very tight budget to force truncation in both tables
+    const result = truncateDbChangesToFit(tables, 2_000);
+    expect(result.rendered).toContain('### task');
+    expect(result.rendered).toContain('### task_comment');
+    // Both tables were independently truncated
+    expect(result.droppedTotal).toBeGreaterThan(0);
+  });
+
+  it('integration: large project DB changes fit within MAX_DELIVERY_BYTES', async () => {
+    // Simulate 2000 task updates (~200 bytes each = ~400 KB raw)
+    const rows: Record<string, unknown>[] = [];
+    for (let i = 0; i < 2000; i++) {
+      rows.push({
+        id: i,
+        project: 1,
+        title: `Task ${i}`,
+        status: 'done',
+        updated_at: `2026-01-01T${String(Math.floor(i / 100)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00Z`,
+        description: 'y'.repeat(100),
+      });
+    }
+
+    const CATCH_UP_BUDGET = 512 * 1024;
+    const DB_BUDGET = Math.floor(CATCH_UP_BUDGET * 0.25); // 25%
+    const result = truncateDbChangesToFit([makeTable('task', 'updated_at', rows)], DB_BUDGET);
+
+    // The rendered DB section must fit within the DB budget
+    expect(Buffer.byteLength(result.rendered, 'utf8')).toBeLessThanOrEqual(
+      DB_BUDGET + 500 // allow small annotation overhead
+    );
+    expect(result.droppedTotal).toBeGreaterThan(0);
+    expect(result.rendered).toContain('[NOTE: dropped');
   });
 });
 

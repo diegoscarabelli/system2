@@ -466,6 +466,105 @@ function readSessionEntries(
 }
 
 /**
+ * A structured DB table result, ready for budget-aware rendering.
+ */
+export interface DbChangeTable {
+  name: string;
+  sql: string;
+  rows: Record<string, unknown>[];
+  timeColumn: string;
+}
+
+/**
+ * Result of truncateDbChangesToFit.
+ */
+export interface DbTruncateResult {
+  rendered: string;
+  droppedTotal: number;
+  droppedRanges: Array<{ table: string; from: string; to: string; count: number }>;
+}
+
+/** Fraction of catchUpBudgetBytes reserved for the DB-changes section.
+ *  Leaves 75% for agent activity (richer narrative material). The 25% cap
+ *  is a conservative starting point: most DB-change windows are small, so
+ *  the budget is rarely hit. It can be tuned upward if structured data proves
+ *  routinely large relative to agent activity. */
+const DB_CHANGES_BUDGET_FRACTION = 0.25;
+
+/**
+ * Truncate DB-change tables to fit within a byte budget, keeping the newest rows.
+ * Budget is split evenly across tables. Dropped rows are annotated per table.
+ */
+export function truncateDbChangesToFit(tables: DbChangeTable[], budget: number): DbTruncateResult {
+  if (tables.length === 0) return { rendered: '', droppedTotal: 0, droppedRanges: [] };
+
+  const perTableBudget = Math.floor(budget / tables.length);
+  const droppedRanges: Array<{ table: string; from: string; to: string; count: number }> = [];
+  let droppedTotal = 0;
+  const sections: string[] = [];
+
+  for (const table of tables) {
+    sections.push(`### ${table.name}`);
+    sections.push(table.sql);
+    sections.push('');
+
+    if (table.rows.length === 0) {
+      sections.push('(no changes)\n');
+      continue;
+    }
+
+    // Sort newest-first so we keep the most recent rows when truncating.
+    const sorted = [...table.rows].sort((a, b) => {
+      const av = String(a[table.timeColumn] ?? '');
+      const bv = String(b[table.timeColumn] ?? '');
+      return bv.localeCompare(av); // descending
+    });
+
+    // Walk newest-first, accumulate until budget exhausted.
+    const kept: Record<string, unknown>[] = [];
+    let accumulated = 0;
+    for (const row of sorted) {
+      const rowSize = Buffer.byteLength(
+        `| ${Object.values(row)
+          .map((v) => String(v ?? ''))
+          .join(' | ')} |\n`,
+        'utf8'
+      );
+      if (accumulated + rowSize > perTableBudget && kept.length > 0) break;
+      kept.push(row);
+      accumulated += rowSize;
+    }
+
+    const dropped = sorted.length - kept.length;
+    if (dropped > 0) {
+      // Oldest dropped rows are at the tail of sorted (ascending order for range).
+      const droppedRows = sorted.slice(kept.length);
+      const timestamps = droppedRows
+        .map((r) => String(r[table.timeColumn] ?? ''))
+        .sort((a, b) => a.localeCompare(b));
+      const from = timestamps[0];
+      const to = timestamps[timestamps.length - 1];
+      droppedRanges.push({ table: table.name, from, to, count: dropped });
+      droppedTotal += dropped;
+    }
+
+    // Render in ascending time order (newest-first array reversed).
+    const ascRows = [...kept].reverse();
+    sections.push(formatMarkdownTable(ascRows));
+    sections.push('');
+
+    if (dropped > 0) {
+      const range = droppedRanges[droppedRanges.length - 1];
+      sections.push(
+        `[NOTE: dropped ${range.count} oldest DB-change rows from ${range.table} spanning ${range.from} → ${range.to}]\n`
+      );
+    }
+  }
+
+  return { rendered: sections.join('\n'), droppedTotal, droppedRanges };
+}
+
+/**
  * Collect database changes in the time window, formatted as markdown.
  */
 export function collectDbChanges(db: DatabaseClient, lastRunTs: string, newRunTs: string): string {
@@ -518,7 +617,7 @@ interface ProjectActivityData {
   projectId: number;
   projectName: string;
   logFile: string;
-  dbChanges: string;
+  dbTables: DbChangeTable[];
   hasChanges: boolean;
 }
 
@@ -526,58 +625,56 @@ type AgentRow = { id: number; role: string; project_name: string | null };
 
 /**
  * Collect database changes scoped to a specific project.
+ * Returns structured DbChangeTable objects for budget-aware rendering.
  */
 export function collectProjectDbChanges(
   db: DatabaseClient,
   projectId: number,
   lastRunTs: string,
   newRunTs: string
-): string {
-  const queries = [
+): DbChangeTable[] {
+  const queries: Array<{ name: string; sql: string; timeColumn: string }> = [
     {
       name: 'project',
+      timeColumn: 'updated_at',
       sql: `SELECT * FROM project WHERE id = ${projectId} AND updated_at >= '${lastRunTs}' AND updated_at < '${newRunTs}'`,
     },
     {
       name: 'task',
+      timeColumn: 'updated_at',
       sql: `SELECT * FROM task WHERE project = ${projectId} AND updated_at >= '${lastRunTs}' AND updated_at < '${newRunTs}' ORDER BY updated_at ASC`,
     },
     {
       name: 'task_comment',
+      timeColumn: 'created_at',
       sql: `SELECT tc.* FROM task_comment tc JOIN task t ON tc.task = t.id WHERE t.project = ${projectId} AND tc.created_at >= '${lastRunTs}' AND tc.created_at < '${newRunTs}' ORDER BY tc.created_at ASC`,
     },
     {
       name: 'task_link',
+      timeColumn: 'created_at',
       sql: `SELECT tl.* FROM task_link tl JOIN task t ON tl.source = t.id WHERE t.project = ${projectId} AND tl.created_at >= '${lastRunTs}' AND tl.created_at < '${newRunTs}' ORDER BY tl.created_at ASC`,
     },
   ];
 
-  const sections: string[] = [];
-  for (const { name, sql } of queries) {
-    const rows = db.query(sql) as Record<string, unknown>[];
-    sections.push(`### ${name}`);
-    sections.push(sql);
-    sections.push('');
-    if (rows.length === 0) {
-      sections.push('(no changes)\n');
-    } else {
-      sections.push(formatMarkdownTable(rows));
-      sections.push('');
-    }
-  }
-  return sections.join('\n');
+  return queries.map(({ name, sql, timeColumn }) => ({
+    name,
+    sql,
+    timeColumn,
+    rows: db.query(sql) as Record<string, unknown>[],
+  }));
 }
 
 /**
  * Collect database changes NOT belonging to any of the given project IDs.
  * Captures standalone tasks and changes to inactive/completed projects.
+ * Returns structured DbChangeTable objects for budget-aware rendering.
  */
 export function collectNonProjectDbChanges(
   db: DatabaseClient,
   activeProjectIds: number[],
   lastRunTs: string,
   newRunTs: string
-): string {
+): DbChangeTable[] {
   const projectExcl =
     activeProjectIds.length > 0 ? `AND id NOT IN (${activeProjectIds.join(',')})` : '';
   const taskExcl =
@@ -589,35 +686,51 @@ export function collectNonProjectDbChanges(
       ? `AND (t.project IS NULL OR t.project NOT IN (${activeProjectIds.join(',')}))`
       : '';
 
-  const queries = [
+  const queries: Array<{ name: string; sql: string; timeColumn: string }> = [
     {
       name: 'project',
+      timeColumn: 'updated_at',
       sql: `SELECT * FROM project WHERE updated_at >= '${lastRunTs}' AND updated_at < '${newRunTs}' ${projectExcl} ORDER BY updated_at ASC`,
     },
     {
       name: 'task',
+      timeColumn: 'updated_at',
       sql: `SELECT * FROM task WHERE updated_at >= '${lastRunTs}' AND updated_at < '${newRunTs}' ${taskExcl} ORDER BY updated_at ASC`,
     },
     {
       name: 'task_comment',
+      timeColumn: 'created_at',
       sql: `SELECT tc.* FROM task_comment tc JOIN task t ON tc.task = t.id WHERE tc.created_at >= '${lastRunTs}' AND tc.created_at < '${newRunTs}' ${joinTaskExcl} ORDER BY tc.created_at ASC`,
     },
     {
       name: 'task_link',
+      timeColumn: 'created_at',
       sql: `SELECT tl.* FROM task_link tl JOIN task t ON tl.source = t.id WHERE tl.created_at >= '${lastRunTs}' AND tl.created_at < '${newRunTs}' ${joinTaskExcl} ORDER BY tl.created_at ASC`,
     },
   ];
 
+  return queries.map(({ name, sql, timeColumn }) => ({
+    name,
+    sql,
+    timeColumn,
+    rows: db.query(sql) as Record<string, unknown>[],
+  }));
+}
+
+/**
+ * Render a list of DbChangeTable objects to a markdown string with no truncation.
+ * Used for tables that are already within budget or when budget is not a concern.
+ */
+function renderDbChangeTables(tables: DbChangeTable[]): string {
   const sections: string[] = [];
-  for (const { name, sql } of queries) {
-    const rows = db.query(sql) as Record<string, unknown>[];
-    sections.push(`### ${name}`);
-    sections.push(sql);
+  for (const table of tables) {
+    sections.push(`### ${table.name}`);
+    sections.push(table.sql);
     sections.push('');
-    if (rows.length === 0) {
+    if (table.rows.length === 0) {
       sections.push('(no changes)\n');
     } else {
-      sections.push(formatMarkdownTable(rows));
+      sections.push(formatMarkdownTable(table.rows));
       sections.push('');
     }
   }
@@ -625,13 +738,20 @@ export function collectNonProjectDbChanges(
 }
 
 /**
+ * Returns true if any of the given DbChangeTable objects contain rows.
+ */
+function dbTablesHaveRows(tables: DbChangeTable[]): boolean {
+  return tables.some((t) => t.rows.length > 0);
+}
+
+/**
  * Check if collected activity data contains any meaningful content.
  */
-function hasActivity(agentActivity: string, dbChanges: string): boolean {
+function hasActivity(agentActivity: string, dbTables: DbChangeTable[]): boolean {
   const hasAgentLines = !agentActivity
     .split('\n')
     .every((line) => !line.trim() || line.startsWith('###') || line === '(no activity)');
-  return hasAgentLines || dbChanges.includes('|');
+  return hasAgentLines || dbTablesHaveRows(dbTables);
 }
 
 /**
@@ -777,7 +897,7 @@ export async function buildAndDeliverDailySummary(
       newRunTs,
       narratorMessageExcerptBytes
     );
-    const projectDbChanges = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
+    const projectDbTables = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
 
     // Collect project-scoped entries to determine whether this project has activity
     const projectScopedEntries = collectAgentActivityWithTimestamps(
@@ -791,8 +911,8 @@ export async function buildAndDeliverDailySummary(
       projectId: project.id,
       projectName: project.name,
       logFile,
-      dbChanges: projectDbChanges,
-      hasChanges: projectScopedEntries.length > 0 || projectDbChanges.includes('|'),
+      dbTables: projectDbTables,
+      hasChanges: projectScopedEntries.length > 0 || dbTablesHaveRows(projectDbTables),
     });
 
     // Deliver project-log message (with all agents including Guide)
@@ -804,7 +924,7 @@ export async function buildAndDeliverDailySummary(
       allProjectAgentEntries,
       narratorMessageExcerptBytes
     );
-    if (!hasActivity(allProjectAgentActivity, projectDbChanges)) continue;
+    if (!hasActivity(allProjectAgentActivity, projectDbTables)) continue;
 
     // Apply catch-up budget to the agent activity entries for this project-log delivery.
     // Build a fixed header to measure how much space it occupies so the budget applies
@@ -819,9 +939,13 @@ new_run_ts: ${newRunTs}
 
 IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.`;
 
+    // Apply DB-changes budget (25% of total) before computing activity budget.
+    const projectDbBudget = Math.floor(catchUpBudgetBytes * DB_CHANGES_BUDGET_FRACTION);
+    const projectDbTruncation = truncateDbChangesToFit(projectDbTables, projectDbBudget);
+
     const projectLogOverhead =
       Buffer.byteLength(projectLogHeader, 'utf8') +
-      Buffer.byteLength(projectDbChanges, 'utf8') +
+      Buffer.byteLength(projectDbTruncation.rendered, 'utf8') +
       200; // 200 for section labels/separators
     const projectLogActivityBudget = Math.max(catchUpBudgetBytes - projectLogOverhead, 0);
     const projectLogTruncation = truncateOldestToFit(
@@ -844,7 +968,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
 ${truncatedProjectActivity}
 ## Database Changes
 
-${projectDbChanges}`;
+${projectDbTruncation.rendered}`;
 
     deliveries.push(
       narratorHost.deliverMessage(projectLogMessage, {
@@ -874,11 +998,11 @@ ${projectDbChanges}`;
     nonProjectAgentEntries,
     narratorMessageExcerptBytes
   );
-  const nonProjectDbChanges = collectNonProjectDbChanges(db, activeProjectIds, lastRunTs, newRunTs);
+  const nonProjectDbTables = collectNonProjectDbChanges(db, activeProjectIds, lastRunTs, newRunTs);
 
   // 7. Check for any activity at all
   const hasProjectChanges = projectDataList.some((pd) => pd.hasChanges);
-  const hasNonProjectChanges = hasActivity(nonProjectAgentActivity, nonProjectDbChanges);
+  const hasNonProjectChanges = hasActivity(nonProjectAgentActivity, nonProjectDbTables);
 
   if (!hasProjectChanges && !hasNonProjectChanges) {
     // Advance cursor even on skip to prevent re-scanning an empty window
@@ -895,11 +1019,27 @@ new_run_ts: ${newRunTs}
 
 IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.`;
 
-  // Compute overhead: header + DB changes + static section labels (generous estimate)
-  const summaryDbOverhead =
-    projectDataList.reduce((s, pd) => s + Buffer.byteLength(pd.dbChanges, 'utf8'), 0) +
-    Buffer.byteLength(nonProjectDbChanges, 'utf8');
-  const summaryOverhead = Buffer.byteLength(dailySummaryHeader, 'utf8') + summaryDbOverhead + 500;
+  // Apply DB-changes budget (25% of total) to each section independently.
+  const summaryDbBudget = Math.floor(catchUpBudgetBytes * DB_CHANGES_BUDGET_FRACTION);
+  // Split the summary DB budget evenly across active project sections + non-project section.
+  const summaryDbSectionCount = projectDataList.filter((pd) => pd.hasChanges).length + 1;
+  const perSectionDbBudget = Math.floor(summaryDbBudget / Math.max(summaryDbSectionCount, 1));
+
+  const projectDbTruncations = new Map<number, DbTruncateResult>();
+  for (const pd of projectDataList) {
+    const result = truncateDbChangesToFit(pd.dbTables, perSectionDbBudget);
+    projectDbTruncations.set(pd.projectId, result);
+  }
+  const nonProjectDbTruncation = truncateDbChangesToFit(nonProjectDbTables, perSectionDbBudget);
+
+  // Compute overhead: header + bounded DB changes + static section labels (generous estimate)
+  const summaryDbRenderedSize =
+    [...projectDbTruncations.values()].reduce(
+      (s, r) => s + Buffer.byteLength(r.rendered, 'utf8'),
+      0
+    ) + Buffer.byteLength(nonProjectDbTruncation.rendered, 'utf8');
+  const summaryOverhead =
+    Buffer.byteLength(dailySummaryHeader, 'utf8') + summaryDbRenderedSize + 500;
   const summaryActivityBudget = Math.max(catchUpBudgetBytes - summaryOverhead, 0);
 
   // Gather all project-scoped entries for truncation
@@ -933,8 +1073,13 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       summaryTruncation.kept,
       narratorMessageExcerptBytes
     );
+    const pdDbResult = projectDbTruncations.get(pd.projectId) ?? {
+      rendered: renderDbChangeTables(pd.dbTables),
+      droppedTotal: 0,
+      droppedRanges: [],
+    };
     activeProjectParts.push(
-      `### Project: ${pd.projectName} (#${pd.projectId})\n\n#### Agent Activity\n\n${renderedProjectActivity}\n#### Database Changes\n\n${pd.dbChanges}`
+      `### Project: ${pd.projectName} (#${pd.projectId})\n\n#### Agent Activity\n\n${renderedProjectActivity}\n#### Database Changes\n\n${pdDbResult.rendered}`
     );
   }
   if (activeProjectParts.length > 0) {
@@ -951,7 +1096,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       narratorMessageExcerptBytes
     );
     messageParts.push(
-      `## Non-Project Activity\n\n#### Agent Activity\n\n${renderedNonProjectActivity}\n#### Database Changes\n\n${nonProjectDbChanges}`
+      `## Non-Project Activity\n\n#### Agent Activity\n\n${renderedNonProjectActivity}\n#### Database Changes\n\n${nonProjectDbTruncation.rendered}`
     );
   }
 
