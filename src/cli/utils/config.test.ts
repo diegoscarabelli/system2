@@ -1,7 +1,12 @@
 import TOML from '@iarna/toml';
 import { describe, expect, it, vi } from 'vitest';
 import type { LlmConfig } from '../../shared/index.js';
-import { buildConfigToml, convertTomlAgents, convertTomlDatabases } from './config.js';
+import {
+  buildConfigToml,
+  convertTomlAgents,
+  convertTomlDatabases,
+  convertTomlLlm,
+} from './config.js';
 
 describe('buildConfigToml', () => {
   it('generates valid TOML with LLM config', () => {
@@ -690,7 +695,7 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
     expect(toml).not.toMatch(/\[llm\.oauth\]/);
   });
 
-  it('round-trips through TOML.parse', () => {
+  it('round-trips through TOML.parse and convertTomlLlm', () => {
     const llm: LlmConfig = {
       primary: 'openai',
       fallback: ['google'],
@@ -701,10 +706,9 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
       oauth: { primary: 'anthropic', fallback: [] },
     };
     const toml = buildConfigToml({ llm });
-    const parsed = TOML.parse(toml) as {
-      llm?: { oauth?: { primary?: string; fallback?: string[] } };
-    };
-    expect(parsed.llm?.oauth?.primary).toBe('anthropic');
-    expect(parsed.llm?.oauth?.fallback).toEqual([]);
+    const parsed = TOML.parse(toml) as Record<string, unknown>;
+    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
+    const reconstructed = convertTomlLlm(llmSection);
+    expect(reconstructed.oauth).toEqual({ primary: 'anthropic', fallback: [] });
   });
 });

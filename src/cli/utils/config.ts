@@ -184,7 +184,7 @@ const DEFAULT_OPERATIONAL: Pick<
 /**
  * Convert TOML LLM section to LlmConfig.
  */
-function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
+export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
   const providers: Partial<Record<LlmProvider, LlmProviderConfig>> = {};
 
   for (const name of [
