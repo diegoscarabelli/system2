@@ -533,6 +533,28 @@ export function truncateDbChangesToFit(tables: DbChangeTable[], budget: number):
     });
 
     // Walk newest-first, accumulate until budget exhausted.
+    // Special case: if the very first (newest) row alone exceeds the per-table budget,
+    // drop ALL rows for this table — keeping it would blow the budget guarantee.
+    const firstRowSize = Buffer.byteLength(
+      `| ${Object.values(sorted[0])
+        .map((v) => String(v ?? ''))
+        .join(' | ')} |\n`,
+      'utf8'
+    );
+    if (firstRowSize > perTableBudget) {
+      const timestamps = sorted
+        .map((r) => String(r[table.timeColumn] ?? ''))
+        .sort((a, b) => a.localeCompare(b));
+      const from = timestamps[0];
+      const to = timestamps[timestamps.length - 1];
+      droppedRanges.push({ table: table.name, from, to, count: sorted.length });
+      droppedTotal += sorted.length;
+      sections.push(
+        `[NOTE: dropped all ${sorted.length} rows from ${table.name} — first row alone exceeds per-table budget of ${perTableBudget.toLocaleString()} bytes]\n`
+      );
+      continue;
+    }
+
     const kept: Record<string, unknown>[] = [];
     let accumulated = 0;
     for (const row of sorted) {

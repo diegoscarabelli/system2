@@ -470,6 +470,36 @@ describe('truncateDbChangesToFit', () => {
     expect(result.droppedTotal).toBeGreaterThan(0);
     expect(result.rendered).toContain('[NOTE: dropped');
   });
+
+  it('drops ALL rows when first (newest) row alone exceeds per-table budget', () => {
+    // A single row with a description field that is larger than the budget
+    const hugeDescription = 'x'.repeat(5000);
+    const rows = [
+      {
+        id: 1,
+        title: 'Task with giant description',
+        description: hugeDescription,
+        updated_at: '2026-01-01T10:00:00Z',
+      },
+    ];
+    const budget = 1000; // 1 KB — the row alone is ~5000+ bytes
+
+    const result = truncateDbChangesToFit([makeTable('task', 'updated_at', rows)], budget);
+
+    // All rows must be dropped
+    expect(result.droppedTotal).toBe(1);
+    expect(result.droppedRanges).toHaveLength(1);
+    expect(result.droppedRanges[0].table).toBe('task');
+    expect(result.droppedRanges[0].count).toBe(1);
+
+    // Annotation must name the table and mention budget
+    expect(result.rendered).toContain('dropped all 1 rows from task');
+    expect(result.rendered).toContain('first row alone exceeds per-table budget');
+
+    // Must NOT contain [object Object] or any row data
+    expect(result.rendered).not.toContain('[object Object]');
+    expect(result.rendered).not.toContain('x'.repeat(100)); // no huge content leaked
+  });
 });
 
 describe('collectAgentActivityWithTimestamps', () => {
