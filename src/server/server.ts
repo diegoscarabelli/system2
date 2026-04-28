@@ -146,6 +146,14 @@ export class Server {
       });
     }
 
+    if (!this.authResolver.getActiveCredential()) {
+      throw new Error(
+        'No usable LLM credentials available. Either:\n' +
+          '  - Run `system2 login <provider>` to authenticate via OAuth, or\n' +
+          '  - Add API keys to ~/.system2/config.toml under [llm.<provider>].keys'
+      );
+    }
+
     // Shared ReminderManager: all agents schedule reminders through the same instance
     this.reminderManager = new ReminderManager(this.agentRegistry);
 
