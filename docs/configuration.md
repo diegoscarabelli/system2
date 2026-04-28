@@ -174,17 +174,17 @@ When API errors occur, System2 automatically retries and fails over:
 
 | Error | Behavior |
 |-------|----------|
-| **401/403** (auth) | Immediate failover. Key permanently marked failed. |
-| **429** (rate limit) | Retry 3x with exponential backoff, then failover. |
-| **500/503/timeout** | Retry 2x with exponential backoff, then failover. |
-| **400** (bad request) | Surface error to user. No retry or failover. |
+| **401/403** (auth) | Immediate failover. Key enters 5-minute cooldown. |
+| **429** (rate limit) | Retry up to 7x with exponential backoff, then failover. Key enters 90-second cooldown. |
+| **500/503/timeout** | Retry 2x with exponential backoff, then failover. Key enters 5-minute cooldown. |
+| **400** (bad request) | Immediate failover. Key enters 5-minute cooldown. |
 
 **Failover order:**
 1. Next key for the current provider
 2. First fallback provider's keys
 3. Continue through fallback providers
 
-**Cooldown recovery:** Rate limit and transient failures enter a 5-minute cooldown. Keys become available again automatically after cooldown expires. Auth errors (invalid/revoked keys) are permanent until you edit config.toml.
+**Cooldown recovery:** All failures enter a timed cooldown (90 seconds for rate limits, 5 minutes for everything else). Keys become available again automatically after the cooldown expires. All cooldowns are in-memory only; restarting the daemon clears them immediately.
 
 See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 

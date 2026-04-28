@@ -62,6 +62,8 @@ All runtime state lives in `~/.system2/`:
 ├── app.db                           SQLite database (gitignored)
 ├── artifacts/                       Project-free reports, dashboards, exports
 ├── config.toml                      Settings and API keys (0600, gitignored)
+├── oauth/                           OAuth credentials (0600, gitignored)
+│   └── anthropic.json               Claude Pro/Max tokens
 ├── knowledge/                       Persistent knowledge (injected into prompts)
 │   ├── conductor.md                 Conductor role-specific knowledge
 │   ├── daily_summaries/             Daily activity logs

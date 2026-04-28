@@ -150,14 +150,16 @@ Send a message to another agent by database ID.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `agent_id` | number | Target agent's database ID |
-| `content` | string | Message content |
+| `message` | string | Message content |
 | `urgent` | boolean | Use `steer` delivery (interrupts). Default: `followUp` (waits) |
 
 Routes through `AgentRegistry` to find the target `AgentHost`, then calls `deliverMessage()`. See [Agents](agents.md#message-delivery) for delivery modes.
 
+**Size pre-check:** before queuing, the tool measures the byte length of the full delivery (including the sender-role prefix). If it exceeds the `[delivery] max_bytes` cap, the tool returns an error synchronously with code `message_too_large` and advises writing large data to a file and passing the path instead.
+
 ### `show_artifact`
 
-Display an artifact file in the UI panel. **Guide-only**: the Guide is the only agent that interacts with the user via the UI. Supports tabbed display (multiple artifacts open at once). See [Artifacts](artifacts.md) for the full artifact system documentation.
+Display an artifact file in the UI panel. Available to all agents except the Narrator. In practice this tool is most useful to the Guide, which is the primary agent that interacts with the user via the UI; other agents typically delegate display requests to the Guide. Supports tabbed display (multiple artifacts open at once). See [Artifacts](artifacts.md) for the full artifact system documentation.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
