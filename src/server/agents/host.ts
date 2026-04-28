@@ -1360,21 +1360,18 @@ export class AgentHost {
       this.writeCompactionCount(this.compactionCount);
     }
 
-    // Trigger pruning compaction at 30% context usage when counter reaches depth
+    // Trigger pruning compaction on agent_end when counter reaches depth
     if (
       event.type === 'agent_end' &&
       this.compactionCount >= this.compactionDepth &&
       !this.isPruning
     ) {
-      const usage = this.getContextUsage();
-      if (usage?.percent != null && usage.percent >= 30) {
-        this.isPruning = true;
-        this.triggerPruningCompaction()
-          .catch((err: unknown) => log.error('[AgentHost] Pruning compaction error:', err))
-          .finally(() => {
-            this.isPruning = false;
-          });
-      }
+      this.isPruning = true;
+      this.triggerPruningCompaction()
+        .catch((err: unknown) => log.error('[AgentHost] Pruning compaction error:', err))
+        .finally(() => {
+          this.isPruning = false;
+        });
     }
   }
 

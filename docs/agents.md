@@ -221,7 +221,7 @@ Auto-compaction is also configured to fire earlier (at ~50% of the context windo
 Agent sessions are persisted as JSONL files in `~/.system2/sessions/{role}_{id}/`. The pi-coding-agent SDK manages:
 - **Session format:** tree structure with `id` and `parentId` for in-place branching
 - **Auto-compaction:** when context approaches model limits, older messages are summarized
-- **Compaction pruning:** long-running agents can set `compaction_depth: N` in their frontmatter. After N auto-compactions, a manual "pruning" compaction runs at 30% context usage. It uses the Nth oldest compaction summary as a baseline to shed stale information, creating a sliding window instead of an ever-growing chain. The compaction counter is persisted to `.compaction-count` in the session directory so it survives restarts.
+- **Compaction pruning:** long-running agents can set `compaction_depth: N` in their frontmatter. After N auto-compactions, a manual "pruning" compaction runs on the next `agent_end`. It uses the Nth oldest compaction summary as a baseline to shed stale information, creating a sliding window instead of an ever-growing chain. The compaction counter is persisted to `.compaction-count` in the session directory so it survives restarts.
 
 **Session continuation** (`initialize()`): at startup, system2 finds the newest `.jsonl` file by mtime (`findMostRecentSession()`) and opens it directly via `SessionManager.open()`. This tolerates files that lack a valid session header, which `SessionManager.continueRecent()` would reject and silently replace with a fresh empty session. `continueRecent()` is used only when no `.jsonl` file exists yet (first-time setup).
 
