@@ -513,4 +513,32 @@ describe('AuthResolver.ensureFresh', () => {
       })
     ).rejects.toThrow('network down');
   });
+
+  it('releases the refresh lock after failure so subsequent calls can succeed', async () => {
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
+
+    // First call: refresh fails
+    await expect(
+      resolver.ensureFresh({
+        refresh: async () => {
+          throw new Error('transient failure');
+        },
+      })
+    ).rejects.toThrow('transient failure');
+
+    // Second call: refresh succeeds (lock must have been released)
+    const refreshed = await resolver.ensureFresh({
+      refresh: async () => ({
+        access: 'recovered',
+        refresh: 'rt-2',
+        expires: Date.now() + 60 * 60_000,
+      }),
+    });
+    expect(refreshed.has('anthropic')).toBe(true);
+    expect(resolver.getActiveCredential()?.provider).toBe('anthropic');
+  });
 });

@@ -380,7 +380,7 @@ export class AuthResolver {
         }
       }
 
-      const lock = this.doRefresh(provider, cred, deps.refresh).then(() => {
+      const lock = this.doRefresh(provider, cred, deps.refresh).finally(() => {
         this.refreshLocks.delete(provider);
       });
       this.refreshLocks.set(provider, lock);
