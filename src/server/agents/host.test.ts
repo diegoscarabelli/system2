@@ -2094,31 +2094,33 @@ describe('AgentHost', () => {
         expect(internal.compactionCount).toBe(0);
       });
 
-      it('triggers pruning on agent_end when counter reaches depth and usage >= 30%', () => {
+      it('triggers pruning on agent_end when counter reaches depth', () => {
         const { internal } = makeHostForPruning(3);
         const session = mockSession(['baseline', 'second', 'third']);
         internal.session = session;
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
         internal.writeCompactionCount = vi.fn();
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 30 });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
         expect(internal.isPruning).toBe(true);
       });
 
-      it('does not trigger pruning when usage is below 30%', () => {
-        const { internal } = makeHostForPruning(3);
-        const session = mockSession(['baseline', 'second', 'third']);
-        internal.session = session;
-        internal._sessionDir = '/tmp/test-session';
-        internal.compactionCount = 3;
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 29 });
+      it('triggers pruning regardless of context usage', () => {
+        for (const usage of [{ percent: 5 }, { percent: 0 }, null]) {
+          const { internal } = makeHostForPruning(3);
+          const session = mockSession(['baseline', 'second', 'third']);
+          internal.session = session;
+          internal._sessionDir = '/tmp/test-session';
+          internal.compactionCount = 3;
+          internal.writeCompactionCount = vi.fn();
+          internal.getContextUsage = vi.fn().mockReturnValue(usage);
 
-        internal.handleCompactionTracking({ type: 'agent_end' });
+          internal.handleCompactionTracking({ type: 'agent_end' });
 
-        expect(internal.isPruning).toBe(false);
+          expect(internal.isPruning).toBe(true);
+        }
       });
 
       it('does not trigger pruning when counter is below depth', () => {
@@ -2126,7 +2128,6 @@ describe('AgentHost', () => {
         internal.session = mockSession(['a', 'b']);
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 2;
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 50 });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
@@ -2141,7 +2142,6 @@ describe('AgentHost', () => {
         internal.compactionCount = 3;
         internal.isPruning = true;
         internal.writeCompactionCount = vi.fn();
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 50 });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
