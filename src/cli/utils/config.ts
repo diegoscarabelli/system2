@@ -91,6 +91,10 @@ interface TomlConfig {
       model?: string;
       compat_reasoning?: boolean;
     };
+    oauth?: {
+      primary?: string;
+      fallback?: string[];
+    };
   };
   agents?: Record<
     string,
@@ -240,11 +244,20 @@ function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
     }
   }
 
-  return {
+  const config: LlmConfig = {
     primary: (toml.primary as LlmProvider) ?? 'anthropic',
     fallback: (toml.fallback as LlmProvider[]) ?? [],
     providers,
   };
+
+  if (toml.oauth?.primary) {
+    config.oauth = {
+      primary: toml.oauth.primary as LlmProvider,
+      fallback: (toml.oauth.fallback as LlmProvider[]) ?? [],
+    };
+  }
+
+  return config;
 }
 
 /**
@@ -547,6 +560,14 @@ export function buildConfigToml(options: {
     lines.push(`primary = "${primary}"`);
     lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
     lines.push('');
+
+    if (options.llm.oauth) {
+      lines.push('[llm.oauth]');
+      lines.push(`primary = "${options.llm.oauth.primary}"`);
+      const fb = options.llm.oauth.fallback.map((f) => `"${f}"`).join(', ');
+      lines.push(`fallback = [${fb}]`);
+      lines.push('');
+    }
 
     for (const name of [
       'anthropic',

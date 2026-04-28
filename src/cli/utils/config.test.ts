@@ -1,4 +1,6 @@
+import TOML from '@iarna/toml';
 import { describe, expect, it, vi } from 'vitest';
+import type { LlmConfig } from '../../shared/index.js';
 import { buildConfigToml, convertTomlAgents, convertTomlDatabases } from './config.js';
 
 describe('buildConfigToml', () => {
@@ -663,5 +665,46 @@ describe('convertTomlAgents', () => {
       conductor: { models: { google: 'gemini-2.5-pro' } },
       narrator: { thinking_level: 'off' },
     });
+  });
+});
+
+describe('buildConfigToml — [llm.oauth] tier', () => {
+  it('emits oauth section with primary and fallback', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [] } },
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toMatch(/\[llm\.oauth\]\s*\nprimary\s*=\s*"anthropic"\s*\nfallback\s*=\s*\[\]/);
+  });
+
+  it('omits oauth section when undefined', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [{ key: 'k', label: 'l' }] } },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).not.toMatch(/\[llm\.oauth\]/);
+  });
+
+  it('round-trips through TOML.parse', () => {
+    const llm: LlmConfig = {
+      primary: 'openai',
+      fallback: ['google'],
+      providers: {
+        anthropic: { keys: [] },
+        openai: { keys: [{ key: 'oai-1', label: 'main' }] },
+      },
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    const toml = buildConfigToml({ llm });
+    const parsed = TOML.parse(toml) as {
+      llm?: { oauth?: { primary?: string; fallback?: string[] } };
+    };
+    expect(parsed.llm?.oauth?.primary).toBe('anthropic');
+    expect(parsed.llm?.oauth?.fallback).toEqual([]);
   });
 });
