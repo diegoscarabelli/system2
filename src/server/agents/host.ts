@@ -1455,7 +1455,13 @@ export class AgentHost {
 
     const baseline = this.findBaselineSummary();
     if (!baseline) {
-      log.info('[AgentHost] No baseline found for pruning, skipping');
+      // Reset the counter so we don't re-attempt baseline lookup on every
+      // subsequent agent_end. The next pruning attempt fires after another
+      // `compactionDepth` regular compactions accumulate; by then a baseline
+      // is much more likely to exist.
+      log.info('[AgentHost] No baseline found for pruning, resetting counter and skipping');
+      this.compactionCount = 0;
+      this.writeCompactionCount(0);
       return;
     }
 

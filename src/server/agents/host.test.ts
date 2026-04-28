@@ -1992,18 +1992,20 @@ describe('AgentHost', () => {
         expect(internal.writeCompactionCount).toHaveBeenCalledWith(0);
       });
 
-      it('skips pruning when no baseline is available', async () => {
+      it('skips pruning when no baseline is available and resets the counter', async () => {
         const { internal } = makeHostForPruning(5);
         const session = mockSession(['only one']);
         internal.session = session;
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 5;
+        internal.writeCompactionCount = vi.fn();
 
         await internal.triggerPruningCompaction();
 
         expect(session.compact).not.toHaveBeenCalled();
-        // compactionCount should NOT be reset when pruning is skipped
-        expect(internal.compactionCount).toBe(5);
+        // Counter is reset so we don't retry baseline lookup on every agent_end.
+        expect(internal.compactionCount).toBe(0);
+        expect(internal.writeCompactionCount).toHaveBeenCalledWith(0);
       });
 
       it('skips pruning when session is null', async () => {
@@ -2105,6 +2107,7 @@ describe('AgentHost', () => {
         internal.handleCompactionTracking({ type: 'agent_end' });
 
         expect(internal.isPruning).toBe(true);
+        expect(session.compact).toHaveBeenCalled();
       });
 
       it('triggers pruning regardless of context usage', () => {
@@ -2120,6 +2123,7 @@ describe('AgentHost', () => {
           internal.handleCompactionTracking({ type: 'agent_end' });
 
           expect(internal.isPruning).toBe(true);
+          expect(session.compact).toHaveBeenCalled();
         }
       });
 
