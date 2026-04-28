@@ -127,4 +127,4 @@ On every CLI invocation, checks whether a newer version of `@diegoscarabelli/sys
 ## See Also
 
 - [Server](server.md): the server this CLI manages
-- [Configuration](../configuration.md): config.toml format and defaults
+- [Configuration](configuration.md): config.toml format and defaults
