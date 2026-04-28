@@ -1992,18 +1992,20 @@ describe('AgentHost', () => {
         expect(internal.writeCompactionCount).toHaveBeenCalledWith(0);
       });
 
-      it('skips pruning when no baseline is available', async () => {
+      it('skips pruning when no baseline is available and resets the counter', async () => {
         const { internal } = makeHostForPruning(5);
         const session = mockSession(['only one']);
         internal.session = session;
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 5;
+        internal.writeCompactionCount = vi.fn();
 
         await internal.triggerPruningCompaction();
 
         expect(session.compact).not.toHaveBeenCalled();
-        // compactionCount should NOT be reset when pruning is skipped
-        expect(internal.compactionCount).toBe(5);
+        // Counter is reset so we don't retry baseline lookup on every agent_end.
+        expect(internal.compactionCount).toBe(0);
+        expect(internal.writeCompactionCount).toHaveBeenCalledWith(0);
       });
 
       it('skips pruning when session is null', async () => {
@@ -2094,31 +2096,38 @@ describe('AgentHost', () => {
         expect(internal.compactionCount).toBe(0);
       });
 
-      it('triggers pruning on agent_end when counter reaches depth and usage >= 30%', () => {
+      it('triggers pruning on agent_end when counter reaches depth', () => {
         const { internal } = makeHostForPruning(3);
         const session = mockSession(['baseline', 'second', 'third']);
         internal.session = session;
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
         internal.writeCompactionCount = vi.fn();
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 30 });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
         expect(internal.isPruning).toBe(true);
+        expect(session.compact).toHaveBeenCalled();
       });
 
-      it('does not trigger pruning when usage is below 30%', () => {
+      it('triggers pruning without consulting context usage', () => {
         const { internal } = makeHostForPruning(3);
         const session = mockSession(['baseline', 'second', 'third']);
         internal.session = session;
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 29 });
+        internal.writeCompactionCount = vi.fn();
+        // Make getContextUsage throw so the test fails loudly if a future
+        // regression re-introduces a usage-based gate in the trigger path.
+        internal.getContextUsage = vi.fn(() => {
+          throw new Error('getContextUsage must not be consulted by pruning trigger');
+        });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
-        expect(internal.isPruning).toBe(false);
+        expect(internal.isPruning).toBe(true);
+        expect(session.compact).toHaveBeenCalled();
+        expect(internal.getContextUsage).not.toHaveBeenCalled();
       });
 
       it('does not trigger pruning when counter is below depth', () => {
@@ -2126,7 +2135,6 @@ describe('AgentHost', () => {
         internal.session = mockSession(['a', 'b']);
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 2;
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 50 });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
@@ -2141,7 +2149,6 @@ describe('AgentHost', () => {
         internal.compactionCount = 3;
         internal.isPruning = true;
         internal.writeCompactionCount = vi.fn();
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 50 });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
@@ -2157,6 +2164,213 @@ describe('AgentHost', () => {
         internal.handleCompactionTracking({ type: 'tool_execution_start' });
 
         expect(internal.compactionCount).toBe(0);
+      });
+    });
+
+    describe('agent_end deferral when pruning fires', () => {
+      type DeferralInternal = PruningInternal & {
+        busy: boolean;
+        onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
+        listeners: Set<(event: { type: string }) => void>;
+        deferredAgentEnd: { type: string } | null;
+        handleSessionEvent: (event: { type: string }) => void;
+        handlePotentialError: (event: unknown) => Promise<void>;
+      };
+
+      it('defers agent_end forwarding and busy clear until pruning completes', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        const session = mockSession(['baseline', 'second', 'third']);
+        def.session = session;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let pruneResolve!: () => void;
+        session.compact.mockImplementation(() => new Promise<void>((r) => (pruneResolve = r)));
+
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+
+        def.handleSessionEvent({ type: 'agent_end' });
+
+        // Pruning is in flight. agent_end has not been forwarded and busy is still true.
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+        expect(listenerEvents).toEqual([]);
+        expect(busyEvents).toEqual([]);
+        expect(def.busy).toBe(true);
+
+        // Pruning finishes.
+        pruneResolve();
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(def.busy).toBe(false);
+        expect(busyEvents).toEqual([false]);
+        expect(listenerEvents).toEqual(['agent_end']);
+      });
+
+      it('forwards agent_end immediately when pruning is not triggered', () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        def.compactionCount = 0;
+        def.busy = true;
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+
+        def.handleSessionEvent({ type: 'agent_end' });
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(def.busy).toBe(false);
+        expect(busyEvents).toEqual([false]);
+        expect(listenerEvents).toEqual(['agent_end']);
+      });
+
+      it('flushes deferred agent_end even when pruning rejects', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        const session = mockSession(['baseline', 'second', 'third']);
+        def.session = session;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let pruneReject!: (err: Error) => void;
+        session.compact.mockImplementation(() => new Promise((_, r) => (pruneReject = r)));
+
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+
+        def.handleSessionEvent({ type: 'agent_end' });
+
+        pruneReject(new Error('compact failed'));
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(def.busy).toBe(false);
+        expect(busyEvents).toEqual([false]);
+        expect(listenerEvents).toEqual(['agent_end']);
+      });
+
+      it('keeps the latest agent_end when a second one arrives mid-pruning', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        const session = mockSession(['baseline', 'second', 'third']);
+        def.session = session;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let pruneResolve!: () => void;
+        session.compact.mockImplementation(() => new Promise<void>((r) => (pruneResolve = r)));
+
+        const listenerEvents: { type: string; tag?: string }[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e as { type: string; tag?: string })]);
+
+        def.handleSessionEvent({ type: 'agent_end', tag: 'first' } as { type: string });
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end', tag: 'first' });
+
+        def.handleSessionEvent({ type: 'agent_end', tag: 'second' } as { type: string });
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end', tag: 'second' });
+
+        // Re-entry guard prevents the second agent_end from triggering pruning again.
+        expect(session.compact).toHaveBeenCalledTimes(1);
+
+        pruneResolve();
+        await new Promise((r) => setImmediate(r));
+
+        expect(listenerEvents).toEqual([{ type: 'agent_end', tag: 'second' }]);
+      });
+
+      it('routes compaction_end through handleCompactionTracking via handleSessionEvent', () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        def.compactionCount = 0;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+        def.listeners = new Set();
+
+        def.handleSessionEvent({ type: 'compaction_end' });
+
+        expect(def.compactionCount).toBe(1);
+      });
+
+      it('stale pruning .finally is a no-op once pruningGeneration is bumped', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal & { pruningGeneration: number };
+        const sessionA = mockSession(['baseline', 'second', 'third']);
+        def.session = sessionA;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let resolveA!: () => void;
+        sessionA.compact.mockImplementation(() => new Promise<void>((r) => (resolveA = r)));
+
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+
+        // Pruning A starts.
+        def.handleSessionEvent({ type: 'agent_end' });
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+
+        // Simulate reinitializeWithProvider clearing pruning state and bumping
+        // the generation while pruning A is still in flight.
+        def.deferredAgentEnd = null;
+        def.isPruning = false;
+        def.pruningGeneration++;
+
+        // A new agent_end fires after reinit completes; pruning B starts.
+        const sessionB = mockSession(['baseline', 'second', 'third']);
+        def.session = sessionB;
+        def.compactionCount = 3;
+        let resolveB!: () => void;
+        sessionB.compact.mockImplementation(() => new Promise<void>((r) => (resolveB = r)));
+        def.busy = true;
+
+        def.handleSessionEvent({ type: 'agent_end' });
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+
+        // Pruning A's promise resolves now (its session is dead). Its .finally
+        // should be a no-op because the generation was bumped.
+        resolveA();
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+        expect(listenerEvents).toEqual([]);
+
+        // Pruning B's promise resolves; its .finally fires and flushes.
+        resolveB();
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(listenerEvents).toEqual(['agent_end']);
       });
     });
 

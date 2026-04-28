@@ -190,6 +190,8 @@ export class AgentHost {
   private compactionCount = 0;
   private compactionDepth = 0;
   private isPruning = false;
+  private deferredAgentEnd: AgentSessionEvent | null = null;
+  private pruningGeneration = 0;
   private contextWindow = 0;
   private contextOverflowHandled = false;
   private agentModels: Record<string, string> = {};
@@ -543,10 +545,6 @@ export class AgentHost {
         this.onBusyChange?.(this.agentId, true, this.getContextUsage()?.percent ?? null);
       }
     } else if (event.type === 'agent_end') {
-      if (this.busy) {
-        this.busy = false;
-        this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
-      }
       // On error turns, lastTurnErrored is true (set synchronously in
       // handlePotentialError before agent_end fires). Skip cleanup so the
       // failed prompt/delivery stays tracked for retry or failover.
@@ -570,10 +568,32 @@ export class AgentHost {
         this.oauthRefreshAttempted = false;
       }
       this.lastTurnErrored = false;
-    }
 
-    // Track compaction for pruning
-    this.handleCompactionTracking(event);
+      // Track compaction for pruning. May synchronously schedule pruning,
+      // setting isPruning = true.
+      this.handleCompactionTracking(event);
+
+      // If pruning was just scheduled, defer the busy clear and agent_end
+      // forwarding until pruning completes — otherwise the UI would see
+      // ready_for_input before pruning starts, allowing a user prompt to
+      // race with the in-flight compaction. If a previous agent_end is
+      // already deferred (a rare case where pi-coding-agent fires another
+      // agent_end while pruning is in flight), keep the latest event since
+      // ready_for_input/context_usage are idempotent for the WS handler.
+      if (this.isPruning) {
+        this.deferredAgentEnd = event;
+        return;
+      }
+
+      if (this.busy) {
+        this.busy = false;
+        this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
+      }
+    } else {
+      // Track compaction for pruning (handles the compaction_end increment
+      // path; the agent_end trigger is handled inline above).
+      this.handleCompactionTracking(event);
+    }
 
     // Forward to external listeners
     this.listeners.forEach((listener) => {
@@ -939,6 +959,15 @@ export class AgentHost {
       this.busy = false;
       this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
     }
+
+    // Drop any pruning state tied to the dead session: a deferred agent_end
+    // belongs to a session that no longer exists, and isPruning would otherwise
+    // remain true if the in-flight session.compact() never resolves. Bump
+    // pruningGeneration so the stale promise's .finally is a no-op and can't
+    // race with a fresh pruning started after reinit completes.
+    this.deferredAgentEnd = null;
+    this.isPruning = false;
+    this.pruningGeneration++;
 
     try {
       // Update current provider and key index
@@ -1439,22 +1468,46 @@ export class AgentHost {
       this.writeCompactionCount(this.compactionCount);
     }
 
-    // Trigger pruning compaction at 30% context usage when counter reaches depth
+    // Trigger pruning compaction on agent_end when counter reaches depth
     if (
       event.type === 'agent_end' &&
       this.compactionCount >= this.compactionDepth &&
       !this.isPruning
     ) {
-      const usage = this.getContextUsage();
-      if (usage?.percent != null && usage.percent >= 30) {
-        this.isPruning = true;
-        this.triggerPruningCompaction()
-          .catch((err: unknown) => log.error('[AgentHost] Pruning compaction error:', err))
-          .finally(() => {
-            this.isPruning = false;
-          });
-      }
+      this.isPruning = true;
+      // Capture a generation token so a stale pruning whose session was torn
+      // down by reinitializeWithProvider can't clear isPruning or flush the
+      // deferred agent_end of a newer pruning that started in the meantime.
+      const generation = ++this.pruningGeneration;
+      this.triggerPruningCompaction()
+        .catch((err: unknown) => log.error('[AgentHost] Pruning compaction error:', err))
+        .finally(() => {
+          if (this.pruningGeneration !== generation) return;
+          this.isPruning = false;
+          this.flushDeferredAgentEnd();
+        });
     }
+  }
+
+  /**
+   * If an agent_end was deferred while pruning was in flight, complete its
+   * handling now: clear busy and forward to listeners so the UI receives
+   * ready_for_input only after pruning has finished.
+   *
+   * Compaction tracking already ran inline before deferral, so the counter
+   * has been reset by triggerPruningCompaction; no need to re-track here.
+   */
+  private flushDeferredAgentEnd(): void {
+    const deferred = this.deferredAgentEnd;
+    if (!deferred) return;
+    this.deferredAgentEnd = null;
+    if (this.busy) {
+      this.busy = false;
+      this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
+    }
+    this.listeners.forEach((listener) => {
+      listener(deferred);
+    });
   }
 
   /**
@@ -1490,7 +1543,13 @@ export class AgentHost {
 
     const baseline = this.findBaselineSummary();
     if (!baseline) {
-      log.info('[AgentHost] No baseline found for pruning, skipping');
+      // Reset the counter so we don't re-attempt baseline lookup on every
+      // subsequent agent_end. The next pruning attempt fires after another
+      // `compactionDepth` regular compactions accumulate; by then a baseline
+      // is much more likely to exist.
+      log.info('[AgentHost] No baseline found for pruning, resetting counter and skipping');
+      this.compactionCount = 0;
+      this.writeCompactionCount(0);
       return;
     }
 
