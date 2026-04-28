@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentHost } from '../agents/host.js';
+import { type AgentHost, MAX_DELIVERY_BYTES } from '../agents/host.js';
 import type { DatabaseClient } from '../db/client.js';
 import {
   buildAndDeliverDailySummary,
@@ -1329,15 +1329,17 @@ describe('buildAndDeliverDailySummary', () => {
 
     const host = mockHost();
     const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
-    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
+    // Use a tight catch-up budget (100 KB) to deterministically trigger truncation
+    // regardless of future default-budget changes.
+    const tightBudget = 100 * 1024;
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
 
     // Should have delivered exactly one message (daily-summary; no projects)
     expect(host.calls).toHaveLength(1);
     const deliveredContent = host.calls[0].content;
 
-    // Must be within CATCH_UP_BUDGET_BYTES (256 KB) of pure activity plus overhead —
-    // in practice well under MAX_DELIVERY_BYTES (512 KB)
-    expect(Buffer.byteLength(deliveredContent, 'utf8')).toBeLessThanOrEqual(512 * 1024);
+    // Must be within the tight catch-up budget plus overhead — well under MAX_DELIVERY_BYTES
+    expect(Buffer.byteLength(deliveredContent, 'utf8')).toBeLessThanOrEqual(MAX_DELIVERY_BYTES);
 
     // Must contain the dropped-range note
     expect(deliveredContent).toContain('[NOTE: dropped');

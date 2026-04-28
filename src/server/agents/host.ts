@@ -110,8 +110,10 @@ const AGENT_LIBRARY_DIR = join(AGENT_DIR, 'library');
 const ORCHESTRATOR_ROLES = new Set(['guide', 'conductor']);
 
 /** Hard cap on inter-agent delivery content. Producers should self-bound; this is the loud-fail
- *  boundary against accidental large deliveries (catch-up payloads, tool result dumps, etc.). */
-export const MAX_DELIVERY_BYTES = 512 * 1024;
+ *  boundary against accidental large deliveries (catch-up payloads, tool result dumps, etc.).
+ *  Default ~1 MB ≈ 25% of a 1M-token context window — leaves room for the recipient's system
+ *  prompt, history, and knowledge files. Configurable via [delivery] max_bytes in config.toml. */
+export const MAX_DELIVERY_BYTES = 1024 * 1024;
 
 interface AgentDefinition {
   name: string;

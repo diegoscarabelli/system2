@@ -162,8 +162,8 @@ interface TomlConfig {
 /** Default delivery budget values. Must stay in sync with MAX_DELIVERY_BYTES,
  *  CATCH_UP_BUDGET_BYTES, and CUSTOM_MESSAGE_CONTENT_BUDGET in the server package. */
 export const DEFAULT_DELIVERY: DeliveryConfig = {
-  max_bytes: 512 * 1024, // 524288 — hard cap on inter-agent delivery size
-  catch_up_budget_bytes: 256 * 1024, // 262144 — producer-side budget (catch-up / daily summary)
+  max_bytes: 1024 * 1024, // 1048576 — hard cap on inter-agent delivery size (~25% of a 1M-token context window)
+  catch_up_budget_bytes: 512 * 1024, // 524288 — producer-side budget; half of max_bytes, leaves headroom for headers/DB-changes/SDK overhead
   custom_message_content_budget_bytes: 4 * 1024, // 4096 — per-custom_message content cap
 };
 

@@ -25,9 +25,10 @@ const INCLUDED_ENTRY_TYPES = new Set(['message', 'custom_message']);
 /** Per-custom_message content cap when feeding catch-up activity into the Narrator. */
 export const CUSTOM_MESSAGE_CONTENT_BUDGET = 4 * 1024;
 
-/** Producer-side budget for a single inter-agent delivery (well under MAX_DELIVERY_BYTES
- *  to leave room for headers, DB-changes section, and SDK request overhead). */
-export const CATCH_UP_BUDGET_BYTES = 256 * 1024;
+/** Producer-side budget for a single inter-agent delivery (half of MAX_DELIVERY_BYTES by default,
+ *  leaving room for headers, DB-changes section, and SDK request overhead).
+ *  Configurable via [delivery] catch_up_budget_bytes in config.toml. */
+export const CATCH_UP_BUDGET_BYTES = 512 * 1024;
 
 /**
  * A session entry with its timestamp exposed alongside the pre-stripped JSON rendering.

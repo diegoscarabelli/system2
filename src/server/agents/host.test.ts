@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LlmConfig } from '../../shared/index.js';
-import { AgentHost } from './host.js';
+import { AgentHost, MAX_DELIVERY_BYTES } from './host.js';
 import type { AgentRegistry } from './registry.js';
 
 // Minimal stubs — we're testing internal state management, not the full agent lifecycle
@@ -1561,8 +1561,8 @@ describe('AgentHost', () => {
       internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
       internal._sessionDir = null;
 
-      // Create content that exceeds MAX_DELIVERY_BYTES (512 KB)
-      const oversizedContent = 'x'.repeat(512 * 1024 + 1);
+      // Create content that exceeds MAX_DELIVERY_BYTES
+      const oversizedContent = 'x'.repeat(MAX_DELIVERY_BYTES + 1);
 
       await expect(
         host.deliverMessage(oversizedContent, {
@@ -1592,8 +1592,8 @@ describe('AgentHost', () => {
       internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
       internal._sessionDir = null;
 
-      // Create content exactly at MAX_DELIVERY_BYTES (512 KB)
-      const contentAtLimit = 'y'.repeat(512 * 1024);
+      // Create content exactly at MAX_DELIVERY_BYTES
+      const contentAtLimit = 'y'.repeat(MAX_DELIVERY_BYTES);
 
       // Should not reject due to size check
       const promise = host.deliverMessage(contentAtLimit, {
