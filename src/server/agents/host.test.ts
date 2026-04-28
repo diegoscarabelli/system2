@@ -3400,4 +3400,150 @@ describe('AgentHost', () => {
       expect(markKeyFailedSpy).toHaveBeenCalledOnce();
     });
   });
+
+  describe('readActivityLogWithBudget', () => {
+    let testDir: string;
+
+    beforeEach(() => {
+      testDir = join(
+        tmpdir(),
+        `system2-actlog-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      );
+      mkdirSync(testDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    type ActivityLogInternal = {
+      readActivityLogWithBudget: (filePath: string, budget: number) => string;
+    };
+
+    function makeHostForActivityLog() {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        knowledgeBudgetChars: 10_000,
+      });
+      const internal = host as unknown as ActivityLogInternal;
+      return { host, internal };
+    }
+
+    const FRONTMATTER =
+      '---\nlast_narrator_update_ts: 2026-04-28T19:00:00.000Z\nproject_id: 1\nproject_name: test\n---\n';
+
+    it('Test A: 50 KB log.md — preserves frontmatter, keeps newest content, drops oldest with notice', () => {
+      // Build 50 KB content: frontmatter + 50 KB of chronological body entries
+      const entryLine = '## 2026-04-28T10:00:00Z — some activity entry\n\ncontent here.\n\n';
+      const bodyLines: string[] = [];
+      let bodyLen = 0;
+      while (bodyLen < 50 * 1024) {
+        bodyLines.push(entryLine);
+        bodyLen += entryLine.length;
+      }
+      const body = bodyLines.join('');
+      // Add a distinct newest entry at the very end so we can assert it's preserved
+      const newestEntry = '## 2026-04-28T23:59:00Z — NEWEST ENTRY\n\nThis is the newest.\n\n';
+      const fullContent = FRONTMATTER + body + newestEntry;
+
+      const logPath = join(testDir, 'log.md');
+      writeFileSync(logPath, fullContent);
+
+      const budget = 10_000;
+      const { internal } = makeHostForActivityLog();
+      const result = internal.readActivityLogWithBudget(logPath, budget);
+
+      // (a) Frontmatter preserved verbatim
+      expect(result.startsWith(FRONTMATTER)).toBe(true);
+      // (b) Newest content (last entry) is at the end
+      expect(result.endsWith(newestEntry.trimEnd())).toBe(false); // trimEnd not needed; check inclusion
+      expect(result).toContain('NEWEST ENTRY');
+      expect(result).toContain('This is the newest.');
+      // (c) Truncation notice present
+      expect(result).toContain(
+        '[...truncated: dropped oldest content from this activity log to fit'
+      );
+      expect(result).toContain('newest entries below]');
+      // Total length should be <= budget + notice overhead
+      expect(result.length).toBeLessThanOrEqual(budget + 200);
+    });
+
+    it('Test B: 50 KB daily summary — preserves frontmatter, keeps newest content, drops oldest with notice', () => {
+      const summaryFrontmatter = '---\ndate: 2026-04-28\ntype: daily_summary\n---\n';
+      const entryLine = '### 09:00 — activity block\n\nsome logged summary content.\n\n';
+      const bodyLines: string[] = [];
+      let bodyLen = 0;
+      while (bodyLen < 50 * 1024) {
+        bodyLines.push(entryLine);
+        bodyLen += entryLine.length;
+      }
+      const newestEntry = '### 23:55 — NEWEST SUMMARY ENTRY\n\nEnd-of-day wrap.\n\n';
+      const fullContent = summaryFrontmatter + bodyLines.join('') + newestEntry;
+
+      const summaryPath = join(testDir, '2026-04-28.md');
+      writeFileSync(summaryPath, fullContent);
+
+      const budget = 10_000;
+      const { internal } = makeHostForActivityLog();
+      const result = internal.readActivityLogWithBudget(summaryPath, budget);
+
+      // (a) Frontmatter preserved verbatim
+      expect(result.startsWith(summaryFrontmatter)).toBe(true);
+      // (b) Newest content preserved
+      expect(result).toContain('NEWEST SUMMARY ENTRY');
+      expect(result).toContain('End-of-day wrap.');
+      // (c) Truncation notice present
+      expect(result).toContain(
+        '[...truncated: dropped oldest content from this activity log to fit'
+      );
+      expect(result).toContain('newest entries below]');
+      expect(result.length).toBeLessThanOrEqual(budget + 200);
+    });
+
+    it('Test C (regression): file within budget is returned as-is (no truncation)', () => {
+      const smallContent = `${FRONTMATTER}A small file that fits in budget.\n`;
+      const filePath = join(testDir, 'small.md');
+      writeFileSync(filePath, smallContent);
+
+      const { internal } = makeHostForActivityLog();
+      const result = internal.readActivityLogWithBudget(filePath, 10_000);
+
+      expect(result).toBe(smallContent);
+      expect(result).not.toContain('[...truncated');
+    });
+
+    it('Test C (regression): curated infrastructure.md uses first-N truncation (drops tail, not oldest)', () => {
+      // This test verifies the distinction: readActivityLogWithBudget drops the MIDDLE (oldest),
+      // while readWithBudget (used for curated files) drops the TAIL.
+      // We confirm readActivityLogWithBudget does NOT produce the curated-file truncation marker.
+      // To trigger truncation, the file must exceed the budget of 10_000 chars.
+      const oldestEntry = '## OLDEST ENTRY — should be dropped\n\ncontent\n\n';
+      // Fill with enough middle content to push total over the 10_000-char budget
+      const singleMiddle =
+        '## middle entry block with some padding content to take up space\n\ncontent here.\n\n';
+      const middleEntries = Array(150).fill(singleMiddle).join('');
+      const newestEntry = '## NEWEST ENTRY — should be kept\n\ncontent\n\n';
+      const fullContent = FRONTMATTER + oldestEntry + middleEntries + newestEntry;
+
+      // Sanity-check: file must exceed budget
+      expect(fullContent.length).toBeGreaterThan(10_000);
+
+      const filePath = join(testDir, 'infrastructure.md');
+      writeFileSync(filePath, fullContent);
+
+      const budget = 10_000;
+      const { internal } = makeHostForActivityLog();
+      const result = internal.readActivityLogWithBudget(filePath, budget);
+
+      // Activity-log truncation: oldest dropped, newest kept
+      expect(result).toContain('NEWEST ENTRY');
+      expect(result).not.toContain('OLDEST ENTRY');
+      // The notice marker is the activity-log one, NOT the curated-file one
+      expect(result).toContain('dropped oldest content from this activity log');
+      expect(result).not.toContain('file exceeds');
+    });
+  });
 });

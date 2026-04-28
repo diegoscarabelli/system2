@@ -1161,11 +1161,16 @@ export class AgentHost {
     }
 
     // Role-aware activity context:
-    // Project-scoped agents get their project log; system-wide agents get daily summaries
+    // Project-scoped agents get their project log; system-wide agents get daily summaries.
+    // Activity logs are chronologically appended, so we keep the newest content (tail) and
+    // drop the oldest middle when truncation is needed — the opposite of curated files.
     if (this.agentProject !== null && this.agentProjectDirName) {
       const projectLogPath = join(SYSTEM2_DIR, 'projects', this.agentProjectDirName, 'log.md');
       if (existsSync(projectLogPath)) {
-        addSection(projectLogPath, readWithBudget(projectLogPath));
+        addSection(
+          projectLogPath,
+          this.readActivityLogWithBudget(projectLogPath, MAX_KNOWLEDGE_CHARS)
+        );
       }
     } else {
       const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -1178,13 +1183,43 @@ export class AgentHost {
           .reverse(); // chronological order
         for (const file of summaryFiles) {
           const filePath = join(summariesDir, file);
-          addSection(filePath, readWithBudget(filePath));
+          addSection(filePath, this.readActivityLogWithBudget(filePath, MAX_KNOWLEDGE_CHARS));
         }
       }
     }
 
     if (sections.length === 0) return '';
     return `\n\n## Knowledge Base\n\n${sections.join('\n\n---\n\n')}`;
+  }
+
+  /**
+   * Truncate an activity-log file (chronologically appended) keeping the YAML frontmatter
+   * and the newest trailing content. Drops the oldest middle content with a marker.
+   */
+  private readActivityLogWithBudget(filePath: string, budget: number): string {
+    const raw = readFileSync(filePath, 'utf-8');
+    if (raw.length <= budget) return raw;
+
+    let frontmatter = '';
+    let body = raw;
+    const fmMatch = raw.match(/^---\n[\s\S]*?\n---\n/);
+    if (fmMatch) {
+      frontmatter = fmMatch[0];
+      body = raw.slice(fmMatch[0].length);
+    }
+
+    const notice = `\n\n[...truncated: dropped oldest content from this activity log to fit ${budget.toLocaleString()}-char budget; newest entries below]\n\n`;
+    const tailBudget = budget - frontmatter.length - notice.length;
+    if (tailBudget <= 0) {
+      // Frontmatter alone exceeds budget; degenerate case
+      return (
+        raw.slice(0, budget) +
+        `\n\n[...truncated: file exceeds ${budget.toLocaleString()} char budget]`
+      );
+    }
+
+    const tail = body.slice(-tailBudget);
+    return frontmatter + notice + tail;
   }
 
   /**
