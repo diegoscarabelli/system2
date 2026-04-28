@@ -65,7 +65,7 @@ The Guide adapts to what you already have: if you have an existing database, orc
 
 Once the server is running, a small set of commands covers the day-to-day lifecycle: checking status, shutting down, managing credentials, and upgrading.
 
-**Daily operation.** Use `system2 status` to confirm the server is up, and `system2 stop` to shut it down gracefully. When you are done for the day, run `system2 stop`: agent work in progress is saved, and a backup is created automatically on the next start.
+**Daily operation.** Use `system2 status` to confirm the server is up, and `system2 stop` to shut it down gracefully (SIGTERM, with a SIGKILL fallback if the server doesn't exit in 10 seconds). The next `system2 start` creates a timestamped backup of `~/.system2/` before initializing.
 
 ```bash
 system2 status           # check whether the server is running
