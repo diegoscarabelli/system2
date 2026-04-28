@@ -2229,6 +2229,66 @@ describe('AgentHost', () => {
         expect(busyEvents).toEqual([false]);
         expect(listenerEvents).toEqual(['agent_end']);
       });
+
+      it('flushes deferred agent_end even when pruning rejects', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        const session = mockSession(['baseline', 'second', 'third']);
+        def.session = session;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let pruneReject!: (err: Error) => void;
+        session.compact.mockImplementation(() => new Promise((_, r) => (pruneReject = r)));
+
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+
+        def.handleSessionEvent({ type: 'agent_end' });
+
+        pruneReject(new Error('compact failed'));
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(def.busy).toBe(false);
+        expect(busyEvents).toEqual([false]);
+        expect(listenerEvents).toEqual(['agent_end']);
+      });
+
+      it('keeps the latest agent_end when a second one arrives mid-pruning', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        const session = mockSession(['baseline', 'second', 'third']);
+        def.session = session;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let pruneResolve!: () => void;
+        session.compact.mockImplementation(() => new Promise<void>((r) => (pruneResolve = r)));
+
+        const listenerEvents: { type: string; tag?: string }[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e as { type: string; tag?: string })]);
+
+        def.handleSessionEvent({ type: 'agent_end', tag: 'first' } as { type: string });
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end', tag: 'first' });
+
+        def.handleSessionEvent({ type: 'agent_end', tag: 'second' } as { type: string });
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end', tag: 'second' });
+
+        pruneResolve();
+        await new Promise((r) => setImmediate(r));
+
+        expect(listenerEvents).toEqual([{ type: 'agent_end', tag: 'second' }]);
+      });
     });
 
     describe('cross-file operations', () => {

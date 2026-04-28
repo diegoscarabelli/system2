@@ -546,7 +546,10 @@ export class AgentHost {
       // If pruning was just scheduled, defer the busy clear and agent_end
       // forwarding until pruning completes — otherwise the UI would see
       // ready_for_input before pruning starts, allowing a user prompt to
-      // race with the in-flight compaction.
+      // race with the in-flight compaction. If a previous agent_end is
+      // already deferred (a rare case where pi-coding-agent fires another
+      // agent_end while pruning is in flight), keep the latest event since
+      // ready_for_input/context_usage are idempotent for the WS handler.
       if (this.isPruning) {
         this.deferredAgentEnd = event;
         return;
@@ -1396,6 +1399,9 @@ export class AgentHost {
    * If an agent_end was deferred while pruning was in flight, complete its
    * handling now: clear busy and forward to listeners so the UI receives
    * ready_for_input only after pruning has finished.
+   *
+   * Compaction tracking already ran inline before deferral, so the counter
+   * has been reset by triggerPruningCompaction; no need to re-track here.
    */
   private flushDeferredAgentEnd(): void {
     const deferred = this.deferredAgentEnd;
