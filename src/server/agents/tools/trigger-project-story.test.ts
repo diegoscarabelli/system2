@@ -8,8 +8,19 @@ import { createTriggerProjectStoryTool } from './trigger-project-story.js';
 // Mock scheduler/jobs helpers so the tool doesn't touch the filesystem
 vi.mock('../../scheduler/jobs.js', () => ({
   collectAgentActivity: vi.fn().mockReturnValue('(agent activity)'),
-  collectProjectDbChanges: vi.fn().mockReturnValue('(db changes)'),
-  formatMarkdownTable: vi.fn().mockReturnValue('| col |\n| --- |'),
+  collectProjectDbChanges: vi.fn().mockReturnValue([
+    {
+      name: 'task',
+      sql: 'SELECT * FROM task WHERE ...',
+      timeColumn: 'updated_at',
+      rows: [{ id: 1, title: 'A task', updated_at: '2026-01-01T00:00:00Z' }],
+    },
+  ]),
+  formatMarkdownTable: vi
+    .fn()
+    .mockReturnValue(
+      '| id | title | updated_at |\n|---|---|---|\n| 1 | A task | 2026-01-01T00:00:00Z |'
+    ),
   readFrontmatterField: vi.fn().mockReturnValue(null),
   readTailChars: vi.fn().mockReturnValue('(log tail)'),
 }));
@@ -233,6 +244,23 @@ describe('trigger_project_story tool', () => {
 
     // Guide is not a conductor, so the "own project" check doesn't apply
     expect((result.content[0] as { text: string }).text).toContain('Project story triggered');
+  });
+
+  it('regression: DB-changes section contains markdown tables, NOT [object Object]', async () => {
+    const conductor = makeAgent(2, 'conductor', 1);
+    const narrator = makeAgent(10, 'narrator', null);
+    const project = makeProject(1, 'test-project');
+    const { tool, deliverMessage } = setup(2, [conductor, narrator], [project], [10]);
+
+    await exec(tool, { project_id: 1 });
+
+    const msg1 = deliverMessage.mock.calls[0][0] as string;
+    // Must contain the markdown table pipe character (from formatMarkdownTable mock)
+    expect(msg1).toContain('|');
+    // Must contain the table name as a section header
+    expect(msg1).toContain('### task');
+    // Must NOT contain the string interpolation artifact
+    expect(msg1).not.toContain('[object Object]');
   });
 
   it('includes existing story note when project_story.md exists', async () => {

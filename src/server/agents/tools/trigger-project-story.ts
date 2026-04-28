@@ -143,7 +143,13 @@ export function createTriggerProjectStoryTool(
           newRunTs,
           narratorMessageExcerptBytes
         );
-        const projectDbChanges = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
+        const projectDbTables = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
+        const projectDbChanges =
+          projectDbTables.length > 0
+            ? projectDbTables
+                .map((table) => `### ${table.name}\n\n${formatMarkdownTable(table.rows)}`)
+                .join('\n\n')
+            : '(no DB changes)';
 
         // Read log.md content (full file, for Message 2)
         const logContent = existsSync(logFile) ? readFileSync(logFile, 'utf-8') : '(no log file)';
