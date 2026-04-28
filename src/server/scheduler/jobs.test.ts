@@ -389,6 +389,62 @@ describe('truncateDbChangesToFit', () => {
     expect(result.droppedTotal).toBeGreaterThan(0);
   });
 
+  it('reclaims unused budget from empty tables to non-empty ones', () => {
+    // 4 tables: 3 empty + 1 with many rows
+    const emptyTaskRows: Record<string, unknown>[] = [];
+    const emptyCommentRows: Record<string, unknown>[] = [];
+    const emptyLinkRows: Record<string, unknown>[] = [];
+
+    // One table with many rows
+    const projectRows: Record<string, unknown>[] = [];
+    for (let i = 0; i < 50; i++) {
+      projectRows.push({
+        id: i,
+        updated_at: `2026-01-01T${String(i).padStart(2, '0')}:00:00Z`,
+        name: `Project ${i}`,
+        payload: 'x'.repeat(150),
+      });
+    }
+
+    const tables = [
+      makeTable('task', 'updated_at', emptyTaskRows),
+      makeTable('task_comment', 'created_at', emptyCommentRows),
+      makeTable('task_link', 'created_at', emptyLinkRows),
+      makeTable('project', 'updated_at', projectRows),
+    ];
+
+    // With budget = 4000:
+    // Without reclamation: perTableBudget = 4000 / 4 = 1000 per table
+    //   - The 1 non-empty table would get only 1000 bytes, dropping most rows
+    // With reclamation: perTableBudget = 4000 / 1 = 4000 for the 1 non-empty table
+    //   - The 1 non-empty table gets the full 4000 bytes, keeping more rows
+    const budget = 4000;
+    const result = truncateDbChangesToFit(tables, budget);
+
+    // All 4 table headers must be present (including the empty ones)
+    expect(result.rendered).toContain('### task');
+    expect(result.rendered).toContain('### task_comment');
+    expect(result.rendered).toContain('### task_link');
+    expect(result.rendered).toContain('### project');
+
+    // Empty tables render "(no changes)" placeholder
+    expect(result.rendered).toContain('(no changes)');
+
+    // Some rows should be kept from the non-empty table
+    expect(result.rendered).toContain('Project');
+
+    // With the full budget available to the single non-empty table,
+    // fewer rows should be dropped compared to even-split budget.
+    // A single row is ~175 bytes, so at 1000 bytes per table (4-way split),
+    // we'd keep ~5 rows. With 4000 bytes (reclaimed), we'd keep ~22 rows.
+    // We verify by checking that the project section uses more of its budget.
+    const projectSection = result.rendered.split('### project')[1].split('###')[0];
+    const projectTableLines = projectSection
+      .split('\n')
+      .filter((l) => l.startsWith('|') && !l.startsWith('| id') && !l.startsWith('|---'));
+    expect(projectTableLines.length).toBeGreaterThan(5);
+  });
+
   it('integration: large project DB changes fit within MAX_DELIVERY_BYTES', async () => {
     // Simulate 2000 task updates (~200 bytes each = ~400 KB raw)
     const rows: Record<string, unknown>[] = [];

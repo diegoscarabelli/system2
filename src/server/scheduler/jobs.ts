@@ -493,12 +493,24 @@ const DB_CHANGES_BUDGET_FRACTION = 0.25;
 
 /**
  * Truncate DB-change tables to fit within a byte budget, keeping the newest rows.
- * Budget is split evenly across tables. Dropped rows are annotated per table.
+ * Budget is split evenly across non-empty tables only. Unused budget from empty
+ * tables is reclaimed and distributed to tables with data. Empty tables still
+ * render their "(no changes)" placeholders for visibility.
+ * Dropped rows are annotated per table.
  */
 export function truncateDbChangesToFit(tables: DbChangeTable[], budget: number): DbTruncateResult {
   if (tables.length === 0) return { rendered: '', droppedTotal: 0, droppedRanges: [] };
 
-  const perTableBudget = Math.floor(budget / tables.length);
+  // Pass 1: identify non-empty tables
+  const nonEmptyTables = tables.filter((t) => t.rows.length > 0);
+
+  // If all tables are empty, render them as-is with no truncation
+  if (nonEmptyTables.length === 0) {
+    return { rendered: renderDbChangeTables(tables), droppedTotal: 0, droppedRanges: [] };
+  }
+
+  // Pass 2: divide budget across non-empty tables only
+  const perTableBudget = Math.floor(budget / nonEmptyTables.length);
   const droppedRanges: Array<{ table: string; from: string; to: string; count: number }> = [];
   let droppedTotal = 0;
   const sections: string[] = [];
