@@ -474,8 +474,9 @@ export class AgentHost {
       log.warn('[AgentHost] OAuth refresh failed during initialize:', err);
       // Fall through with possibly-stale token; SDK will return 401 → handlePotentialError refreshes again.
     }
-    // Re-read active credential in case ensureFresh changed which credential is active
-    const cred = this.authResolver.getActiveCredential();
+    // Re-read active credential in case ensureFresh changed which credential is active.
+    // Use getActiveKey(provider) to stay scoped to the current provider, not a system-wide credential.
+    const cred = this.authResolver.getActiveKey(this.currentProvider);
     if (cred) {
       this.currentTier = cred.tier;
       // currentProvider was already resolved above; only update tier and keyIndex
