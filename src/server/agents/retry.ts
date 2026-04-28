@@ -104,7 +104,13 @@ function isContextOverflow(message: string): boolean {
     // OpenAI Responses API: "Your input exceeds the context window of this model"
     /exceeds the context window/.test(message) ||
     // Providers that surface the error code verbatim in the message
-    /context.?length.?exceeded/.test(message)
+    /context.?length.?exceeded/.test(message) ||
+    // wire-size-too-large (413 from Anthropic, 400 from some providers)
+    /request exceeds the maximum size/.test(message) ||
+    /input size exceeds.*mb/.test(message) ||
+    // Anthropic OAuth long-context misclassifier (Pro/Max bug post-March-2026)
+    /extra usage is required for long context/.test(message) ||
+    /long context request/.test(message)
   );
 }
 

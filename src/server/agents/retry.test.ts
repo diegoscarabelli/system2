@@ -151,6 +151,28 @@ describe('categorizeError', () => {
       'rate_limit'
     );
   });
+
+  it('returns "context_overflow" for 413 wire-size-too-large errors', () => {
+    expect(categorizeError(new Error('413 Request exceeds the maximum size'))).toBe(
+      'context_overflow'
+    );
+  });
+
+  it('returns "context_overflow" for 400 input size exceeds limit errors', () => {
+    expect(categorizeError(new Error('400 input size exceeds 8 MB'))).toBe('context_overflow');
+  });
+
+  it('returns "context_overflow" for 429 long-context misclassifier errors', () => {
+    expect(
+      categorizeError(
+        new Error('429 Extra usage is required for long context requests on your account')
+      )
+    ).toBe('context_overflow');
+  });
+
+  it('returns "context_overflow" for long context request rejected errors', () => {
+    expect(categorizeError(new Error('long context request rejected'))).toBe('context_overflow');
+  });
 });
 
 describe('extractErrorMessage', () => {
