@@ -2160,6 +2160,81 @@ describe('AgentHost', () => {
       });
     });
 
+    describe('agent_end deferral when pruning fires', () => {
+      type DeferralInternal = PruningInternal & {
+        busy: boolean;
+        onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
+        listeners: Set<(event: { type: string }) => void>;
+        deferredAgentEnd: { type: string } | null;
+        handleSessionEvent: (event: { type: string }) => void;
+        handlePotentialError: (event: unknown) => Promise<void>;
+      };
+
+      it('defers agent_end forwarding and busy clear until pruning completes', async () => {
+        const { host, internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        const session = mockSession(['baseline', 'second', 'third']);
+        def.session = session;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let pruneResolve!: () => void;
+        session.compact.mockImplementation(() => new Promise<void>((r) => (pruneResolve = r)));
+
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+
+        def.handleSessionEvent({ type: 'agent_end' });
+
+        // Pruning is in flight. agent_end has not been forwarded and busy is still true.
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+        expect(listenerEvents).toEqual([]);
+        expect(busyEvents).toEqual([]);
+        expect(def.busy).toBe(true);
+
+        // Pruning finishes.
+        pruneResolve();
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(def.busy).toBe(false);
+        expect(busyEvents).toEqual([false]);
+        expect(listenerEvents).toEqual(['agent_end']);
+
+        host.dispose?.();
+      });
+
+      it('forwards agent_end immediately when pruning is not triggered', () => {
+        const { host, internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        def.compactionCount = 0;
+        def.busy = true;
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+
+        def.handleSessionEvent({ type: 'agent_end' });
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(def.busy).toBe(false);
+        expect(busyEvents).toEqual([false]);
+        expect(listenerEvents).toEqual(['agent_end']);
+
+        host.dispose?.();
+      });
+    });
+
     describe('cross-file operations', () => {
       let testDir: string;
 

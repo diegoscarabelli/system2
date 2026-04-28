@@ -186,6 +186,7 @@ export class AgentHost {
   private compactionCount = 0;
   private compactionDepth = 0;
   private isPruning = false;
+  private deferredAgentEnd: AgentSessionEvent | null = null;
   private contextWindow = 0;
   private contextOverflowHandled = false;
   private agentModels: Record<string, string> = {};
@@ -517,10 +518,6 @@ export class AgentHost {
         this.onBusyChange?.(this.agentId, true, this.getContextUsage()?.percent ?? null);
       }
     } else if (event.type === 'agent_end') {
-      if (this.busy) {
-        this.busy = false;
-        this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
-      }
       // On error turns, lastTurnErrored is true (set synchronously in
       // handlePotentialError before agent_end fires). Skip cleanup so the
       // failed prompt/delivery stays tracked for retry or failover.
@@ -541,10 +538,29 @@ export class AgentHost {
         this.deliverySendCount = 0;
       }
       this.lastTurnErrored = false;
-    }
 
-    // Track compaction for pruning
-    this.handleCompactionTracking(event);
+      // Track compaction for pruning. May synchronously schedule pruning,
+      // setting isPruning = true.
+      this.handleCompactionTracking(event);
+
+      // If pruning was just scheduled, defer the busy clear and agent_end
+      // forwarding until pruning completes — otherwise the UI would see
+      // ready_for_input before pruning starts, allowing a user prompt to
+      // race with the in-flight compaction.
+      if (this.isPruning) {
+        this.deferredAgentEnd = event;
+        return;
+      }
+
+      if (this.busy) {
+        this.busy = false;
+        this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
+      }
+    } else {
+      // Track compaction for pruning (handles the compaction_end increment
+      // path; the agent_end trigger is handled inline above).
+      this.handleCompactionTracking(event);
+    }
 
     // Forward to external listeners
     this.listeners.forEach((listener) => {
@@ -1371,8 +1387,27 @@ export class AgentHost {
         .catch((err: unknown) => log.error('[AgentHost] Pruning compaction error:', err))
         .finally(() => {
           this.isPruning = false;
+          this.flushDeferredAgentEnd();
         });
     }
+  }
+
+  /**
+   * If an agent_end was deferred while pruning was in flight, complete its
+   * handling now: clear busy and forward to listeners so the UI receives
+   * ready_for_input only after pruning has finished.
+   */
+  private flushDeferredAgentEnd(): void {
+    const deferred = this.deferredAgentEnd;
+    if (!deferred) return;
+    this.deferredAgentEnd = null;
+    if (this.busy) {
+      this.busy = false;
+      this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
+    }
+    this.listeners.forEach((listener) => {
+      listener(deferred);
+    });
   }
 
   /**
