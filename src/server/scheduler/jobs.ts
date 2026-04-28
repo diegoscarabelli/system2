@@ -467,7 +467,6 @@ interface ProjectActivityData {
   projectId: number;
   projectName: string;
   logFile: string;
-  agentActivity: string;
   dbChanges: string;
   hasChanges: boolean;
 }
@@ -726,27 +725,19 @@ export async function buildAndDeliverDailySummary(
     );
     const projectDbChanges = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
 
-    // Cache project-scoped agent activity for daily summary reuse
+    // Collect project-scoped entries to determine whether this project has activity
     const projectScopedEntries = collectAgentActivityWithTimestamps(
       system2Dir,
       projectScopedAgents,
       lastRunTs,
       newRunTs
     );
-    const projectScopedActivity = renderAgentActivitySections(
-      system2Dir,
-      projectScopedAgents,
-      lastRunTs,
-      newRunTs,
-      projectScopedEntries
-    );
     projectDataList.push({
       projectId: project.id,
       projectName: project.name,
       logFile,
-      agentActivity: projectScopedActivity,
       dbChanges: projectDbChanges,
-      hasChanges: hasActivity(projectScopedActivity, projectDbChanges),
+      hasChanges: projectScopedEntries.length > 0 || projectDbChanges.includes('|'),
     });
 
     // Deliver project-log message (with all agents including Guide)
