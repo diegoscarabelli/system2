@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LlmProvider } from '../../shared/index.js';
 import { log } from '../utils/logger.js';
@@ -50,7 +50,11 @@ export function saveOAuthCredentials(
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
-  writeFileSync(credentialsPath(system2Dir, provider), JSON.stringify(credentials, null, 2), {
-    mode: 0o600,
-  });
+  if (process.platform !== 'win32') {
+    chmodSync(dir, 0o700); // idempotent; protects against loose perms on pre-existing dir
+  }
+  const finalPath = credentialsPath(system2Dir, provider);
+  const tmpPath = `${finalPath}.tmp`;
+  writeFileSync(tmpPath, JSON.stringify(credentials, null, 2), { mode: 0o600 });
+  renameSync(tmpPath, finalPath);
 }
