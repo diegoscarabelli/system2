@@ -2171,7 +2171,7 @@ describe('AgentHost', () => {
       };
 
       it('defers agent_end forwarding and busy clear until pruning completes', async () => {
-        const { host, internal } = makeHostForPruning(3);
+        const { internal } = makeHostForPruning(3);
         const def = internal as DeferralInternal;
         const session = mockSession(['baseline', 'second', 'third']);
         def.session = session;
@@ -2208,11 +2208,10 @@ describe('AgentHost', () => {
         expect(busyEvents).toEqual([false]);
         expect(listenerEvents).toEqual(['agent_end']);
 
-        host.dispose?.();
       });
 
       it('forwards agent_end immediately when pruning is not triggered', () => {
-        const { host, internal } = makeHostForPruning(3);
+        const { internal } = makeHostForPruning(3);
         const def = internal as DeferralInternal;
         def.compactionCount = 0;
         def.busy = true;
@@ -2231,7 +2230,6 @@ describe('AgentHost', () => {
         expect(busyEvents).toEqual([false]);
         expect(listenerEvents).toEqual(['agent_end']);
 
-        host.dispose?.();
       });
     });
 
