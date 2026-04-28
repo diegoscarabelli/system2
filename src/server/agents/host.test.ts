@@ -2110,21 +2110,24 @@ describe('AgentHost', () => {
         expect(session.compact).toHaveBeenCalled();
       });
 
-      it('triggers pruning regardless of context usage', () => {
-        for (const usage of [{ percent: 5 }, { percent: 0 }, null]) {
-          const { internal } = makeHostForPruning(3);
-          const session = mockSession(['baseline', 'second', 'third']);
-          internal.session = session;
-          internal._sessionDir = '/tmp/test-session';
-          internal.compactionCount = 3;
-          internal.writeCompactionCount = vi.fn();
-          internal.getContextUsage = vi.fn().mockReturnValue(usage);
+      it('triggers pruning without consulting context usage', () => {
+        const { internal } = makeHostForPruning(3);
+        const session = mockSession(['baseline', 'second', 'third']);
+        internal.session = session;
+        internal._sessionDir = '/tmp/test-session';
+        internal.compactionCount = 3;
+        internal.writeCompactionCount = vi.fn();
+        // Make getContextUsage throw so the test fails loudly if a future
+        // regression re-introduces a usage-based gate in the trigger path.
+        internal.getContextUsage = vi.fn(() => {
+          throw new Error('getContextUsage must not be consulted by pruning trigger');
+        });
 
-          internal.handleCompactionTracking({ type: 'agent_end' });
+        internal.handleCompactionTracking({ type: 'agent_end' });
 
-          expect(internal.isPruning).toBe(true);
-          expect(session.compact).toHaveBeenCalled();
-        }
+        expect(internal.isPruning).toBe(true);
+        expect(session.compact).toHaveBeenCalled();
+        expect(internal.getContextUsage).not.toHaveBeenCalled();
       });
 
       it('does not trigger pruning when counter is below depth', () => {
