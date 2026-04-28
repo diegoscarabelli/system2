@@ -110,6 +110,10 @@ export class Server {
     this.agentRegistry = new AgentRegistry();
 
     // Shared AuthResolver: all agents see the same cooldown/failover state
+
+    /** OAuth providers with refresh implementations available in v1. */
+    const SUPPORTED_OAUTH_PROVIDERS: ReadonlySet<LlmProvider> = new Set(['anthropic']);
+
     const oauthCredentials: OAuthCredentialsMap = {};
     if (config.llmConfig.oauth) {
       const oauthProviders: LlmProvider[] = [
@@ -117,6 +121,12 @@ export class Server {
         ...config.llmConfig.oauth.fallback,
       ];
       for (const provider of oauthProviders) {
+        if (!SUPPORTED_OAUTH_PROVIDERS.has(provider)) {
+          log.error(
+            `[server] [llm.oauth] declares unsupported provider "${provider}". Supported providers: ${[...SUPPORTED_OAUTH_PROVIDERS].join(', ')}. Skipping.`
+          );
+          continue;
+        }
         const creds = loadOAuthCredentials(SYSTEM2_DIR, provider);
         if (creds) {
           oauthCredentials[provider] = creds;

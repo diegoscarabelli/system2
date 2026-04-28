@@ -468,6 +468,10 @@ export class AgentHost {
     // silently replace with a new empty session. Fall back to continueRecent() only
     // when no .jsonl file exists at all (first-time setup).
     // Refresh near-expiry OAuth tokens before snapshotting auth state into the SDK.
+    // `refreshAnthropic` is currently the only OAuth refresh implementation. server.ts
+    // validates that [llm.oauth] only contains supported providers; if support for
+    // additional OAuth providers is added, this should be extended into a refresh map
+    // keyed by provider.
     try {
       await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
     } catch (err) {
