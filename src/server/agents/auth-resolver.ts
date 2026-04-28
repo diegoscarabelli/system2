@@ -361,26 +361,39 @@ export class AuthResolver {
    * reinitialize SDK sessions for those providers (existing sessions hold a snapshot
    * of the old access token).
    * Concurrent callers are serialized per provider so refresh runs once.
+   *
+   * @param deps.force - Providers to refresh regardless of expiry (e.g., on 401 from a
+   *   revoked-but-not-expired token). Defaults to empty — only expiry-based refresh occurs.
    */
   async ensureFresh(deps: {
     refresh: (refreshToken: string) => Promise<RefreshedTokens>;
+    /** Providers to refresh regardless of expiry (e.g., on 401 from a revoked-but-not-expired token). */
+    force?: LlmProvider[];
   }): Promise<Set<LlmProvider>> {
     const refreshed = new Set<LlmProvider>();
+    const forceSet = new Set(deps.force ?? []);
     for (const provider of this.oauthOrder) {
       const cred = this.oauthCredentials[provider];
-      if (!cred || !isExpiringSoon(cred.expires)) continue;
+      if (!cred) continue;
+      const shouldRefresh = forceSet.has(provider) || isExpiringSoon(cred.expires);
+      if (!shouldRefresh) continue;
 
       const existing = this.refreshLocks.get(provider);
+      // Bug B fix: re-read credential after awaiting so we use the rotated refresh token.
+      let credToUse = cred;
       if (existing) {
         await existing;
         const after = this.oauthCredentials[provider];
-        if (after && !isExpiringSoon(after.expires)) {
+        if (!after) continue; // credential disappeared while we waited
+        const stillNeedsRefresh = forceSet.has(provider) || isExpiringSoon(after.expires);
+        if (!stillNeedsRefresh) {
           refreshed.add(provider);
           continue;
         }
+        credToUse = after;
       }
 
-      const lock = this.doRefresh(provider, cred, deps.refresh).finally(() => {
+      const lock = this.doRefresh(provider, credToUse, deps.refresh).finally(() => {
         this.refreshLocks.delete(provider);
       });
       this.refreshLocks.set(provider, lock);
@@ -388,6 +401,14 @@ export class AuthResolver {
       refreshed.add(provider);
     }
     return refreshed;
+  }
+
+  /**
+   * Get the current in-memory OAuth credential for a provider.
+   * Used for inspection and testing.
+   */
+  getActiveOAuthCredential(provider: LlmProvider): OAuthCredentials | undefined {
+    return this.oauthCredentials[provider];
   }
 
   private async doRefresh(

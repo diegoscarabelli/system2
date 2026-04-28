@@ -541,4 +541,90 @@ describe('AuthResolver.ensureFresh', () => {
     expect(refreshed.has('anthropic')).toBe(true);
     expect(resolver.getActiveCredential()?.provider).toBe('anthropic');
   });
+
+  // Bug A regression: force-refresh bypasses the expiry check
+  it('forces refresh for providers in the force list even if not near expiry', async () => {
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    const resolver = new AuthResolver(cfg, undefined, {
+      anthropic: makeOAuthCreds(60 * 60_000), // 1 hour — well within fresh window
+    });
+    let called = false;
+    const refreshed = await resolver.ensureFresh({
+      refresh: async () => {
+        called = true;
+        return { access: 'forced-new', refresh: 'rt-new', expires: Date.now() + 60 * 60_000 };
+      },
+      force: ['anthropic'],
+    });
+    expect(called).toBe(true);
+    expect(refreshed.has('anthropic')).toBe(true);
+    expect(resolver.getActiveOAuthCredential('anthropic')?.access).toBe('forced-new');
+  });
+
+  it('does not force-refresh providers not in the force list', async () => {
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: ['openai'] },
+    };
+    let anthropicCalled = false;
+    let openaiCalled = false;
+    const resolver = new AuthResolver(cfg, undefined, {
+      anthropic: makeOAuthCreds(60 * 60_000), // fresh
+      openai: { ...makeOAuthCreds(60 * 60_000), label: 'openai-oauth' }, // fresh
+    });
+    await resolver.ensureFresh({
+      refresh: async (refreshToken) => {
+        // Identify which provider is being refreshed by the refresh token
+        if (refreshToken === 'rt-xyz') anthropicCalled = true;
+        else openaiCalled = true;
+        return { access: 'new', refresh: 'rt-new', expires: Date.now() + 60 * 60_000 };
+      },
+      force: ['anthropic'], // only force anthropic
+    });
+    expect(anthropicCalled).toBe(true);
+    expect(openaiCalled).toBe(false);
+  });
+
+  // Bug B regression: use latest credential after awaiting an existing refresh lock
+  it('uses the latest credential after awaiting an existing refresh lock', async () => {
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    const resolver = new AuthResolver(cfg, undefined, {
+      anthropic: makeOAuthCreds(1000), // expiring soon
+    });
+
+    const seen: string[] = [];
+
+    // First refresh: slow, rotates refresh token (but result still expiring soon for second refresh)
+    const slow = async (refreshToken: string): Promise<RefreshedTokens> => {
+      seen.push(refreshToken);
+      await new Promise((r) => setTimeout(r, 30));
+      return { access: 'a1', refresh: 'rt-rotated', expires: Date.now() + 1000 }; // still expiring
+    };
+
+    // Second refresh: fast, uses the rotated token from the first refresh
+    const fast = async (refreshToken: string): Promise<RefreshedTokens> => {
+      seen.push(refreshToken);
+      return { access: 'a2', refresh: 'rt-final', expires: Date.now() + 60 * 60_000 };
+    };
+
+    // Kick off both with force so the second caller hits the post-await path
+    const first = resolver.ensureFresh({ refresh: slow, force: ['anthropic'] });
+    // Brief delay so `first` acquires the lock before `second` is called
+    await new Promise((r) => setTimeout(r, 5));
+    const second = resolver.ensureFresh({ refresh: fast, force: ['anthropic'] });
+    await Promise.all([first, second]);
+
+    // First refresh should have used the original refresh token
+    expect(seen[0]).toBe('rt-xyz');
+    // Second refresh should have used the rotated token written by the first refresh
+    expect(seen[1]).toBe('rt-rotated');
+    // Final state should reflect the second refresh
+    expect(resolver.getActiveOAuthCredential('anthropic')?.refresh).toBe('rt-final');
+  });
 });
