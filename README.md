@@ -67,6 +67,9 @@ Once the server is running, a small set of commands covers the day-to-day lifecy
 
 ```bash
 system2 status           # check whether the server is running
+```
+
+```bash
 system2 stop             # shut down gracefully
 ```
 
@@ -74,6 +77,9 @@ system2 stop             # shut down gracefully
 
 ```bash
 system2 login            # add or refresh a Claude Pro/Max OAuth credential
+```
+
+```bash
 system2 logout           # remove an OAuth credential
 ```
 
