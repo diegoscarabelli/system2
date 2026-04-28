@@ -2207,7 +2207,6 @@ describe('AgentHost', () => {
         expect(def.busy).toBe(false);
         expect(busyEvents).toEqual([false]);
         expect(listenerEvents).toEqual(['agent_end']);
-
       });
 
       it('forwards agent_end immediately when pruning is not triggered', () => {
@@ -2229,7 +2228,6 @@ describe('AgentHost', () => {
         expect(def.busy).toBe(false);
         expect(busyEvents).toEqual([false]);
         expect(listenerEvents).toEqual(['agent_end']);
-
       });
     });
 
