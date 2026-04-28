@@ -3072,5 +3072,31 @@ describe('AgentHost', () => {
       // Should have fallen through to markKeyFailed (standard auth-failure path)
       expect(markKeyFailedSpy).toHaveBeenCalledOnce();
     });
+
+    it('calls markKeyFailed (no second refresh) when refresh succeeds but retry also returns 401', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // First 401: ensureFresh succeeds → oauthRefreshAttempted is set to true
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set());
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+
+      await internal.handlePotentialError(auth401Event);
+
+      // Refresh succeeded: ensureFresh called once, reinitialize triggered, no failover yet
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      expect(markKeyFailedSpy).not.toHaveBeenCalled();
+      // Guard flag is now set
+      expect(internal.oauthRefreshAttempted).toBe(true);
+
+      // Second 401 arrives (simulates the retried request also failing with 401).
+      // oauthRefreshAttempted is already true → no second refresh, fall through to markKeyFailed.
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh must NOT have been called a second time
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      // markKeyFailed must be called — standard failover path
+      expect(markKeyFailedSpy).toHaveBeenCalledOnce();
+    });
   });
 });
