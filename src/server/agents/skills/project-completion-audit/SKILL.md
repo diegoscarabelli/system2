@@ -52,7 +52,7 @@ If any answer turns up "I'm not sure" or "I'd need to check": go check. The audi
 
 ## Outcome
 
-- **Audit clean (every question answered with concrete evidence):** proceed to step 6 of `conductor.md` (request final project review from the Reviewer).
+- **Audit clean (every question answered with concrete evidence):** request final project review from the Reviewer, following `conductor.md` → Workflow → "Review and Completion".
 - **Audit found gaps:** address each gap as task work (resume work on the open task, or create a new task for the gap), then re-run the audit. Do not request final review with known unaddressed gaps; the Reviewer is for catching what the audit missed, not for finding what you already knew was wrong.
 
 ## Why this exists
