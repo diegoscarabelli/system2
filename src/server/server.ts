@@ -21,13 +21,20 @@ import type {
   JobExecution,
   KnowledgeConfig,
   LlmConfig,
+  LlmProvider,
   SchedulerConfig,
   ServerMessage,
   ServicesConfig,
   ToolsConfig,
 } from '../shared/index.js';
+import type { OAuthCredentialsMap } from './agents/auth-resolver.js';
 import { AuthResolver } from './agents/auth-resolver.js';
 import { AgentHost } from './agents/host.js';
+import {
+  loadOAuthCredentials,
+  type OAuthCredentials,
+  saveOAuthCredentials,
+} from './agents/oauth-credentials.js';
 import { AgentRegistry } from './agents/registry.js';
 import type { AgentResurrector } from './agents/tools/resurrect-agent.js';
 import type { AgentSpawner } from './agents/tools/spawn-agent.js';
@@ -103,7 +110,31 @@ export class Server {
     this.agentRegistry = new AgentRegistry();
 
     // Shared AuthResolver: all agents see the same cooldown/failover state
-    this.authResolver = new AuthResolver(config.llmConfig);
+    const oauthCredentials: OAuthCredentialsMap = {};
+    if (config.llmConfig.oauth) {
+      const oauthProviders: LlmProvider[] = [
+        config.llmConfig.oauth.primary,
+        ...config.llmConfig.oauth.fallback,
+      ];
+      for (const provider of oauthProviders) {
+        const creds = loadOAuthCredentials(SYSTEM2_DIR, provider);
+        if (creds) {
+          oauthCredentials[provider] = creds;
+        } else {
+          log.warn(
+            `[server] [llm.oauth] declares ${provider} but ~/.system2/oauth/${provider}.json is missing — skipping`
+          );
+        }
+      }
+    }
+
+    this.authResolver = new AuthResolver(config.llmConfig, undefined, oauthCredentials);
+
+    for (const provider of Object.keys(oauthCredentials) as LlmProvider[]) {
+      this.authResolver.setPersistOAuth(provider, async (creds: OAuthCredentials) => {
+        saveOAuthCredentials(SYSTEM2_DIR, provider, creds);
+      });
+    }
 
     // Shared ReminderManager: all agents schedule reminders through the same instance
     this.reminderManager = new ReminderManager(this.agentRegistry);
