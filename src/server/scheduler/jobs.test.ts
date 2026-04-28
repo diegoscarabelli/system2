@@ -10,14 +10,17 @@ import {
   buildAndDeliverMemoryUpdate,
   CUSTOM_MESSAGE_CONTENT_BUDGET,
   collectAgentActivity,
+  collectAgentActivityWithTimestamps,
   formatMarkdownTable,
   JobSkipped,
   readFrontmatterField,
   readTailChars,
   registerNarratorJobs,
+  renderAgentActivitySections,
   resolveDailySummaryTimestamp,
   stripSessionEntry,
   trackJobExecution,
+  truncateOldestToFit,
   writeFrontmatterField,
 } from './jobs.js';
 import type { Scheduler } from './scheduler.js';
@@ -247,6 +250,163 @@ describe('collectAgentActivity', () => {
     expect(result).not.toContain('before');
     expect(result).not.toContain('after');
     expect(result).not.toContain('excluded-type');
+  });
+});
+
+describe('truncateOldestToFit', () => {
+  it('returns empty result for empty input', () => {
+    const result = truncateOldestToFit([], 1024);
+    expect(result.kept).toEqual([]);
+    expect(result.droppedCount).toBe(0);
+    expect(result.droppedRange).toBeNull();
+  });
+
+  it('keeps all entries when total is under budget', () => {
+    const entries = [
+      { timestamp: '2026-01-01T01:00:00Z', rendered: 'a'.repeat(100) },
+      { timestamp: '2026-01-01T02:00:00Z', rendered: 'b'.repeat(100) },
+    ];
+    const result = truncateOldestToFit(entries, 500);
+    expect(result.droppedCount).toBe(0);
+    expect(result.droppedRange).toBeNull();
+    expect(result.kept).toHaveLength(2);
+    // Returned in sorted order
+    expect(result.kept[0].timestamp).toBe('2026-01-01T01:00:00Z');
+  });
+
+  it('drops oldest entries first when total exceeds budget', () => {
+    const entries = [
+      { timestamp: '2026-01-01T03:00:00Z', rendered: 'c'.repeat(200) },
+      { timestamp: '2026-01-01T01:00:00Z', rendered: 'a'.repeat(200) }, // oldest
+      { timestamp: '2026-01-01T02:00:00Z', rendered: 'b'.repeat(200) },
+    ];
+    // Budget of 350 means the two oldest (400 total) must be trimmed to fit
+    const result = truncateOldestToFit(entries, 350);
+    expect(result.droppedCount).toBeGreaterThan(0);
+    // Total rendered size of kept entries must fit within budget
+    const keptSize = result.kept.reduce((s, e) => s + e.rendered.length, 0);
+    expect(keptSize).toBeLessThanOrEqual(350);
+    // The newest entry should survive
+    const keptTimestamps = result.kept.map((e) => e.timestamp);
+    expect(keptTimestamps).toContain('2026-01-01T03:00:00Z');
+    // The dropped range starts at the oldest
+    expect(result.droppedRange?.from).toBe('2026-01-01T01:00:00Z');
+  });
+
+  it('handles a single entry that exceeds the budget on its own', () => {
+    const entries = [{ timestamp: '2026-01-01T01:00:00Z', rendered: 'x'.repeat(1000) }];
+    const result = truncateOldestToFit(entries, 500);
+    expect(result.kept).toEqual([]);
+    expect(result.droppedCount).toBe(1);
+    expect(result.droppedRange?.from).toBe('2026-01-01T01:00:00Z');
+    expect(result.droppedRange?.to).toBe('2026-01-01T01:00:00Z');
+  });
+});
+
+describe('collectAgentActivityWithTimestamps', () => {
+  it('returns empty array for agents without session dirs', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const agents = [{ id: 1, role: 'guide', project_name: null }];
+    const result = collectAgentActivityWithTimestamps(
+      dir,
+      agents,
+      '2025-01-01T00:00:00Z',
+      '2025-12-31T23:59:59Z'
+    );
+    expect(result).toEqual([]);
+  });
+
+  it('returns TimestampedEntry objects for in-window entries', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(sessionDir, { recursive: true });
+
+    const entryTs = '2025-06-01T10:30:00Z';
+    const entry = JSON.stringify({
+      type: 'message',
+      timestamp: entryTs,
+      message: { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+    });
+    writeFileSync(join(sessionDir, 'session.jsonl'), entry);
+
+    const agents = [{ id: 1, role: 'guide', project_name: null }];
+    const result = collectAgentActivityWithTimestamps(
+      dir,
+      agents,
+      '2025-06-01T10:00:00Z',
+      '2025-06-01T11:00:00Z'
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].timestamp).toBe(entryTs);
+    expect(typeof result[0].rendered).toBe('string');
+    // rendered is a JSON string of the stripped entry
+    const parsed = JSON.parse(result[0].rendered);
+    expect(parsed.timestamp).toBe(entryTs);
+  });
+});
+
+describe('renderAgentActivitySections', () => {
+  it('renders (no activity) when entries array is empty', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(sessionDir, { recursive: true });
+
+    // Write an entry so the session dir exists but pass an empty kept array
+    const entryTs = '2025-06-01T10:30:00Z';
+    writeFileSync(
+      join(sessionDir, 'session.jsonl'),
+      JSON.stringify({
+        type: 'message',
+        timestamp: entryTs,
+        message: { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+      })
+    );
+
+    const agents = [{ id: 1, role: 'guide', project_name: null }];
+    const result = renderAgentActivitySections(
+      dir,
+      agents,
+      '2025-06-01T10:00:00Z',
+      '2025-06-01T11:00:00Z',
+      [] // empty kept set
+    );
+    expect(result).toContain('(no activity)');
+  });
+
+  it('renders only the kept entries when a subset is passed', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(sessionDir, { recursive: true });
+
+    const ts1 = '2025-06-01T10:00:00Z';
+    const ts2 = '2025-06-01T10:30:00Z';
+    const e1 = {
+      type: 'message',
+      timestamp: ts1,
+      message: { role: 'user', content: [{ type: 'text', text: 'first' }] },
+    };
+    const e2 = {
+      type: 'message',
+      timestamp: ts2,
+      message: { role: 'user', content: [{ type: 'text', text: 'second' }] },
+    };
+    writeFileSync(
+      join(sessionDir, 'session.jsonl'),
+      [JSON.stringify(e1), JSON.stringify(e2)].join('\n')
+    );
+
+    const agents = [{ id: 1, role: 'guide', project_name: null }];
+    // Only pass the second entry as "kept"
+    const kept = [{ timestamp: ts2, rendered: JSON.stringify({ ...e2 }) }];
+    const result = renderAgentActivitySections(
+      dir,
+      agents,
+      '2025-06-01T09:00:00Z',
+      '2025-06-01T11:00:00Z',
+      kept
+    );
+    expect(result).toContain(ts2);
+    expect(result).not.toContain(ts1);
   });
 });
 
@@ -1105,6 +1265,61 @@ describe('buildAndDeliverDailySummary', () => {
     await expect(buildAndDeliverDailySummary(db, host, 99, dir, 30)).rejects.toThrow(JobSkipped);
 
     // Cursor should still advance in today's file to prevent re-scanning the same window
+    const today = new Date().toISOString().slice(0, 10);
+    const todayFile = join(summariesDir, `${today}.md`);
+    const cursor = readFrontmatterField(todayFile, 'last_narrator_update_ts');
+    expect(cursor).not.toBeNull();
+    expect(cursor).not.toBe(lastRunTs);
+  });
+
+  it('truncates oversized catch-up activity to fit the budget and includes a dropped-range note', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+
+    // Set lastRunTs to a wide window so all 100 entries fall inside
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString(); // 1 hour ago
+    writeFileSync(
+      join(summariesDir, '2026-03-15.md'),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — 2026-03-15\n`
+    );
+
+    // Build 100 entries totalling ~1 MB. Each rendered entry is ~10 KB.
+    // Timestamps are spaced 10 seconds apart so they're sortable.
+    const baseTime = Date.now() - 50 * 60_000; // 50 minutes ago
+    const lines: string[] = [];
+    for (let i = 0; i < 100; i++) {
+      const ts = new Date(baseTime + i * 10_000).toISOString();
+      lines.push(
+        JSON.stringify({
+          type: 'custom_message',
+          timestamp: ts,
+          content: `entry-${i}-${'x'.repeat(10_000)}`,
+        })
+      );
+    }
+    writeFileSync(join(sessionDir, 'session.jsonl'), lines.join('\n'));
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
+
+    // Should have delivered exactly one message (daily-summary; no projects)
+    expect(host.calls).toHaveLength(1);
+    const deliveredContent = host.calls[0].content;
+
+    // Must be within CATCH_UP_BUDGET_BYTES (256 KB) of pure activity plus overhead —
+    // in practice well under MAX_DELIVERY_BYTES (512 KB)
+    expect(Buffer.byteLength(deliveredContent, 'utf8')).toBeLessThanOrEqual(512 * 1024);
+
+    // Must contain the dropped-range note
+    expect(deliveredContent).toContain('[NOTE: dropped');
+    expect(deliveredContent).toContain('oldest entries spanning');
+    expect(deliveredContent).toContain('to fit');
+
+    // Cursor must have advanced to newRunTs
     const today = new Date().toISOString().slice(0, 10);
     const todayFile = join(summariesDir, `${today}.md`);
     const cursor = readFrontmatterField(todayFile, 'last_narrator_update_ts');

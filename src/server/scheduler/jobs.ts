@@ -25,6 +25,70 @@ const INCLUDED_ENTRY_TYPES = new Set(['message', 'custom_message']);
 /** Per-custom_message content cap when feeding catch-up activity into the Narrator. */
 export const CUSTOM_MESSAGE_CONTENT_BUDGET = 4 * 1024;
 
+/** Producer-side budget for a single inter-agent delivery (well under MAX_DELIVERY_BYTES
+ *  to leave room for headers, DB-changes section, and SDK request overhead). */
+export const CATCH_UP_BUDGET_BYTES = 256 * 1024;
+
+/**
+ * A session entry with its timestamp exposed alongside the pre-stripped JSON rendering.
+ */
+export interface TimestampedEntry {
+  timestamp: string;
+  rendered: string; // pre-stripped, JSON-encoded line
+}
+
+/**
+ * Result of truncateOldestToFit.
+ */
+export interface TruncateResult {
+  kept: TimestampedEntry[];
+  droppedCount: number;
+  droppedRange: { from: string; to: string } | null;
+}
+
+/**
+ * Truncate the oldest entries from `entries` until the total rendered size fits within
+ * `budget` bytes. Entries are sorted by timestamp ascending before truncation so the
+ * oldest are always dropped first. Dropped entries are gone permanently — they are not
+ * deferred.
+ */
+export function truncateOldestToFit(entries: TimestampedEntry[], budget: number): TruncateResult {
+  if (entries.length === 0) return { kept: [], droppedCount: 0, droppedRange: null };
+  const sorted = [...entries].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  let total = sorted.reduce((s, e) => s + e.rendered.length, 0);
+  if (total <= budget) return { kept: sorted, droppedCount: 0, droppedRange: null };
+
+  const dropped: TimestampedEntry[] = [];
+  while (total > budget && sorted.length > 0) {
+    const e = sorted.shift();
+    if (e) {
+      dropped.push(e);
+      total -= e.rendered.length;
+    }
+  }
+  return {
+    kept: sorted,
+    droppedCount: dropped.length,
+    droppedRange:
+      dropped.length > 0
+        ? { from: dropped[0].timestamp, to: dropped[dropped.length - 1].timestamp }
+        : null,
+  };
+}
+
+/**
+ * Format a truncation annotation line to prepend to a delivery body when entries were
+ * dropped. Returns an empty string if nothing was dropped.
+ */
+function annotateTruncation(result: TruncateResult): string {
+  if (result.droppedCount === 0 || !result.droppedRange) return '';
+  return (
+    `\n\n[NOTE: dropped ${result.droppedCount} oldest entries spanning ` +
+    `${result.droppedRange.from} → ${result.droppedRange.to} ` +
+    `to fit ${CATCH_UP_BUDGET_BYTES.toLocaleString()}-byte delivery budget]\n\n`
+  );
+}
+
 /**
  * Read a YAML frontmatter field from the first few lines of a file.
  */
@@ -142,12 +206,52 @@ export function resolveDailySummaryTimestamp(
 
 /**
  * Collect JSONL session entries for all non-archived agents in the time window.
+ * Returns the activity as a formatted string for direct embedding in delivery bodies.
  */
 export function collectAgentActivity(
   system2Dir: string,
   agents: Array<{ id: number; role: string; project_name: string | null }>,
   lastRunTs: string,
   newRunTs: string
+): string {
+  const timestamped = collectAgentActivityWithTimestamps(system2Dir, agents, lastRunTs, newRunTs);
+  return renderAgentActivitySections(system2Dir, agents, lastRunTs, newRunTs, timestamped);
+}
+
+/**
+ * Collect JSONL session entries for all non-archived agents in the time window.
+ * Returns a flat array of TimestampedEntry values (one per session line), preserving
+ * timestamps for oldest-first truncation. Call renderAgentActivitySections to turn
+ * the result back into a formatted string.
+ */
+export function collectAgentActivityWithTimestamps(
+  system2Dir: string,
+  agents: Array<{ id: number; role: string; project_name: string | null }>,
+  lastRunTs: string,
+  newRunTs: string
+): TimestampedEntry[] {
+  const all: TimestampedEntry[] = [];
+  for (const agent of agents) {
+    const sessionDir = join(system2Dir, 'sessions', `${agent.role}_${agent.id}`);
+    if (!existsSync(sessionDir)) continue;
+    const entries = readSessionEntries(sessionDir, lastRunTs, newRunTs);
+    all.push(...entries);
+  }
+  return all;
+}
+
+/**
+ * Render a formatted activity string from a pre-collected set of TimestampedEntry values,
+ * grouped by agent label. Agents with no entries get an "(no activity)" placeholder.
+ * Accepts an optional pre-filtered `entries` array to support truncation: pass the result
+ * of `truncateOldestToFit(...).kept` to render only retained entries.
+ */
+export function renderAgentActivitySections(
+  system2Dir: string,
+  agents: Array<{ id: number; role: string; project_name: string | null }>,
+  lastRunTs: string,
+  newRunTs: string,
+  entries?: TimestampedEntry[]
 ): string {
   const sections: string[] = [];
 
@@ -162,11 +266,21 @@ export function collectAgentActivity(
       continue;
     }
 
-    const entries = readSessionEntries(sessionDir, lastRunTs, newRunTs);
-    if (entries.length === 0) {
+    let agentEntries: string[];
+    if (entries !== undefined) {
+      // Use the pre-filtered set. Re-read the raw entries for this agent to match by
+      // rendered string — this avoids re-parsing while staying correct.
+      const rawForAgent = readSessionEntries(sessionDir, lastRunTs, newRunTs);
+      const keptSet = new Set(entries.map((e) => e.rendered));
+      agentEntries = rawForAgent.filter((e) => keptSet.has(e.rendered)).map((e) => e.rendered);
+    } else {
+      agentEntries = readSessionEntries(sessionDir, lastRunTs, newRunTs).map((e) => e.rendered);
+    }
+
+    if (agentEntries.length === 0) {
       sections.push(`### ${label}\n\n(no activity)\n`);
     } else {
-      sections.push(`### ${label}\n\n${entries.join('\n')}\n`);
+      sections.push(`### ${label}\n\n${agentEntries.join('\n')}\n`);
     }
   }
 
@@ -262,13 +376,19 @@ export function stripSessionEntry(entry: Record<string, unknown>): Record<string
 
 /**
  * Read JSONL entries from all session files in a directory, filtered by time window.
+ * Returns TimestampedEntry values so callers can apply oldest-first truncation before
+ * rendering. The `rendered` field is the pre-stripped, JSON-encoded string.
  */
-function readSessionEntries(sessionDir: string, lastRunTs: string, newRunTs: string): string[] {
+function readSessionEntries(
+  sessionDir: string,
+  lastRunTs: string,
+  newRunTs: string
+): TimestampedEntry[] {
   const files = readdirSync(sessionDir)
     .filter((f) => f.endsWith('.jsonl'))
     .sort();
 
-  const entries: string[] = [];
+  const entries: TimestampedEntry[] = [];
 
   for (const file of files) {
     const filePath = join(sessionDir, file);
@@ -281,9 +401,9 @@ function readSessionEntries(sessionDir: string, lastRunTs: string, newRunTs: str
         if (!INCLUDED_ENTRY_TYPES.has(entry.type)) continue;
         if (!entry.timestamp) continue;
 
-        const ts = entry.timestamp;
+        const ts = entry.timestamp as string;
         if (ts >= lastRunTs && ts < newRunTs) {
-          entries.push(JSON.stringify(stripSessionEntry(entry)));
+          entries.push({ timestamp: ts, rendered: JSON.stringify(stripSessionEntry(entry)) });
         }
       } catch {
         // Skip malformed lines
@@ -598,7 +718,7 @@ export async function buildAndDeliverDailySummary(
     // All agents involved: project-scoped + Guide (for project log)
     const allProjectAgents = [...projectScopedAgents, ...projectLogSystemAgents];
 
-    const allProjectAgentActivity = collectAgentActivity(
+    const allProjectAgentEntries = collectAgentActivityWithTimestamps(
       system2Dir,
       allProjectAgents,
       lastRunTs,
@@ -607,11 +727,18 @@ export async function buildAndDeliverDailySummary(
     const projectDbChanges = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
 
     // Cache project-scoped agent activity for daily summary reuse
-    const projectScopedActivity = collectAgentActivity(
+    const projectScopedEntries = collectAgentActivityWithTimestamps(
       system2Dir,
       projectScopedAgents,
       lastRunTs,
       newRunTs
+    );
+    const projectScopedActivity = renderAgentActivitySections(
+      system2Dir,
+      projectScopedAgents,
+      lastRunTs,
+      newRunTs,
+      projectScopedEntries
     );
     projectDataList.push({
       projectId: project.id,
@@ -623,9 +750,19 @@ export async function buildAndDeliverDailySummary(
     });
 
     // Deliver project-log message (with all agents including Guide)
+    const allProjectAgentActivity = renderAgentActivitySections(
+      system2Dir,
+      allProjectAgents,
+      lastRunTs,
+      newRunTs,
+      allProjectAgentEntries
+    );
     if (!hasActivity(allProjectAgentActivity, projectDbChanges)) continue;
 
-    const projectLogMessage = `[Scheduled task: project-log]
+    // Apply catch-up budget to the agent activity entries for this project-log delivery.
+    // Build a fixed header to measure how much space it occupies so the budget applies
+    // only to the variable activity section.
+    const projectLogHeader = `[Scheduled task: project-log]
 
 project_id: ${project.id}
 project_name: ${project.name}
@@ -633,11 +770,27 @@ file: ${logFile}
 last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
-IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
+IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.`;
 
+    const projectLogOverhead = projectLogHeader.length + projectDbChanges.length + 200; // 200 for section labels/separators
+    const projectLogActivityBudget = Math.max(CATCH_UP_BUDGET_BYTES - projectLogOverhead, 0);
+    const projectLogTruncation = truncateOldestToFit(
+      allProjectAgentEntries,
+      projectLogActivityBudget
+    );
+    const truncatedProjectActivity = renderAgentActivitySections(
+      system2Dir,
+      allProjectAgents,
+      lastRunTs,
+      newRunTs,
+      projectLogTruncation.kept
+    );
+    const projectLogAnnotation = annotateTruncation(projectLogTruncation);
+
+    const projectLogMessage = `${projectLogHeader}${projectLogAnnotation}
 ## Agent Activity
 
-${allProjectAgentActivity}
+${truncatedProjectActivity}
 ## Database Changes
 
 ${projectDbChanges}`;
@@ -655,11 +808,18 @@ ${projectDbChanges}`;
   const activeProjectIds = projectDataList.map((p) => p.projectId);
 
   // Non-project: Guide + Narrator JSONL (full streams, span all projects)
-  const nonProjectAgentActivity = collectAgentActivity(
+  const nonProjectAgentEntries = collectAgentActivityWithTimestamps(
     system2Dir,
     dailySummarySystemAgents,
     lastRunTs,
     newRunTs
+  );
+  const nonProjectAgentActivity = renderAgentActivitySections(
+    system2Dir,
+    dailySummarySystemAgents,
+    lastRunTs,
+    newRunTs,
+    nonProjectAgentEntries
   );
   const nonProjectDbChanges = collectNonProjectDbChanges(db, activeProjectIds, lastRunTs, newRunTs);
 
@@ -674,21 +834,51 @@ ${projectDbChanges}`;
   }
 
   // 8. Assemble daily summary message (only sections with activity)
-  const messageParts: string[] = [
-    `[Scheduled task: daily-summary]
+  const dailySummaryHeader = `[Scheduled task: daily-summary]
 
 file: ${filePath}
 last_run_ts: ${lastRunTs}
 new_run_ts: ${newRunTs}
 
-IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.`,
+IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.`;
+
+  // Compute overhead: header + DB changes + static section labels (generous estimate)
+  const summaryDbOverhead =
+    projectDataList.reduce((s, pd) => s + pd.dbChanges.length, 0) + nonProjectDbChanges.length;
+  const summaryOverhead = dailySummaryHeader.length + summaryDbOverhead + 500;
+  const summaryActivityBudget = Math.max(CATCH_UP_BUDGET_BYTES - summaryOverhead, 0);
+
+  // Gather all project-scoped entries for truncation
+  const allProjectScopedEntries: TimestampedEntry[] = projectDataList.flatMap((pd) =>
+    collectAgentActivityWithTimestamps(
+      system2Dir,
+      allAgents.filter((a) => a.project_name === pd.projectName),
+      lastRunTs,
+      newRunTs
+    )
+  );
+  const allActivityEntries = [...allProjectScopedEntries, ...nonProjectAgentEntries];
+  const summaryTruncation = truncateOldestToFit(allActivityEntries, summaryActivityBudget);
+  const summaryAnnotation = annotateTruncation(summaryTruncation);
+
+  const messageParts: string[] = [
+    summaryAnnotation ? `${dailySummaryHeader}${summaryAnnotation}` : dailySummaryHeader,
   ];
 
   const activeProjectParts: string[] = [];
   for (const pd of projectDataList) {
     if (!pd.hasChanges) continue;
+    // Render this project's activity using only kept entries
+    const projectAgents = allAgents.filter((a) => a.project_name === pd.projectName);
+    const renderedProjectActivity = renderAgentActivitySections(
+      system2Dir,
+      projectAgents,
+      lastRunTs,
+      newRunTs,
+      summaryTruncation.kept
+    );
     activeProjectParts.push(
-      `### Project: ${pd.projectName} (#${pd.projectId})\n\n#### Agent Activity\n\n${pd.agentActivity}\n#### Database Changes\n\n${pd.dbChanges}`
+      `### Project: ${pd.projectName} (#${pd.projectId})\n\n#### Agent Activity\n\n${renderedProjectActivity}\n#### Database Changes\n\n${pd.dbChanges}`
     );
   }
   if (activeProjectParts.length > 0) {
@@ -696,8 +886,15 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
   }
 
   if (hasNonProjectChanges) {
+    const renderedNonProjectActivity = renderAgentActivitySections(
+      system2Dir,
+      dailySummarySystemAgents,
+      lastRunTs,
+      newRunTs,
+      summaryTruncation.kept
+    );
     messageParts.push(
-      `## Non-Project Activity\n\n#### Agent Activity\n\n${nonProjectAgentActivity}\n#### Database Changes\n\n${nonProjectDbChanges}`
+      `## Non-Project Activity\n\n#### Agent Activity\n\n${renderedNonProjectActivity}\n#### Database Changes\n\n${nonProjectDbChanges}`
     );
   }
 
