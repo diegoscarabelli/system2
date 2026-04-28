@@ -61,30 +61,26 @@ The Guide adapts to what you already have: if you have an existing database, orc
 
 ### Managing and updating
 
-Once the server is running, you can check on it, stop it, or upgrade System2 at any time:
+Once the server is running, a small set of commands covers the day-to-day lifecycle: checking status, shutting down, managing credentials, and upgrading.
+
+**Daily operation.** Use `system2 status` to confirm the server is up, and `system2 stop` to shut it down gracefully. When you are done for the day, run `system2 stop`: agent work in progress is saved, and a backup is created automatically on the next start.
 
 ```bash
 system2 status           # check whether the server is running
-```
-
-```bash
 system2 stop             # shut down gracefully
 ```
 
-When you are done for the day, run `system2 stop`. Agent work in progress is saved, and a backup is created automatically on the next start.
+**Authentication.** `system2 login` runs the Claude.ai OAuth flow, persists tokens to `~/.system2/oauth/<provider>.json` (mode 0600), and (if needed) adds `[llm.oauth]` to `config.toml`. Use it to switch on OAuth after a key-only onboarding, or to re-authenticate after a refresh-token expiry. `system2 logout` reverses both. Both commands require the daemon to be stopped first; restart it afterward to pick up the change.
 
 ```bash
 system2 login            # add or refresh a Claude Pro/Max OAuth credential
-```
-
-```bash
 system2 logout           # remove an OAuth credential
 ```
 
-`system2 login` runs the Claude.ai OAuth flow, persists tokens to `~/.system2/oauth/<provider>.json` (mode 0600), and (if needed) adds `[llm.oauth]` to `config.toml`. Use it to switch on OAuth after a key-only onboarding, or to re-authenticate after a refresh-token expiry. `system2 logout` reverses both. Both commands require the daemon to be stopped first, and you must restart it afterward to pick up the change.
+**Upgrading.** Pull the latest release from npm:
 
 ```bash
-pnpm update -g @diegoscarabelli/system2   # upgrade System2 to the latest release
+pnpm update -g @diegoscarabelli/system2
 ```
 
 ---
