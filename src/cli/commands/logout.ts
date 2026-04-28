@@ -75,14 +75,15 @@ export function removeProviderFromOAuthTier(
 
 export async function logout(provider?: string): Promise<void> {
   console.clear();
-  p.intro('🧠 System2 OAuth logout');
 
   if (!existsSync(CONFIG_FILE)) {
+    p.intro('🧠 System2 OAuth logout');
     p.cancel(`No System2 installation found at ${SYSTEM2_DIR}.`);
     process.exit(1);
   }
 
   if (isDaemonRunning()) {
+    p.intro('🧠 System2 OAuth logout');
     p.cancel('System2 daemon is running. Stop it first with: system2 stop');
     process.exit(1);
   }
@@ -90,6 +91,7 @@ export async function logout(provider?: string): Promise<void> {
   let target: LlmProvider;
   if (provider) {
     if (!OAUTH_PROVIDERS.includes(provider as LlmProvider)) {
+      p.intro('🧠 System2 OAuth logout');
       p.cancel(
         `OAuth logout for "${provider}" is not supported. Supported: ${OAUTH_PROVIDERS.join(', ')}`
       );
@@ -99,6 +101,8 @@ export async function logout(provider?: string): Promise<void> {
   } else {
     target = OAUTH_PROVIDERS[0];
   }
+
+  p.intro(`🧠 System2 OAuth logout — ${target}`);
 
   const credPath = join(SYSTEM2_DIR, 'oauth', `${target}.json`);
   const fileExists = existsSync(credPath);

@@ -102,14 +102,15 @@ export function addProviderToOAuthTier(
 
 export async function login(provider?: string): Promise<void> {
   console.clear();
-  p.intro('🧠 System2 OAuth login');
 
   if (!existsSync(CONFIG_FILE)) {
+    p.intro('🧠 System2 OAuth login');
     p.cancel(`No System2 installation found at ${SYSTEM2_DIR}. Run "system2 onboard" first.`);
     process.exit(1);
   }
 
   if (isDaemonRunning()) {
+    p.intro('🧠 System2 OAuth login');
     p.cancel('System2 daemon is running. Stop it first with: system2 stop');
     process.exit(1);
   }
@@ -117,6 +118,7 @@ export async function login(provider?: string): Promise<void> {
   let target: LlmProvider;
   if (provider) {
     if (!OAUTH_PROVIDERS.includes(provider as LlmProvider)) {
+      p.intro('🧠 System2 OAuth login');
       p.cancel(
         `OAuth login for "${provider}" is not supported. Supported: ${OAUTH_PROVIDERS.join(', ')}`
       );
@@ -127,6 +129,7 @@ export async function login(provider?: string): Promise<void> {
     if (OAUTH_PROVIDERS.length === 1) {
       target = OAUTH_PROVIDERS[0];
     } else {
+      p.intro('🧠 System2 OAuth login');
       target = (await p.select({
         message: 'Which OAuth provider?',
         options: OAUTH_PROVIDERS.map((id) => ({ value: id, label: id })),
@@ -137,6 +140,8 @@ export async function login(provider?: string): Promise<void> {
       }
     }
   }
+
+  p.intro(`🧠 System2 OAuth login — ${target}`);
 
   const label = (await p.text({
     message: 'Label for this OAuth credential:',
