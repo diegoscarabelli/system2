@@ -29,10 +29,17 @@ export interface LlmProviderConfig {
   routing?: Record<string, string[]>;
 }
 
+export interface LlmOAuthConfig {
+  primary: LlmProvider;
+  fallback: LlmProvider[];
+}
+
 export interface LlmConfig {
   primary: LlmProvider;
   fallback: LlmProvider[];
   providers: Partial<Record<LlmProvider, LlmProviderConfig>>;
+  /** Optional OAuth tier. When present, OAuth credentials are tried before API keys. */
+  oauth?: LlmOAuthConfig;
 }
 
 export interface BraveSearchConfig {
