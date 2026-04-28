@@ -8,6 +8,7 @@ import type { DatabaseClient } from '../db/client.js';
 import {
   buildAndDeliverDailySummary,
   buildAndDeliverMemoryUpdate,
+  CUSTOM_MESSAGE_CONTENT_BUDGET,
   collectAgentActivity,
   formatMarkdownTable,
   JobSkipped,
@@ -389,6 +390,23 @@ describe('stripSessionEntry', () => {
     it('does not crash when details is absent', () => {
       const entry = { type: 'custom_message', content: 'hello' };
       expect(stripSessionEntry(entry)).toEqual({ type: 'custom_message', content: 'hello' });
+    });
+
+    it('truncates content exceeding CUSTOM_MESSAGE_CONTENT_BUDGET', () => {
+      const longContent = 'x'.repeat(10 * 1024); // 10 KB
+      const entry = {
+        type: 'custom_message',
+        content: longContent,
+        details: { sender: 1, receiver: 2, timestamp: 0 },
+      };
+      const result = stripSessionEntry(entry) as Record<string, unknown>;
+      expect(result).not.toHaveProperty('details');
+      expect(typeof result.content).toBe('string');
+      const contentStr = result.content as string;
+      expect(contentStr.length).toBeLessThanOrEqual(CUSTOM_MESSAGE_CONTENT_BUDGET + 100); // budget + truncation marker
+      expect(contentStr).toContain(
+        `[...truncated: custom_message content exceeded ${CUSTOM_MESSAGE_CONTENT_BUDGET}-byte budget]`
+      );
     });
   });
 

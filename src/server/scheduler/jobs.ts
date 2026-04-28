@@ -22,6 +22,9 @@ import type { Scheduler } from './scheduler.js';
 /** Entry types to include from JSONL session files */
 const INCLUDED_ENTRY_TYPES = new Set(['message', 'custom_message']);
 
+/** Per-custom_message content cap when feeding catch-up activity into the Narrator. */
+export const CUSTOM_MESSAGE_CONTENT_BUDGET = 4 * 1024;
+
 /**
  * Read a YAML frontmatter field from the first few lines of a file.
  */
@@ -183,6 +186,11 @@ export function stripSessionEntry(entry: Record<string, unknown>): Record<string
 
   if (type === 'custom_message') {
     const { details: _d, ...rest } = entry;
+    if (typeof rest.content === 'string' && rest.content.length > CUSTOM_MESSAGE_CONTENT_BUDGET) {
+      rest.content =
+        rest.content.slice(0, CUSTOM_MESSAGE_CONTENT_BUDGET) +
+        `\n\n[...truncated: custom_message content exceeded ${CUSTOM_MESSAGE_CONTENT_BUDGET}-byte budget]`;
+    }
     return rest;
   }
 
