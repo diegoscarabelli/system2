@@ -23,9 +23,11 @@ It exists to help people think more clearly about complex questions and empower 
 ### Prerequisites
 
 1. **[Node.js 20+](https://nodejs.org/)** and **[pnpm 8+](https://pnpm.io/installation)** (in a terminal, run `node -v` and `pnpm -v` to check)
-2. **An LLM credential** (at least one required). Two options, combinable:
-   - **Claude Pro/Max OAuth** (recommended if you have a Claude subscription): no API key needed. During onboarding you will be offered this as the first step.
-   - **An API key**: [OpenRouter](https://openrouter.ai/) is highly recommended (access to multiple models with one key). Anthropic, Google, OpenAI, and other providers also work.
+2. **An LLM credential** (at least one required). Two tiers, combinable, both configurable during onboarding:
+   - **Claude Pro/Max OAuth** (recommended if you have a Claude subscription): no per-token cost, the agents run against your existing flat-rate subscription. If you already pay for Claude Pro or Max, this is the cheapest way to use System2.
+   - **API keys**: pay-per-token across providers. [OpenRouter](https://openrouter.ai/) is recommended for access to multiple models with one key; Anthropic, Google, OpenAI, and others also work. You can add multiple keys for rotation and multiple providers for failover.
+
+   Combining both tiers gives you OAuth as the primary path with API keys as fallback when OAuth rate-limits.
 3. **Brave Search API key** (highly recommended). Enables agents to search the web and fetch web pages content. This is useful for researching APIs, documentation, and data sources on the web. [Get one here](https://brave.com/search/api/).
 
 ### Install and run
@@ -37,12 +39,7 @@ pnpm add -g @diegoscarabelli/system2      # install System2 globally
 system2 onboard          # one-time setup (see below)
 ```
 
-`system2 onboard` creates the `~/.system2/` directory and walks you through LLM credential setup. You can configure **either or both** of two auth tiers:
-
-- **Claude Pro/Max OAuth** (recommended): no per-token cost, the agents run against your existing flat-rate subscription. If you already pay for Claude Pro or Max, this is the cheapest way to use System2.
-- **API keys**: pay-per-token across providers (OpenRouter, Anthropic, Google, OpenAI, and others). Add multiple keys for rotation and multiple providers for failover.
-
-Combining both tiers gives you OAuth as the primary path with API keys as fallback when OAuth rate-limits. Onboarding also offers Brave Search setup. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
+`system2 onboard` creates the `~/.system2/` directory and walks you through LLM credential setup (Claude Pro/Max OAuth, API keys, or both, as described in Prerequisites) and optional Brave Search setup. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
 
 ```bash
 system2 start            # starts the server and opens the browser
