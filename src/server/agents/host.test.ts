@@ -2713,53 +2713,55 @@ describe('AgentHost', () => {
       expect(internal.pendingPrompt).toBeNull();
     });
 
-    it('replays pending deliveries on the recovered session after context overflow', async () => {
+    it('drops pending deliveries and rejects their promises on context_overflow', async () => {
       const { internal } = makeHostForOverflow();
       const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
       internal.session = { sendCustomMessage };
+      const reject1 = vi.fn();
+      const reject2 = vi.fn();
       internal.pendingDeliveries = [
         {
           content: 'task-1',
           details: { source: 'scheduler' },
           urgent: false,
           resolve: vi.fn(),
-          reject: vi.fn(),
+          reject: reject1,
         },
         {
           content: 'task-2',
           details: { source: 'scheduler' },
           urgent: true,
           resolve: vi.fn(),
-          reject: vi.fn(),
+          reject: reject2,
         },
       ];
       await internal.handlePotentialError(
         makeOverflowEvent('400: input token count exceeds maximum context length')
       );
+      // Delivery promises are rejected with a wire-size error message
+      expect(reject1).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('wire-size') })
+      );
+      expect(reject2).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('wire-size') })
+      );
+      // Deliveries are NOT replayed across providers (sendCustomMessage not called)
+      expect(sendCustomMessage).not.toHaveBeenCalled();
+      // pendingDeliveries cleared by the drop guard
+      expect(internal.pendingDeliveries).toHaveLength(0);
+    });
+
+    it('does not drop pending deliveries on context_overflow when there are none', async () => {
+      const { internal } = makeHostForOverflow();
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      internal.session = { sendCustomMessage };
+      internal.pendingDeliveries = [];
+      await internal.handlePotentialError(
+        makeOverflowEvent('400: input token count exceeds maximum context length')
+      );
+      // handleContextOverflow still called, no rejection errors thrown
       expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
-      expect(sendCustomMessage).toHaveBeenCalledTimes(2);
-      expect(sendCustomMessage).toHaveBeenNthCalledWith(
-        1,
-        {
-          customType: 'agent_message',
-          content: 'task-1',
-          display: false,
-          details: { source: 'scheduler' },
-        },
-        { deliverAs: 'followUp', triggerTurn: true }
-      );
-      expect(sendCustomMessage).toHaveBeenNthCalledWith(
-        2,
-        {
-          customType: 'agent_message',
-          content: 'task-2',
-          display: false,
-          details: { source: 'scheduler' },
-        },
-        { deliverAs: 'steer', triggerTurn: true }
-      );
-      // pendingDeliveries NOT cleared (agent_end shifts on success)
-      expect(internal.pendingDeliveries).toHaveLength(2);
+      expect(sendCustomMessage).not.toHaveBeenCalled();
     });
   });
 

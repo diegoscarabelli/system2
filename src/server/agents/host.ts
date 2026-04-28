@@ -644,6 +644,25 @@ export class AgentHost {
     // on error turns, but we still snapshot for the failover path where
     // reinitializeWithProvider needs the values passed as arguments.
     const promptToRetry = this.pendingPrompt;
+
+    // Drop pending deliveries on context_overflow: the delivery content itself is likely
+    // what triggered the wire-size error (413/"request exceeds maximum size" or similar).
+    // Replaying an oversized message across providers won't shrink it — it would just
+    // duplicate the failure. Reject promises immediately so callers (scheduler jobs,
+    // message_agent) don't hang waiting for a resolution that can never arrive.
+    if (category === 'context_overflow' && this.pendingDeliveries.length > 0) {
+      log.warn(
+        `[AgentHost] Dropping ${this.pendingDeliveries.length} pending delivery(ies) on context_overflow ` +
+          `(re-sending oversized message would just duplicate the failure).`
+      );
+      for (const d of this.pendingDeliveries) {
+        d.reject(
+          new Error('Delivery dropped: message exceeded wire-size limits across all providers.')
+        );
+      }
+      this.pendingDeliveries = [];
+    }
+
     const deliveriesToRetry = [...this.pendingDeliveries];
     // Reset the send counter: the failed turn's sends are abandoned.
     // The retry/failover path will re-send and re-increment as needed.
