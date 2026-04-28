@@ -22,8 +22,10 @@ import type { Scheduler } from './scheduler.js';
 /** Entry types to include from JSONL session files */
 const INCLUDED_ENTRY_TYPES = new Set(['message', 'custom_message']);
 
-/** Per-custom_message content cap when feeding catch-up activity into the Narrator. */
-export const CUSTOM_MESSAGE_CONTENT_BUDGET = 4 * 1024;
+/** Per-custom_message content cap when feeding catch-up activity into the Narrator.
+ *  16 KB captures most legitimate inter-agent payloads while still aggressively
+ *  truncating 1+ MB pathological cases. */
+export const CUSTOM_MESSAGE_CONTENT_BUDGET = 16 * 1024;
 
 /** Producer-side budget for a single inter-agent delivery (half of MAX_DELIVERY_BYTES by default,
  *  leaving room for headers, DB-changes section, and SDK request overhead).

@@ -36,7 +36,8 @@ type AgentRow = { id: number; role: string; project_name: string | null };
 export function createTriggerProjectStoryTool(
   db: DatabaseClient,
   agentId: number,
-  registry: AgentRegistry
+  registry: AgentRegistry,
+  customMessageContentBudget?: number
 ) {
   const params = Type.Object({
     project_id: Type.Number({
@@ -139,7 +140,8 @@ export function createTriggerProjectStoryTool(
           SYSTEM2_DIR,
           projectLogAgents,
           lastRunTs,
-          newRunTs
+          newRunTs,
+          customMessageContentBudget
         );
         const projectDbChanges = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
 

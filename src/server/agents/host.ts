@@ -40,6 +40,7 @@ import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js'; // used for backfilling dir_name on legacy projects
 import type { ReminderManager } from '../reminders/manager.js';
+import { CUSTOM_MESSAGE_CONTENT_BUDGET } from '../scheduler/jobs.js';
 import { filterByRole } from '../skills/loader.js';
 import { log } from '../utils/logger.js';
 import type { AuthTier } from './auth-resolver.js';
@@ -152,6 +153,8 @@ export interface AgentHostConfig {
   onDatabaseWrite?: OnDatabaseWrite;
   /** Hard cap on inter-agent delivery size in bytes. Defaults to MAX_DELIVERY_BYTES. */
   maxDeliveryBytes?: number;
+  /** Per-custom_message content cap in bytes. Defaults to CUSTOM_MESSAGE_CONTENT_BUDGET. */
+  customMessageContentBudget?: number;
   /** Called when the agent's busy state changes. */
   onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
   /** Called when an agent is terminated via terminate_agent tool. */
@@ -206,6 +209,7 @@ export class AgentHost {
   private agentsConfig?: AgentsConfig;
   private reminderManager?: ReminderManager;
   private knowledgeBudgetChars: number;
+  private customMessageContentBudget: number;
   private unsubscribeSession: (() => void) | null = null;
   private onDatabaseWrite?: OnDatabaseWrite;
   private onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
@@ -224,6 +228,8 @@ export class AgentHost {
     this.chatMaxMessages = config.chatMaxMessages ?? 1000;
     this.reminderManager = config.reminderManager;
     this.knowledgeBudgetChars = Math.max(config.knowledgeBudgetChars ?? 20_000, 5_000);
+    this.customMessageContentBudget =
+      config.customMessageContentBudget ?? CUSTOM_MESSAGE_CONTENT_BUDGET;
     this.onDatabaseWrite = config.onDatabaseWrite;
     this.onBusyChange = config.onBusyChange;
     this.onAgentTerminate = config.onAgentTerminate;
@@ -1281,7 +1287,14 @@ export class AgentHost {
       tools.push(
         createTerminateAgentTool(this.db, this.agentId, this.registry, this.onAgentTerminate)
       );
-      tools.push(createTriggerProjectStoryTool(this.db, this.agentId, this.registry));
+      tools.push(
+        createTriggerProjectStoryTool(
+          this.db,
+          this.agentId,
+          this.registry,
+          this.customMessageContentBudget
+        )
+      );
     }
 
     if (canOrchestrate && this.resurrector) {

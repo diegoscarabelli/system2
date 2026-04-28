@@ -168,6 +168,7 @@ export class Server {
     this.guideAgentId = guideAgent.id;
     const callbacks = this.buildAgentCallbacks();
     const maxDeliveryBytes = config.deliveryConfig?.max_bytes ?? MAX_DELIVERY_BYTES;
+    const customMessageContentBudget = config.deliveryConfig?.custom_message_content_budget_bytes;
     this.agentHost = new AgentHost({
       db: this.db,
       agentId: guideAgent.id,
@@ -183,6 +184,7 @@ export class Server {
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
       maxDeliveryBytes,
+      customMessageContentBudget,
       ...callbacks,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
@@ -203,6 +205,7 @@ export class Server {
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
       maxDeliveryBytes,
+      customMessageContentBudget,
       ...callbacks,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
@@ -488,6 +491,7 @@ export class Server {
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: this.config.knowledgeConfig?.budget_chars,
       maxDeliveryBytes: this.config.deliveryConfig?.max_bytes ?? MAX_DELIVERY_BYTES,
+      customMessageContentBudget: this.config.deliveryConfig?.custom_message_content_budget_bytes,
       ...this.buildAgentCallbacks(),
     });
 

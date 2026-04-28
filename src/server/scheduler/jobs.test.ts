@@ -553,7 +553,7 @@ describe('stripSessionEntry', () => {
     });
 
     it('truncates content exceeding CUSTOM_MESSAGE_CONTENT_BUDGET', () => {
-      const longContent = 'x'.repeat(10 * 1024); // 10 KB
+      const longContent = 'x'.repeat(20 * 1024); // 20 KB, exceeds 16 KB budget
       const entry = {
         type: 'custom_message',
         content: longContent,
@@ -573,8 +573,8 @@ describe('stripSessionEntry', () => {
       // Create content with 4-byte UTF-8 emoji characters
       // Each emoji is 4 bytes in UTF-8
       const emoji = '🔥'; // 4 bytes in UTF-8
-      // Budget is 4KB (4096 bytes), so we need > 1024 emojis to exceed it
-      const emojisNeeded = 2000; // 8000 bytes total, exceeds 4KB budget
+      // Budget is 16KB (16384 bytes), so we need > 4096 emojis to exceed it
+      const emojisNeeded = 5000; // 20000 bytes total, exceeds 16KB budget
       const multiByteContent = emoji.repeat(emojisNeeded);
 
       const entry = {
