@@ -14,6 +14,7 @@
 import { AuthStorage } from '@mariozechner/pi-coding-agent';
 import type { LlmConfig, LlmProvider } from '../../shared/index.js';
 import { log } from '../utils/logger.js';
+import { isExpiringSoon, type RefreshedTokens } from './oauth.js';
 import type { OAuthCredentials } from './oauth-credentials.js';
 
 /** Default cooldown durations */
@@ -57,6 +58,10 @@ export class AuthResolver {
   private oauthCredentials: OAuthCredentialsMap;
   private oauthOrder: LlmProvider[];
   private keysOrder: LlmProvider[];
+  private persistCallbacks: Partial<
+    Record<LlmProvider, (creds: OAuthCredentials) => Promise<void>>
+  > = {};
+  private refreshLocks: Map<LlmProvider, Promise<void>> = new Map();
 
   constructor(
     llmConfig: LlmConfig,
@@ -338,6 +343,76 @@ export class AuthResolver {
     }
 
     return AuthStorage.inMemory(data);
+  }
+
+  /**
+   * Register a callback that persists refreshed OAuth credentials for a provider.
+   */
+  setPersistOAuth(
+    provider: LlmProvider,
+    callback: (creds: OAuthCredentials) => Promise<void>
+  ): void {
+    this.persistCallbacks[provider] = callback;
+  }
+
+  /**
+   * Refresh any OAuth credential whose access token is within the expiry buffer.
+   * Returns the set of providers whose credentials were refreshed; callers should
+   * reinitialize SDK sessions for those providers (existing sessions hold a snapshot
+   * of the old access token).
+   * Concurrent callers are serialized per provider so refresh runs once.
+   */
+  async ensureFresh(deps: {
+    refresh: (refreshToken: string) => Promise<RefreshedTokens>;
+  }): Promise<Set<LlmProvider>> {
+    const refreshed = new Set<LlmProvider>();
+    for (const provider of this.oauthOrder) {
+      const cred = this.oauthCredentials[provider];
+      if (!cred || !isExpiringSoon(cred.expires)) continue;
+
+      const existing = this.refreshLocks.get(provider);
+      if (existing) {
+        await existing;
+        const after = this.oauthCredentials[provider];
+        if (after && !isExpiringSoon(after.expires)) {
+          refreshed.add(provider);
+          continue;
+        }
+      }
+
+      const lock = this.doRefresh(provider, cred, deps.refresh).then(() => {
+        this.refreshLocks.delete(provider);
+      });
+      this.refreshLocks.set(provider, lock);
+      await lock;
+      refreshed.add(provider);
+    }
+    return refreshed;
+  }
+
+  private async doRefresh(
+    provider: LlmProvider,
+    cred: OAuthCredentials,
+    refresh: (refreshToken: string) => Promise<RefreshedTokens>
+  ): Promise<void> {
+    const tokens = await refresh(cred.refresh);
+    const updated: OAuthCredentials = {
+      access: tokens.access,
+      refresh: tokens.refresh,
+      expires: tokens.expires,
+      label: cred.label,
+    };
+    this.oauthCredentials[provider] = updated;
+    log.info(`[AuthResolver] OAuth token refreshed for ${provider}:${cred.label}`);
+
+    const persist = this.persistCallbacks[provider];
+    if (persist) {
+      try {
+        await persist(updated);
+      } catch (err) {
+        log.warn(`[AuthResolver] Failed to persist refreshed OAuth for ${provider}:`, err);
+      }
+    }
   }
 
   /**

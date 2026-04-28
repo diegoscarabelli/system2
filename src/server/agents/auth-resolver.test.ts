@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LlmConfig } from '../../shared/index.js';
 import { AuthResolver } from './auth-resolver.js';
+import type { RefreshedTokens } from './oauth.js';
 import type { OAuthCredentials } from './oauth-credentials.js';
 
 function makeConfig(overrides?: Partial<LlmConfig>): LlmConfig {
@@ -420,5 +421,96 @@ describe('AuthResolver — two-tier model', () => {
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds() });
     expect(resolver.providerOrder).toEqual(['anthropic', 'openai']);
+  });
+});
+
+describe('AuthResolver.ensureFresh', () => {
+  it('refreshes OAuth credential within expiry buffer and persists', async () => {
+    const persisted: OAuthCredentials[] = [];
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    const resolver = new AuthResolver(cfg, undefined, {
+      anthropic: makeOAuthCreds(60_000), // 1 min — within buffer
+    });
+    resolver.setPersistOAuth('anthropic', async (creds) => {
+      persisted.push(creds);
+    });
+    const refreshed = await resolver.ensureFresh({
+      refresh: async (): Promise<RefreshedTokens> => ({
+        access: 'new-access',
+        refresh: 'rt-2',
+        expires: Date.now() + 60 * 60_000,
+      }),
+    });
+    expect(refreshed.has('anthropic')).toBe(true);
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].refresh).toBe('rt-2');
+  });
+
+  it('does nothing when OAuth tier is empty', async () => {
+    const cfg = makeTwoTierConfig();
+    delete cfg.oauth;
+    const resolver = new AuthResolver(cfg);
+    const refreshed = await resolver.ensureFresh({
+      refresh: async () => {
+        throw new Error('should not be called');
+      },
+    });
+    expect(refreshed.size).toBe(0);
+  });
+
+  it('does nothing when OAuth tokens are fresh', async () => {
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    let calls = 0;
+    const resolver = new AuthResolver(cfg, undefined, {
+      anthropic: makeOAuthCreds(60 * 60_000), // 1 hour — fresh
+    });
+    await resolver.ensureFresh({
+      refresh: async () => {
+        calls++;
+        return { access: 'x', refresh: 'y', expires: 1 };
+      },
+    });
+    expect(calls).toBe(0);
+  });
+
+  it('serializes concurrent ensureFresh calls per provider', async () => {
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
+    let count = 0;
+    const slow = async (): Promise<RefreshedTokens> => {
+      count++;
+      await new Promise((r) => setTimeout(r, 20));
+      return { access: 'new', refresh: 'rt-2', expires: Date.now() + 60 * 60_000 };
+    };
+    await Promise.all([
+      resolver.ensureFresh({ refresh: slow }),
+      resolver.ensureFresh({ refresh: slow }),
+      resolver.ensureFresh({ refresh: slow }),
+    ]);
+    expect(count).toBe(1);
+  });
+
+  it('throws when refresh fails', async () => {
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
+    await expect(
+      resolver.ensureFresh({
+        refresh: async () => {
+          throw new Error('network down');
+        },
+      })
+    ).rejects.toThrow('network down');
   });
 });
