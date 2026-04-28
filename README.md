@@ -23,7 +23,9 @@ It exists to help people think more clearly about complex questions and empower 
 ### Prerequisites
 
 1. **[Node.js 20+](https://nodejs.org/)** and **[pnpm 8+](https://pnpm.io/installation)** (in a terminal, run `node -v` and `pnpm -v` to check)
-2. **An LLM API key** (required). [OpenRouter](https://openrouter.ai/) is highly recommended: it provides access to multiple models with a single key. Anthropic, Google, OpenAI, and other providers also work.
+2. **An LLM credential** (at least one required). Two options, combinable:
+   - **Claude Pro/Max OAuth** (recommended if you have a Claude subscription): no API key needed. During onboarding you will be offered this as the first step.
+   - **An API key**: [OpenRouter](https://openrouter.ai/) is highly recommended (access to multiple models with one key). Anthropic, Google, OpenAI, and other providers also work.
 3. **Brave Search API key** (highly recommended). Enables agents to search the web and fetch web pages content. This is useful for researching APIs, documentation, and data sources on the web. [Get one here](https://brave.com/search/api/).
 
 ### Install and run
@@ -35,7 +37,7 @@ pnpm add -g @diegoscarabelli/system2      # install System2 globally
 system2 onboard          # one-time setup (see below)
 ```
 
-`system2 onboard` creates the `~/.system2/` directory and walks you through configuration: pick your LLM provider, enter API keys (you can add multiple for rotation and fallback providers for redundancy), and optionally set up Brave Search. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
+`system2 onboard` creates the `~/.system2/` directory and walks you through configuration: optionally set up Claude Pro/Max OAuth (recommended if you have a subscription), then pick your LLM provider and enter API keys (you can add multiple for rotation and fallback providers for redundancy), and optionally set up Brave Search. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
 
 ```bash
 system2 start            # starts the server and opens the browser
@@ -72,6 +74,16 @@ system2 stop             # shut down gracefully
 When you are done for the day, run `system2 stop`. Agent work in progress is saved, and a backup is created automatically on the next start.
 
 ```bash
+system2 login            # add or refresh a Claude Pro/Max OAuth credential
+```
+
+```bash
+system2 logout           # remove an OAuth credential
+```
+
+`system2 login` runs the Claude.ai OAuth flow, persists tokens to `~/.system2/oauth/<provider>.json` (mode 0600), and (if needed) adds `[llm.oauth]` to `config.toml`. Use it to switch on OAuth after a key-only onboarding, or to re-authenticate after a refresh-token expiry. `system2 logout` reverses both. Both commands require the daemon to be stopped first, and you must restart it afterward to pick up the change.
+
+```bash
 pnpm update -g @diegoscarabelli/system2   # upgrade System2 to the latest release
 ```
 
@@ -97,7 +109,8 @@ pnpm update -g @diegoscarabelli/system2   # upgrade System2 to the latest releas
 
 All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
 
-- **`[llm]`**: primary provider, fallback order, per-provider API keys with automatic rotation
+- **`[llm.oauth]`**: OAuth tier — subscription credentials (Claude Pro/Max). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
+- **`[llm]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation
 - **`[databases.*]`**: analytical database connections (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite) that agents and dashboard artifacts can query
 - **`[agents.*]`**: per-role overrides for thinking level, context compaction depth, and model selection per provider
 - **`[services.brave_search]`**: web search via Brave Search API (highly recommended)
@@ -133,6 +146,8 @@ System2's home directory is `~/.system2/`. It holds all system state: configurat
 ├── .gitignore
 ├── app.db                           SQLite database (gitignored)
 ├── config.toml                      Settings and API keys (0600, gitignored)
+├── oauth/                           OAuth credentials (0600, gitignored)
+│   └── anthropic.json               Claude Pro/Max tokens
 ├── knowledge/                       Persistent knowledge (git-tracked)
 │   ├── conductor.md                 Conductor role-specific knowledge
 │   ├── daily_summaries/             Daily activity logs

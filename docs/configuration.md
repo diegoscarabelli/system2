@@ -10,7 +10,12 @@ All System2 settings live in `~/.system2/config.toml`, created by `system2 onboa
 ## config.toml Reference
 
 ```toml
-# LLM providers and API keys
+# OAuth tier — subscription credentials, tried first
+[llm.oauth]
+primary = "anthropic"
+fallback = []   # only anthropic OAuth supported in v1
+
+# API key tier — billed per token, used after OAuth tier exhausted
 [llm]
 primary = "anthropic"
 fallback = ["google", "openai"]
@@ -125,7 +130,7 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 
 | Provider | Models Used |
 |----------|------------|
-| `anthropic` | Claude (Sonnet, Opus, Haiku) |
+| `anthropic` | Claude (Sonnet, Opus, Haiku); also supports OAuth (Claude Pro/Max) |
 | `cerebras` | Fast inference (Llama, Qwen) |
 | `google` | Gemini |
 | `groq` | Fast inference (Llama, DeepSeek, Gemma) |
@@ -160,6 +165,45 @@ When API errors occur, System2 automatically retries and fails over:
 **Cooldown recovery:** Rate limit and transient failures enter a 5-minute cooldown. Keys become available again automatically after cooldown expires. Auth errors (invalid/revoked keys) are permanent until you edit config.toml.
 
 See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
+
+## Auth Tiers
+
+System2 has two auth tiers:
+
+- **OAuth tier** — subscription credentials (`[llm.oauth]`). Tried first. v1 supports Anthropic Claude Pro/Max OAuth. Pi-ai supports Google Gemini CLI, GitHub Copilot, and OpenAI Codex OAuth as well; those will be added in future iterations.
+- **API key tier** — `[llm].primary` + `fallback`. Same shape as today. Used after the OAuth tier is fully exhausted (every OAuth credential in cooldown).
+
+The OAuth tier is fully exhausted before the system drops into the API key tier — never interleaving. If `[llm.oauth]` is absent, system2 behaves exactly like an API-key-only setup.
+
+### Anthropic OAuth (Claude Pro/Max)
+
+The pi-ai SDK detects OAuth tokens (substring match `sk-ant-oat`) and switches the Anthropic client to Bearer auth + Claude Code identity headers. The agent loop, custom tools, and multi-agent orchestration are unchanged.
+
+**Setup:** During `system2 onboard`, the first step asks whether to configure OAuth. Selecting "yes" + "Anthropic" opens a browser for Claude.ai authentication. The resulting tokens are saved to `~/.system2/oauth/anthropic.json` (mode 0600).
+
+**Refresh:** OAuth access tokens expire roughly hourly. The daemon refreshes them automatically before each agent session creation and on 401 errors. Refreshed tokens are persisted back to `~/.system2/oauth/anthropic.json`.
+
+**Failover:** A 401 on an OAuth credential triggers one refresh-and-retry. If refresh succeeds, the session reinitializes with the new token and the prompt retries. If refresh fails (or any other error), the OAuth credential enters cooldown and the next OAuth fallback is tried; once the OAuth tier is exhausted, the system drops into the API key tier.
+
+**Caveats:**
+- Claude Pro/Max usage limits are sized for one human in Claude Code. A multi-agent system2 workload (Guide + Conductor + Reviewer + Workers + Narrator running concurrently) can hit the 5-hour message cap quickly. Configure the API key tier as fallback for sustained workloads.
+- Programmatic use of Pro/Max credentials outside Claude Code is in a TOS gray area. Use at your own discretion.
+- Prompt caching is disabled on the OAuth path (the SDK strips `cache_control` from system prompts for OAuth tokens). Per-call billing still goes through the subscription.
+
+### Re-authenticating and managing credentials post-onboarding
+
+Use `system2 login <provider>` to add an OAuth credential after onboarding (or to re-authenticate when a refresh token has been invalidated — for example, after signing out of Claude.ai, changing your password, revoking the app's grant, or hitting an idle-expiry on the refresh token). The command runs the OAuth flow, writes `~/.system2/oauth/<provider>.json`, and (if `[llm.oauth]` is missing or doesn't include the provider) offers to patch `config.toml` to enable the OAuth tier. If the daemon is running, restart it to pick up the new credential: `system2 stop && system2 start`.
+
+Use `system2 logout <provider>` to remove an OAuth credential. The command deletes the credentials file and offers to remove the provider from `[llm.oauth]` in `config.toml`.
+
+### Changing primary provider or switching auth method
+
+System2 reads `~/.system2/config.toml` only at startup. To change the primary provider, swap which tier is preferred, add or remove a fallback provider, or edit any other LLM configuration:
+
+1. Edit `~/.system2/config.toml` directly (or use `system2 login` / `system2 logout` for OAuth credential changes).
+2. Restart the daemon: `system2 stop && system2 start`.
+
+You do not need to switch auth methods manually for cost or rate-limit reasons — the two-tier failover handles that automatically. OAuth is tried first; once exhausted, the system drops to the API key tier without any user action. If a transient failure has put a credential into cooldown and you want to force the system to retry it sooner than the cooldown expiry, restart the daemon (which clears in-memory cooldowns).
 
 ## Agent Overrides
 

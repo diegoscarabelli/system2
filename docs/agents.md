@@ -216,12 +216,26 @@ Auto-compaction is also configured to fire earlier (at ~50% of the context windo
 
 **Last-resort provider recovery:** after all normal recovery paths (retry, failover, context overflow) are exhausted, `handlePotentialError` checks if a different provider is available before giving up. This covers cases where an agent is stuck on a dead fallback provider (e.g., Anthropic with $0 credits returning 400 `client` errors) while the primary provider's cooldown has expired. `getNextProvider()` iterates in provider order (primary first), so agents naturally gravitate back to the primary when it becomes available.
 
+### Two-Tier Credentials (OAuth + API Keys)
+
+When `[llm.oauth]` is configured, `AuthResolver` walks credentials across two tiers:
+
+1. **OAuth tier** — providers listed in `[llm.oauth].primary` + `fallback`, each with one credential loaded from `~/.system2/oauth/<provider>.json` at startup.
+2. **API key tier** — providers listed in `[llm].primary` + `fallback`, with one or more API keys each.
+
+`getActiveCredential()` returns a `{ tier, provider, keyIndex, label }` tuple. Cooldown keys are namespaced as `${tier}:${provider}:${keyIndex}` so the same provider in both tiers (e.g., Anthropic OAuth and Anthropic API keys) doesn't collide. The OAuth tier is fully exhausted (every credential in cooldown) before the resolver returns a keys-tier credential.
+
+Two extra concerns over plain API keys:
+
+1. **Refresh.** `AuthResolver.ensureFresh()` is awaited before each session creation in `AgentHost.initialize()` and `reinitializeWithProvider()`. If an OAuth access token is within 5 minutes of expiry, the resolver calls the SDK's `refreshAnthropicToken`, updates in-memory state, and persists via the callback registered through `setPersistOAuth()`. Concurrent refreshes per provider are serialized via a Promise lock.
+2. **401 handling.** Normally `auth` errors trigger immediate failover. For OAuth-tier credentials, `AgentHost` first calls `ensureFresh()` and reinitializes the session before falling over — this catches expiry-related 401s without losing the credential. If refresh itself fails, the credential goes into cooldown via the standard path.
+
 ## Session Persistence
 
 Agent sessions are persisted as JSONL files in `~/.system2/sessions/{role}_{id}/`. The pi-coding-agent SDK manages:
 - **Session format:** tree structure with `id` and `parentId` for in-place branching
 - **Auto-compaction:** when context approaches model limits, older messages are summarized
-- **Compaction pruning:** long-running agents can set `compaction_depth: N` in their frontmatter. After N auto-compactions, a manual "pruning" compaction runs at 30% context usage. It uses the Nth oldest compaction summary as a baseline to shed stale information, creating a sliding window instead of an ever-growing chain. The compaction counter is persisted to `.compaction-count` in the session directory so it survives restarts.
+- **Compaction pruning:** long-running agents can set `compaction_depth: N` in their frontmatter. After N auto-compactions, a manual "pruning" compaction runs on the next `agent_end`. It uses the Nth oldest compaction summary as a baseline to shed stale information, creating a sliding window instead of an ever-growing chain. The compaction counter is persisted to `.compaction-count` in the session directory so it survives restarts. While the pruning compaction is in flight, the `agent_end` signal (and the `ready_for_input` it triggers in the UI) is deferred until the compaction completes, so a user prompt cannot race the in-flight compaction.
 
 **Session continuation** (`initialize()`): at startup, system2 finds the newest `.jsonl` file by mtime (`findMostRecentSession()`) and opens it directly via `SessionManager.open()`. This tolerates files that lack a valid session header, which `SessionManager.continueRecent()` would reject and silently replace with a fresh empty session. `continueRecent()` is used only when no `.jsonl` file exists yet (first-time setup).
 

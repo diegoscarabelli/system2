@@ -1992,18 +1992,20 @@ describe('AgentHost', () => {
         expect(internal.writeCompactionCount).toHaveBeenCalledWith(0);
       });
 
-      it('skips pruning when no baseline is available', async () => {
+      it('skips pruning when no baseline is available and resets the counter', async () => {
         const { internal } = makeHostForPruning(5);
         const session = mockSession(['only one']);
         internal.session = session;
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 5;
+        internal.writeCompactionCount = vi.fn();
 
         await internal.triggerPruningCompaction();
 
         expect(session.compact).not.toHaveBeenCalled();
-        // compactionCount should NOT be reset when pruning is skipped
-        expect(internal.compactionCount).toBe(5);
+        // Counter is reset so we don't retry baseline lookup on every agent_end.
+        expect(internal.compactionCount).toBe(0);
+        expect(internal.writeCompactionCount).toHaveBeenCalledWith(0);
       });
 
       it('skips pruning when session is null', async () => {
@@ -2094,31 +2096,38 @@ describe('AgentHost', () => {
         expect(internal.compactionCount).toBe(0);
       });
 
-      it('triggers pruning on agent_end when counter reaches depth and usage >= 30%', () => {
+      it('triggers pruning on agent_end when counter reaches depth', () => {
         const { internal } = makeHostForPruning(3);
         const session = mockSession(['baseline', 'second', 'third']);
         internal.session = session;
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
         internal.writeCompactionCount = vi.fn();
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 30 });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
         expect(internal.isPruning).toBe(true);
+        expect(session.compact).toHaveBeenCalled();
       });
 
-      it('does not trigger pruning when usage is below 30%', () => {
+      it('triggers pruning without consulting context usage', () => {
         const { internal } = makeHostForPruning(3);
         const session = mockSession(['baseline', 'second', 'third']);
         internal.session = session;
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 3;
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 29 });
+        internal.writeCompactionCount = vi.fn();
+        // Make getContextUsage throw so the test fails loudly if a future
+        // regression re-introduces a usage-based gate in the trigger path.
+        internal.getContextUsage = vi.fn(() => {
+          throw new Error('getContextUsage must not be consulted by pruning trigger');
+        });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
-        expect(internal.isPruning).toBe(false);
+        expect(internal.isPruning).toBe(true);
+        expect(session.compact).toHaveBeenCalled();
+        expect(internal.getContextUsage).not.toHaveBeenCalled();
       });
 
       it('does not trigger pruning when counter is below depth', () => {
@@ -2126,7 +2135,6 @@ describe('AgentHost', () => {
         internal.session = mockSession(['a', 'b']);
         internal._sessionDir = '/tmp/test-session';
         internal.compactionCount = 2;
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 50 });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
@@ -2141,7 +2149,6 @@ describe('AgentHost', () => {
         internal.compactionCount = 3;
         internal.isPruning = true;
         internal.writeCompactionCount = vi.fn();
-        internal.getContextUsage = vi.fn().mockReturnValue({ percent: 50 });
 
         internal.handleCompactionTracking({ type: 'agent_end' });
 
@@ -2157,6 +2164,213 @@ describe('AgentHost', () => {
         internal.handleCompactionTracking({ type: 'tool_execution_start' });
 
         expect(internal.compactionCount).toBe(0);
+      });
+    });
+
+    describe('agent_end deferral when pruning fires', () => {
+      type DeferralInternal = PruningInternal & {
+        busy: boolean;
+        onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
+        listeners: Set<(event: { type: string }) => void>;
+        deferredAgentEnd: { type: string } | null;
+        handleSessionEvent: (event: { type: string }) => void;
+        handlePotentialError: (event: unknown) => Promise<void>;
+      };
+
+      it('defers agent_end forwarding and busy clear until pruning completes', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        const session = mockSession(['baseline', 'second', 'third']);
+        def.session = session;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let pruneResolve!: () => void;
+        session.compact.mockImplementation(() => new Promise<void>((r) => (pruneResolve = r)));
+
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+
+        def.handleSessionEvent({ type: 'agent_end' });
+
+        // Pruning is in flight. agent_end has not been forwarded and busy is still true.
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+        expect(listenerEvents).toEqual([]);
+        expect(busyEvents).toEqual([]);
+        expect(def.busy).toBe(true);
+
+        // Pruning finishes.
+        pruneResolve();
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(def.busy).toBe(false);
+        expect(busyEvents).toEqual([false]);
+        expect(listenerEvents).toEqual(['agent_end']);
+      });
+
+      it('forwards agent_end immediately when pruning is not triggered', () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        def.compactionCount = 0;
+        def.busy = true;
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+
+        def.handleSessionEvent({ type: 'agent_end' });
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(def.busy).toBe(false);
+        expect(busyEvents).toEqual([false]);
+        expect(listenerEvents).toEqual(['agent_end']);
+      });
+
+      it('flushes deferred agent_end even when pruning rejects', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        const session = mockSession(['baseline', 'second', 'third']);
+        def.session = session;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let pruneReject!: (err: Error) => void;
+        session.compact.mockImplementation(() => new Promise((_, r) => (pruneReject = r)));
+
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+
+        def.handleSessionEvent({ type: 'agent_end' });
+
+        pruneReject(new Error('compact failed'));
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(def.busy).toBe(false);
+        expect(busyEvents).toEqual([false]);
+        expect(listenerEvents).toEqual(['agent_end']);
+      });
+
+      it('keeps the latest agent_end when a second one arrives mid-pruning', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        const session = mockSession(['baseline', 'second', 'third']);
+        def.session = session;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let pruneResolve!: () => void;
+        session.compact.mockImplementation(() => new Promise<void>((r) => (pruneResolve = r)));
+
+        const listenerEvents: { type: string; tag?: string }[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e as { type: string; tag?: string })]);
+
+        def.handleSessionEvent({ type: 'agent_end', tag: 'first' } as { type: string });
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end', tag: 'first' });
+
+        def.handleSessionEvent({ type: 'agent_end', tag: 'second' } as { type: string });
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end', tag: 'second' });
+
+        // Re-entry guard prevents the second agent_end from triggering pruning again.
+        expect(session.compact).toHaveBeenCalledTimes(1);
+
+        pruneResolve();
+        await new Promise((r) => setImmediate(r));
+
+        expect(listenerEvents).toEqual([{ type: 'agent_end', tag: 'second' }]);
+      });
+
+      it('routes compaction_end through handleCompactionTracking via handleSessionEvent', () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        def.compactionCount = 0;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+        def.listeners = new Set();
+
+        def.handleSessionEvent({ type: 'compaction_end' });
+
+        expect(def.compactionCount).toBe(1);
+      });
+
+      it('stale pruning .finally is a no-op once pruningGeneration is bumped', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal & { pruningGeneration: number };
+        const sessionA = mockSession(['baseline', 'second', 'third']);
+        def.session = sessionA;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let resolveA!: () => void;
+        sessionA.compact.mockImplementation(() => new Promise<void>((r) => (resolveA = r)));
+
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+
+        // Pruning A starts.
+        def.handleSessionEvent({ type: 'agent_end' });
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+
+        // Simulate reinitializeWithProvider clearing pruning state and bumping
+        // the generation while pruning A is still in flight.
+        def.deferredAgentEnd = null;
+        def.isPruning = false;
+        def.pruningGeneration++;
+
+        // A new agent_end fires after reinit completes; pruning B starts.
+        const sessionB = mockSession(['baseline', 'second', 'third']);
+        def.session = sessionB;
+        def.compactionCount = 3;
+        let resolveB!: () => void;
+        sessionB.compact.mockImplementation(() => new Promise<void>((r) => (resolveB = r)));
+        def.busy = true;
+
+        def.handleSessionEvent({ type: 'agent_end' });
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+
+        // Pruning A's promise resolves now (its session is dead). Its .finally
+        // should be a no-op because the generation was bumped.
+        resolveA();
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+        expect(listenerEvents).toEqual([]);
+
+        // Pruning B's promise resolves; its .finally fires and flushes.
+        resolveB();
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(listenerEvents).toEqual(['agent_end']);
       });
     });
 
@@ -2867,6 +3081,256 @@ describe('AgentHost', () => {
       await internal.compactForProvider('cerebras');
 
       expect(internal.handleContextOverflow).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('currentTier tracking', () => {
+    it('initializes currentTier as "oauth" when active credential is from OAuth tier', async () => {
+      const { AuthResolver } = await import('./auth-resolver.js');
+
+      // Build a config that has both an OAuth tier (anthropic) and a keys tier (cerebras)
+      const llmConfig = {
+        primary: 'cerebras' as const,
+        fallback: [],
+        providers: {
+          cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
+        },
+        oauth: { primary: 'anthropic' as const, fallback: [] },
+      };
+
+      // Provide a non-expiring OAuth credential so the OAuth tier is active
+      const oauthCred = {
+        access: 'sk-ant-oat01-test',
+        refresh: 'sk-ant-ort01-test',
+        expires: Date.now() + 60 * 60 * 1000, // 1 hour from now
+        label: 'Pro',
+      };
+      const authResolver = new AuthResolver(llmConfig, undefined, { anthropic: oauthCred });
+
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig,
+        authResolver,
+      });
+
+      const internal = host as unknown as {
+        currentTier: string;
+        currentProvider: string;
+      };
+
+      expect(internal.currentTier).toBe('oauth');
+      expect(internal.currentProvider).toBe('anthropic');
+    });
+
+    it('initializes currentTier as "keys" when no OAuth credentials are present', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as { currentTier: string };
+      expect(internal.currentTier).toBe('keys');
+    });
+
+    it('markKeyFailed uses oauth cooldown key when currentTier is "oauth"', async () => {
+      const { AuthResolver } = await import('./auth-resolver.js');
+
+      const llmConfig = {
+        primary: 'cerebras' as const,
+        fallback: [],
+        providers: {
+          cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
+        },
+        oauth: { primary: 'anthropic' as const, fallback: [] },
+      };
+
+      const oauthCred = {
+        access: 'sk-ant-oat01-test',
+        refresh: 'sk-ant-ort01-test',
+        expires: Date.now() + 60 * 60 * 1000,
+        label: 'Pro',
+      };
+      const authResolver = new AuthResolver(llmConfig, undefined, { anthropic: oauthCred });
+
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig,
+        authResolver,
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        currentKeyIndex: number;
+        currentTier: string;
+        oauthRefreshAttempted: boolean;
+        authResolver: import('./auth-resolver.js').AuthResolver;
+        reinitializeWithProvider: ReturnType<typeof vi.fn>;
+        session: unknown;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
+      // Skip the refresh-and-retry branch so we test the markKeyFailed path directly.
+      internal.oauthRefreshAttempted = true;
+
+      // Confirm tier is oauth before the error
+      expect(internal.currentTier).toBe('oauth');
+
+      // Fire an auth error — goes straight to failover (refresh already attempted)
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 401: Unauthorized - Invalid API key' },
+      });
+
+      // The OAuth credential for anthropic:0 should now be in cooldown under the oauth key
+      expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'oauth')).toBe(true);
+      // And NOT under the keys key (different namespace)
+      expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'keys')).toBe(false);
+    });
+  });
+
+  describe('OAuth refresh-and-retry on 401', () => {
+    async function makeOAuthHost() {
+      const { AuthResolver } = await import('./auth-resolver.js');
+
+      const llmConfig = {
+        primary: 'cerebras' as const,
+        fallback: [],
+        providers: {
+          cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
+        },
+        oauth: { primary: 'anthropic' as const, fallback: [] },
+      };
+
+      const oauthCred = {
+        access: 'sk-ant-oat01-test',
+        refresh: 'sk-ant-ort01-test',
+        expires: Date.now() + 60 * 60 * 1000,
+        label: 'Pro',
+      };
+
+      const authResolver = new AuthResolver(llmConfig, undefined, { anthropic: oauthCred });
+
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig,
+        authResolver,
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        currentTier: string;
+        oauthRefreshAttempted: boolean;
+        authResolver: import('./auth-resolver.js').AuthResolver;
+        reinitializeWithProvider: ReturnType<typeof vi.fn>;
+        session: unknown;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
+
+      return { host, internal, authResolver };
+    }
+
+    const auth401Event = {
+      type: 'message_end',
+      message: { stopReason: 'error', errorMessage: 'Error 401: Unauthorized - Invalid API key' },
+    };
+
+    it('refreshes token and retries via reinitializeWithProvider when ensureFresh succeeds', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // Stub ensureFresh to succeed and return a set containing the current provider
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set(['anthropic']));
+      // Stub markKeyFailed to track calls
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed');
+
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh was called with force: [currentProvider]
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      expect(authResolver.ensureFresh).toHaveBeenCalledWith(
+        expect.objectContaining({ force: ['anthropic'] })
+      );
+      // reinitializeWithProvider was called with the same provider (refresh-and-retry path)
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
+        'anthropic',
+        null, // pendingPrompt (no prompt was queued)
+        [], // pendingDeliveries (none queued)
+        'OAuth token refreshed',
+        expect.stringContaining('anthropic OAuth credential')
+      );
+      // markKeyFailed must NOT have been called — we didn't fail over
+      expect(markKeyFailedSpy).not.toHaveBeenCalled();
+    });
+
+    it('falls through to standard failover when ensureFresh returns set NOT containing current provider', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // Stub ensureFresh to return empty set (refresh was a no-op, e.g. concurrent lock ran first)
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set());
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh was called
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      // reinitializeWithProvider must NOT have been called — provider not in refreshed set
+      expect(internal.reinitializeWithProvider).not.toHaveBeenCalled();
+      // Should have fallen through to markKeyFailed (standard failover)
+      expect(markKeyFailedSpy).toHaveBeenCalledOnce();
+    });
+
+    it('falls through to standard failover (markKeyFailed) when ensureFresh throws', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // Stub ensureFresh to fail
+      vi.spyOn(authResolver, 'ensureFresh').mockRejectedValue(new Error('refresh_token_expired'));
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh was attempted
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      // Should have fallen through to markKeyFailed (standard auth-failure path)
+      expect(markKeyFailedSpy).toHaveBeenCalledOnce();
+    });
+
+    it('calls markKeyFailed (no second refresh) when refresh succeeds but retry also returns 401', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // First 401: ensureFresh succeeds and returns the current provider in the set
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set(['anthropic']));
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+
+      await internal.handlePotentialError(auth401Event);
+
+      // Refresh succeeded: ensureFresh called once, reinitialize triggered, no failover yet
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      expect(markKeyFailedSpy).not.toHaveBeenCalled();
+      // Guard flag is now set
+      expect(internal.oauthRefreshAttempted).toBe(true);
+
+      // Second 401 arrives (simulates the retried request also failing with 401).
+      // oauthRefreshAttempted is already true → no second refresh, fall through to markKeyFailed.
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh must NOT have been called a second time
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      // markKeyFailed must be called — standard failover path
+      expect(markKeyFailedSpy).toHaveBeenCalledOnce();
     });
   });
 });

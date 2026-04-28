@@ -42,7 +42,9 @@ import { resolveProjectDir } from '../projects/dir.js'; // used for backfilling 
 import type { ReminderManager } from '../reminders/manager.js';
 import { filterByRole } from '../skills/loader.js';
 import { log } from '../utils/logger.js';
+import type { AuthTier } from './auth-resolver.js';
 import { AuthResolver } from './auth-resolver.js';
+import { refreshAnthropic } from './oauth.js';
 import type { AgentRegistry } from './registry.js';
 import {
   calculateDelay,
@@ -163,6 +165,7 @@ export class AgentHost {
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
   private currentProvider: LlmProvider;
   private currentKeyIndex = 0;
+  private currentTier: AuthTier = 'keys';
   private retryAttempts: Map<string, number> = new Map(); // Track retries per error type
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
@@ -182,10 +185,13 @@ export class AgentHost {
   private resourceLoader: DefaultResourceLoader | null = null;
   private busy = false;
   private lastTurnErrored = false;
+  private oauthRefreshAttempted = false;
   private deliverySendCount = 0;
   private compactionCount = 0;
   private compactionDepth = 0;
   private isPruning = false;
+  private deferredAgentEnd: AgentSessionEvent | null = null;
+  private pruningGeneration = 0;
   private contextWindow = 0;
   private contextOverflowHandled = false;
   private agentModels: Record<string, string> = {};
@@ -220,8 +226,10 @@ export class AgentHost {
     this.authResolver = config.authResolver ?? new AuthResolver(config.llmConfig);
     const authStorage = this.authResolver.createAuthStorage();
     this.modelRegistry = new ModelRegistry(authStorage);
-    this.currentProvider = this.authResolver.primaryProvider;
-    this.currentKeyIndex = this.authResolver.getActiveKey(this.currentProvider)?.keyIndex ?? 0;
+    const activeCred = this.authResolver.getActiveCredential();
+    this.currentProvider = activeCred?.provider ?? this.authResolver.primaryProvider;
+    this.currentKeyIndex = activeCred?.keyIndex ?? 0;
+    this.currentTier = activeCred?.tier ?? 'keys';
 
     log.info('[AgentHost] Auth status:', this.authResolver.getStatus());
   }
@@ -461,6 +469,26 @@ export class AgentHost {
     // files that lack a valid session header, which continueRecent() would reject and
     // silently replace with a new empty session. Fall back to continueRecent() only
     // when no .jsonl file exists at all (first-time setup).
+    // Refresh near-expiry OAuth tokens before snapshotting auth state into the SDK.
+    // `refreshAnthropic` is currently the only OAuth refresh implementation. server.ts
+    // validates that [llm.oauth] only contains supported providers; if support for
+    // additional OAuth providers is added, this should be extended into a refresh map
+    // keyed by provider.
+    try {
+      await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
+    } catch (err) {
+      log.warn('[AgentHost] OAuth refresh failed during initialize:', err);
+      // Fall through with possibly-stale token; SDK will return 401 → handlePotentialError refreshes again.
+    }
+    // Re-read active credential in case ensureFresh changed which credential is active.
+    // Use getActiveKey(provider) to stay scoped to the current provider, not a system-wide credential.
+    const cred = this.authResolver.getActiveKey(this.currentProvider);
+    if (cred) {
+      this.currentTier = cred.tier;
+      // currentProvider was already resolved above; only update tier and keyIndex
+      this.currentKeyIndex = cred.keyIndex;
+    }
+
     const latestSession = findMostRecentSession(agentSessionDir);
     const sessionManager = latestSession
       ? SessionManager.open(latestSession, agentSessionDir)
@@ -517,10 +545,6 @@ export class AgentHost {
         this.onBusyChange?.(this.agentId, true, this.getContextUsage()?.percent ?? null);
       }
     } else if (event.type === 'agent_end') {
-      if (this.busy) {
-        this.busy = false;
-        this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
-      }
       // On error turns, lastTurnErrored is true (set synchronously in
       // handlePotentialError before agent_end fires). Skip cleanup so the
       // failed prompt/delivery stays tracked for retry or failover.
@@ -539,12 +563,37 @@ export class AgentHost {
           if (completed) completed.resolve();
         }
         this.deliverySendCount = 0;
+        // Re-arm the OAuth refresh guard so a future 401 on a fresh token can
+        // trigger another refresh attempt.
+        this.oauthRefreshAttempted = false;
       }
       this.lastTurnErrored = false;
-    }
 
-    // Track compaction for pruning
-    this.handleCompactionTracking(event);
+      // Track compaction for pruning. May synchronously schedule pruning,
+      // setting isPruning = true.
+      this.handleCompactionTracking(event);
+
+      // If pruning was just scheduled, defer the busy clear and agent_end
+      // forwarding until pruning completes — otherwise the UI would see
+      // ready_for_input before pruning starts, allowing a user prompt to
+      // race with the in-flight compaction. If a previous agent_end is
+      // already deferred (a rare case where pi-coding-agent fires another
+      // agent_end while pruning is in flight), keep the latest event since
+      // ready_for_input/context_usage are idempotent for the WS handler.
+      if (this.isPruning) {
+        this.deferredAgentEnd = event;
+        return;
+      }
+
+      if (this.busy) {
+        this.busy = false;
+        this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
+      }
+    } else {
+      // Track compaction for pruning (handles the compaction_end increment
+      // path; the agent_end trigger is handled inline above).
+      this.handleCompactionTracking(event);
+    }
 
     // Forward to external listeners
     this.listeners.forEach((listener) => {
@@ -596,10 +645,52 @@ export class AgentHost {
     // The retry/failover path will re-send and re-increment as needed.
     this.deliverySendCount = 0;
 
+    // OAuth refresh-and-retry: 401 from an OAuth-tier credential should refresh once
+    // before failing over. Refresh updates in-memory tokens; reinitialize the session
+    // so the SDK picks up the new access token.
+    //
+    // We force-refresh the current provider because the token may have been server-side
+    // revoked while still appearing fresh locally (expires far in the future). If the
+    // refresh didn't actually happen (provider not in returned set), skip the retry and
+    // fall through to standard failover instead of burning a round-trip with the same token.
+    if (category === 'auth' && this.currentTier === 'oauth' && !this.oauthRefreshAttempted) {
+      this.oauthRefreshAttempted = true;
+      try {
+        const refreshed = await this.authResolver.ensureFresh({
+          refresh: refreshAnthropic,
+          force: [this.currentProvider],
+        });
+        if (refreshed.has(this.currentProvider)) {
+          log.info('[AgentHost] OAuth token refreshed after 401, retrying via reinitialize');
+          await this.reinitializeWithProvider(
+            this.currentProvider,
+            promptToRetry,
+            deliveriesToRetry,
+            'OAuth token refreshed',
+            `401 on ${this.currentProvider} OAuth credential, refreshed and retrying`
+          );
+          return;
+        }
+        // ensureFresh completed but did not refresh the current provider (e.g., the
+        // concurrent lock already ran and still couldn't refresh, or the credential
+        // disappeared). Fall through to standard failover to avoid a wasted retry.
+        log.warn('[AgentHost] OAuth refresh after 401 was a no-op, falling over');
+      } catch (refreshErr) {
+        log.warn('[AgentHost] OAuth refresh failed after 401, falling over:', refreshErr);
+        // Fall through to standard auth-failure handling below
+      }
+    }
+
     // If another agent already put our key in cooldown, skip retries and reinitialize.
     // Uses the tracked key index so we check our actual key, not whatever index
     // another agent may have rotated to.
-    if (this.authResolver.isKeyInCooldown(this.currentProvider, this.currentKeyIndex)) {
+    if (
+      this.authResolver.isKeyInCooldown(
+        this.currentProvider,
+        this.currentKeyIndex,
+        this.currentTier
+      )
+    ) {
       const nextProvider = this.authResolver.getNextProvider();
       if (nextProvider) {
         const reason =
@@ -711,7 +802,8 @@ export class AgentHost {
         this.currentProvider,
         failureReason,
         errorMessage,
-        this.currentKeyIndex
+        this.currentKeyIndex,
+        this.currentTier
       );
 
       if (hasMore) {
@@ -868,15 +960,31 @@ export class AgentHost {
       this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
     }
 
+    // Drop any pruning state tied to the dead session: a deferred agent_end
+    // belongs to a session that no longer exists, and isPruning would otherwise
+    // remain true if the in-flight session.compact() never resolves. Bump
+    // pruningGeneration so the stale promise's .finally is a no-op and can't
+    // race with a fresh pruning started after reinit completes.
+    this.deferredAgentEnd = null;
+    this.isPruning = false;
+    this.pruningGeneration++;
+
     try {
       // Update current provider and key index
       this.currentProvider = provider;
       this.currentKeyIndex = this.authResolver.getActiveKey(provider)?.keyIndex ?? 0;
+      this.currentTier = this.authResolver.getActiveKey(provider)?.tier ?? 'keys';
 
       // Push chat message before init so the user sees the reason even if
       // initialization fails. Only for actual failovers, not compaction recovery.
       if (reason) {
         this.pushSystemMessage(detail ? `${reason}\n\n${detail}` : reason);
+      }
+
+      try {
+        await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
+      } catch (err) {
+        log.warn('[AgentHost] OAuth refresh failed during reinitialize:', err);
       }
 
       // Recreate model registry with updated auth
@@ -1360,22 +1468,46 @@ export class AgentHost {
       this.writeCompactionCount(this.compactionCount);
     }
 
-    // Trigger pruning compaction at 30% context usage when counter reaches depth
+    // Trigger pruning compaction on agent_end when counter reaches depth
     if (
       event.type === 'agent_end' &&
       this.compactionCount >= this.compactionDepth &&
       !this.isPruning
     ) {
-      const usage = this.getContextUsage();
-      if (usage?.percent != null && usage.percent >= 30) {
-        this.isPruning = true;
-        this.triggerPruningCompaction()
-          .catch((err: unknown) => log.error('[AgentHost] Pruning compaction error:', err))
-          .finally(() => {
-            this.isPruning = false;
-          });
-      }
+      this.isPruning = true;
+      // Capture a generation token so a stale pruning whose session was torn
+      // down by reinitializeWithProvider can't clear isPruning or flush the
+      // deferred agent_end of a newer pruning that started in the meantime.
+      const generation = ++this.pruningGeneration;
+      this.triggerPruningCompaction()
+        .catch((err: unknown) => log.error('[AgentHost] Pruning compaction error:', err))
+        .finally(() => {
+          if (this.pruningGeneration !== generation) return;
+          this.isPruning = false;
+          this.flushDeferredAgentEnd();
+        });
     }
+  }
+
+  /**
+   * If an agent_end was deferred while pruning was in flight, complete its
+   * handling now: clear busy and forward to listeners so the UI receives
+   * ready_for_input only after pruning has finished.
+   *
+   * Compaction tracking already ran inline before deferral, so the counter
+   * has been reset by triggerPruningCompaction; no need to re-track here.
+   */
+  private flushDeferredAgentEnd(): void {
+    const deferred = this.deferredAgentEnd;
+    if (!deferred) return;
+    this.deferredAgentEnd = null;
+    if (this.busy) {
+      this.busy = false;
+      this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
+    }
+    this.listeners.forEach((listener) => {
+      listener(deferred);
+    });
   }
 
   /**
@@ -1411,7 +1543,13 @@ export class AgentHost {
 
     const baseline = this.findBaselineSummary();
     if (!baseline) {
-      log.info('[AgentHost] No baseline found for pruning, skipping');
+      // Reset the counter so we don't re-attempt baseline lookup on every
+      // subsequent agent_end. The next pruning attempt fires after another
+      // `compactionDepth` regular compactions accumulate; by then a baseline
+      // is much more likely to exist.
+      log.info('[AgentHost] No baseline found for pruning, resetting counter and skipping');
+      this.compactionCount = 0;
+      this.writeCompactionCount(0);
       return;
     }
 

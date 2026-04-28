@@ -51,6 +51,7 @@ export async function start(options: {
   }
 
   const primaryProvider = config.llm.primary;
+  const oauthPrimary = config.llm.oauth?.primary;
 
   if (!primaryProvider) {
     console.error('Error: No primary provider configured in config.toml');
@@ -65,7 +66,12 @@ export async function start(options: {
   }
 
   console.log('Starting System2 Gateway...');
-  console.log(`  Provider: ${primaryProvider}`);
+  if (oauthPrimary) {
+    console.log(`  OAuth tier:   ${oauthPrimary}`);
+    console.log(`  API key tier: ${primaryProvider}`);
+  } else {
+    console.log(`  Provider: ${primaryProvider}`);
+  }
   console.log(`  Port: ${port}`);
   console.log('');
 
