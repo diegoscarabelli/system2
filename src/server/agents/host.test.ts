@@ -2869,4 +2869,113 @@ describe('AgentHost', () => {
       expect(internal.handleContextOverflow).not.toHaveBeenCalled();
     });
   });
+
+  describe('currentTier tracking', () => {
+    it('initializes currentTier as "oauth" when active credential is from OAuth tier', async () => {
+      const { AuthResolver } = await import('./auth-resolver.js');
+
+      // Build a config that has both an OAuth tier (anthropic) and a keys tier (cerebras)
+      const llmConfig = {
+        primary: 'cerebras' as const,
+        fallback: [],
+        providers: {
+          cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
+        },
+        oauth: { primary: 'anthropic' as const, fallback: [] },
+      };
+
+      // Provide a non-expiring OAuth credential so the OAuth tier is active
+      const oauthCred = {
+        access: 'sk-ant-oat01-test',
+        refresh: 'sk-ant-ort01-test',
+        expires: Date.now() + 60 * 60 * 1000, // 1 hour from now
+        label: 'Pro',
+      };
+      const authResolver = new AuthResolver(llmConfig, undefined, { anthropic: oauthCred });
+
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig,
+        authResolver,
+      });
+
+      const internal = host as unknown as {
+        currentTier: string;
+        currentProvider: string;
+      };
+
+      expect(internal.currentTier).toBe('oauth');
+      expect(internal.currentProvider).toBe('anthropic');
+    });
+
+    it('initializes currentTier as "keys" when no OAuth credentials are present', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as { currentTier: string };
+      expect(internal.currentTier).toBe('keys');
+    });
+
+    it('markKeyFailed uses oauth cooldown key when currentTier is "oauth"', async () => {
+      const { AuthResolver } = await import('./auth-resolver.js');
+
+      const llmConfig = {
+        primary: 'cerebras' as const,
+        fallback: [],
+        providers: {
+          cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
+        },
+        oauth: { primary: 'anthropic' as const, fallback: [] },
+      };
+
+      const oauthCred = {
+        access: 'sk-ant-oat01-test',
+        refresh: 'sk-ant-ort01-test',
+        expires: Date.now() + 60 * 60 * 1000,
+        label: 'Pro',
+      };
+      const authResolver = new AuthResolver(llmConfig, undefined, { anthropic: oauthCred });
+
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig,
+        authResolver,
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        currentKeyIndex: number;
+        currentTier: string;
+        authResolver: import('./auth-resolver.js').AuthResolver;
+        reinitializeWithProvider: ReturnType<typeof vi.fn>;
+        session: unknown;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
+
+      // Confirm tier is oauth before the error
+      expect(internal.currentTier).toBe('oauth');
+
+      // Fire an auth error — goes straight to failover (no retries for auth)
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 401: Unauthorized - Invalid API key' },
+      });
+
+      // The OAuth credential for anthropic:0 should now be in cooldown under the oauth key
+      expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'oauth')).toBe(true);
+      // And NOT under the keys key (different namespace)
+      expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'keys')).toBe(false);
+    });
+  });
 });

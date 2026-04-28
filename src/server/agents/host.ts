@@ -42,7 +42,9 @@ import { resolveProjectDir } from '../projects/dir.js'; // used for backfilling 
 import type { ReminderManager } from '../reminders/manager.js';
 import { filterByRole } from '../skills/loader.js';
 import { log } from '../utils/logger.js';
+import type { AuthTier } from './auth-resolver.js';
 import { AuthResolver } from './auth-resolver.js';
+import { refreshAnthropic } from './oauth.js';
 import type { AgentRegistry } from './registry.js';
 import {
   calculateDelay,
@@ -163,6 +165,7 @@ export class AgentHost {
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
   private currentProvider: LlmProvider;
   private currentKeyIndex = 0;
+  private currentTier: AuthTier = 'keys';
   private retryAttempts: Map<string, number> = new Map(); // Track retries per error type
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
@@ -220,8 +223,10 @@ export class AgentHost {
     this.authResolver = config.authResolver ?? new AuthResolver(config.llmConfig);
     const authStorage = this.authResolver.createAuthStorage();
     this.modelRegistry = new ModelRegistry(authStorage);
-    this.currentProvider = this.authResolver.primaryProvider;
-    this.currentKeyIndex = this.authResolver.getActiveKey(this.currentProvider)?.keyIndex ?? 0;
+    const activeCred = this.authResolver.getActiveCredential();
+    this.currentProvider = activeCred?.provider ?? this.authResolver.primaryProvider;
+    this.currentKeyIndex = activeCred?.keyIndex ?? 0;
+    this.currentTier = activeCred?.tier ?? 'keys';
 
     log.info('[AgentHost] Auth status:', this.authResolver.getStatus());
   }
@@ -461,6 +466,21 @@ export class AgentHost {
     // files that lack a valid session header, which continueRecent() would reject and
     // silently replace with a new empty session. Fall back to continueRecent() only
     // when no .jsonl file exists at all (first-time setup).
+    // Refresh near-expiry OAuth tokens before snapshotting auth state into the SDK.
+    try {
+      await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
+    } catch (err) {
+      log.warn('[AgentHost] OAuth refresh failed during initialize:', err);
+      // Fall through with possibly-stale token; SDK will return 401 → handlePotentialError refreshes again.
+    }
+    // Re-read active credential in case ensureFresh changed which credential is active
+    const cred = this.authResolver.getActiveCredential();
+    if (cred) {
+      this.currentTier = cred.tier;
+      // currentProvider was already resolved above; only update tier and keyIndex
+      this.currentKeyIndex = cred.keyIndex;
+    }
+
     const latestSession = findMostRecentSession(agentSessionDir);
     const sessionManager = latestSession
       ? SessionManager.open(latestSession, agentSessionDir)
@@ -599,7 +619,13 @@ export class AgentHost {
     // If another agent already put our key in cooldown, skip retries and reinitialize.
     // Uses the tracked key index so we check our actual key, not whatever index
     // another agent may have rotated to.
-    if (this.authResolver.isKeyInCooldown(this.currentProvider, this.currentKeyIndex)) {
+    if (
+      this.authResolver.isKeyInCooldown(
+        this.currentProvider,
+        this.currentKeyIndex,
+        this.currentTier
+      )
+    ) {
       const nextProvider = this.authResolver.getNextProvider();
       if (nextProvider) {
         const reason =
@@ -711,7 +737,8 @@ export class AgentHost {
         this.currentProvider,
         failureReason,
         errorMessage,
-        this.currentKeyIndex
+        this.currentKeyIndex,
+        this.currentTier
       );
 
       if (hasMore) {
@@ -872,11 +899,18 @@ export class AgentHost {
       // Update current provider and key index
       this.currentProvider = provider;
       this.currentKeyIndex = this.authResolver.getActiveKey(provider)?.keyIndex ?? 0;
+      this.currentTier = this.authResolver.getActiveKey(provider)?.tier ?? 'keys';
 
       // Push chat message before init so the user sees the reason even if
       // initialization fails. Only for actual failovers, not compaction recovery.
       if (reason) {
         this.pushSystemMessage(detail ? `${reason}\n\n${detail}` : reason);
+      }
+
+      try {
+        await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
+      } catch (err) {
+        log.warn('[AgentHost] OAuth refresh failed during reinitialize:', err);
       }
 
       // Recreate model registry with updated auth
