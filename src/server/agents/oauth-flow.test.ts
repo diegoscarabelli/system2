@@ -40,10 +40,10 @@ describe('OAuth end-to-end flow', () => {
     });
 
     const loaded = loadOAuthCredentials(tmpDir, 'anthropic');
-    expect(loaded).not.toBeNull();
+    if (!loaded) throw new Error('expected credentials to load');
 
     const resolver = new AuthResolver(makeTwoTierConfig(), undefined, {
-      anthropic: loaded!,
+      anthropic: loaded,
     });
 
     resolver.setPersistOAuth('anthropic', async (creds) => {
@@ -78,8 +78,10 @@ describe('OAuth end-to-end flow', () => {
       expires: Date.now() + 60 * 60_000,
       label: 'claude-pro',
     });
+    const loaded = loadOAuthCredentials(tmpDir, 'anthropic');
+    if (!loaded) throw new Error('expected credentials to load');
     const resolver = new AuthResolver(makeTwoTierConfig(), undefined, {
-      anthropic: loadOAuthCredentials(tmpDir, 'anthropic')!,
+      anthropic: loaded,
     });
 
     expect(resolver.getActiveCredential()?.tier).toBe('oauth');
@@ -109,9 +111,12 @@ describe('OAuth end-to-end flow', () => {
       expires: Date.now() + 60 * 60_000,
       label: 'codex',
     });
+    const a = loadOAuthCredentials(tmpDir, 'anthropic');
+    const o = loadOAuthCredentials(tmpDir, 'openai');
+    if (!a || !o) throw new Error('expected credentials to load');
     const resolver = new AuthResolver(cfg, undefined, {
-      anthropic: loadOAuthCredentials(tmpDir, 'anthropic')!,
-      openai: loadOAuthCredentials(tmpDir, 'openai')!,
+      anthropic: a,
+      openai: o,
     });
 
     expect(resolver.getActiveCredential()).toMatchObject({
