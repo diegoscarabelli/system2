@@ -33,7 +33,15 @@ describe('oauth-credentials', () => {
 
   it('writes file with mode 0600', () => {
     saveOAuthCredentials(dir, 'anthropic', { access: 'a', refresh: 'b', expires: 1, label: 'l' });
-    const mode = statSync(join(dir, 'oauth', 'anthropic.json')).mode & 0o777;
+    const stats = statSync(join(dir, 'oauth', 'anthropic.json'));
+
+    if (process.platform === 'win32') {
+      // POSIX mode bits aren't reliably supported on Windows
+      expect(stats.isFile()).toBe(true);
+      return;
+    }
+
+    const mode = stats.mode & 0o777;
     expect(mode).toBe(0o600);
   });
 

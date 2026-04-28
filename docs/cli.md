@@ -56,7 +56,7 @@ After running `system2 login`, restart the daemon to pick up the new credential:
 system2 stop && system2 start
 ```
 
-See [Auth Tiers](../configuration.md#auth-tiers) in the configuration reference for how OAuth credentials interact with API key fallback and refresh behavior.
+See [Auth Tiers](configuration.md#auth-tiers) in the configuration reference for how OAuth credentials interact with API key fallback and refresh behavior.
 
 ### `system2 logout [provider]`
 
@@ -108,7 +108,7 @@ The config utility handles:
 - Validating required fields (at least one LLM provider with keys)
 - Building a `ServerConfig` object for the server
 
-See [Configuration](../configuration.md) for the full config.toml reference.
+See [Configuration](configuration.md) for the full config.toml reference.
 
 ## Utilities
 
