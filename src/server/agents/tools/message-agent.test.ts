@@ -130,6 +130,25 @@ describe('message_agent tool', () => {
     expect(deliverMessage).not.toHaveBeenCalled();
   });
 
+  it('accepts a message exactly at maxDeliveryBytes including prefix overhead', async () => {
+    const guide = makeAgent(1, 'guide');
+    const conductor = makeAgent(2, 'conductor');
+    // Measure the prefix the tool prepends at runtime so the test stays correct
+    // if the format ever changes.
+    const prefix = '[guide_1 message]\n\n';
+    const prefixBytes = Buffer.byteLength(prefix, 'utf8');
+    const maxDeliveryBytes = 1024;
+    // Construct a message body such that prefix + body === maxDeliveryBytes exactly.
+    const bodyBytes = maxDeliveryBytes - prefixBytes;
+    const message = 'a'.repeat(bodyBytes);
+    const { tool, deliverMessage } = setup(1, [guide, conductor], [2], maxDeliveryBytes);
+
+    // Total content bytes === maxDeliveryBytes: should NOT be rejected.
+    const result = await exec(tool, { agent_id: 2, message });
+    expect((result.content[0] as { text: string }).text).toContain('delivered');
+    expect(deliverMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('returns success even when deliverMessage throws (fire-and-forget)', async () => {
     const guide = makeAgent(1, 'guide');
     const conductor = makeAgent(2, 'conductor');
