@@ -55,7 +55,7 @@ export interface TruncateResult {
 export function truncateOldestToFit(entries: TimestampedEntry[], budget: number): TruncateResult {
   if (entries.length === 0) return { kept: [], droppedCount: 0, droppedRange: null };
   const sorted = [...entries].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  let total = sorted.reduce((s, e) => s + e.rendered.length, 0);
+  let total = sorted.reduce((s, e) => s + Buffer.byteLength(e.rendered, 'utf8'), 0);
   if (total <= budget) return { kept: sorted, droppedCount: 0, droppedRange: null };
 
   const dropped: TimestampedEntry[] = [];
@@ -63,7 +63,7 @@ export function truncateOldestToFit(entries: TimestampedEntry[], budget: number)
     const e = sorted.shift();
     if (e) {
       dropped.push(e);
-      total -= e.rendered.length;
+      total -= Buffer.byteLength(e.rendered, 'utf8');
     }
   }
   return {
@@ -763,7 +763,10 @@ new_run_ts: ${newRunTs}
 
 IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.`;
 
-    const projectLogOverhead = projectLogHeader.length + projectDbChanges.length + 200; // 200 for section labels/separators
+    const projectLogOverhead =
+      Buffer.byteLength(projectLogHeader, 'utf8') +
+      Buffer.byteLength(projectDbChanges, 'utf8') +
+      200; // 200 for section labels/separators
     const projectLogActivityBudget = Math.max(CATCH_UP_BUDGET_BYTES - projectLogOverhead, 0);
     const projectLogTruncation = truncateOldestToFit(
       allProjectAgentEntries,
@@ -835,8 +838,9 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
 
   // Compute overhead: header + DB changes + static section labels (generous estimate)
   const summaryDbOverhead =
-    projectDataList.reduce((s, pd) => s + pd.dbChanges.length, 0) + nonProjectDbChanges.length;
-  const summaryOverhead = dailySummaryHeader.length + summaryDbOverhead + 500;
+    projectDataList.reduce((s, pd) => s + Buffer.byteLength(pd.dbChanges, 'utf8'), 0) +
+    Buffer.byteLength(nonProjectDbChanges, 'utf8');
+  const summaryOverhead = Buffer.byteLength(dailySummaryHeader, 'utf8') + summaryDbOverhead + 500;
   const summaryActivityBudget = Math.max(CATCH_UP_BUDGET_BYTES - summaryOverhead, 0);
 
   // Gather all project-scoped entries for truncation
