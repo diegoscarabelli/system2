@@ -185,6 +185,7 @@ export class AgentHost {
   private resourceLoader: DefaultResourceLoader | null = null;
   private busy = false;
   private lastTurnErrored = false;
+  private oauthRefreshAttempted = false;
   private deliverySendCount = 0;
   private compactionCount = 0;
   private compactionDepth = 0;
@@ -559,6 +560,9 @@ export class AgentHost {
           if (completed) completed.resolve();
         }
         this.deliverySendCount = 0;
+        // Re-arm the OAuth refresh guard so a future 401 on a fresh token can
+        // trigger another refresh attempt.
+        this.oauthRefreshAttempted = false;
       }
       this.lastTurnErrored = false;
     }
@@ -615,6 +619,28 @@ export class AgentHost {
     // Reset the send counter: the failed turn's sends are abandoned.
     // The retry/failover path will re-send and re-increment as needed.
     this.deliverySendCount = 0;
+
+    // OAuth refresh-and-retry: 401 from an OAuth-tier credential should refresh once
+    // before failing over. Refresh updates in-memory tokens; reinitialize the session
+    // so the SDK picks up the new access token.
+    if (category === 'auth' && this.currentTier === 'oauth' && !this.oauthRefreshAttempted) {
+      this.oauthRefreshAttempted = true;
+      try {
+        await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
+        log.info('[AgentHost] OAuth token refreshed after 401, retrying via reinitialize');
+        await this.reinitializeWithProvider(
+          this.currentProvider,
+          promptToRetry,
+          deliveriesToRetry,
+          'OAuth token refreshed',
+          `401 on ${this.currentProvider} OAuth credential, refreshed and retrying`
+        );
+        return;
+      } catch (refreshErr) {
+        log.warn('[AgentHost] OAuth refresh failed after 401, falling over:', refreshErr);
+        // Fall through to standard auth-failure handling below
+      }
+    }
 
     // If another agent already put our key in cooldown, skip retries and reinitialize.
     // Uses the tracked key index so we check our actual key, not whatever index

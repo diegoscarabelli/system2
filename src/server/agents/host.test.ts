@@ -2955,6 +2955,7 @@ describe('AgentHost', () => {
         currentProvider: string;
         currentKeyIndex: number;
         currentTier: string;
+        oauthRefreshAttempted: boolean;
         authResolver: import('./auth-resolver.js').AuthResolver;
         reinitializeWithProvider: ReturnType<typeof vi.fn>;
         session: unknown;
@@ -2962,11 +2963,13 @@ describe('AgentHost', () => {
 
       internal.session = { prompt: vi.fn() };
       internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
+      // Skip the refresh-and-retry branch so we test the markKeyFailed path directly.
+      internal.oauthRefreshAttempted = true;
 
       // Confirm tier is oauth before the error
       expect(internal.currentTier).toBe('oauth');
 
-      // Fire an auth error — goes straight to failover (no retries for auth)
+      // Fire an auth error — goes straight to failover (refresh already attempted)
       await internal.handlePotentialError({
         type: 'message_end',
         message: { stopReason: 'error', errorMessage: 'Error 401: Unauthorized - Invalid API key' },
@@ -2976,6 +2979,98 @@ describe('AgentHost', () => {
       expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'oauth')).toBe(true);
       // And NOT under the keys key (different namespace)
       expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'keys')).toBe(false);
+    });
+  });
+
+  describe('OAuth refresh-and-retry on 401', () => {
+    async function makeOAuthHost() {
+      const { AuthResolver } = await import('./auth-resolver.js');
+
+      const llmConfig = {
+        primary: 'cerebras' as const,
+        fallback: [],
+        providers: {
+          cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
+        },
+        oauth: { primary: 'anthropic' as const, fallback: [] },
+      };
+
+      const oauthCred = {
+        access: 'sk-ant-oat01-test',
+        refresh: 'sk-ant-ort01-test',
+        expires: Date.now() + 60 * 60 * 1000,
+        label: 'Pro',
+      };
+
+      const authResolver = new AuthResolver(llmConfig, undefined, { anthropic: oauthCred });
+
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig,
+        authResolver,
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        currentTier: string;
+        oauthRefreshAttempted: boolean;
+        authResolver: import('./auth-resolver.js').AuthResolver;
+        reinitializeWithProvider: ReturnType<typeof vi.fn>;
+        session: unknown;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
+
+      return { host, internal, authResolver };
+    }
+
+    const auth401Event = {
+      type: 'message_end',
+      message: { stopReason: 'error', errorMessage: 'Error 401: Unauthorized - Invalid API key' },
+    };
+
+    it('refreshes token and retries via reinitializeWithProvider when ensureFresh succeeds', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // Stub ensureFresh to succeed (return empty set — no providers were refreshed)
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set());
+      // Stub markKeyFailed to track calls
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed');
+
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh was called
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      // reinitializeWithProvider was called with the same provider (refresh-and-retry path)
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
+        'anthropic',
+        null, // pendingPrompt (no prompt was queued)
+        [], // pendingDeliveries (none queued)
+        'OAuth token refreshed',
+        expect.stringContaining('anthropic OAuth credential')
+      );
+      // markKeyFailed must NOT have been called — we didn't fail over
+      expect(markKeyFailedSpy).not.toHaveBeenCalled();
+    });
+
+    it('falls through to standard failover (markKeyFailed) when ensureFresh throws', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // Stub ensureFresh to fail
+      vi.spyOn(authResolver, 'ensureFresh').mockRejectedValue(new Error('refresh_token_expired'));
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh was attempted
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      // Should have fallen through to markKeyFailed (standard auth-failure path)
+      expect(markKeyFailedSpy).toHaveBeenCalledOnce();
     });
   });
 });
