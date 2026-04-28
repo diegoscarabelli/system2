@@ -887,6 +887,12 @@ export class AgentHost {
       this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
     }
 
+    // Drop any pruning state tied to the dead session: a deferred agent_end
+    // belongs to a session that no longer exists, and isPruning would otherwise
+    // remain true if the in-flight session.compact() never resolves.
+    this.deferredAgentEnd = null;
+    this.isPruning = false;
+
     try {
       // Update current provider and key index
       this.currentProvider = provider;
