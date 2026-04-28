@@ -2284,10 +2284,26 @@ describe('AgentHost', () => {
         def.handleSessionEvent({ type: 'agent_end', tag: 'second' } as { type: string });
         expect(def.deferredAgentEnd).toEqual({ type: 'agent_end', tag: 'second' });
 
+        // Re-entry guard prevents the second agent_end from triggering pruning again.
+        expect(session.compact).toHaveBeenCalledTimes(1);
+
         pruneResolve();
         await new Promise((r) => setImmediate(r));
 
         expect(listenerEvents).toEqual([{ type: 'agent_end', tag: 'second' }]);
+      });
+
+      it('routes compaction_end through handleCompactionTracking via handleSessionEvent', () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal;
+        def.compactionCount = 0;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+        def.listeners = new Set();
+
+        def.handleSessionEvent({ type: 'compaction_end' });
+
+        expect(def.compactionCount).toBe(1);
       });
     });
 
