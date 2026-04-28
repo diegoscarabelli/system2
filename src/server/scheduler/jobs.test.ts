@@ -1507,8 +1507,244 @@ describe('buildAndDeliverDailySummary', () => {
       (msg) => msg.includes('[Scheduler] Truncated') && msg.includes('oldest activity entries')
     );
     expect(truncationWarn).toBeDefined();
-    expect(truncationWarn).toContain('non-project daily summary delivery');
+    expect(truncationWarn).toContain('combined daily summary activity');
     expect(truncationWarn).toContain('byte budget');
+
+    warnSpy.mockRestore();
+  });
+
+  it('emits log.warn when project-log activity truncation drops entries', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    // Project conductor session directory
+    const projectDir = join(dir, 'projects', 'proj_1');
+    const sessionDir = join(dir, 'sessions', 'conductor_2');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
+    mkdirSync(join(projectDir, 'scratchpad'), { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(summariesDir, `${today}.md`),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
+    );
+
+    // Build many large conductor entries so the project-log activity budget is exceeded
+    const baseTime = Date.now() - 50 * 60_000;
+    const lines: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const ts = new Date(baseTime + i * 10_000).toISOString();
+      lines.push(
+        JSON.stringify({
+          type: 'custom_message',
+          timestamp: ts,
+          content: `entry-${i}-${'x'.repeat(10_000)}`,
+        })
+      );
+    }
+    writeFileSync(join(sessionDir, 'session.jsonl'), lines.join('\n'));
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    // Tight budget forces project-log activity to be truncated
+    const tightBudget = 100 * 1024;
+    const db = {
+      query(sql: string) {
+        if (sql.includes('FROM agent'))
+          return [
+            { id: 1, role: 'guide', project_name: null },
+            { id: 2, role: 'conductor', project_name: 'TestProject' },
+          ];
+        if (sql.includes('FROM project p'))
+          return [{ id: 1, name: 'TestProject', dir_name: 'proj_1' }];
+        return [];
+      },
+    } as unknown as DatabaseClient;
+    const host = mockHost();
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => args.join(' '));
+    const truncationWarn = warnCalls.find(
+      (msg) =>
+        msg.includes('[Scheduler] Truncated') &&
+        msg.includes('oldest activity entries') &&
+        msg.includes('TestProject') &&
+        msg.includes('delivery to fit')
+    );
+    expect(truncationWarn).toBeDefined();
+
+    warnSpy.mockRestore();
+  });
+
+  it('emits log.warn when project-log DB-changes truncation drops rows', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const projectDir = join(dir, 'projects', 'proj_1');
+    const sessionDir = join(dir, 'sessions', 'conductor_2');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
+    mkdirSync(join(projectDir, 'scratchpad'), { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(summariesDir, `${today}.md`),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
+    );
+
+    // Write one small conductor entry so there is activity (and the project-log block is entered)
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+    writeFileSync(
+      join(sessionDir, 'session.jsonl'),
+      JSON.stringify({ type: 'custom_message', timestamp: entryTs, content: 'hi' })
+    );
+
+    // Return many large DB rows so DB-changes budget is exceeded even at 100 KB
+    const manyRows = Array.from({ length: 50 }, (_, i) => ({
+      id: i,
+      title: 'x'.repeat(300),
+      status: 'done',
+      updated_at: entryTs,
+      project: 1,
+    }));
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    const tightBudget = 100 * 1024;
+    const db = {
+      query(sql: string) {
+        if (sql.includes('FROM agent'))
+          return [
+            { id: 1, role: 'guide', project_name: null },
+            { id: 2, role: 'conductor', project_name: 'TestProject' },
+          ];
+        if (sql.includes('FROM project p'))
+          return [{ id: 1, name: 'TestProject', dir_name: 'proj_1' }];
+        // Return many rows for project DB queries so truncation fires
+        if (sql.includes('project = 1') || sql.includes('t.project = 1')) return manyRows;
+        return [];
+      },
+    } as unknown as DatabaseClient;
+    const host = mockHost();
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => args.join(' '));
+    const truncationWarn = warnCalls.find((msg) =>
+      msg.includes('[Scheduler] Truncated DB-change rows from project TestProject delivery')
+    );
+    expect(truncationWarn).toBeDefined();
+    expect(truncationWarn).toContain('budget=');
+
+    warnSpy.mockRestore();
+  });
+
+  it('emits log.warn when per-project daily-summary DB-changes truncation drops rows', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const projectDir = join(dir, 'projects', 'proj_1');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
+    mkdirSync(join(projectDir, 'scratchpad'), { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(summariesDir, `${today}.md`),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
+    );
+
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+    // Many large DB rows for the project so daily-summary per-project DB budget is exceeded
+    const manyRows = Array.from({ length: 50 }, (_, i) => ({
+      id: i,
+      title: 'x'.repeat(300),
+      status: 'done',
+      updated_at: entryTs,
+      project: 1,
+    }));
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    const tightBudget = 100 * 1024;
+    const db = {
+      query(sql: string) {
+        if (sql.includes('FROM agent'))
+          return [
+            { id: 1, role: 'guide', project_name: null },
+            { id: 2, role: 'conductor', project_name: 'TestProject' },
+          ];
+        if (sql.includes('FROM project p'))
+          return [{ id: 1, name: 'TestProject', dir_name: 'proj_1' }];
+        if (sql.includes('project = 1') || sql.includes('t.project = 1')) return manyRows;
+        return [];
+      },
+    } as unknown as DatabaseClient;
+    const host = mockHost();
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => args.join(' '));
+    const truncationWarn = warnCalls.find((msg) =>
+      msg.includes('[Scheduler] Truncated DB-change rows from project TestProject daily summary')
+    );
+    expect(truncationWarn).toBeDefined();
+    expect(truncationWarn).toContain('budget=');
+
+    warnSpy.mockRestore();
+  });
+
+  it('emits log.warn when non-project daily-summary DB-changes truncation drops rows', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    mkdirSync(summariesDir, { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(summariesDir, `${today}.md`),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
+    );
+
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+    // Many large standalone (non-project) task rows to blow the non-project DB budget
+    const manyRows = Array.from({ length: 50 }, (_, i) => ({
+      id: i,
+      title: 'x'.repeat(300),
+      status: 'done',
+      updated_at: entryTs,
+      project: null,
+    }));
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    const tightBudget = 100 * 1024;
+    const db = {
+      query(sql: string) {
+        // No projects, no project agents — just guide (non-project)
+        if (sql.includes('FROM agent')) return [{ id: 1, role: 'guide', project_name: null }];
+        if (sql.includes('FROM project p')) return [];
+        // Non-project DB queries: return many rows for all table queries
+        if (
+          sql.includes('FROM task') ||
+          sql.includes('FROM task_comment') ||
+          sql.includes('FROM task_link') ||
+          sql.includes('FROM project')
+        )
+          return manyRows;
+        return [];
+      },
+    } as unknown as DatabaseClient;
+    const host = mockHost();
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => args.join(' '));
+    const truncationWarn = warnCalls.find((msg) =>
+      msg.includes('[Scheduler] Truncated DB-change rows from non-project daily summary delivery')
+    );
+    expect(truncationWarn).toBeDefined();
+    expect(truncationWarn).toContain('budget=');
 
     warnSpy.mockRestore();
   });
