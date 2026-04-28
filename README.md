@@ -74,6 +74,16 @@ system2 stop             # shut down gracefully
 When you are done for the day, run `system2 stop`. Agent work in progress is saved, and a backup is created automatically on the next start.
 
 ```bash
+system2 login            # add or refresh a Claude Pro/Max OAuth credential
+```
+
+```bash
+system2 logout           # remove an OAuth credential
+```
+
+`system2 login` runs the Claude.ai OAuth flow, persists tokens to `~/.system2/oauth/<provider>.json` (mode 0600), and (if needed) adds `[llm.oauth]` to `config.toml`. Use it to switch on OAuth after a key-only onboarding, or to re-authenticate after a refresh-token expiry. `system2 logout` reverses both. Both commands require the daemon to be stopped first, and you must restart it afterward to pick up the change.
+
+```bash
 pnpm update -g @diegoscarabelli/system2   # upgrade System2 to the latest release
 ```
 
