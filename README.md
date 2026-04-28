@@ -73,7 +73,7 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**Authentication.** `system2 login` runs the Claude.ai OAuth flow, persists tokens to `~/.system2/oauth/<provider>.json` (mode 0600), and (if needed) adds `[llm.oauth]` to `config.toml`. Use it to switch on OAuth after a key-only onboarding, or to re-authenticate after a refresh-token expiry. `system2 logout` reverses both. Both commands require the daemon to be stopped first; restart it afterward to pick up the change.
+**Authentication.** You don't need to run `system2 login` after onboarding: if you opt into OAuth during `system2 onboard`, the same flow runs there and credentials are already saved. Use `system2 login` later to switch on OAuth after a key-only onboarding, to add another OAuth provider, or to re-authenticate after a refresh-token expiry. It runs the Claude.ai OAuth flow, persists tokens to `~/.system2/oauth/<provider>.json` (mode 0600), and (if needed) adds `[llm.oauth]` to `config.toml`. `system2 logout` reverses both. Both commands require the daemon to be stopped first; restart it afterward to pick up the change.
 
 ```bash
 system2 login            # add or refresh a Claude Pro/Max OAuth credential
