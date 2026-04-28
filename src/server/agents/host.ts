@@ -187,6 +187,7 @@ export class AgentHost {
   private compactionDepth = 0;
   private isPruning = false;
   private deferredAgentEnd: AgentSessionEvent | null = null;
+  private pruningGeneration = 0;
   private contextWindow = 0;
   private contextOverflowHandled = false;
   private agentModels: Record<string, string> = {};
@@ -889,9 +890,12 @@ export class AgentHost {
 
     // Drop any pruning state tied to the dead session: a deferred agent_end
     // belongs to a session that no longer exists, and isPruning would otherwise
-    // remain true if the in-flight session.compact() never resolves.
+    // remain true if the in-flight session.compact() never resolves. Bump
+    // pruningGeneration so the stale promise's .finally is a no-op and can't
+    // race with a fresh pruning started after reinit completes.
     this.deferredAgentEnd = null;
     this.isPruning = false;
+    this.pruningGeneration++;
 
     try {
       // Update current provider and key index
@@ -1392,9 +1396,14 @@ export class AgentHost {
       !this.isPruning
     ) {
       this.isPruning = true;
+      // Capture a generation token so a stale pruning whose session was torn
+      // down by reinitializeWithProvider can't clear isPruning or flush the
+      // deferred agent_end of a newer pruning that started in the meantime.
+      const generation = ++this.pruningGeneration;
       this.triggerPruningCompaction()
         .catch((err: unknown) => log.error('[AgentHost] Pruning compaction error:', err))
         .finally(() => {
+          if (this.pruningGeneration !== generation) return;
           this.isPruning = false;
           this.flushDeferredAgentEnd();
         });

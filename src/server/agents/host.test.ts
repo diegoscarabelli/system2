@@ -2309,6 +2309,66 @@ describe('AgentHost', () => {
 
         expect(def.compactionCount).toBe(1);
       });
+
+      it('stale pruning .finally is a no-op once pruningGeneration is bumped', async () => {
+        const { internal } = makeHostForPruning(3);
+        const def = internal as DeferralInternal & { pruningGeneration: number };
+        const sessionA = mockSession(['baseline', 'second', 'third']);
+        def.session = sessionA;
+        def._sessionDir = '/tmp/test-session';
+        def.compactionCount = 3;
+        def.busy = true;
+        def.writeCompactionCount = vi.fn();
+        def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+        let resolveA!: () => void;
+        sessionA.compact.mockImplementation(() => new Promise<void>((r) => (resolveA = r)));
+
+        const listenerEvents: string[] = [];
+        def.listeners = new Set([(e) => listenerEvents.push(e.type)]);
+        const busyEvents: boolean[] = [];
+        def.onBusyChange = (_id, busy) => busyEvents.push(busy);
+
+        // Pruning A starts.
+        def.handleSessionEvent({ type: 'agent_end' });
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+
+        // Simulate reinitializeWithProvider clearing pruning state and bumping
+        // the generation while pruning A is still in flight.
+        def.deferredAgentEnd = null;
+        def.isPruning = false;
+        def.pruningGeneration++;
+
+        // A new agent_end fires after reinit completes; pruning B starts.
+        const sessionB = mockSession(['baseline', 'second', 'third']);
+        def.session = sessionB;
+        def.compactionCount = 3;
+        let resolveB!: () => void;
+        sessionB.compact.mockImplementation(() => new Promise<void>((r) => (resolveB = r)));
+        def.busy = true;
+
+        def.handleSessionEvent({ type: 'agent_end' });
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+
+        // Pruning A's promise resolves now (its session is dead). Its .finally
+        // should be a no-op because the generation was bumped.
+        resolveA();
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(true);
+        expect(def.deferredAgentEnd).toEqual({ type: 'agent_end' });
+        expect(listenerEvents).toEqual([]);
+
+        // Pruning B's promise resolves; its .finally fires and flushes.
+        resolveB();
+        await new Promise((r) => setImmediate(r));
+
+        expect(def.isPruning).toBe(false);
+        expect(def.deferredAgentEnd).toBeNull();
+        expect(listenerEvents).toEqual(['agent_end']);
+      });
     });
 
     describe('cross-file operations', () => {
