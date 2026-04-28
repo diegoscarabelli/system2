@@ -109,6 +109,10 @@ const AGENT_LIBRARY_DIR = join(AGENT_DIR, 'library');
 /** Roles that can spawn, manage, and resurrect agents. Single source of truth for tool access. */
 const ORCHESTRATOR_ROLES = new Set(['guide', 'conductor']);
 
+/** Hard cap on inter-agent delivery content. Producers should self-bound; this is the loud-fail
+ *  boundary against accidental large deliveries (catch-up payloads, tool result dumps, etc.). */
+export const MAX_DELIVERY_BYTES = 512 * 1024;
+
 interface AgentDefinition {
   name: string;
   description: string;
@@ -1287,6 +1291,16 @@ export class AgentHost {
     }
     if (this.isReinitializing) {
       return Promise.reject(new Error('Agent is reinitializing, delivery rejected'));
+    }
+
+    // Check wire-size budget before queuing
+    if (Buffer.byteLength(content, 'utf8') > MAX_DELIVERY_BYTES) {
+      return Promise.reject(
+        new Error(
+          `Delivery content exceeds MAX_DELIVERY_BYTES (${MAX_DELIVERY_BYTES} bytes). ` +
+            `Producer should pre-bound. Receiver=${details.receiver}, sender=${details.sender}.`
+        )
+      );
     }
 
     // Create deferred promise for completion notification. Resolves when

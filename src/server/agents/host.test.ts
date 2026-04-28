@@ -1542,6 +1542,71 @@ describe('AgentHost', () => {
         host.deliverMessage('hi', { sender: 1, receiver: 2, timestamp: Date.now() })
       ).not.toThrow();
     });
+
+    it('rejects delivery when content exceeds MAX_DELIVERY_BYTES', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      // Create content that exceeds MAX_DELIVERY_BYTES (512 KB)
+      const oversizedContent = 'x'.repeat(512 * 1024 + 1);
+
+      await expect(
+        host.deliverMessage(oversizedContent, {
+          sender: 1,
+          receiver: 2,
+          timestamp: Date.now(),
+        })
+      ).rejects.toThrow(/Delivery content exceeds MAX_DELIVERY_BYTES/);
+    });
+
+    it('accepts delivery when content is exactly at MAX_DELIVERY_BYTES', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+        pendingDeliveries: Array<{ content: string }>;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      // Create content exactly at MAX_DELIVERY_BYTES (512 KB)
+      const contentAtLimit = 'y'.repeat(512 * 1024);
+
+      // Should not reject due to size check
+      const promise = host.deliverMessage(contentAtLimit, {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      expect(promise).toBeInstanceOf(Promise);
+      // The delivery should be queued (not rejected by size check)
+      expect(internal.pendingDeliveries).toHaveLength(1);
+      expect(internal.pendingDeliveries[0].content).toBe(contentAtLimit);
+    });
   });
 
   describe('pushSystemMessage on failover', () => {
