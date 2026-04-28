@@ -15,7 +15,12 @@ function makeAgent(id: number, role: string): Agent {
   } as Agent;
 }
 
-function setup(selfId: number, agents: Agent[], registeredIds: number[]) {
+function setup(
+  selfId: number,
+  agents: Agent[],
+  registeredIds: number[],
+  maxDeliveryBytes?: number
+) {
   const deliverMessage = vi.fn().mockReturnValue(Promise.resolve());
   const db = {
     getAgent: (id: number) => agents.find((a) => a.id === id) ?? null,
@@ -24,7 +29,7 @@ function setup(selfId: number, agents: Agent[], registeredIds: number[]) {
     get: (id: number) =>
       registeredIds.includes(id) ? { deliverMessage, abort: vi.fn() } : undefined,
   } as unknown as AgentRegistry;
-  const tool = createMessageAgentTool(selfId, registry, db);
+  const tool = createMessageAgentTool(selfId, registry, db, maxDeliveryBytes);
   return { tool, deliverMessage };
 }
 
@@ -80,6 +85,49 @@ describe('message_agent tool', () => {
     const result = await exec(tool, { agent_id: 2, message: 'Hello' });
 
     expect((result.content[0] as { text: string }).text).toContain('not currently active');
+  });
+
+  it('returns error tool-result when message exceeds maxDeliveryBytes cap', async () => {
+    const guide = makeAgent(1, 'guide');
+    const conductor = makeAgent(2, 'conductor');
+    // Cap set to 50 bytes — well below any realistic message
+    const { tool, deliverMessage } = setup(1, [guide, conductor], [2], 50);
+
+    const result = await exec(tool, { agent_id: 2, message: 'x'.repeat(200) });
+
+    expect((result.details as { error: string }).error).toBe('message_too_large');
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain('exceeds the inter-agent delivery cap');
+    expect(text).toContain('50'); // cap mentioned in error
+    // deliverMessage must NOT have been called
+    expect(deliverMessage).not.toHaveBeenCalled();
+  });
+
+  it('calls deliverMessage when message is within maxDeliveryBytes cap', async () => {
+    const guide = makeAgent(1, 'guide');
+    const conductor = makeAgent(2, 'conductor');
+    // Cap set to 1 MB — comfortably above a small message
+    const { tool, deliverMessage } = setup(1, [guide, conductor], [2], 1024 * 1024);
+
+    const result = await exec(tool, { agent_id: 2, message: 'small message' });
+
+    expect((result.content[0] as { text: string }).text).toContain('delivered');
+    expect(deliverMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('size pre-check accounts for the sender prefix overhead', async () => {
+    const guide = makeAgent(1, 'guide');
+    const conductor = makeAgent(2, 'conductor');
+    // The tool prepends "[guide_1 message]\n\n" (~20 bytes) before measuring.
+    // Set cap to exactly the prefix length so any non-empty message fails.
+    const prefix = '[guide_1 message]\n\n';
+    const prefixBytes = Buffer.byteLength(prefix, 'utf8');
+    const { tool, deliverMessage } = setup(1, [guide, conductor], [2], prefixBytes);
+
+    // A non-empty message should overflow the cap
+    const result = await exec(tool, { agent_id: 2, message: 'hi' });
+    expect((result.details as { error: string }).error).toBe('message_too_large');
+    expect(deliverMessage).not.toHaveBeenCalled();
   });
 
   it('returns success even when deliverMessage throws (fire-and-forget)', async () => {

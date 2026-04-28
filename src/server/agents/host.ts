@@ -1242,7 +1242,7 @@ export class AgentHost {
     const tools: AgentTool<any>[] = [
       createReadSystem2DbTool(this.db),
       createWriteSystem2DbTool(this.db, this.agentId, this.onDatabaseWrite),
-      createMessageAgentTool(this.agentId, this.registry, this.db),
+      createMessageAgentTool(this.agentId, this.registry, this.db, this.maxDeliveryBytes),
       createBashTool((content, details) => {
         this.session?.sendCustomMessage(
           { customType: 'bash_background', content, display: false, details },
