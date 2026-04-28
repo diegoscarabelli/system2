@@ -75,6 +75,8 @@
   export const CUSTOM_MESSAGE_CONTENT_BUDGET = 4 * 1024;
   ```
 
+  > **Note (post-implementation):** `CUSTOM_MESSAGE_CONTENT_BUDGET` was renamed to `NARRATOR_MESSAGE_EXCERPT_BYTES` during follow-up work to clarify that the budget applies only to Narrator-bound deliveries (daily-summary cron + `trigger_project_story` tool). The TOML key changed from `custom_message_content_budget_bytes` to `narrator_message_excerpt_bytes`.
+
 - [ ] Step 2 — failing test in `jobs.test.ts` that calls `stripSessionEntry` on a `custom_message` with a 10 KB string content and asserts the returned entry's `content` is truncated to ≤ 4 KB with a "[truncated]" suffix.
 
 - [ ] Step 3 — update `stripSessionEntry` (around line 181):
