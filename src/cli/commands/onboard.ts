@@ -7,14 +7,18 @@
  */
 
 import { existsSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, mkdir as mkdirAsync } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
+import { loginAnthropic } from '../../server/agents/oauth.js';
+import { saveOAuthCredentials } from '../../server/agents/oauth-credentials.js';
 import type {
   LlmConfig,
   LlmKey,
+  LlmOAuthConfig,
   LlmProvider,
+  LlmProviderConfig,
   ServicesConfig,
   ToolsConfig,
 } from '../../shared/index.js';
@@ -30,6 +34,14 @@ const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: 'openai-compatible', label: 'OpenAI-compatible (LiteLLM, vLLM, Ollama, Thaura, etc.)' },
   { value: 'openrouter', label: 'OpenRouter (multi-provider gateway)' },
   { value: 'xai', label: 'xAI (Grok)' },
+];
+
+const OAUTH_PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
+  {
+    value: 'anthropic',
+    label: 'Anthropic (Claude Pro/Max)',
+    hint: 'Uses your Claude.ai subscription. No API key needed.',
+  },
 ];
 
 /**
@@ -222,6 +234,273 @@ async function collectWebSearchConfig(): Promise<{
   };
 }
 
+/**
+ * Run the OAuth login flow for a given provider.
+ * Returns { label } on success, null on failure.
+ */
+async function runOAuthLogin(provider: LlmProvider): Promise<{ label: string } | null> {
+  if (provider !== 'anthropic') {
+    p.log.error(`OAuth login for ${provider} is not implemented yet`);
+    return null;
+  }
+
+  const label = (await p.text({
+    message: 'Label for this OAuth credential:',
+    placeholder: 'claude-pro',
+    defaultValue: 'claude-pro',
+  })) as string;
+
+  if (p.isCancel(label)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  if (!existsSync(SYSTEM2_DIR)) {
+    await mkdirAsync(SYSTEM2_DIR, { recursive: true });
+  }
+
+  const s = p.spinner();
+  s.start('Waiting for browser authentication...');
+  try {
+    const creds = await loginAnthropic({
+      onAuth: ({ url }) => {
+        s.message(`Open this URL to authenticate:\n${url}`);
+      },
+      onPrompt: async ({ message, placeholder }) => {
+        s.stop('Browser callback timed out');
+        const value = (await p.text({ message, placeholder })) as string;
+        if (p.isCancel(value)) {
+          p.cancel('Onboarding cancelled');
+          process.exit(0);
+        }
+        s.start('Exchanging code...');
+        return value;
+      },
+      onProgress: (m) => s.message(m),
+    });
+    saveOAuthCredentials(SYSTEM2_DIR, provider, {
+      access: creds.access,
+      refresh: creds.refresh,
+      expires: creds.expires,
+      label: label || 'claude-pro',
+    });
+    s.stop('✓ OAuth login successful');
+    return { label: label || 'claude-pro' };
+  } catch (err) {
+    s.stop('✗ OAuth login failed');
+    p.log.error(err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+/**
+ * Collect the OAuth tier configuration.
+ * Returns LlmOAuthConfig if configured, null if skipped or failed.
+ */
+async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
+  const wantsOAuth = await p.confirm({
+    message: 'Configure OAuth providers? (recommended if you have a Claude Pro/Max subscription)',
+    initialValue: true,
+  });
+  if (p.isCancel(wantsOAuth)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+  if (!wantsOAuth) return null;
+
+  const primary = (await p.select({
+    message: 'Select your primary OAuth provider:',
+    options: OAUTH_PROVIDERS,
+  })) as LlmProvider;
+  if (p.isCancel(primary)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  const result = await runOAuthLogin(primary);
+  if (!result) {
+    const retry = await p.confirm({
+      message: 'OAuth login failed. Skip OAuth tier and continue with API keys only?',
+      initialValue: true,
+    });
+    if (p.isCancel(retry) || !retry) {
+      p.cancel('Onboarding cancelled');
+      process.exit(0);
+    }
+    return null;
+  }
+
+  const fallback: LlmProvider[] = [];
+  let availableOAuth = OAUTH_PROVIDERS.filter((o) => o.value !== primary);
+  while (availableOAuth.length > 0) {
+    const addMore = await p.confirm({
+      message: 'Add another OAuth provider as fallback?',
+      initialValue: false,
+    });
+    if (p.isCancel(addMore)) {
+      p.cancel('Onboarding cancelled');
+      process.exit(0);
+    }
+    if (!addMore) break;
+
+    const next = (await p.select({
+      message: 'Select fallback OAuth provider:',
+      options: availableOAuth,
+    })) as LlmProvider;
+    if (p.isCancel(next)) {
+      p.cancel('Onboarding cancelled');
+      process.exit(0);
+    }
+    const r = await runOAuthLogin(next);
+    if (r) {
+      fallback.push(next);
+    }
+    availableOAuth = availableOAuth.filter((o) => o.value !== next);
+  }
+
+  return { primary, fallback };
+}
+
+/**
+ * Collect the API key tier configuration.
+ * Returns { llm: null } if user opts out, otherwise the full provider config.
+ */
+async function collectApiKeyTier(): Promise<{
+  llm: {
+    primary: LlmProvider;
+    fallback: LlmProvider[];
+    providers: Partial<Record<LlmProvider, LlmProviderConfig>>;
+  } | null;
+  services?: ServicesConfig;
+  tools?: ToolsConfig;
+}> {
+  const wantsApiKeys = await p.confirm({
+    message: 'Configure API key providers? (recommended as fallback when OAuth rate-limits)',
+    initialValue: true,
+  });
+  if (p.isCancel(wantsApiKeys)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+  if (!wantsApiKeys) {
+    return { llm: null };
+  }
+
+  const collectedKeys: Map<LlmProvider, LlmKey[]> = new Map();
+
+  // Step 1: Select primary provider
+  const primaryProvider = (await p.select({
+    message: 'Select your primary LLM provider:',
+    options: PROVIDERS,
+  })) as LlmProvider;
+
+  if (p.isCancel(primaryProvider)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  // Step 2: Collect keys for primary provider (openai-compatible needs extra config)
+  let compatExtras: { base_url: string; model: string; compat_reasoning: boolean } | undefined;
+
+  if (primaryProvider === 'openai-compatible') {
+    const compatConfig = await collectOpenAICompatibleConfig();
+    collectedKeys.set(primaryProvider, compatConfig.keys);
+    compatExtras = {
+      base_url: compatConfig.base_url,
+      model: compatConfig.model,
+      compat_reasoning: compatConfig.compat_reasoning,
+    };
+  } else {
+    const primaryKeys = await collectKeysForProvider(primaryProvider);
+    collectedKeys.set(primaryProvider, primaryKeys);
+  }
+
+  // Step 3: Ask about fallback providers
+  const wantsFallback = await p.confirm({
+    message: 'Configure fallback providers?',
+    initialValue: false,
+  });
+
+  if (p.isCancel(wantsFallback)) {
+    p.cancel('Onboarding cancelled');
+    process.exit(0);
+  }
+
+  const fallbackOrder: LlmProvider[] = [];
+
+  if (wantsFallback) {
+    let availableProviders = PROVIDERS.filter((p) => p.value !== primaryProvider);
+
+    while (availableProviders.length > 0) {
+      const fallbackProvider = (await p.select({
+        message:
+          fallbackOrder.length === 0
+            ? 'Select a fallback provider:'
+            : 'Select another fallback provider:',
+        options: availableProviders,
+      })) as LlmProvider;
+
+      if (p.isCancel(fallbackProvider)) {
+        p.cancel('Onboarding cancelled');
+        process.exit(0);
+      }
+
+      if (fallbackProvider === 'openai-compatible' && !compatExtras) {
+        const compatConfig = await collectOpenAICompatibleConfig();
+        collectedKeys.set(fallbackProvider, compatConfig.keys);
+        compatExtras = {
+          base_url: compatConfig.base_url,
+          model: compatConfig.model,
+          compat_reasoning: compatConfig.compat_reasoning,
+        };
+      } else {
+        const fallbackKeys = await collectKeysForProvider(fallbackProvider);
+        collectedKeys.set(fallbackProvider, fallbackKeys);
+      }
+      fallbackOrder.push(fallbackProvider);
+
+      availableProviders = availableProviders.filter((p) => p.value !== fallbackProvider);
+
+      if (availableProviders.length > 0) {
+        const addMore = await p.confirm({
+          message: 'Add another fallback provider?',
+          initialValue: false,
+        });
+
+        if (p.isCancel(addMore)) {
+          p.cancel('Onboarding cancelled');
+          process.exit(0);
+        }
+
+        if (!addMore) break;
+      }
+    }
+  }
+
+  // Build providers map
+  const providers: Partial<Record<LlmProvider, LlmProviderConfig>> = {};
+  for (const [provider, keys] of collectedKeys) {
+    if (provider === 'openai-compatible' && compatExtras) {
+      providers[provider] = {
+        keys,
+        base_url: compatExtras.base_url,
+        model: compatExtras.model,
+        compat_reasoning: compatExtras.compat_reasoning,
+      };
+    } else {
+      providers[provider] = { keys };
+    }
+  }
+
+  return {
+    llm: {
+      primary: primaryProvider,
+      fallback: fallbackOrder,
+      providers,
+    },
+  };
+}
+
 export async function onboard(): Promise<void> {
   console.clear();
 
@@ -244,125 +523,45 @@ export async function onboard(): Promise<void> {
   p.intro('🧠 Welcome to System2, the AI multi-agent system for working with data.');
 
   p.log.info(
-    'Before we can get to work, we need at least one LLM provider and an API key. ' +
-      'You can configure multiple providers and keys for redundancy and flexibility. ' +
-      "Don't worry, you can always change or add providers and keys later by editing ~/.system2/config.toml directly."
+    'Before we can get to work, we need at least one LLM provider configured. ' +
+      'You can use OAuth (Claude Pro/Max subscription) and/or API keys. ' +
+      "Don't worry, you can always change or add providers later by editing ~/.system2/config.toml directly."
   );
 
   try {
-    const collectedKeys: Map<LlmProvider, LlmKey[]> = new Map();
+    // Phase 1a: OAuth tier
+    const oauthTier = await collectOAuthTier();
 
-    // Step 1: Select primary provider
-    const primaryProvider = (await p.select({
-      message: 'Select your primary LLM provider:',
-      options: PROVIDERS,
-    })) as LlmProvider;
+    // Phase 1b: API key tier
+    const apiKeyTier = await collectApiKeyTier();
 
-    if (p.isCancel(primaryProvider)) {
+    // Validate: at least one tier must be configured
+    if (!oauthTier && !apiKeyTier.llm) {
+      p.log.error('At least one auth tier (OAuth or API keys) must be configured.');
       p.cancel('Onboarding cancelled');
-      process.exit(0);
+      process.exit(1);
     }
 
-    // Step 2: Collect keys for primary provider (openai-compatible needs extra config)
-    let compatExtras: { base_url: string; model: string; compat_reasoning: boolean } | undefined;
-
-    if (primaryProvider === 'openai-compatible') {
-      const compatConfig = await collectOpenAICompatibleConfig();
-      collectedKeys.set(primaryProvider, compatConfig.keys);
-      compatExtras = {
-        base_url: compatConfig.base_url,
-        model: compatConfig.model,
-        compat_reasoning: compatConfig.compat_reasoning,
-      };
+    // Build LLM config — at this point at least one tier is non-null (validated above)
+    let llmConfig: LlmConfig;
+    if (apiKeyTier.llm) {
+      llmConfig = { ...apiKeyTier.llm };
     } else {
-      const primaryKeys = await collectKeysForProvider(primaryProvider);
-      collectedKeys.set(primaryProvider, primaryKeys);
+      // oauthTier is guaranteed non-null: both-null case already exited above
+      const oauthPrimary = (oauthTier as LlmOAuthConfig).primary;
+      llmConfig = {
+        primary: oauthPrimary,
+        fallback: [],
+        providers: { [oauthPrimary]: { keys: [] } },
+      };
     }
 
-    // Step 3: Ask about fallback providers
-    const wantsFallback = await p.confirm({
-      message: 'Configure fallback providers?',
-      initialValue: false,
-    });
-
-    if (p.isCancel(wantsFallback)) {
-      p.cancel('Onboarding cancelled');
-      process.exit(0);
+    if (oauthTier) {
+      llmConfig.oauth = oauthTier;
     }
 
-    const fallbackOrder: LlmProvider[] = [];
-
-    if (wantsFallback) {
-      let availableProviders = PROVIDERS.filter((p) => p.value !== primaryProvider);
-
-      while (availableProviders.length > 0) {
-        const fallbackProvider = (await p.select({
-          message:
-            fallbackOrder.length === 0
-              ? 'Select a fallback provider:'
-              : 'Select another fallback provider:',
-          options: availableProviders,
-        })) as LlmProvider;
-
-        if (p.isCancel(fallbackProvider)) {
-          p.cancel('Onboarding cancelled');
-          process.exit(0);
-        }
-
-        if (fallbackProvider === 'openai-compatible' && !compatExtras) {
-          const compatConfig = await collectOpenAICompatibleConfig();
-          collectedKeys.set(fallbackProvider, compatConfig.keys);
-          compatExtras = {
-            base_url: compatConfig.base_url,
-            model: compatConfig.model,
-            compat_reasoning: compatConfig.compat_reasoning,
-          };
-        } else {
-          const fallbackKeys = await collectKeysForProvider(fallbackProvider);
-          collectedKeys.set(fallbackProvider, fallbackKeys);
-        }
-        fallbackOrder.push(fallbackProvider);
-
-        availableProviders = availableProviders.filter((p) => p.value !== fallbackProvider);
-
-        if (availableProviders.length > 0) {
-          const addMore = await p.confirm({
-            message: 'Add another fallback provider?',
-            initialValue: false,
-          });
-
-          if (p.isCancel(addMore)) {
-            p.cancel('Onboarding cancelled');
-            process.exit(0);
-          }
-
-          if (!addMore) break;
-        }
-      }
-    }
-
-    // Step 4: Ask about web search
+    // Phase 1c: Web search
     const { services, tools } = await collectWebSearchConfig();
-
-    // Build LLM config
-    const llmConfig: LlmConfig = {
-      primary: primaryProvider,
-      fallback: fallbackOrder,
-      providers: {},
-    };
-
-    for (const [provider, keys] of collectedKeys) {
-      if (provider === 'openai-compatible' && compatExtras) {
-        llmConfig.providers[provider] = {
-          keys,
-          base_url: compatExtras.base_url,
-          model: compatExtras.model,
-          compat_reasoning: compatExtras.compat_reasoning,
-        };
-      } else {
-        llmConfig.providers[provider] = { keys };
-      }
-    }
 
     // Phase 2: Bootstrap
     const s = p.spinner();
