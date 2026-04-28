@@ -1297,7 +1297,8 @@ export function registerNarratorJobs(
           narratorHost,
           narratorId,
           system2Dir,
-          knowledgeBudgetChars
+          knowledgeBudgetChars,
+          catchUpBudgetBytes
         );
       },
       onJobChange
@@ -1313,7 +1314,8 @@ export async function buildAndDeliverMemoryUpdate(
   narratorHost: AgentHost,
   narratorId: number,
   system2Dir: string,
-  knowledgeBudgetChars = 20_000
+  knowledgeBudgetChars = 20_000,
+  catchUpBudgetBytes: number = CATCH_UP_BUDGET_BYTES
 ): Promise<void> {
   knowledgeBudgetChars = Math.max(knowledgeBudgetChars, 5_000);
   const newRunTs = new Date().toISOString();
@@ -1352,14 +1354,53 @@ export async function buildAndDeliverMemoryUpdate(
 
   const messageParts: string[] = [];
 
+  let summaryAnnotation = '';
+
   if (summaryFiles.length > 0) {
-    // Embed summary content inline so the Narrator doesn't need read tool calls
-    const summaryEntries = summaryFiles.map((f) => {
+    // Convert each summary file to a TimestampedEntry for oldest-first truncation.
+    // The timestamp is the date in the filename (e.g. "2026-03-10" from "2026-03-10.md").
+    const summaryEntryObjects: TimestampedEntry[] = summaryFiles.map((f) => {
       const content = readFileSync(f, 'utf-8');
       const filename = basename(f);
-      return `### ${filename}\n\n${content}`;
+      const timestamp = filename.replace('.md', '');
+      return {
+        timestamp,
+        rendered: `### ${filename}\n\n${content}`,
+      };
     });
-    messageParts.push(`## Daily summaries to incorporate\n\n${summaryEntries.join('\n\n')}`);
+
+    // Compute how much of the budget the fixed header occupies so the truncation budget
+    // applies only to the variable daily-summary section.
+    const fixedHeader = `[Scheduled task: memory-update]
+
+memory_file: ${memoryFile}
+last_narrator_update_ts: ${lastTs ?? '(none)'}
+new_run_ts: ${newRunTs}
+
+IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.`;
+    const sectionLabel = '## Daily summaries to incorporate\n\n';
+    const headerOverhead =
+      Buffer.byteLength(fixedHeader, 'utf8') + Buffer.byteLength(sectionLabel, 'utf8') + 200; // 200 for separators/join
+    const summaryBudget = Math.max(catchUpBudgetBytes - headerOverhead, 0);
+
+    const truncation = truncateOldestToFit(summaryEntryObjects, summaryBudget);
+
+    if (truncation.droppedCount > 0 && truncation.droppedRange) {
+      log.warn(
+        `[Scheduler] Truncated ${truncation.droppedCount} oldest daily summary files spanning ` +
+          `${truncation.droppedRange.from} → ${truncation.droppedRange.to} ` +
+          `from memory-update delivery to fit ${catchUpBudgetBytes.toLocaleString()}-byte budget`
+      );
+      summaryAnnotation =
+        `\n\n[NOTE: dropped ${truncation.droppedCount} oldest daily summary files spanning ` +
+        `${truncation.droppedRange.from} → ${truncation.droppedRange.to} ` +
+        `to fit ${catchUpBudgetBytes.toLocaleString()}-byte delivery budget]\n\n`;
+    }
+
+    // Render kept entries (already sorted oldest-first by truncateOldestToFit)
+    if (truncation.kept.length > 0) {
+      messageParts.push(`${sectionLabel}${truncation.kept.map((e) => e.rendered).join('\n\n')}`);
+    }
   }
 
   if (oversizedFiles.length > 0) {
@@ -1373,13 +1414,15 @@ export async function buildAndDeliverMemoryUpdate(
     );
   }
 
-  const message = `[Scheduled task: memory-update]
+  const fixedHeader = `[Scheduled task: memory-update]
 
 memory_file: ${memoryFile}
 last_narrator_update_ts: ${lastTs ?? '(none)'}
 new_run_ts: ${newRunTs}
 
-IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.
+IMPORTANT: Do not message the Guide when you are done. This is a background task — no response is expected.`;
+
+  const message = `${fixedHeader}${summaryAnnotation}
 
 ${messageParts.join('\n\n')}`;
 
@@ -1389,7 +1432,7 @@ ${messageParts.join('\n\n')}`;
     timestamp: Date.now(),
   });
 
-  // Server-side cursor advancement for memory.md
+  // Server-side cursor advancement for memory.md (always advances regardless of truncation)
   writeFrontmatterField(memoryFile, 'last_narrator_update_ts', newRunTs);
   commitIfStateDir(memoryFile, 'cursor: memory.md');
 }

@@ -712,6 +712,152 @@ describe('buildAndDeliverMemoryUpdate', () => {
     expect(msg).toContain('infrastructure.md');
     expect(msg).not.toContain('## Daily summaries to incorporate');
   });
+
+  describe('delivery size bounding (catchUpBudgetBytes)', () => {
+    it('(a) does not truncate when total summaries fit within budget', async () => {
+      const dir = trackTmpDir(makeTmpDir());
+      const knowledgeDir = join(dir, 'knowledge');
+      const summariesDir = join(knowledgeDir, 'daily_summaries');
+      mkdirSync(summariesDir, { recursive: true });
+      writeFileSync(
+        join(knowledgeDir, 'memory.md'),
+        '---\nlast_narrator_update_ts: 2026-03-09T00:00:00Z\n---\n# Memory'
+      );
+      writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary 10\nDay ten.');
+      writeFileSync(join(summariesDir, '2026-03-11.md'), '---\n---\n# Summary 11\nDay eleven.');
+
+      const warnSpy = vi.spyOn(log, 'warn');
+      const host = mockNarratorHost();
+      // Large budget: both summaries are tiny, should fit easily
+      await buildAndDeliverMemoryUpdate(host, 2, dir, 20_000, 512 * 1024);
+      expect(host.calls).toHaveLength(1);
+
+      const msg = host.calls[0].content;
+      expect(msg).toContain('Day ten.');
+      expect(msg).toContain('Day eleven.');
+      expect(msg).not.toContain('[NOTE: dropped');
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Truncated'));
+      warnSpy.mockRestore();
+
+      // Cursor advances
+      const updatedTs = readFrontmatterField(
+        join(knowledgeDir, 'memory.md'),
+        'last_narrator_update_ts'
+      );
+      expect(updatedTs).not.toBeNull();
+      expect(updatedTs).not.toBe('2026-03-09T00:00:00Z');
+    });
+
+    it('(b) drops oldest summaries when over budget and annotates + warns', async () => {
+      const dir = trackTmpDir(makeTmpDir());
+      const knowledgeDir = join(dir, 'knowledge');
+      const summariesDir = join(knowledgeDir, 'daily_summaries');
+      mkdirSync(summariesDir, { recursive: true });
+      writeFileSync(
+        join(knowledgeDir, 'memory.md'),
+        '---\nlast_narrator_update_ts: 2026-03-09T00:00:00Z\n---\n# Memory'
+      );
+      // Write 5 files, each ~300 bytes
+      const days = ['2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13', '2026-03-14'];
+      for (const day of days) {
+        writeFileSync(
+          join(summariesDir, `${day}.md`),
+          `---\n---\n# Summary ${day}\n${'content for day '.repeat(10)}${day}\n`
+        );
+      }
+
+      const warnSpy = vi.spyOn(log, 'warn');
+      const host = mockNarratorHost();
+      // Very small budget: only ~500 bytes for summaries section — forces truncation
+      await buildAndDeliverMemoryUpdate(host, 2, dir, 20_000, 500);
+      expect(host.calls).toHaveLength(1);
+
+      const msg = host.calls[0].content;
+      // Annotation present
+      expect(msg).toContain('[NOTE: dropped');
+      expect(msg).toContain('to fit 500-byte delivery budget]');
+      // warn fired
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Truncated'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('memory-update delivery'));
+      warnSpy.mockRestore();
+
+      // Cursor still advances
+      const updatedTs = readFrontmatterField(
+        join(knowledgeDir, 'memory.md'),
+        'last_narrator_update_ts'
+      );
+      expect(updatedTs).not.toBeNull();
+      expect(updatedTs).not.toBe('2026-03-09T00:00:00Z');
+    });
+
+    it('(c) drops all files when each individually exceeds budget; message still has header', async () => {
+      const dir = trackTmpDir(makeTmpDir());
+      const knowledgeDir = join(dir, 'knowledge');
+      const summariesDir = join(knowledgeDir, 'daily_summaries');
+      mkdirSync(summariesDir, { recursive: true });
+      writeFileSync(
+        join(knowledgeDir, 'memory.md'),
+        '---\nlast_narrator_update_ts: 2026-03-09T00:00:00Z\n---\n# Memory'
+      );
+      // Write 2 very large files, each >> 100 bytes
+      writeFileSync(
+        join(summariesDir, '2026-03-10.md'),
+        `---\n---\n# Summary\n${'x'.repeat(500)}\n`
+      );
+      writeFileSync(
+        join(summariesDir, '2026-03-11.md'),
+        `---\n---\n# Summary\n${'y'.repeat(500)}\n`
+      );
+
+      const warnSpy = vi.spyOn(log, 'warn');
+      const host = mockNarratorHost();
+      // Extremely tiny budget (100 bytes) — both files are individually too big
+      await buildAndDeliverMemoryUpdate(host, 2, dir, 20_000, 100);
+      expect(host.calls).toHaveLength(1);
+
+      const msg = host.calls[0].content;
+      // Header must still be present (Narrator gets a valid signal)
+      expect(msg).toContain('[Scheduled task: memory-update]');
+      // Annotation present
+      expect(msg).toContain('[NOTE: dropped');
+      // Both summaries dropped
+      expect(msg).not.toContain('x'.repeat(50));
+      expect(msg).not.toContain('y'.repeat(50));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Truncated'));
+      warnSpy.mockRestore();
+
+      // Cursor still advances
+      const updatedTs = readFrontmatterField(
+        join(knowledgeDir, 'memory.md'),
+        'last_narrator_update_ts'
+      );
+      expect(updatedTs).not.toBeNull();
+      expect(updatedTs).not.toBe('2026-03-09T00:00:00Z');
+    });
+
+    it('(d) cursor advances in all truncation scenarios', async () => {
+      // Re-verify cursor advancement explicitly for each scenario via a thin integration check.
+      // Scenario: exactly at budget (no truncation) — cursor must advance.
+      const dir = trackTmpDir(makeTmpDir());
+      const knowledgeDir = join(dir, 'knowledge');
+      const summariesDir = join(knowledgeDir, 'daily_summaries');
+      mkdirSync(summariesDir, { recursive: true });
+      const memoryPath = join(knowledgeDir, 'memory.md');
+      writeFileSync(
+        memoryPath,
+        '---\nlast_narrator_update_ts: 2026-03-09T00:00:00Z\n---\n# Memory'
+      );
+      writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Day 10\nSmall content.\n');
+
+      const host = mockNarratorHost();
+      const before = '2026-03-09T00:00:00Z';
+      await buildAndDeliverMemoryUpdate(host, 2, dir, 20_000, 512 * 1024);
+
+      const after = readFrontmatterField(memoryPath, 'last_narrator_update_ts');
+      expect(after).not.toBeNull();
+      expect(after).not.toBe(before);
+    });
+  });
 });
 
 describe('stripSessionEntry', () => {

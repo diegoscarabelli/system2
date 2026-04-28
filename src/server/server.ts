@@ -715,7 +715,8 @@ export class Server {
                 this.narratorHost,
                 this.narratorId,
                 SYSTEM2_DIR,
-                this.config.knowledgeConfig?.budget_chars
+                this.config.knowledgeConfig?.budget_chars,
+                this.config.deliveryConfig?.catch_up_budget_bytes ?? CATCH_UP_BUDGET_BYTES
               ),
             onJobChange
           );
