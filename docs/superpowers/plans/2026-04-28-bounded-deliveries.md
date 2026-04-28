@@ -40,7 +40,7 @@
   ```typescript
   /** Hard cap on inter-agent delivery content. Producers should self-bound; this is the loud-fail
    *  boundary against accidental large deliveries (catch-up payloads, tool result dumps, etc.). */
-  export const MAX_DELIVERY_BYTES = 512 * 1024;
+  export const MAX_DELIVERY_BYTES = 1024 * 1024; // 1 MB (implemented; original plan said 512 KB)
   ```
 
 - [ ] Step 3 — in `deliverMessage()` (around line 1280), after the `isReinitializing` check and before the `pendingDeliveries.push`, reject when oversized:
@@ -72,26 +72,33 @@
 
   ```typescript
   /** Per-custom_message content cap when feeding catch-up activity into the Narrator. */
-  export const CUSTOM_MESSAGE_CONTENT_BUDGET = 4 * 1024;
+  export const NARRATOR_MESSAGE_EXCERPT_BYTES = 16 * 1024; // 16 KB (implemented; original plan said 4 KB as CUSTOM_MESSAGE_CONTENT_BUDGET)
   ```
 
-  > **Note (post-implementation):** `CUSTOM_MESSAGE_CONTENT_BUDGET` was renamed to `NARRATOR_MESSAGE_EXCERPT_BYTES` during follow-up work to clarify that the budget applies only to Narrator-bound deliveries (daily-summary cron + `trigger_project_story` tool). The TOML key changed from `custom_message_content_budget_bytes` to `narrator_message_excerpt_bytes`.
+  > **Note (post-implementation):** Originally named `CUSTOM_MESSAGE_CONTENT_BUDGET = 4 * 1024`. Renamed to `NARRATOR_MESSAGE_EXCERPT_BYTES` and raised to 16 KB to capture most legitimate inter-agent payloads while bounding pathological cases. The TOML key changed from `custom_message_content_budget_bytes` to `narrator_message_excerpt_bytes`.
 
-- [ ] Step 2 — failing test in `jobs.test.ts` that calls `stripSessionEntry` on a `custom_message` with a 10 KB string content and asserts the returned entry's `content` is truncated to ≤ 4 KB with a "[truncated]" suffix.
+- [ ] Step 2 — failing test in `jobs.test.ts` that calls `stripSessionEntry` on a `custom_message` with a 10 KB string content and asserts the returned entry's `content` is truncated to ≤ 16 KB (implemented default; original plan said 4 KB) with a "[truncated]" suffix.
 
 - [ ] Step 3 — update `stripSessionEntry` (around line 181):
 
   ```typescript
   if (type === 'custom_message') {
     const { details: _d, ...rest } = entry;
-    if (typeof rest.content === 'string' && rest.content.length > CUSTOM_MESSAGE_CONTENT_BUDGET) {
+    if (typeof rest.content === 'string' && Buffer.byteLength(rest.content, 'utf8') > NARRATOR_MESSAGE_EXCERPT_BYTES) {
+      // Iterative truncation to handle multi-byte UTF-8 characters safely
+      let truncated = rest.content.slice(0, NARRATOR_MESSAGE_EXCERPT_BYTES);
+      while (Buffer.byteLength(truncated, 'utf8') > NARRATOR_MESSAGE_EXCERPT_BYTES) {
+        truncated = truncated.slice(0, -1);
+      }
       rest.content =
-        rest.content.slice(0, CUSTOM_MESSAGE_CONTENT_BUDGET) +
-        `\n\n[...truncated: custom_message content exceeded ${CUSTOM_MESSAGE_CONTENT_BUDGET}-byte budget]`;
+        truncated +
+        `\n\n[...truncated: narrator message excerpt exceeded ${NARRATOR_MESSAGE_EXCERPT_BYTES}-byte budget]`;
     }
     return rest;
   }
   ```
+
+  > **Note (post-implementation):** `CUSTOM_MESSAGE_CONTENT_BUDGET` was renamed to `NARRATOR_MESSAGE_EXCERPT_BYTES` and the default was raised to 16 KB to capture most legitimate inter-agent payloads while still bounding pathological cases.
 
   Truncate from the end (drop the tail). Inter-agent message bodies are typically structured: tag at the top, then content; truncating the tail loses the latter half of the body but preserves the agent-readable header. If a future case needs whole-message context, the producer should pre-summarize before sending.
 
@@ -244,9 +251,9 @@ This is the largest task. It has two sub-deliverables: a `truncateOldestToFit` h
 - [ ] Step 1 — add constant + types:
 
   ```typescript
-  /** Producer-side budget for a single inter-agent delivery (well under MAX_DELIVERY_BYTES
-   *  to leave room for headers, DB-changes section, and SDK request overhead). */
-  export const CATCH_UP_BUDGET_BYTES = 256 * 1024;
+  /** Producer-side budget for a single inter-agent delivery (half of MAX_DELIVERY_BYTES,
+   *  leaving room for headers, DB-changes section, and SDK request overhead). */
+  export const CATCH_UP_BUDGET_BYTES = 512 * 1024; // 512 KB (implemented; original plan said 256 KB)
 
   export interface TimestampedEntry {
     timestamp: string;
@@ -324,7 +331,7 @@ This is the largest task. It has two sub-deliverables: a `truncateOldestToFit` h
 
 - All 5 retry-pattern test cases pass.
 - `MAX_DELIVERY_BYTES` thrown when oversized; existing deliveries that fit are unaffected.
-- `CATCH_UP_BUDGET_BYTES < MAX_DELIVERY_BYTES` so producer-bounded deliveries always pass transport.
+- `CATCH_UP_BUDGET_BYTES` (512 KB) < `MAX_DELIVERY_BYTES` (1 MB) so producer-bounded deliveries always pass transport.
 - Activity-log-truncation preserves frontmatter byte-for-byte; newest-first; dropped-notice present.
 - Curated knowledge files (`infrastructure.md`, `user.md`, `memory.md`, role) keep first-N truncation for back-compat.
 - 413, 429-long-context, and existing token-overflow patterns all categorize as `context_overflow`.
