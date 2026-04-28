@@ -108,6 +108,11 @@ max_history_messages = 1000  # Max messages in chat history ring buffer
 
 [knowledge]
 budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overruns
+
+[delivery]
+max_bytes = 1048576                # Hard cap on inter-agent delivery wire size (~1 MB)
+catch_up_budget_bytes = 524288     # Producer budget for catch-up / daily-summary deliveries (~512 KB)
+narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Narrator-bound deliveries (~16 KB)
 ```
 
 ## Sections
@@ -125,6 +130,7 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 | `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
 | `[chat]` | Chat history settings | `ChatConfig` |
 | `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
+| `[delivery]` | Inter-agent delivery size bounds | -- |
 
 ## LLM Providers
 
@@ -141,6 +147,22 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 | `xai` | Grok |
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
+
+## Delivery Size Bounds
+
+To prevent oversized inter-agent deliveries from triggering provider context-overflow errors or cooldown cascades, the `[delivery]` section configures producer-side size limits:
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `max_bytes` | 1048576 (1 MB) | Hard wire-size cap. Approximately 25% of a 1M-token context window. Producers should self-bound; this is the loud-fail boundary at which deliveries are rejected. |
+| `catch_up_budget_bytes` | 524288 (512 KB) | Producer-side budget for catch-up and daily-summary deliveries. Typically half of `max_bytes`, leaving headroom for headers, DB-changes sections, and SDK overhead. When activity exceeds this budget, oldest entries are dropped first. |
+| `narrator_message_excerpt_bytes` | 16384 (16 KB) | Per-`custom_message` content cap when feeding session JSONL into Narrator-bound deliveries (daily-summary cron and `trigger_project_story` tool). Prevents individual messages with oversized content from bloating the delivery. |
+
+**Invariant:** `catch_up_budget_bytes` must be less than `max_bytes`. This is validated at startup; if violated, a warning is logged.
+
+When a catch-up delivery (e.g., daily summary) exceeds `catch_up_budget_bytes`, the oldest activity entries are dropped first, with a note prepended: `[NOTE: dropped N oldest entries spanning timestamp-A → timestamp-B to fit within delivery budget]`. The server logs this action at warn level. Cursor advancement is unaffected: the `last_narrator_update_ts` advances to the current run timestamp regardless, so dropped entries are intentionally not re-scanned.
+
+For the `message_agent` tool, if a single message payload exceeds `max_bytes`, it is synchronously rejected with error code `message_too_large`.
 
 The `openrouter` provider supports an optional `[llm.openrouter.routing]` section that controls upstream provider routing. Keys are model ID prefixes matched against the resolved model (longest prefix wins), values are arrays of OpenRouter provider slugs tried in order. Prefixes containing special characters like `/` must be quoted in TOML (e.g. `"google/" = [...]`). For example, `google = ["google-vertex/global", "google-vertex", "google-ai-studio"]` routes all `google/*` models through Vertex AI first. If no prefix matches, no routing preference is set and OpenRouter uses its default load balancing.
 
