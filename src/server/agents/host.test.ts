@@ -3576,13 +3576,15 @@ describe('AgentHost', () => {
 
       // (a) Frontmatter preserved verbatim
       expect(result.startsWith(FRONTMATTER)).toBe(true);
-      // (b) Newest content (last entry) is at the end
-      expect(result).toContain('NEWEST ENTRY');
-      expect(result).toContain('This is the newest.');
+      // (b) Newest content (last entry) is at the end — truncation notice comes before it
+      const truncationNoticePrefix =
+        '[...truncated: dropped oldest content from this activity log to fit';
+      const truncationNoticeIndex = result.indexOf(truncationNoticePrefix);
+      const newestEntryIndex = result.indexOf(newestEntry.trimEnd());
+      expect(truncationNoticeIndex).toBeGreaterThanOrEqual(0);
+      expect(newestEntryIndex).toBeGreaterThan(truncationNoticeIndex);
+      expect(result.trimEnd().endsWith(newestEntry.trimEnd())).toBe(true);
       // (c) Truncation notice present
-      expect(result).toContain(
-        '[...truncated: dropped oldest content from this activity log to fit'
-      );
       expect(result).toContain('newest entries below]');
       // Total length should be <= budget + notice overhead
       expect(result.length).toBeLessThanOrEqual(budget + 200);
