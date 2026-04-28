@@ -3459,7 +3459,6 @@ describe('AgentHost', () => {
       // (a) Frontmatter preserved verbatim
       expect(result.startsWith(FRONTMATTER)).toBe(true);
       // (b) Newest content (last entry) is at the end
-      expect(result.endsWith(newestEntry.trimEnd())).toBe(false); // trimEnd not needed; check inclusion
       expect(result).toContain('NEWEST ENTRY');
       expect(result).toContain('This is the newest.');
       // (c) Truncation notice present
