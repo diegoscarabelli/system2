@@ -45,6 +45,19 @@ describe('oauth-credentials', () => {
     expect(mode).toBe(0o600);
   });
 
+  it('enforces 0700 on the oauth directory', async () => {
+    const { mkdirSync, statSync } = await import('node:fs');
+    // Pre-create the directory with a looser mode
+    mkdirSync(join(dir, 'oauth'), { recursive: true, mode: 0o755 });
+    saveOAuthCredentials(dir, 'anthropic', { access: 'a', refresh: 'b', expires: 1, label: 'l' });
+    if (process.platform === 'win32') {
+      expect(statSync(join(dir, 'oauth')).isDirectory()).toBe(true);
+      return;
+    }
+    const mode = statSync(join(dir, 'oauth')).mode & 0o777;
+    expect(mode).toBe(0o700);
+  });
+
   it('returns null when file is corrupt JSON', async () => {
     const { mkdirSync, writeFileSync } = await import('node:fs');
     mkdirSync(join(dir, 'oauth'), { recursive: true });
