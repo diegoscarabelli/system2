@@ -44,16 +44,29 @@ export function addProviderToOAuthTier(
   const oauth = parsed.llm?.oauth;
 
   if (!oauth) {
-    // Append [llm.oauth] section. We use a regex insert so we don't disturb other sections.
-    const insertion = `\n[llm.oauth]\nprimary = "${provider}"\nfallback = []\n`;
-    // Insert immediately after the existing [llm] block (before the next [llm.<x>] section).
-    const updated = raw.replace(/(\n\[llm\][^[]*?)(\n\[llm\.)/s, `$1${insertion}$2`);
-    if (updated === raw) {
-      // Fallback: append to end of file
-      writeFileSync(configPath, raw.endsWith('\n') ? raw + insertion : `${raw}\n${insertion}`);
-    } else {
-      writeFileSync(configPath, updated);
+    const insertion = `[llm.oauth]\nprimary = "${provider}"\nfallback = []\n`;
+    const lines = raw.split('\n');
+    const llmHeaderIdx = lines.findIndex((l) => l.trim() === '[llm]');
+    if (llmHeaderIdx === -1) {
+      // No [llm] block. Append at end (preserve trailing newline behavior).
+      const sep = raw.endsWith('\n') ? '' : '\n';
+      writeFileSync(configPath, `${raw}${sep}\n${insertion}`);
+      return { changed: true };
     }
+    // Find end of [llm] block: next line that starts a new table, or EOF
+    let insertIdx = lines.length;
+    for (let i = llmHeaderIdx + 1; i < lines.length; i++) {
+      if (/^\[/.test(lines[i].trim())) {
+        insertIdx = i;
+        break;
+      }
+    }
+    // Skip any blank lines immediately before the next section so we insert *before* the blank line
+    while (insertIdx > llmHeaderIdx + 1 && lines[insertIdx - 1].trim() === '') {
+      insertIdx--;
+    }
+    lines.splice(insertIdx, 0, '', `[llm.oauth]`, `primary = "${provider}"`, 'fallback = []');
+    writeFileSync(configPath, lines.join('\n'));
     return { changed: true };
   }
 
