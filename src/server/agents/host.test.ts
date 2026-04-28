@@ -2869,4 +2869,254 @@ describe('AgentHost', () => {
       expect(internal.handleContextOverflow).not.toHaveBeenCalled();
     });
   });
+
+  describe('currentTier tracking', () => {
+    it('initializes currentTier as "oauth" when active credential is from OAuth tier', async () => {
+      const { AuthResolver } = await import('./auth-resolver.js');
+
+      // Build a config that has both an OAuth tier (anthropic) and a keys tier (cerebras)
+      const llmConfig = {
+        primary: 'cerebras' as const,
+        fallback: [],
+        providers: {
+          cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
+        },
+        oauth: { primary: 'anthropic' as const, fallback: [] },
+      };
+
+      // Provide a non-expiring OAuth credential so the OAuth tier is active
+      const oauthCred = {
+        access: 'sk-ant-oat01-test',
+        refresh: 'sk-ant-ort01-test',
+        expires: Date.now() + 60 * 60 * 1000, // 1 hour from now
+        label: 'Pro',
+      };
+      const authResolver = new AuthResolver(llmConfig, undefined, { anthropic: oauthCred });
+
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig,
+        authResolver,
+      });
+
+      const internal = host as unknown as {
+        currentTier: string;
+        currentProvider: string;
+      };
+
+      expect(internal.currentTier).toBe('oauth');
+      expect(internal.currentProvider).toBe('anthropic');
+    });
+
+    it('initializes currentTier as "keys" when no OAuth credentials are present', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as { currentTier: string };
+      expect(internal.currentTier).toBe('keys');
+    });
+
+    it('markKeyFailed uses oauth cooldown key when currentTier is "oauth"', async () => {
+      const { AuthResolver } = await import('./auth-resolver.js');
+
+      const llmConfig = {
+        primary: 'cerebras' as const,
+        fallback: [],
+        providers: {
+          cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
+        },
+        oauth: { primary: 'anthropic' as const, fallback: [] },
+      };
+
+      const oauthCred = {
+        access: 'sk-ant-oat01-test',
+        refresh: 'sk-ant-ort01-test',
+        expires: Date.now() + 60 * 60 * 1000,
+        label: 'Pro',
+      };
+      const authResolver = new AuthResolver(llmConfig, undefined, { anthropic: oauthCred });
+
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig,
+        authResolver,
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        currentKeyIndex: number;
+        currentTier: string;
+        oauthRefreshAttempted: boolean;
+        authResolver: import('./auth-resolver.js').AuthResolver;
+        reinitializeWithProvider: ReturnType<typeof vi.fn>;
+        session: unknown;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
+      // Skip the refresh-and-retry branch so we test the markKeyFailed path directly.
+      internal.oauthRefreshAttempted = true;
+
+      // Confirm tier is oauth before the error
+      expect(internal.currentTier).toBe('oauth');
+
+      // Fire an auth error — goes straight to failover (refresh already attempted)
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 401: Unauthorized - Invalid API key' },
+      });
+
+      // The OAuth credential for anthropic:0 should now be in cooldown under the oauth key
+      expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'oauth')).toBe(true);
+      // And NOT under the keys key (different namespace)
+      expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'keys')).toBe(false);
+    });
+  });
+
+  describe('OAuth refresh-and-retry on 401', () => {
+    async function makeOAuthHost() {
+      const { AuthResolver } = await import('./auth-resolver.js');
+
+      const llmConfig = {
+        primary: 'cerebras' as const,
+        fallback: [],
+        providers: {
+          cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
+        },
+        oauth: { primary: 'anthropic' as const, fallback: [] },
+      };
+
+      const oauthCred = {
+        access: 'sk-ant-oat01-test',
+        refresh: 'sk-ant-ort01-test',
+        expires: Date.now() + 60 * 60 * 1000,
+        label: 'Pro',
+      };
+
+      const authResolver = new AuthResolver(llmConfig, undefined, { anthropic: oauthCred });
+
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig,
+        authResolver,
+      });
+
+      const internal = host as unknown as {
+        handlePotentialError: (event: unknown) => Promise<void>;
+        currentProvider: string;
+        currentTier: string;
+        oauthRefreshAttempted: boolean;
+        authResolver: import('./auth-resolver.js').AuthResolver;
+        reinitializeWithProvider: ReturnType<typeof vi.fn>;
+        session: unknown;
+      };
+
+      internal.session = { prompt: vi.fn() };
+      internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
+
+      return { host, internal, authResolver };
+    }
+
+    const auth401Event = {
+      type: 'message_end',
+      message: { stopReason: 'error', errorMessage: 'Error 401: Unauthorized - Invalid API key' },
+    };
+
+    it('refreshes token and retries via reinitializeWithProvider when ensureFresh succeeds', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // Stub ensureFresh to succeed and return a set containing the current provider
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set(['anthropic']));
+      // Stub markKeyFailed to track calls
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed');
+
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh was called with force: [currentProvider]
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      expect(authResolver.ensureFresh).toHaveBeenCalledWith(
+        expect.objectContaining({ force: ['anthropic'] })
+      );
+      // reinitializeWithProvider was called with the same provider (refresh-and-retry path)
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
+        'anthropic',
+        null, // pendingPrompt (no prompt was queued)
+        [], // pendingDeliveries (none queued)
+        'OAuth token refreshed',
+        expect.stringContaining('anthropic OAuth credential')
+      );
+      // markKeyFailed must NOT have been called — we didn't fail over
+      expect(markKeyFailedSpy).not.toHaveBeenCalled();
+    });
+
+    it('falls through to standard failover when ensureFresh returns set NOT containing current provider', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // Stub ensureFresh to return empty set (refresh was a no-op, e.g. concurrent lock ran first)
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set());
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh was called
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      // reinitializeWithProvider must NOT have been called — provider not in refreshed set
+      expect(internal.reinitializeWithProvider).not.toHaveBeenCalled();
+      // Should have fallen through to markKeyFailed (standard failover)
+      expect(markKeyFailedSpy).toHaveBeenCalledOnce();
+    });
+
+    it('falls through to standard failover (markKeyFailed) when ensureFresh throws', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // Stub ensureFresh to fail
+      vi.spyOn(authResolver, 'ensureFresh').mockRejectedValue(new Error('refresh_token_expired'));
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh was attempted
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      // Should have fallen through to markKeyFailed (standard auth-failure path)
+      expect(markKeyFailedSpy).toHaveBeenCalledOnce();
+    });
+
+    it('calls markKeyFailed (no second refresh) when refresh succeeds but retry also returns 401', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // First 401: ensureFresh succeeds and returns the current provider in the set
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set(['anthropic']));
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+
+      await internal.handlePotentialError(auth401Event);
+
+      // Refresh succeeded: ensureFresh called once, reinitialize triggered, no failover yet
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      expect(markKeyFailedSpy).not.toHaveBeenCalled();
+      // Guard flag is now set
+      expect(internal.oauthRefreshAttempted).toBe(true);
+
+      // Second 401 arrives (simulates the retried request also failing with 401).
+      // oauthRefreshAttempted is already true → no second refresh, fall through to markKeyFailed.
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh must NOT have been called a second time
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      // markKeyFailed must be called — standard failover path
+      expect(markKeyFailedSpy).toHaveBeenCalledOnce();
+    });
+  });
 });

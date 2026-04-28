@@ -18,6 +18,9 @@ app.db-wal
 # Credentials
 config.toml
 
+# OAuth credentials (access + refresh tokens)
+oauth/
+
 # Runtime
 server.pid
 logs/

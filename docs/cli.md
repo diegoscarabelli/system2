@@ -14,6 +14,8 @@ src/
 ├── index.ts               # CLI entry point (Commander setup)
 ├── commands/
 │   ├── onboard.ts         # Interactive setup wizard
+│   ├── login.ts           # OAuth login flow (add or refresh credential)
+│   ├── logout.ts          # OAuth logout (remove credential)
 │   ├── start.ts           # Start server (daemon or foreground)
 │   ├── stop.ts            # Graceful shutdown
 │   └── status.ts          # Server status info
@@ -32,11 +34,43 @@ src/
 
 Interactive setup wizard using [@clack/prompts](https://github.com/bombshell-dev/clack):
 
-1. Select primary LLM provider (Anthropic / Google / OpenAI)
-2. Enter API keys (supports multiple labeled keys per provider)
+1. Optionally configure the OAuth tier (Claude Pro/Max): runs the browser OAuth flow and writes `~/.system2/oauth/anthropic.json`
+2. Select primary LLM provider (Anthropic / Google / OpenAI) and enter API keys (supports multiple labeled keys per provider)
 3. Optionally configure fallback provider
 4. Optionally configure Brave Search API key
 5. Creates `~/.system2/` directory and writes `config.toml` (permissions `0600`)
+
+At least one auth tier (OAuth or API key) must be configured. The OAuth step comes first and is independent: you can configure OAuth only, API keys only, or both.
+
+### `system2 login [provider]`
+
+Runs the OAuth flow for `provider` (default: `anthropic`, the only supported provider in v1), writes the resulting tokens to `~/.system2/oauth/<provider>.json` (mode 0600), and offers to patch `[llm.oauth]` in `config.toml` if the provider is not already there.
+
+Use this command to:
+- Add OAuth credentials after onboarding (if you skipped the OAuth step).
+- Re-authenticate when a refresh token has been invalidated — for example after signing out of Claude.ai, changing your password, revoking the app's grant, or hitting an idle expiry on the refresh token.
+
+After running `system2 login`, restart the daemon to pick up the new credential:
+
+```bash
+system2 stop && system2 start
+```
+
+See [Auth Tiers](configuration.md#auth-tiers) in the configuration reference for how OAuth credentials interact with API key fallback and refresh behavior.
+
+### `system2 logout [provider]`
+
+Removes the OAuth credential for `provider` (default: `anthropic`). The command:
+1. Asks for confirmation, then deletes `~/.system2/oauth/<provider>.json`.
+2. Offers to remove `provider` from `[llm.oauth]` in `config.toml`.
+
+If `[llm.oauth]` becomes empty (the last provider is removed), the entire section is dropped from `config.toml`, and system2 reverts to API-key-only behavior on next start.
+
+After running `system2 logout`, restart the daemon to apply the change:
+
+```bash
+system2 stop && system2 start
+```
 
 ### `system2 start`
 
@@ -74,7 +108,7 @@ The config utility handles:
 - Validating required fields (at least one LLM provider with keys)
 - Building a `ServerConfig` object for the server
 
-See [Configuration](../configuration.md) for the full config.toml reference.
+See [Configuration](configuration.md) for the full config.toml reference.
 
 ## Utilities
 
@@ -93,4 +127,4 @@ On every CLI invocation, checks whether a newer version of `@diegoscarabelli/sys
 ## See Also
 
 - [Server](server.md): the server this CLI manages
-- [Configuration](../configuration.md): config.toml format and defaults
+- [Configuration](configuration.md): config.toml format and defaults
