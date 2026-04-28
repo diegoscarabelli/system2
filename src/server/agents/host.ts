@@ -624,19 +624,33 @@ export class AgentHost {
     // OAuth refresh-and-retry: 401 from an OAuth-tier credential should refresh once
     // before failing over. Refresh updates in-memory tokens; reinitialize the session
     // so the SDK picks up the new access token.
+    //
+    // We force-refresh the current provider because the token may have been server-side
+    // revoked while still appearing fresh locally (expires far in the future). If the
+    // refresh didn't actually happen (provider not in returned set), skip the retry and
+    // fall through to standard failover instead of burning a round-trip with the same token.
     if (category === 'auth' && this.currentTier === 'oauth' && !this.oauthRefreshAttempted) {
       this.oauthRefreshAttempted = true;
       try {
-        await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
-        log.info('[AgentHost] OAuth token refreshed after 401, retrying via reinitialize');
-        await this.reinitializeWithProvider(
-          this.currentProvider,
-          promptToRetry,
-          deliveriesToRetry,
-          'OAuth token refreshed',
-          `401 on ${this.currentProvider} OAuth credential, refreshed and retrying`
-        );
-        return;
+        const refreshed = await this.authResolver.ensureFresh({
+          refresh: refreshAnthropic,
+          force: [this.currentProvider],
+        });
+        if (refreshed.has(this.currentProvider)) {
+          log.info('[AgentHost] OAuth token refreshed after 401, retrying via reinitialize');
+          await this.reinitializeWithProvider(
+            this.currentProvider,
+            promptToRetry,
+            deliveriesToRetry,
+            'OAuth token refreshed',
+            `401 on ${this.currentProvider} OAuth credential, refreshed and retrying`
+          );
+          return;
+        }
+        // ensureFresh completed but did not refresh the current provider (e.g., the
+        // concurrent lock already ran and still couldn't refresh, or the credential
+        // disappeared). Fall through to standard failover to avoid a wasted retry.
+        log.warn('[AgentHost] OAuth refresh after 401 was a no-op, falling over');
       } catch (refreshErr) {
         log.warn('[AgentHost] OAuth refresh failed after 401, falling over:', refreshErr);
         // Fall through to standard auth-failure handling below

@@ -3036,15 +3036,18 @@ describe('AgentHost', () => {
     it('refreshes token and retries via reinitializeWithProvider when ensureFresh succeeds', async () => {
       const { internal, authResolver } = await makeOAuthHost();
 
-      // Stub ensureFresh to succeed (return empty set — no providers were refreshed)
-      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set());
+      // Stub ensureFresh to succeed and return a set containing the current provider
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set(['anthropic']));
       // Stub markKeyFailed to track calls
       const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed');
 
       await internal.handlePotentialError(auth401Event);
 
-      // ensureFresh was called
+      // ensureFresh was called with force: [currentProvider]
       expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      expect(authResolver.ensureFresh).toHaveBeenCalledWith(
+        expect.objectContaining({ force: ['anthropic'] })
+      );
       // reinitializeWithProvider was called with the same provider (refresh-and-retry path)
       expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
       expect(internal.reinitializeWithProvider).toHaveBeenCalledWith(
@@ -3056,6 +3059,23 @@ describe('AgentHost', () => {
       );
       // markKeyFailed must NOT have been called — we didn't fail over
       expect(markKeyFailedSpy).not.toHaveBeenCalled();
+    });
+
+    it('falls through to standard failover when ensureFresh returns set NOT containing current provider', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+
+      // Stub ensureFresh to return empty set (refresh was a no-op, e.g. concurrent lock ran first)
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set());
+      const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+
+      await internal.handlePotentialError(auth401Event);
+
+      // ensureFresh was called
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      // reinitializeWithProvider must NOT have been called — provider not in refreshed set
+      expect(internal.reinitializeWithProvider).not.toHaveBeenCalled();
+      // Should have fallen through to markKeyFailed (standard failover)
+      expect(markKeyFailedSpy).toHaveBeenCalledOnce();
     });
 
     it('falls through to standard failover (markKeyFailed) when ensureFresh throws', async () => {
@@ -3076,8 +3096,8 @@ describe('AgentHost', () => {
     it('calls markKeyFailed (no second refresh) when refresh succeeds but retry also returns 401', async () => {
       const { internal, authResolver } = await makeOAuthHost();
 
-      // First 401: ensureFresh succeeds → oauthRefreshAttempted is set to true
-      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set());
+      // First 401: ensureFresh succeeds and returns the current provider in the set
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set(['anthropic']));
       const markKeyFailedSpy = vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
 
       await internal.handlePotentialError(auth401Event);
