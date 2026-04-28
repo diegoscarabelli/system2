@@ -105,3 +105,9 @@ export interface AgentOverrideConfig {
 export interface AgentsConfig {
   [role: string]: AgentOverrideConfig;
 }
+
+export interface DeliveryConfig {
+  max_bytes: number;
+  catch_up_budget_bytes: number;
+  custom_message_content_budget_bytes: number;
+}

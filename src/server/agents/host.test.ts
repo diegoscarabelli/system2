@@ -1570,7 +1570,7 @@ describe('AgentHost', () => {
           receiver: 2,
           timestamp: Date.now(),
         })
-      ).rejects.toThrow(/Delivery content exceeds MAX_DELIVERY_BYTES/);
+      ).rejects.toThrow(/Delivery content exceeds max_bytes/);
     });
 
     it('accepts delivery when content is exactly at MAX_DELIVERY_BYTES', () => {
@@ -1606,6 +1606,63 @@ describe('AgentHost', () => {
       // The delivery should be queued (not rejected by size check)
       expect(internal.pendingDeliveries).toHaveLength(1);
       expect(internal.pendingDeliveries[0].content).toBe(contentAtLimit);
+    });
+
+    it('rejects at configured maxDeliveryBytes limit when smaller than default', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        maxDeliveryBytes: 1024,
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      // Content just over the configured 1024-byte limit
+      const oversized = 'x'.repeat(1025);
+      await expect(
+        host.deliverMessage(oversized, { sender: 1, receiver: 2, timestamp: Date.now() })
+      ).rejects.toThrow(/max_bytes \(1024 bytes\)/);
+    });
+
+    it('accepts delivery exactly at the configured maxDeliveryBytes limit', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        maxDeliveryBytes: 1024,
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+        pendingDeliveries: Array<{ content: string }>;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      const contentAtLimit = 'y'.repeat(1024);
+      const promise = host.deliverMessage(contentAtLimit, {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      expect(promise).toBeInstanceOf(Promise);
+      expect(internal.pendingDeliveries).toHaveLength(1);
     });
   });
 

@@ -17,6 +17,7 @@ import type {
   AgentsConfig,
   DatabaseConnectionConfig,
   DatabasesConfig,
+  DeliveryConfig,
   LlmConfig,
   LlmProvider,
   LlmProviderConfig,
@@ -37,6 +38,7 @@ export interface System2Config {
   services?: ServicesConfig;
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
+  delivery?: DeliveryConfig;
   backup: {
     /** Hours between automatic backups (default: 24) */
     cooldownHours: number;
@@ -150,7 +152,20 @@ interface TomlConfig {
   knowledge?: {
     budget_chars?: number;
   };
+  delivery?: {
+    max_bytes?: number;
+    catch_up_budget_bytes?: number;
+    custom_message_content_budget_bytes?: number;
+  };
 }
+
+/** Default delivery budget values. Must stay in sync with MAX_DELIVERY_BYTES,
+ *  CATCH_UP_BUDGET_BYTES, and CUSTOM_MESSAGE_CONTENT_BUDGET in the server package. */
+export const DEFAULT_DELIVERY: DeliveryConfig = {
+  max_bytes: 512 * 1024, // 524288 — hard cap on inter-agent delivery size
+  catch_up_budget_bytes: 256 * 1024, // 262144 — producer-side budget (catch-up / daily summary)
+  custom_message_content_budget_bytes: 4 * 1024, // 4096 — per-custom_message content cap
+};
 
 /**
  * Default operational configuration values.
@@ -283,6 +298,41 @@ function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
     };
   }
   return tools;
+}
+
+/**
+ * Convert TOML delivery section to DeliveryConfig, applying defaults for missing or invalid keys.
+ * Emits a warning and falls back to the default for any non-positive or non-integer value.
+ * Also warns if catch_up_budget_bytes >= max_bytes (producer budget should be < transport cap).
+ */
+export function convertTomlDelivery(toml: NonNullable<TomlConfig['delivery']>): DeliveryConfig {
+  function resolveField(key: keyof DeliveryConfig, raw: number | undefined): number {
+    const def = DEFAULT_DELIVERY[key];
+    if (raw === undefined) return def;
+    if (!Number.isInteger(raw) || raw <= 0) {
+      console.warn(
+        `[Config] Invalid delivery.${key} = ${raw}. Must be a positive integer. Using default (${def}).`
+      );
+      return def;
+    }
+    return raw;
+  }
+
+  const max_bytes = resolveField('max_bytes', toml.max_bytes);
+  const catch_up_budget_bytes = resolveField('catch_up_budget_bytes', toml.catch_up_budget_bytes);
+  const custom_message_content_budget_bytes = resolveField(
+    'custom_message_content_budget_bytes',
+    toml.custom_message_content_budget_bytes
+  );
+
+  if (catch_up_budget_bytes >= max_bytes) {
+    console.warn(
+      `[Config] delivery.catch_up_budget_bytes (${catch_up_budget_bytes}) >= delivery.max_bytes (${max_bytes}). ` +
+        `Producer budget should be less than the transport cap to leave headroom.`
+    );
+  }
+
+  return { max_bytes, catch_up_budget_bytes, custom_message_content_budget_bytes };
 }
 
 /**
@@ -523,6 +573,10 @@ export function loadConfig(): System2Config {
       config.databases = convertTomlDatabases(tomlConfig.databases);
     }
 
+    if (tomlConfig.delivery) {
+      config.delivery = convertTomlDelivery(tomlConfig.delivery);
+    }
+
     return config;
   } catch (_error) {
     console.warn('[Config] Failed to parse config.toml, using defaults');
@@ -539,6 +593,7 @@ export function buildConfigToml(options: {
   services?: ServicesConfig;
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
+  delivery?: DeliveryConfig;
   backup?: System2Config['backup'];
   session?: System2Config['session'];
   logs?: System2Config['logs'];
@@ -765,6 +820,26 @@ export function buildConfigToml(options: {
   lines.push('[knowledge]');
   lines.push(`# Maximum characters per knowledge file before truncation`);
   lines.push(`budget_chars = ${knowledge.budgetChars}`);
+  lines.push('');
+
+  const delivery = options.delivery ?? DEFAULT_DELIVERY;
+  lines.push('[delivery]');
+  lines.push(
+    `# Hard cap on inter-agent delivery size in bytes (default: ${DEFAULT_DELIVERY.max_bytes})`
+  );
+  lines.push(`max_bytes = ${delivery.max_bytes}`);
+  lines.push('');
+  lines.push(
+    `# Producer-side budget for catch-up / daily-summary deliveries in bytes (default: ${DEFAULT_DELIVERY.catch_up_budget_bytes})`
+  );
+  lines.push(`catch_up_budget_bytes = ${delivery.catch_up_budget_bytes}`);
+  lines.push('');
+  lines.push(
+    `# Per-custom_message content cap when feeding session activity to the Narrator in bytes (default: ${DEFAULT_DELIVERY.custom_message_content_budget_bytes})`
+  );
+  lines.push(
+    `custom_message_content_budget_bytes = ${delivery.custom_message_content_budget_bytes}`
+  );
   lines.push('');
 
   return lines.join('\n');

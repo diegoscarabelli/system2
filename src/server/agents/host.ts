@@ -148,6 +148,8 @@ export interface AgentHostConfig {
   knowledgeBudgetChars?: number;
   /** Called after every successful write_system2_db operation. */
   onDatabaseWrite?: OnDatabaseWrite;
+  /** Hard cap on inter-agent delivery size in bytes. Defaults to MAX_DELIVERY_BYTES. */
+  maxDeliveryBytes?: number;
   /** Called when the agent's busy state changes. */
   onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
   /** Called when an agent is terminated via terminate_agent tool. */
@@ -206,6 +208,7 @@ export class AgentHost {
   private onDatabaseWrite?: OnDatabaseWrite;
   private onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
   private onAgentTerminate?: () => void;
+  private maxDeliveryBytes: number;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -222,6 +225,7 @@ export class AgentHost {
     this.onDatabaseWrite = config.onDatabaseWrite;
     this.onBusyChange = config.onBusyChange;
     this.onAgentTerminate = config.onAgentTerminate;
+    this.maxDeliveryBytes = config.maxDeliveryBytes ?? MAX_DELIVERY_BYTES;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -1348,10 +1352,10 @@ export class AgentHost {
     }
 
     // Check wire-size budget before queuing
-    if (Buffer.byteLength(content, 'utf8') > MAX_DELIVERY_BYTES) {
+    if (Buffer.byteLength(content, 'utf8') > this.maxDeliveryBytes) {
       return Promise.reject(
         new Error(
-          `Delivery content exceeds MAX_DELIVERY_BYTES (${MAX_DELIVERY_BYTES} bytes). ` +
+          `Delivery content exceeds max_bytes (${this.maxDeliveryBytes} bytes). ` +
             `Producer should pre-bound. Receiver=${details.receiver}, sender=${details.sender}.`
         )
       );

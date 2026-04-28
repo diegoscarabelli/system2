@@ -80,12 +80,12 @@ export function truncateOldestToFit(entries: TimestampedEntry[], budget: number)
  * Format a truncation annotation line to prepend to a delivery body when entries were
  * dropped. Returns an empty string if nothing was dropped.
  */
-function annotateTruncation(result: TruncateResult): string {
+function annotateTruncation(result: TruncateResult, catchUpBudgetBytes: number): string {
   if (result.droppedCount === 0 || !result.droppedRange) return '';
   return (
     `\n\n[NOTE: dropped ${result.droppedCount} oldest entries spanning ` +
     `${result.droppedRange.from} → ${result.droppedRange.to} ` +
-    `to fit ${CATCH_UP_BUDGET_BYTES.toLocaleString()}-byte delivery budget]\n\n`
+    `to fit ${catchUpBudgetBytes.toLocaleString()}-byte delivery budget]\n\n`
   );
 }
 
@@ -212,10 +212,24 @@ export function collectAgentActivity(
   system2Dir: string,
   agents: Array<{ id: number; role: string; project_name: string | null }>,
   lastRunTs: string,
-  newRunTs: string
+  newRunTs: string,
+  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
 ): string {
-  const timestamped = collectAgentActivityWithTimestamps(system2Dir, agents, lastRunTs, newRunTs);
-  return renderAgentActivitySections(system2Dir, agents, lastRunTs, newRunTs, timestamped);
+  const timestamped = collectAgentActivityWithTimestamps(
+    system2Dir,
+    agents,
+    lastRunTs,
+    newRunTs,
+    customMessageContentBudget
+  );
+  return renderAgentActivitySections(
+    system2Dir,
+    agents,
+    lastRunTs,
+    newRunTs,
+    timestamped,
+    customMessageContentBudget
+  );
 }
 
 /**
@@ -228,13 +242,14 @@ export function collectAgentActivityWithTimestamps(
   system2Dir: string,
   agents: Array<{ id: number; role: string; project_name: string | null }>,
   lastRunTs: string,
-  newRunTs: string
+  newRunTs: string,
+  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
 ): TimestampedEntry[] {
   const all: TimestampedEntry[] = [];
   for (const agent of agents) {
     const sessionDir = join(system2Dir, 'sessions', `${agent.role}_${agent.id}`);
     if (!existsSync(sessionDir)) continue;
-    const entries = readSessionEntries(sessionDir, lastRunTs, newRunTs);
+    const entries = readSessionEntries(sessionDir, lastRunTs, newRunTs, customMessageContentBudget);
     all.push(...entries);
   }
   return all;
@@ -251,7 +266,8 @@ export function renderAgentActivitySections(
   agents: Array<{ id: number; role: string; project_name: string | null }>,
   lastRunTs: string,
   newRunTs: string,
-  entries?: TimestampedEntry[]
+  entries?: TimestampedEntry[],
+  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
 ): string {
   const sections: string[] = [];
 
@@ -270,11 +286,21 @@ export function renderAgentActivitySections(
     if (entries !== undefined) {
       // Use the pre-filtered set. Re-read the raw entries for this agent to match by
       // rendered string — this avoids re-parsing while staying correct.
-      const rawForAgent = readSessionEntries(sessionDir, lastRunTs, newRunTs);
+      const rawForAgent = readSessionEntries(
+        sessionDir,
+        lastRunTs,
+        newRunTs,
+        customMessageContentBudget
+      );
       const keptSet = new Set(entries.map((e) => e.rendered));
       agentEntries = rawForAgent.filter((e) => keptSet.has(e.rendered)).map((e) => e.rendered);
     } else {
-      agentEntries = readSessionEntries(sessionDir, lastRunTs, newRunTs).map((e) => e.rendered);
+      agentEntries = readSessionEntries(
+        sessionDir,
+        lastRunTs,
+        newRunTs,
+        customMessageContentBudget
+      ).map((e) => e.rendered);
     }
 
     if (agentEntries.length === 0) {
@@ -294,22 +320,28 @@ export function renderAgentActivitySections(
  * raw tool outputs) and truncates large argument/result values to 100 chars.
  *
  * Operates on plain objects — never mutates the input.
+ *
+ * @param entry The parsed JSONL entry to strip.
+ * @param customMessageContentBudget Per-custom_message content cap in bytes. Defaults to CUSTOM_MESSAGE_CONTENT_BUDGET.
  */
-export function stripSessionEntry(entry: Record<string, unknown>): Record<string, unknown> {
+export function stripSessionEntry(
+  entry: Record<string, unknown>,
+  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
+): Record<string, unknown> {
   const type = entry.type;
 
   if (type === 'custom_message') {
     const { details: _d, ...rest } = entry;
     if (typeof rest.content === 'string') {
-      if (Buffer.byteLength(rest.content, 'utf8') > CUSTOM_MESSAGE_CONTENT_BUDGET) {
-        let truncated = rest.content.slice(0, CUSTOM_MESSAGE_CONTENT_BUDGET);
+      if (Buffer.byteLength(rest.content, 'utf8') > customMessageContentBudget) {
+        let truncated = rest.content.slice(0, customMessageContentBudget);
         // Trim further if multi-byte chars pushed bytes over budget
-        while (Buffer.byteLength(truncated, 'utf8') > CUSTOM_MESSAGE_CONTENT_BUDGET) {
+        while (Buffer.byteLength(truncated, 'utf8') > customMessageContentBudget) {
           truncated = truncated.slice(0, -1);
         }
         rest.content =
           truncated +
-          `\n\n[...truncated: custom_message content exceeded ${CUSTOM_MESSAGE_CONTENT_BUDGET}-byte budget]`;
+          `\n\n[...truncated: custom_message content exceeded ${customMessageContentBudget}-byte budget]`;
       }
     }
     return rest;
@@ -389,7 +421,8 @@ export function stripSessionEntry(entry: Record<string, unknown>): Record<string
 function readSessionEntries(
   sessionDir: string,
   lastRunTs: string,
-  newRunTs: string
+  newRunTs: string,
+  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
 ): TimestampedEntry[] {
   const files = readdirSync(sessionDir)
     .filter((f) => f.endsWith('.jsonl'))
@@ -410,7 +443,10 @@ function readSessionEntries(
 
         const ts = entry.timestamp as string;
         if (ts >= lastRunTs && ts < newRunTs) {
-          entries.push({ timestamp: ts, rendered: JSON.stringify(stripSessionEntry(entry)) });
+          entries.push({
+            timestamp: ts,
+            rendered: JSON.stringify(stripSessionEntry(entry, customMessageContentBudget)),
+          });
         }
       } catch {
         // Skip malformed lines
@@ -624,7 +660,9 @@ export async function buildAndDeliverDailySummary(
   narratorHost: AgentHost,
   narratorId: number,
   system2Dir: string,
-  intervalMinutes: number
+  intervalMinutes: number,
+  catchUpBudgetBytes: number = CATCH_UP_BUDGET_BYTES,
+  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
 ): Promise<void> {
   const newRunTs = new Date().toISOString();
   const today = newRunTs.slice(0, 10);
@@ -728,7 +766,8 @@ export async function buildAndDeliverDailySummary(
       system2Dir,
       allProjectAgents,
       lastRunTs,
-      newRunTs
+      newRunTs,
+      customMessageContentBudget
     );
     const projectDbChanges = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
 
@@ -737,7 +776,8 @@ export async function buildAndDeliverDailySummary(
       system2Dir,
       projectScopedAgents,
       lastRunTs,
-      newRunTs
+      newRunTs,
+      customMessageContentBudget
     );
     projectDataList.push({
       projectId: project.id,
@@ -753,7 +793,8 @@ export async function buildAndDeliverDailySummary(
       allProjectAgents,
       lastRunTs,
       newRunTs,
-      allProjectAgentEntries
+      allProjectAgentEntries,
+      customMessageContentBudget
     );
     if (!hasActivity(allProjectAgentActivity, projectDbChanges)) continue;
 
@@ -774,7 +815,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       Buffer.byteLength(projectLogHeader, 'utf8') +
       Buffer.byteLength(projectDbChanges, 'utf8') +
       200; // 200 for section labels/separators
-    const projectLogActivityBudget = Math.max(CATCH_UP_BUDGET_BYTES - projectLogOverhead, 0);
+    const projectLogActivityBudget = Math.max(catchUpBudgetBytes - projectLogOverhead, 0);
     const projectLogTruncation = truncateOldestToFit(
       allProjectAgentEntries,
       projectLogActivityBudget
@@ -784,9 +825,10 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       allProjectAgents,
       lastRunTs,
       newRunTs,
-      projectLogTruncation.kept
+      projectLogTruncation.kept,
+      customMessageContentBudget
     );
-    const projectLogAnnotation = annotateTruncation(projectLogTruncation);
+    const projectLogAnnotation = annotateTruncation(projectLogTruncation, catchUpBudgetBytes);
 
     const projectLogMessage = `${projectLogHeader}${projectLogAnnotation}
 ## Agent Activity
@@ -813,14 +855,16 @@ ${projectDbChanges}`;
     system2Dir,
     dailySummarySystemAgents,
     lastRunTs,
-    newRunTs
+    newRunTs,
+    customMessageContentBudget
   );
   const nonProjectAgentActivity = renderAgentActivitySections(
     system2Dir,
     dailySummarySystemAgents,
     lastRunTs,
     newRunTs,
-    nonProjectAgentEntries
+    nonProjectAgentEntries,
+    customMessageContentBudget
   );
   const nonProjectDbChanges = collectNonProjectDbChanges(db, activeProjectIds, lastRunTs, newRunTs);
 
@@ -848,7 +892,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
     projectDataList.reduce((s, pd) => s + Buffer.byteLength(pd.dbChanges, 'utf8'), 0) +
     Buffer.byteLength(nonProjectDbChanges, 'utf8');
   const summaryOverhead = Buffer.byteLength(dailySummaryHeader, 'utf8') + summaryDbOverhead + 500;
-  const summaryActivityBudget = Math.max(CATCH_UP_BUDGET_BYTES - summaryOverhead, 0);
+  const summaryActivityBudget = Math.max(catchUpBudgetBytes - summaryOverhead, 0);
 
   // Gather all project-scoped entries for truncation
   const allProjectScopedEntries: TimestampedEntry[] = projectDataList.flatMap((pd) =>
@@ -856,12 +900,13 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       system2Dir,
       allAgents.filter((a) => a.project_name === pd.projectName),
       lastRunTs,
-      newRunTs
+      newRunTs,
+      customMessageContentBudget
     )
   );
   const allActivityEntries = [...allProjectScopedEntries, ...nonProjectAgentEntries];
   const summaryTruncation = truncateOldestToFit(allActivityEntries, summaryActivityBudget);
-  const summaryAnnotation = annotateTruncation(summaryTruncation);
+  const summaryAnnotation = annotateTruncation(summaryTruncation, catchUpBudgetBytes);
 
   const messageParts: string[] = [
     summaryAnnotation ? `${dailySummaryHeader}${summaryAnnotation}` : dailySummaryHeader,
@@ -877,7 +922,8 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       projectAgents,
       lastRunTs,
       newRunTs,
-      summaryTruncation.kept
+      summaryTruncation.kept,
+      customMessageContentBudget
     );
     activeProjectParts.push(
       `### Project: ${pd.projectName} (#${pd.projectId})\n\n#### Agent Activity\n\n${renderedProjectActivity}\n#### Database Changes\n\n${pd.dbChanges}`
@@ -893,7 +939,8 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       dailySummarySystemAgents,
       lastRunTs,
       newRunTs,
-      summaryTruncation.kept
+      summaryTruncation.kept,
+      customMessageContentBudget
     );
     messageParts.push(
       `## Non-Project Activity\n\n#### Agent Activity\n\n${renderedNonProjectActivity}\n#### Database Changes\n\n${nonProjectDbChanges}`
@@ -977,7 +1024,9 @@ export function registerNarratorJobs(
   system2Dir: string,
   intervalMinutes: number,
   knowledgeBudgetChars?: number,
-  onJobChange?: () => void
+  onJobChange?: () => void,
+  catchUpBudgetBytes: number = CATCH_UP_BUDGET_BYTES,
+  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
 ): void {
   // Daily summary — configurable interval
   const cronPattern = 60 % intervalMinutes === 0 ? `*/${intervalMinutes} * * * *` : '*/30 * * * *';
@@ -997,7 +1046,9 @@ export function registerNarratorJobs(
           narratorHost,
           narratorId,
           system2Dir,
-          intervalMinutes
+          intervalMinutes,
+          catchUpBudgetBytes,
+          customMessageContentBudget
         );
       },
       onJobChange

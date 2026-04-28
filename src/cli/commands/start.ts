@@ -106,6 +106,7 @@ export async function start(options: {
       knowledgeConfig: { budget_chars: config.knowledge.budgetChars },
       databasesConfig: config.databases,
       agentsConfig: config.agents,
+      deliveryConfig: config.delivery,
     });
 
     await server.start();

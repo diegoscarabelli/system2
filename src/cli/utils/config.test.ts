@@ -5,7 +5,9 @@ import {
   buildConfigToml,
   convertTomlAgents,
   convertTomlDatabases,
+  convertTomlDelivery,
   convertTomlLlm,
+  DEFAULT_DELIVERY,
 } from './config.js';
 
 describe('buildConfigToml', () => {
@@ -710,5 +712,111 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
     const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
     const reconstructed = convertTomlLlm(llmSection);
     expect(reconstructed.oauth).toEqual({ primary: 'anthropic', fallback: [] });
+  });
+});
+
+describe('convertTomlDelivery', () => {
+  it('reads valid config correctly with all fields present', () => {
+    const result = convertTomlDelivery({
+      max_bytes: 1048576,
+      catch_up_budget_bytes: 524288,
+      custom_message_content_budget_bytes: 8192,
+    });
+    expect(result).toEqual({
+      max_bytes: 1048576,
+      catch_up_budget_bytes: 524288,
+      custom_message_content_budget_bytes: 8192,
+    });
+  });
+
+  it('applies defaults for missing keys', () => {
+    const result = convertTomlDelivery({});
+    expect(result).toEqual(DEFAULT_DELIVERY);
+  });
+
+  it('applies default for a single missing key, keeps valid keys', () => {
+    const result = convertTomlDelivery({ max_bytes: 2097152 });
+    expect(result.max_bytes).toBe(2097152);
+    expect(result.catch_up_budget_bytes).toBe(DEFAULT_DELIVERY.catch_up_budget_bytes);
+    expect(result.custom_message_content_budget_bytes).toBe(
+      DEFAULT_DELIVERY.custom_message_content_budget_bytes
+    );
+  });
+
+  it('warns and uses default for a non-positive value', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlDelivery({ max_bytes: 0 });
+    expect(result.max_bytes).toBe(DEFAULT_DELIVERY.max_bytes);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('delivery.max_bytes'));
+    warnSpy.mockRestore();
+  });
+
+  it('warns and uses default for a negative value', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlDelivery({ catch_up_budget_bytes: -1 });
+    expect(result.catch_up_budget_bytes).toBe(DEFAULT_DELIVERY.catch_up_budget_bytes);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('delivery.catch_up_budget_bytes'));
+    warnSpy.mockRestore();
+  });
+
+  it('warns and uses default for a non-integer value', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlDelivery({ max_bytes: 1.5 });
+    expect(result.max_bytes).toBe(DEFAULT_DELIVERY.max_bytes);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('delivery.max_bytes'));
+    warnSpy.mockRestore();
+  });
+
+  it('warns when catch_up_budget_bytes >= max_bytes', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    convertTomlDelivery({ max_bytes: 1024, catch_up_budget_bytes: 1024 });
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('catch_up_budget_bytes'));
+    warnSpy.mockRestore();
+  });
+
+  it('does not warn when catch_up_budget_bytes < max_bytes', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    convertTomlDelivery({ max_bytes: 2048, catch_up_budget_bytes: 1024 });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
+describe('buildConfigToml — [delivery] section', () => {
+  it('emits [delivery] section with default values when not specified', () => {
+    const result = buildConfigToml({});
+    expect(result).toContain('[delivery]');
+    expect(result).toContain(`max_bytes = ${DEFAULT_DELIVERY.max_bytes}`);
+    expect(result).toContain(`catch_up_budget_bytes = ${DEFAULT_DELIVERY.catch_up_budget_bytes}`);
+    expect(result).toContain(
+      `custom_message_content_budget_bytes = ${DEFAULT_DELIVERY.custom_message_content_budget_bytes}`
+    );
+  });
+
+  it('emits [delivery] section with custom values when specified', () => {
+    const result = buildConfigToml({
+      delivery: {
+        max_bytes: 1048576,
+        catch_up_budget_bytes: 524288,
+        custom_message_content_budget_bytes: 8192,
+      },
+    });
+    expect(result).toContain('[delivery]');
+    expect(result).toContain('max_bytes = 1048576');
+    expect(result).toContain('catch_up_budget_bytes = 524288');
+    expect(result).toContain('custom_message_content_budget_bytes = 8192');
+  });
+
+  it('round-trips [delivery] section through TOML.parse and convertTomlDelivery', () => {
+    const input = {
+      max_bytes: 2097152,
+      catch_up_budget_bytes: 1048576,
+      custom_message_content_budget_bytes: 16384,
+    };
+    const toml = buildConfigToml({ delivery: input });
+    const parsed = TOML.parse(toml) as Record<string, unknown>;
+    const deliverySection = parsed.delivery as Parameters<typeof convertTomlDelivery>[0];
+    const reconstructed = convertTomlDelivery(deliverySection);
+    expect(reconstructed).toEqual(input);
   });
 });
