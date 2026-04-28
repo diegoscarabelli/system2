@@ -44,5 +44,6 @@ Follow these steps end-to-end whenever you decide that a user request needs its 
 
 8. **Schedule a follow-up check** via `set_reminder`:
    - `delay_minutes: 3`
-   - `message`: instructions to your future self naming the Conductor's agent ID and the project ID, e.g. "Check whether conductor_N has acknowledged the initial briefing for project #M. If no message has arrived, query the agent's context and nudge it; if it is still working, re-schedule another 3-minute reminder. Keep re-scheduling until the Conductor engages."
-   - Rationale: a Conductor that silently stalls is worse than one that errors out loudly. This reminder guarantees the thread stays alive.
+   - `message`: instructions to your future self naming the Conductor's agent ID and the project ID, e.g. "Check whether conductor_N has acknowledged the initial briefing for project #M. If the Conductor has activity in the last few minutes (recent app.db updates, recent messages, log.md entries), it is working — re-schedule another reminder and do NOT message it. If the Conductor is silent (no activity since the briefing was sent), nudge it once. If two consecutive reminders find it silent, stop nudging and surface the silence to the user — do not keep re-messaging."
+   - Rationale: a Conductor that silently stalls is worse than one that errors out loudly. This reminder guarantees the thread stays alive without devolving into a polling loop that spams the Conductor's queue and corrupts its compaction summary.
+   - Reminder discipline (per the inter-agent message rules in your base prompt): at most one active reminder per recipient at a time — cancel before re-creating; never re-message a recipient who is mid-task; escalate to the user after two consecutive silent reminders.

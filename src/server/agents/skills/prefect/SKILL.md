@@ -321,7 +321,7 @@ prefect flow-run inspect <flow-run-id>
 prefect deployment ls
 
 # Inspect deployment configuration
-prefect deployment inspect <deployment-name>/<flow-name>
+prefect deployment inspect <flow-name>/<deployment-name>
 
 # Check worker health and active work pools
 prefect work-pool ls
@@ -349,6 +349,22 @@ Use this instead of repeatedly running `prefect flow-run ls` and trying to parse
 **Flow run stuck in "Running"**: worker may have crashed without reporting. Check worker logs. Runs exceeding `timeout_seconds` are eventually marked as failed.
 
 **Tasks not visible in UI**: ensure they use `@task` decorator (plain function calls are not tracked). Check that `log_prints=True` is set if expecting print output.
+
+## Environment Scope: `_dev` vs Production
+
+`_dev` databases (e.g. `lens_dev`) are for smoke tests and pipeline iteration: ad hoc runs, schema verification, sample-volume checks. They are NOT for scheduled production workloads.
+
+**Hard rules when targeting a `_dev` database:**
+
+- **Never create a scheduled deployment.** Pass `--no-schedule` (or omit any `cron`, `interval`, `RRule`, or `schedules:` entry in `prefect.yaml`) when deploying. After deploying, confirm via `prefect deployment inspect <flow-name>/<deployment-name>` that no schedule is attached.
+- A scheduled deployment in a `_dev` environment has caused real harm in this project: multiple flow runs fired concurrently against the same scratch directories, bloated disk usage to tens of GB, and forced manual triage. Default to manual triggering for `_dev`; only attach a schedule when the target is explicitly a production database.
+
+**Pre-deploy checklist** (run through before every `prefect deploy`, regardless of target):
+
+1. Read the active `.env` and confirm `SQL_DB_NAME` matches the database you intend to write to. A common failure is `.env` defaulting to a production database (e.g. `lens`) while the project is scoped to `lens_dev` — silent rollbacks ensue because the target database is not the one you intended.
+2. Confirm the deployment name reflects the environment (`<name>-dev` vs `<name>-prod`). Do not reuse a deployment name across environments.
+3. Confirm whether a schedule is intended. If you are deploying to `_dev`, the answer is no; pass `--no-schedule`.
+4. After deploy, run `prefect deployment inspect` and verify schedule, target database (via deployment parameters or env), and work pool. A 30-second check at deploy time catches problems that would otherwise show up as silent runtime errors.
 
 ## Local Server and Deployments
 
