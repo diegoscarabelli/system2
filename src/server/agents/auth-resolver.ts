@@ -34,9 +34,6 @@ export interface ActiveCredential {
   label: string;
 }
 
-/** @deprecated Use ActiveCredential */
-export type ActiveKey = ActiveCredential;
-
 export type OAuthCredentialsMap = Partial<Record<LlmProvider, OAuthCredentials>>;
 
 interface KeyCooldown {
