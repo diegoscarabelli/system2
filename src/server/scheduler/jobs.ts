@@ -300,10 +300,17 @@ export function stripSessionEntry(entry: Record<string, unknown>): Record<string
 
   if (type === 'custom_message') {
     const { details: _d, ...rest } = entry;
-    if (typeof rest.content === 'string' && rest.content.length > CUSTOM_MESSAGE_CONTENT_BUDGET) {
-      rest.content =
-        rest.content.slice(0, CUSTOM_MESSAGE_CONTENT_BUDGET) +
-        `\n\n[...truncated: custom_message content exceeded ${CUSTOM_MESSAGE_CONTENT_BUDGET}-byte budget]`;
+    if (typeof rest.content === 'string') {
+      if (Buffer.byteLength(rest.content, 'utf8') > CUSTOM_MESSAGE_CONTENT_BUDGET) {
+        let truncated = rest.content.slice(0, CUSTOM_MESSAGE_CONTENT_BUDGET);
+        // Trim further if multi-byte chars pushed bytes over budget
+        while (Buffer.byteLength(truncated, 'utf8') > CUSTOM_MESSAGE_CONTENT_BUDGET) {
+          truncated = truncated.slice(0, -1);
+        }
+        rest.content =
+          truncated +
+          `\n\n[...truncated: custom_message content exceeded ${CUSTOM_MESSAGE_CONTENT_BUDGET}-byte budget]`;
+      }
     }
     return rest;
   }

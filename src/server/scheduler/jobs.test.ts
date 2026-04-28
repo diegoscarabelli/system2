@@ -568,6 +568,31 @@ describe('stripSessionEntry', () => {
         `[...truncated: custom_message content exceeded ${CUSTOM_MESSAGE_CONTENT_BUDGET}-byte budget]`
       );
     });
+
+    it('respects byte budget with multi-byte UTF-8 content (regression test)', () => {
+      // Create content with 4-byte UTF-8 emoji characters
+      // Each emoji is 4 bytes in UTF-8
+      const emoji = '🔥'; // 4 bytes in UTF-8
+      // Budget is 4KB (4096 bytes), so we need > 1024 emojis to exceed it
+      const emojisNeeded = 2000; // 8000 bytes total, exceeds 4KB budget
+      const multiByteContent = emoji.repeat(emojisNeeded);
+
+      const entry = {
+        type: 'custom_message',
+        content: multiByteContent,
+        details: { sender: 1, receiver: 2, timestamp: 0 },
+      };
+      const result = stripSessionEntry(entry) as Record<string, unknown>;
+      const contentStr = result.content as string;
+
+      // Verify the truncation marker is present
+      expect(contentStr).toContain('[...truncated: custom_message content exceeded');
+
+      // Verify byte length is within budget (excludes the truncation marker)
+      const truncatedPart = contentStr.split('\n\n[...truncated:')[0];
+      const byteLength = Buffer.byteLength(truncatedPart, 'utf8');
+      expect(byteLength).toBeLessThanOrEqual(CUSTOM_MESSAGE_CONTENT_BUDGET);
+    });
   });
 
   describe('assistant message', () => {
