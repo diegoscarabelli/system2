@@ -37,7 +37,12 @@ pnpm add -g @diegoscarabelli/system2      # install System2 globally
 system2 onboard          # one-time setup (see below)
 ```
 
-`system2 onboard` creates the `~/.system2/` directory and walks you through configuration: optionally set up Claude Pro/Max OAuth (recommended if you have a subscription), then pick your LLM provider and enter API keys (you can add multiple for rotation and fallback providers for redundancy), and optionally set up Brave Search. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
+`system2 onboard` creates the `~/.system2/` directory and walks you through LLM credential setup. You can configure **either or both** of two auth tiers:
+
+- **Claude Pro/Max OAuth** (recommended): no per-token cost, the agents run against your existing flat-rate subscription. If you already pay for Claude Pro or Max, this is the cheapest way to use System2.
+- **API keys**: pay-per-token across providers (OpenRouter, Anthropic, Google, OpenAI, and others). Add multiple keys for rotation and multiple providers for failover.
+
+Combining both tiers gives you OAuth as the primary path with API keys as fallback when OAuth rate-limits. Onboarding also offers Brave Search setup. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
 
 ```bash
 system2 start            # starts the server and opens the browser
