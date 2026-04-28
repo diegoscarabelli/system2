@@ -54,7 +54,14 @@ export function saveOAuthCredentials(
     chmodSync(dir, 0o700); // idempotent; protects against loose perms on pre-existing dir
   }
   const finalPath = credentialsPath(system2Dir, provider);
-  const tmpPath = `${finalPath}.tmp`;
-  writeFileSync(tmpPath, JSON.stringify(credentials, null, 2), { mode: 0o600 });
-  renameSync(tmpPath, finalPath);
+  const data = JSON.stringify(credentials, null, 2);
+  if (process.platform === 'win32') {
+    // Windows rename can fail when the destination already exists; write directly
+    // instead (sacrificing atomicity, which Windows file APIs don't reliably provide anyway).
+    writeFileSync(finalPath, data, { mode: 0o600 });
+  } else {
+    const tmpPath = `${finalPath}.tmp`;
+    writeFileSync(tmpPath, data, { mode: 0o600 });
+    renameSync(tmpPath, finalPath);
+  }
 }
