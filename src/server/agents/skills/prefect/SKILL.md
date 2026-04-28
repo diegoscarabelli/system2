@@ -321,7 +321,7 @@ prefect flow-run inspect <flow-run-id>
 prefect deployment ls
 
 # Inspect deployment configuration
-prefect deployment inspect <deployment-name>/<flow-name>
+prefect deployment inspect <flow-name>/<deployment-name>
 
 # Check worker health and active work pools
 prefect work-pool ls
@@ -356,7 +356,7 @@ Use this instead of repeatedly running `prefect flow-run ls` and trying to parse
 
 **Hard rules when targeting a `_dev` database:**
 
-- **Never create a scheduled deployment.** Pass `--no-schedule` (or omit any `cron`, `interval`, `RRule`, or `schedules:` entry in `prefect.yaml`) when deploying. After deploying, confirm via `prefect deployment inspect <deployment-name>/<flow-name>` that no schedule is attached.
+- **Never create a scheduled deployment.** Pass `--no-schedule` (or omit any `cron`, `interval`, `RRule`, or `schedules:` entry in `prefect.yaml`) when deploying. After deploying, confirm via `prefect deployment inspect <flow-name>/<deployment-name>` that no schedule is attached.
 - A scheduled deployment in a `_dev` environment has caused real harm in this project: multiple flow runs fired concurrently against the same scratch directories, bloated disk usage to tens of GB, and forced manual triage. Default to manual triggering for `_dev`; only attach a schedule when the target is explicitly a production database.
 
 **Pre-deploy checklist** (run through before every `prefect deploy`, regardless of target):
