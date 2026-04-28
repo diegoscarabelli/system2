@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type AgentHost, MAX_DELIVERY_BYTES } from '../agents/host.js';
 import type { DatabaseClient } from '../db/client.js';
+import { log } from '../utils/logger.js';
 import {
   buildAndDeliverDailySummary,
   buildAndDeliverMemoryUpdate,
@@ -1464,6 +1465,52 @@ describe('buildAndDeliverDailySummary', () => {
     const cursor = readFrontmatterField(todayFile, 'last_narrator_update_ts');
     expect(cursor).not.toBeNull();
     expect(cursor).not.toBe(lastRunTs);
+  });
+
+  it('emits log.warn when catch-up activity truncation drops entries', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    writeFileSync(
+      join(summariesDir, '2026-03-15.md'),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — 2026-03-15\n`
+    );
+
+    // Build entries large enough to trigger truncation at a 100 KB budget
+    const baseTime = Date.now() - 50 * 60_000;
+    const lines: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const ts = new Date(baseTime + i * 10_000).toISOString();
+      lines.push(
+        JSON.stringify({
+          type: 'custom_message',
+          timestamp: ts,
+          content: `entry-${i}-${'x'.repeat(10_000)}`,
+        })
+      );
+    }
+    writeFileSync(join(sessionDir, 'session.jsonl'), lines.join('\n'));
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    const tightBudget = 100 * 1024;
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => args.join(' '));
+    const truncationWarn = warnCalls.find(
+      (msg) => msg.includes('[Scheduler] Truncated') && msg.includes('oldest activity entries')
+    );
+    expect(truncationWarn).toBeDefined();
+    expect(truncationWarn).toContain('non-project daily summary delivery');
+    expect(truncationWarn).toContain('byte budget');
+
+    warnSpy.mockRestore();
   });
 });
 

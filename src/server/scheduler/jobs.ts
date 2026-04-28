@@ -952,6 +952,21 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       allProjectAgentEntries,
       projectLogActivityBudget
     );
+    if (projectLogTruncation.droppedCount > 0 && projectLogTruncation.droppedRange) {
+      log.warn(
+        `[Scheduler] Truncated ${projectLogTruncation.droppedCount} oldest activity entries spanning ` +
+          `${projectLogTruncation.droppedRange.from} → ${projectLogTruncation.droppedRange.to} ` +
+          `from project ${project.name} delivery to fit ${catchUpBudgetBytes.toLocaleString()}-byte budget`
+      );
+    }
+    if (projectDbTruncation.droppedTotal > 0 && projectDbTruncation.droppedRanges.length > 0) {
+      const summary = projectDbTruncation.droppedRanges
+        .map((r) => `${r.count} from ${r.table}`)
+        .join(', ');
+      log.warn(
+        `[Scheduler] Truncated DB-change rows from project ${project.name} delivery: ${summary} (budget=${projectDbBudget.toLocaleString()} bytes)`
+      );
+    }
     const truncatedProjectActivity = renderAgentActivitySections(
       system2Dir,
       allProjectAgents,
@@ -1029,8 +1044,22 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
   for (const pd of projectDataList) {
     const result = truncateDbChangesToFit(pd.dbTables, perSectionDbBudget);
     projectDbTruncations.set(pd.projectId, result);
+    if (result.droppedTotal > 0 && result.droppedRanges.length > 0) {
+      const summary = result.droppedRanges.map((r) => `${r.count} from ${r.table}`).join(', ');
+      log.warn(
+        `[Scheduler] Truncated DB-change rows from project ${pd.projectName} daily summary: ${summary} (budget=${perSectionDbBudget.toLocaleString()} bytes)`
+      );
+    }
   }
   const nonProjectDbTruncation = truncateDbChangesToFit(nonProjectDbTables, perSectionDbBudget);
+  if (nonProjectDbTruncation.droppedTotal > 0 && nonProjectDbTruncation.droppedRanges.length > 0) {
+    const summary = nonProjectDbTruncation.droppedRanges
+      .map((r) => `${r.count} from ${r.table}`)
+      .join(', ');
+    log.warn(
+      `[Scheduler] Truncated DB-change rows from non-project daily summary delivery: ${summary} (budget=${perSectionDbBudget.toLocaleString()} bytes)`
+    );
+  }
 
   // Compute overhead: header + bounded DB changes + static section labels (generous estimate)
   const summaryDbRenderedSize =
@@ -1054,6 +1083,13 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
   );
   const allActivityEntries = [...allProjectScopedEntries, ...nonProjectAgentEntries];
   const summaryTruncation = truncateOldestToFit(allActivityEntries, summaryActivityBudget);
+  if (summaryTruncation.droppedCount > 0 && summaryTruncation.droppedRange) {
+    log.warn(
+      `[Scheduler] Truncated ${summaryTruncation.droppedCount} oldest activity entries spanning ` +
+        `${summaryTruncation.droppedRange.from} → ${summaryTruncation.droppedRange.to} ` +
+        `from non-project daily summary delivery to fit ${catchUpBudgetBytes.toLocaleString()}-byte budget`
+    );
+  }
   const summaryAnnotation = annotateTruncation(summaryTruncation, catchUpBudgetBytes);
 
   const messageParts: string[] = [
