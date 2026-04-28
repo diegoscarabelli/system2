@@ -1087,7 +1087,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
     log.warn(
       `[Scheduler] Truncated ${summaryTruncation.droppedCount} oldest activity entries spanning ` +
         `${summaryTruncation.droppedRange.from} → ${summaryTruncation.droppedRange.to} ` +
-        `from non-project daily summary delivery to fit ${catchUpBudgetBytes.toLocaleString()}-byte budget`
+        `from combined daily summary activity to fit ${catchUpBudgetBytes.toLocaleString()}-byte budget`
     );
   }
   const summaryAnnotation = annotateTruncation(summaryTruncation, catchUpBudgetBytes);
