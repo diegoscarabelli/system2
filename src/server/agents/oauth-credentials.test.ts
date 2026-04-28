@@ -1,0 +1,53 @@
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { loadOAuthCredentials, saveOAuthCredentials } from './oauth-credentials.js';
+
+describe('oauth-credentials', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'system2-oauth-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('returns null when credentials file does not exist', () => {
+    expect(loadOAuthCredentials(dir, 'anthropic')).toBeNull();
+  });
+
+  it('round-trips credentials per provider', () => {
+    const creds = {
+      access: 'sk-ant-oat-abc',
+      refresh: 'rt-xyz',
+      expires: 1714680000000,
+      label: 'claude-pro',
+    };
+    saveOAuthCredentials(dir, 'anthropic', creds);
+    expect(loadOAuthCredentials(dir, 'anthropic')).toEqual(creds);
+    expect(loadOAuthCredentials(dir, 'openai')).toBeNull();
+  });
+
+  it('writes file with mode 0600', () => {
+    saveOAuthCredentials(dir, 'anthropic', { access: 'a', refresh: 'b', expires: 1, label: 'l' });
+    const mode = statSync(join(dir, 'oauth', 'anthropic.json')).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  it('returns null when file is corrupt JSON', async () => {
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    mkdirSync(join(dir, 'oauth'), { recursive: true });
+    writeFileSync(join(dir, 'oauth', 'anthropic.json'), '{not json');
+    expect(loadOAuthCredentials(dir, 'anthropic')).toBeNull();
+  });
+
+  it('returns null when file is missing required fields', async () => {
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    mkdirSync(join(dir, 'oauth'), { recursive: true });
+    writeFileSync(join(dir, 'oauth', 'anthropic.json'), JSON.stringify({ access: 'a' }));
+    expect(loadOAuthCredentials(dir, 'anthropic')).toBeNull();
+  });
+});
