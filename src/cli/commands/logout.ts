@@ -6,6 +6,19 @@ import pc from 'picocolors';
 import type { LlmProvider } from '../../shared/index.js';
 import { CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
 
+function isDaemonRunning(): boolean {
+  const pidFile = join(SYSTEM2_DIR, 'server.pid');
+  if (!existsSync(pidFile)) return false;
+  const pid = parseInt(readFileSync(pidFile, 'utf-8').trim(), 10);
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0); // signal 0 = check existence
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const OAUTH_PROVIDERS: LlmProvider[] = ['anthropic'];
 
 /**
@@ -66,6 +79,11 @@ export async function logout(provider?: string): Promise<void> {
 
   if (!existsSync(CONFIG_FILE)) {
     p.cancel(`No System2 installation found at ${SYSTEM2_DIR}.`);
+    process.exit(1);
+  }
+
+  if (isDaemonRunning()) {
+    p.cancel('System2 daemon is running. Stop it first with: system2 stop');
     process.exit(1);
   }
 
