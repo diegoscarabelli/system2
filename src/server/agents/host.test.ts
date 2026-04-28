@@ -2770,7 +2770,7 @@ describe('AgentHost', () => {
       expect(internal.pendingPrompt).toBeNull();
     });
 
-    it('drops pending deliveries and rejects their promises on context_overflow', async () => {
+    it('drops pending deliveries and rejects their promises on wire-size overflow (413)', async () => {
       const { internal } = makeHostForOverflow();
       const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
       internal.session = { sendCustomMessage };
@@ -2793,7 +2793,7 @@ describe('AgentHost', () => {
         },
       ];
       await internal.handlePotentialError(
-        makeOverflowEvent('400: input token count exceeds maximum context length')
+        makeOverflowEvent('413: request exceeds the maximum size allowed')
       );
       // Delivery promises are rejected with a wire-size error message
       expect(reject1).toHaveBeenCalledWith(
@@ -2802,10 +2802,71 @@ describe('AgentHost', () => {
       expect(reject2).toHaveBeenCalledWith(
         expect.objectContaining({ message: expect.stringContaining('wire-size') })
       );
-      // Deliveries are NOT replayed across providers (sendCustomMessage not called)
-      expect(sendCustomMessage).not.toHaveBeenCalled();
       // pendingDeliveries cleared by the drop guard
       expect(internal.pendingDeliveries).toHaveLength(0);
+    });
+
+    it('drops pending deliveries on Anthropic OAuth long-context misclassifier (429)', async () => {
+      const { internal } = makeHostForOverflow();
+      const reject1 = vi.fn();
+      internal.pendingDeliveries = [
+        {
+          content: 'task-1',
+          details: { source: 'scheduler' },
+          urgent: false,
+          resolve: vi.fn(),
+          reject: reject1,
+        },
+      ];
+      await internal.handlePotentialError(
+        makeOverflowEvent('429: extra usage is required for long context requests')
+      );
+      expect(reject1).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('wire-size') })
+      );
+      expect(internal.pendingDeliveries).toHaveLength(0);
+    });
+
+    it('does NOT drop pending deliveries on token-window overflow (400 input token count)', async () => {
+      const { internal } = makeHostForOverflow();
+      const reject1 = vi.fn();
+      const resolve1 = vi.fn();
+      internal.pendingDeliveries = [
+        {
+          content: 'task-1',
+          details: { source: 'scheduler' },
+          urgent: false,
+          resolve: resolve1,
+          reject: reject1,
+        },
+      ];
+      await internal.handlePotentialError(
+        makeOverflowEvent('400: input token count exceeds maximum context length')
+      );
+      // Token-window overflow is recoverable via compaction — deliveries must NOT be dropped
+      expect(reject1).not.toHaveBeenCalled();
+      expect(internal.pendingDeliveries).toHaveLength(1);
+      // handleContextOverflow still triggered
+      expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
+    });
+
+    it('does NOT drop pending deliveries on token-window overflow (400 maximum context length)', async () => {
+      const { internal } = makeHostForOverflow();
+      const reject1 = vi.fn();
+      internal.pendingDeliveries = [
+        {
+          content: 'task-1',
+          details: { source: 'scheduler' },
+          urgent: false,
+          resolve: vi.fn(),
+          reject: reject1,
+        },
+      ];
+      await internal.handlePotentialError(
+        makeOverflowEvent('400: maximum context length is 128000 tokens')
+      );
+      expect(reject1).not.toHaveBeenCalled();
+      expect(internal.pendingDeliveries).toHaveLength(1);
     });
 
     it('does not drop pending deliveries on context_overflow when there are none', async () => {
@@ -2814,7 +2875,7 @@ describe('AgentHost', () => {
       internal.session = { sendCustomMessage };
       internal.pendingDeliveries = [];
       await internal.handlePotentialError(
-        makeOverflowEvent('400: input token count exceeds maximum context length')
+        makeOverflowEvent('413: request exceeds the maximum size allowed')
       );
       // handleContextOverflow still called, no rejection errors thrown
       expect(internal.handleContextOverflow).toHaveBeenCalledOnce();

@@ -52,6 +52,7 @@ import {
   categorizeError,
   type ErrorCategory,
   extractStatusCode,
+  isWireSizeOverflow,
   shouldFailover,
   shouldRetry,
   sleep,
@@ -657,14 +658,19 @@ export class AgentHost {
     // reinitializeWithProvider needs the values passed as arguments.
     const promptToRetry = this.pendingPrompt;
 
-    // Drop pending deliveries on context_overflow: the delivery content itself is likely
-    // what triggered the wire-size error (413/"request exceeds maximum size" or similar).
-    // Replaying an oversized message across providers won't shrink it — it would just
-    // duplicate the failure. Reject promises immediately so callers (scheduler jobs,
-    // message_agent) don't hang waiting for a resolution that can never arrive.
-    if (category === 'context_overflow' && this.pendingDeliveries.length > 0) {
+    // Drop pending deliveries only on wire-size overflows (413/"request exceeds maximum size",
+    // "extra usage is required for long context", etc.). These payloads are too large to
+    // transmit regardless of provider — replaying them would just duplicate the failure.
+    // Token-window overflows ("input token count exceeds maximum", "maximum context length",
+    // "prompt is too long") are RECOVERABLE via compaction and must NOT drop pending
+    // deliveries — they should continue through the compaction-and-replay path below.
+    if (
+      category === 'context_overflow' &&
+      isWireSizeOverflow(errorMessage) &&
+      this.pendingDeliveries.length > 0
+    ) {
       log.warn(
-        `[AgentHost] Dropping ${this.pendingDeliveries.length} pending delivery(ies) on context_overflow ` +
+        `[AgentHost] Dropping ${this.pendingDeliveries.length} pending delivery(ies) on wire-size overflow ` +
           `(re-sending oversized message would just duplicate the failure).`
       );
       for (const d of this.pendingDeliveries) {

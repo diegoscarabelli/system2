@@ -85,6 +85,31 @@ export function categorizeError(error: unknown): ErrorCategory {
 }
 
 /**
+ * Check if an error message indicates a wire-size overflow — a payload that is too
+ * large to transmit, regardless of how many tokens it represents. These errors cannot
+ * be recovered by compaction or provider failover (the same oversized bytes would be
+ * replayed). Pending deliveries should be dropped rather than retried.
+ *
+ * Distinct from token-window overflows (e.g. "input token count exceeds maximum"),
+ * which ARE recoverable via compaction.
+ */
+export function isWireSizeOverflow(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    // HTTP 413 from Anthropic and other providers
+    /request exceeds the maximum size/.test(m) ||
+    /input size exceeds.*mb/.test(m) ||
+    /payload too large/.test(m) ||
+    /request too large/.test(m) ||
+    /body too large/.test(m) ||
+    /exceeds maximum size/.test(m) ||
+    // Anthropic OAuth long-context misclassifier (Pro/Max, post-March-2026):
+    // fires on requests over a soft size threshold — smaller request will pass.
+    /extra usage is required for long context/.test(m)
+  );
+}
+
+/**
  * Check if an error message indicates context window overflow.
  * Matches patterns from all supported providers.
  */
