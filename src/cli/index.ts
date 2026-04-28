@@ -7,6 +7,7 @@
 
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
+import { login } from './commands/login.js';
 import { onboard } from './commands/onboard.js';
 import { start } from './commands/start.js';
 import { status } from './commands/status.js';
@@ -29,6 +30,13 @@ program
   .description('Initialize System2 and configure LLM providers')
   .action(async () => {
     await onboard();
+  });
+
+program
+  .command('login [provider]')
+  .description('Authenticate with an OAuth provider (re-auth post-onboarding)')
+  .action(async (provider?: string) => {
+    await login(provider);
   });
 
 program
