@@ -75,7 +75,7 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**Authentication.** Only Claude OAuth (Pro/Max) is supported today. You don't need `system2 login` if you opted into OAuth during `system2 onboard`: the same flow runs there. Use it later to add OAuth after a key-only onboarding or to re-authenticate after a refresh-token expiry; `system2 logout` reverses it. Stop the daemon before running either, and restart afterward to pick up the change.
+**OAuth credentials.** Use `system2 login` to add Claude Pro/Max OAuth after a key-only onboarding, or to re-authenticate after a refresh-token expiry. `system2 logout` removes the credential. Stop the daemon before running either, and restart afterward to pick up the change.
 
 ```bash
 system2 login            # add or refresh a Claude Pro/Max OAuth credential
