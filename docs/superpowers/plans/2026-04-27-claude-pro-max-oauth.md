@@ -1560,6 +1560,21 @@ The pi-ai SDK detects OAuth tokens (substring match `sk-ant-oat`) and switches t
 - Claude Pro/Max usage limits are sized for one human in Claude Code. A multi-agent system2 workload (Guide + Conductor + Reviewer + Workers + Narrator running concurrently) can hit the 5-hour message cap quickly. Configure the API key tier as fallback for sustained workloads.
 - Programmatic use of Pro/Max credentials outside Claude Code is in a TOS gray area. Use at your own discretion.
 - Prompt caching is disabled on the OAuth path (the SDK strips `cache_control` from system prompts for OAuth tokens). Per-call billing still goes through the subscription.
+
+### Re-authenticating and managing credentials post-onboarding
+
+Use `system2 login <provider>` to add an OAuth credential after onboarding (or to re-authenticate when a refresh token has been invalidated — for example, after signing out of Claude.ai, changing your password, revoking the app's grant, or hitting an idle-expiry on the refresh token). The command runs the OAuth flow, writes `~/.system2/oauth/<provider>.json`, and (if `[llm.oauth]` is missing or doesn't include the provider) offers to patch `config.toml` to enable the OAuth tier. If the daemon is running, restart it to pick up the new credential: `system2 stop && system2 start`.
+
+Use `system2 logout <provider>` to remove an OAuth credential. The command deletes the credentials file and offers to remove the provider from `[llm.oauth]` in `config.toml`.
+
+### Changing primary provider or switching auth method
+
+System2 reads `~/.system2/config.toml` only at startup. To change the primary provider, swap which tier is preferred, add or remove a fallback provider, or edit any other LLM configuration:
+
+1. Edit `~/.system2/config.toml` directly (or use `system2 login` / `system2 logout` for OAuth credential changes).
+2. Restart the daemon: `system2 stop && system2 start`.
+
+You do not need to switch auth methods manually for cost or rate-limit reasons — the two-tier failover handles that automatically. OAuth is tried first; once exhausted, the system drops to the API key tier without any user action. If a transient failure has put a credential into cooldown and you want to force the system to retry it sooner than the cooldown expiry, restart the daemon (which clears in-memory cooldowns).
 ````
 
 - [ ] **Step 2: Update `docs/agents.md`**
@@ -1755,9 +1770,546 @@ git commit -m "test: end-to-end two-tier OAuth flow"
 
 ---
 
+## Task 13: `system2 login <provider>` command
+
+**Files:**
+- Create: `src/cli/commands/login.ts`
+- Modify: `src/cli/index.ts` (register the command)
+- Test: `src/cli/commands/login.test.ts` (the config-patching helper is the testable unit)
+
+This task wires up post-onboarding OAuth login. It reuses the OAuth helper from Task 4 (`loginAnthropic`) and the credentials writer from Task 3 (`saveOAuthCredentials`), and uses the TOML round-trip from Task 2 to optionally patch `[llm.oauth]` when the provider is not yet enabled.
+
+- [ ] **Step 1: Write the failing test for the config-patch helper**
+
+Create `src/cli/commands/login.test.ts`:
+
+```typescript
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { addProviderToOAuthTier } from './login.js';
+
+describe('addProviderToOAuthTier', () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'system2-login-test-'));
+    configPath = join(dir, 'config.toml');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('adds [llm.oauth] section when missing', () => {
+    writeFileSync(configPath, `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.anthropic]\nkeys = []\n`);
+    const result = addProviderToOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toMatch(/\[llm\.oauth\][\s\S]*primary\s*=\s*"anthropic"/);
+  });
+
+  it('appends to fallback when oauth section exists with different primary', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "google"\nfallback = []\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const result = addProviderToOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toMatch(/primary\s*=\s*"google"/);
+    expect(content).toMatch(/fallback\s*=\s*\[\s*"anthropic"\s*\]/);
+  });
+
+  it('is a no-op when provider already in oauth tier', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "anthropic"\nfallback = []\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const before = readFileSync(configPath, 'utf-8');
+    const result = addProviderToOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+});
+```
+
+- [ ] **Step 2: Run the failing test**
+
+Run: `pnpm test src/cli/commands/login.test.ts`
+Expected: FAIL — module does not exist.
+
+- [ ] **Step 3: Implement `addProviderToOAuthTier` and the `login` command**
+
+Create `src/cli/commands/login.ts`:
+
+```typescript
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdir as mkdirAsync } from 'node:fs/promises';
+import * as p from '@clack/prompts';
+import pc from 'picocolors';
+import TOML from '@iarna/toml';
+import type { LlmConfig, LlmProvider } from '../../shared/index.js';
+import { loginAnthropic } from '../../server/agents/oauth.js';
+import { saveOAuthCredentials } from '../../server/agents/oauth-credentials.js';
+import { buildConfigToml, CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
+
+const OAUTH_PROVIDERS: LlmProvider[] = ['anthropic'];
+
+/**
+ * Patch config.toml to include `provider` in the OAuth tier (`[llm.oauth]`).
+ * If the section is missing, create it with `provider` as primary and empty fallback.
+ * If present with a different primary, append `provider` to fallback.
+ * If `provider` is already in the tier, no-op.
+ *
+ * Returns { changed: boolean }.
+ */
+export function addProviderToOAuthTier(
+  configPath: string,
+  provider: LlmProvider
+): { changed: boolean } {
+  if (!existsSync(configPath)) {
+    throw new Error(`config.toml not found at ${configPath}`);
+  }
+  const raw = readFileSync(configPath, 'utf-8');
+  const parsed = TOML.parse(raw) as { llm?: { oauth?: { primary?: string; fallback?: string[] } } };
+  const oauth = parsed.llm?.oauth;
+
+  if (!oauth) {
+    // Append [llm.oauth] section. We use a regex insert so we don't disturb other sections.
+    const insertion = `\n[llm.oauth]\nprimary = "${provider}"\nfallback = []\n`;
+    // Insert immediately after the existing [llm] block (before the next [llm.<x>] section).
+    const updated = raw.replace(/(\n\[llm\][^\[]*?)(\n\[llm\.)/s, `$1${insertion}$2`);
+    if (updated === raw) {
+      // Fallback: append to end of file
+      writeFileSync(configPath, raw.endsWith('\n') ? raw + insertion : raw + '\n' + insertion);
+    } else {
+      writeFileSync(configPath, updated);
+    }
+    return { changed: true };
+  }
+
+  const inTier = oauth.primary === provider || (oauth.fallback ?? []).includes(provider);
+  if (inTier) return { changed: false };
+
+  // Append to fallback array. Reconstruct the section in-place via regex on the existing section.
+  const sectionPattern = /\[llm\.oauth\]([\s\S]*?)(?=\n\[|$)/;
+  const match = raw.match(sectionPattern);
+  if (!match) {
+    // Shouldn't happen because oauth is non-null, but guard anyway
+    return { changed: false };
+  }
+  const newFallback = [...(oauth.fallback ?? []), provider];
+  const fallbackLine = `fallback = [${newFallback.map((f) => `"${f}"`).join(', ')}]`;
+  const replacedSection = match[0].replace(/fallback\s*=\s*\[[^\]]*\]/, fallbackLine);
+  writeFileSync(configPath, raw.replace(sectionPattern, replacedSection));
+  return { changed: true };
+}
+
+export async function login(provider?: string): Promise<void> {
+  console.clear();
+  p.intro('🧠 System2 OAuth login');
+
+  if (!existsSync(CONFIG_FILE)) {
+    p.cancel(`No System2 installation found at ${SYSTEM2_DIR}. Run "system2 onboard" first.`);
+    process.exit(1);
+  }
+
+  let target: LlmProvider;
+  if (provider) {
+    if (!OAUTH_PROVIDERS.includes(provider as LlmProvider)) {
+      p.cancel(`OAuth login for "${provider}" is not supported. Supported: ${OAUTH_PROVIDERS.join(', ')}`);
+      process.exit(1);
+    }
+    target = provider as LlmProvider;
+  } else {
+    if (OAUTH_PROVIDERS.length === 1) {
+      target = OAUTH_PROVIDERS[0];
+    } else {
+      target = (await p.select({
+        message: 'Which OAuth provider?',
+        options: OAUTH_PROVIDERS.map((id) => ({ value: id, label: id })),
+      })) as LlmProvider;
+      if (p.isCancel(target)) {
+        p.cancel('Cancelled');
+        process.exit(0);
+      }
+    }
+  }
+
+  const label = (await p.text({
+    message: 'Label for this OAuth credential:',
+    placeholder: 'claude-pro',
+    defaultValue: 'claude-pro',
+  })) as string;
+  if (p.isCancel(label)) {
+    p.cancel('Cancelled');
+    process.exit(0);
+  }
+
+  if (!existsSync(SYSTEM2_DIR)) {
+    await mkdirAsync(SYSTEM2_DIR, { recursive: true });
+  }
+
+  const s = p.spinner();
+  s.start('Waiting for browser authentication...');
+  try {
+    const creds = await loginAnthropic({
+      onAuth: ({ url }) => {
+        s.message(`Open this URL to authenticate:\n${url}`);
+      },
+      onPrompt: async ({ message, placeholder }) => {
+        s.stop('Browser callback timed out');
+        const value = (await p.text({ message, placeholder })) as string;
+        if (p.isCancel(value)) {
+          p.cancel('Cancelled');
+          process.exit(0);
+        }
+        s.start('Exchanging code...');
+        return value;
+      },
+      onProgress: (m) => s.message(m),
+    });
+    saveOAuthCredentials(SYSTEM2_DIR, target, {
+      access: creds.access,
+      refresh: creds.refresh,
+      expires: creds.expires,
+      label: label || 'claude-pro',
+    });
+    s.stop('✓ OAuth login successful');
+  } catch (err) {
+    s.stop('✗ OAuth login failed');
+    p.log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+
+  // Offer to patch config.toml
+  const patch = await p.confirm({
+    message: `Add ${target} to [llm.oauth] in config.toml?`,
+    initialValue: true,
+  });
+  if (p.isCancel(patch)) {
+    p.cancel('Cancelled (credentials saved, config not modified)');
+    process.exit(0);
+  }
+  if (patch) {
+    const result = addProviderToOAuthTier(CONFIG_FILE, target);
+    if (result.changed) {
+      p.log.info(`✓ Updated [llm.oauth] in ${CONFIG_FILE}`);
+    } else {
+      p.log.info(`${target} is already in [llm.oauth] — no changes`);
+    }
+  }
+
+  p.outro(
+    `✨ Done. If system2 is running, restart to apply: ${pc.bold('system2 stop && system2 start')}`
+  );
+}
+```
+
+Register the command in `src/cli/index.ts`. Find the existing command registrations (search for `onboard` to find the pattern) and add a `login` command that takes an optional `<provider>` argument.
+
+- [ ] **Step 4: Run the helper tests**
+
+Run: `pnpm test src/cli/commands/login.test.ts`
+Expected: PASS (3 tests)
+
+- [ ] **Step 5: Run full quality checks**
+
+Run: `pnpm check && pnpm typecheck && pnpm build`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/cli/commands/login.ts src/cli/commands/login.test.ts src/cli/index.ts
+git commit -m "feat(cli): add 'system2 login' command for OAuth re-auth post-onboarding"
+```
+
+---
+
+## Task 14: `system2 logout <provider>` command
+
+**Files:**
+- Create: `src/cli/commands/logout.ts`
+- Modify: `src/cli/index.ts` (register the command)
+- Test: `src/cli/commands/logout.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `src/cli/commands/logout.test.ts`:
+
+```typescript
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { removeProviderFromOAuthTier } from './logout.js';
+
+describe('removeProviderFromOAuthTier', () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'system2-logout-test-'));
+    configPath = join(dir, 'config.toml');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('removes provider when it is the only entry: drops [llm.oauth] section', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "anthropic"\nfallback = []\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const result = removeProviderFromOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).not.toMatch(/\[llm\.oauth\]/);
+  });
+
+  it('removes provider from fallback', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "google"\nfallback = ["anthropic"]\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const result = removeProviderFromOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toMatch(/primary\s*=\s*"google"/);
+    expect(content).toMatch(/fallback\s*=\s*\[\]/);
+  });
+
+  it('promotes first fallback when removing primary', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "anthropic"\nfallback = ["google"]\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const result = removeProviderFromOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toMatch(/primary\s*=\s*"google"/);
+    expect(content).toMatch(/fallback\s*=\s*\[\]/);
+  });
+
+  it('is a no-op when provider not in oauth tier', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "google"\nfallback = []\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const before = readFileSync(configPath, 'utf-8');
+    const result = removeProviderFromOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+});
+```
+
+- [ ] **Step 2: Verify failure**
+
+Run: `pnpm test src/cli/commands/logout.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement `removeProviderFromOAuthTier` and the command**
+
+Create `src/cli/commands/logout.ts`:
+
+```typescript
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import * as p from '@clack/prompts';
+import pc from 'picocolors';
+import TOML from '@iarna/toml';
+import type { LlmProvider } from '../../shared/index.js';
+import { CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
+
+const OAUTH_PROVIDERS: LlmProvider[] = ['anthropic'];
+
+/**
+ * Patch config.toml to remove `provider` from `[llm.oauth]`.
+ * - If `provider` is the primary and there's a fallback: promote the first fallback to primary.
+ * - If `provider` is the primary and no fallback: drop the `[llm.oauth]` section entirely.
+ * - If `provider` is in fallback: remove it from the fallback list.
+ * - If `provider` not in the tier: no-op.
+ */
+export function removeProviderFromOAuthTier(
+  configPath: string,
+  provider: LlmProvider
+): { changed: boolean } {
+  if (!existsSync(configPath)) {
+    throw new Error(`config.toml not found at ${configPath}`);
+  }
+  const raw = readFileSync(configPath, 'utf-8');
+  const parsed = TOML.parse(raw) as { llm?: { oauth?: { primary?: string; fallback?: string[] } } };
+  const oauth = parsed.llm?.oauth;
+  if (!oauth) return { changed: false };
+
+  const fallback = oauth.fallback ?? [];
+  const isPrimary = oauth.primary === provider;
+  const inFallback = fallback.includes(provider);
+  if (!isPrimary && !inFallback) return { changed: false };
+
+  // Compute the new shape
+  let newPrimary: string | null = oauth.primary ?? null;
+  let newFallback = fallback.slice();
+
+  if (isPrimary) {
+    if (newFallback.length > 0) {
+      newPrimary = newFallback.shift() ?? null;
+    } else {
+      newPrimary = null;
+    }
+  } else {
+    newFallback = newFallback.filter((f) => f !== provider);
+  }
+
+  const sectionPattern = /\n?\[llm\.oauth\][\s\S]*?(?=\n\[|$)/;
+
+  if (newPrimary === null) {
+    // Drop the entire section
+    writeFileSync(configPath, raw.replace(sectionPattern, ''));
+    return { changed: true };
+  }
+
+  const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
+  const replacement = `\n[llm.oauth]\nprimary = "${newPrimary}"\nfallback = [${fbStr}]\n`;
+  writeFileSync(configPath, raw.replace(sectionPattern, replacement));
+  return { changed: true };
+}
+
+export async function logout(provider?: string): Promise<void> {
+  console.clear();
+  p.intro('🧠 System2 OAuth logout');
+
+  if (!existsSync(CONFIG_FILE)) {
+    p.cancel(`No System2 installation found at ${SYSTEM2_DIR}.`);
+    process.exit(1);
+  }
+
+  let target: LlmProvider;
+  if (provider) {
+    if (!OAUTH_PROVIDERS.includes(provider as LlmProvider)) {
+      p.cancel(`OAuth logout for "${provider}" is not supported. Supported: ${OAUTH_PROVIDERS.join(', ')}`);
+      process.exit(1);
+    }
+    target = provider as LlmProvider;
+  } else {
+    target = OAUTH_PROVIDERS[0];
+  }
+
+  const credPath = join(SYSTEM2_DIR, 'oauth', `${target}.json`);
+  const fileExists = existsSync(credPath);
+
+  if (!fileExists) {
+    p.log.info(`No credentials file found at ${credPath}`);
+  } else {
+    const confirmDelete = await p.confirm({
+      message: `Delete OAuth credentials for ${target} (${credPath})?`,
+      initialValue: true,
+    });
+    if (p.isCancel(confirmDelete) || !confirmDelete) {
+      p.cancel('Cancelled');
+      process.exit(0);
+    }
+    rmSync(credPath);
+    p.log.info(`✓ Deleted ${credPath}`);
+  }
+
+  const confirmConfig = await p.confirm({
+    message: `Remove ${target} from [llm.oauth] in config.toml?`,
+    initialValue: true,
+  });
+  if (p.isCancel(confirmConfig)) {
+    p.cancel('Cancelled');
+    process.exit(0);
+  }
+  if (confirmConfig) {
+    const result = removeProviderFromOAuthTier(CONFIG_FILE, target);
+    if (result.changed) {
+      p.log.info(`✓ Updated [llm.oauth] in ${CONFIG_FILE}`);
+    } else {
+      p.log.info(`${target} was not in [llm.oauth] — no changes`);
+    }
+  }
+
+  p.outro(
+    `Done. If system2 is running, restart to apply: ${pc.bold('system2 stop && system2 start')}`
+  );
+}
+```
+
+Register the command in `src/cli/index.ts` next to `login`.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm test src/cli/commands/logout.test.ts`
+Expected: PASS (4 tests)
+
+- [ ] **Step 5: Run full quality checks**
+
+Run: `pnpm check && pnpm typecheck && pnpm build && pnpm test`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/cli/commands/logout.ts src/cli/commands/logout.test.ts src/cli/index.ts
+git commit -m "feat(cli): add 'system2 logout' command to remove OAuth credentials"
+```
+
+---
+
+## Task 15: Final cross-task review and finalization
+
+**Files:**
+- Modify (as needed): `README.md`, `docs/cli.md`, `docs/configuration.md`, `docs/agents.md`, `docs/README.md`
+- Verify: full build / test / check passes from a clean state
+
+This task is the wrap-up after Tasks 1–14 are merged: confirm everything is consistent, README and docs index reflect the new commands, and there are no loose ends.
+
+- [ ] **Step 1: Confirm all docs reflect the new behavior**
+
+- `README.md`: update the quick-start to mention the OAuth login choice during onboarding. If the README has a "Configuration" or "Auth" section, link to `docs/configuration.md` for the OAuth tier explanation.
+- `docs/README.md`: ensure the index entry for `configuration.md` and `cli.md` still accurately summarize the file. If the OAuth content is substantial enough, add a one-line index note ("OAuth tier and re-auth").
+- `docs/cli.md`: document the new `system2 login` and `system2 logout` commands with usage examples. Cross-reference `docs/configuration.md` for the OAuth tier semantics.
+- `docs/configuration.md`: confirm Tasks 11's docs render correctly and the new sections (Auth Tiers, Anthropic OAuth, Re-authenticating, Changing primary provider) are coherent and link to each other where useful.
+- `docs/agents.md`: confirm the AuthResolver section reflects the two-tier model.
+
+- [ ] **Step 2: Run the full quality gate from a clean state**
+
+```bash
+pnpm install
+pnpm check
+pnpm typecheck
+pnpm build
+pnpm test
+```
+
+All must pass. Capture and address any pre-existing failures or warnings introduced by this branch.
+
+- [ ] **Step 3: Verify cross-task consistency**
+
+- Type names: `LlmOAuthConfig`, `OAuthCredentials`, `OAuthCredentialsMap`, `RefreshedTokens`, `ActiveCredential`, `AuthTier` are consistently named and imported across every file that references them.
+- Filesystem layout: `~/.system2/oauth/<provider>.json` is the only canonical credentials path. No leftover references to other paths in code or docs.
+- Cooldown key format: `${tier}:${provider}:${keyIndex}` is used everywhere (auth-resolver.ts, host.ts).
+- Onboarding output: TOML written by onboarding round-trips through `convertTomlLlm` without warnings.
+
+- [ ] **Step 4: Commit any doc updates**
+
+```bash
+git add README.md docs/
+git commit -m "docs: cross-reference OAuth login/logout commands and finalize docs"
+```
+
+---
+
 ## Self-review notes
 
-- **Spec coverage:** Two-tier model with OAuth-first failover (Tasks 1, 2, 5, 6, 12), OAuth opt-in via onboarding asked first (Task 10), at least one tier required (Task 10), API key tier behaves identically when OAuth absent (Tasks 5, 7), refresh-and-retry on 401 (Task 9), token persistence (Tasks 3, 6, 7).
+- **Spec coverage:** Two-tier model with OAuth-first failover (Tasks 1, 2, 5, 6, 12), OAuth opt-in via onboarding asked first (Task 10), at least one tier required (Task 10), API key tier behaves identically when OAuth absent (Tasks 5, 7), refresh-and-retry on 401 (Task 9), token persistence (Tasks 3, 6, 7), post-onboarding re-auth (Task 13), credential removal (Task 14), final consistency check (Task 15).
 - **Type consistency:** `OAuthCredentials` defined in Task 3, used in Tasks 5, 6, 7, 12. `RefreshedTokens` defined in Task 4, used in Task 6. `ActiveCredential`, `AuthTier`, `OAuthCredentialsMap` defined in Task 5, used in Tasks 7, 8, 12. `LlmOAuthConfig` defined in Task 1, used in Tasks 2, 10.
 - **Backwards compatibility:** `[llm.oauth]` is optional. Existing configs without `[llm.oauth]` keep the today's behavior (single keys tier). Cooldown key format changes from `provider:idx` to `tier:provider:idx`, but no consumer parses these strings — they're internal map keys.
 - **Concurrency:** Per-provider refresh lock (Task 6) prevents thundering-herd refresh from multiple agents.
@@ -1765,7 +2317,8 @@ git commit -m "test: end-to-end two-tier OAuth flow"
 
 ## Things deliberately out of scope
 
-- A `system2 login <provider>` standalone re-auth command. Users can re-run onboarding (after backing up `~/.system2`) or manually delete the credentials file and edit config.toml.
+- Hot-reload of OAuth credentials or provider config without restarting the daemon. After `system2 login` / `logout` (or any edit to `config.toml`), users must `system2 stop && system2 start` to pick up changes. A `POST /api/auth/reload` endpoint is a feasible follow-up if usage demands it.
+- A `system2 config` CLI helper for editing `[llm].primary` / `[llm].fallback`. Documented workflow is "edit `~/.system2/config.toml` and restart" (see Task 11). Add the helper later if users find this clunky.
 - UI surfacing of OAuth state in `/api/agents`. Logging via the existing chat-message error path is sufficient for v1.
 - Multi-account OAuth (more than one credential per provider). v1 supports one credential per provider.
 - Per-role override of which tier to use. The user explicitly does not want this — both tiers apply globally to every agent.
