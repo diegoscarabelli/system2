@@ -22,10 +22,10 @@ import type { Scheduler } from './scheduler.js';
 /** Entry types to include from JSONL session files */
 const INCLUDED_ENTRY_TYPES = new Set(['message', 'custom_message']);
 
-/** Per-custom_message content cap when feeding catch-up activity into the Narrator.
- *  16 KB captures most legitimate inter-agent payloads while still aggressively
- *  truncating 1+ MB pathological cases. */
-export const CUSTOM_MESSAGE_CONTENT_BUDGET = 16 * 1024;
+/** Per-message excerpt cap when feeding session JSONL into Narrator-bound deliveries
+ *  (daily-summary cron and trigger_project_story tool). 16 KB captures most legitimate
+ *  inter-agent payloads while aggressively truncating 1+ MB pathological cases. */
+export const NARRATOR_MESSAGE_EXCERPT_BYTES = 16 * 1024;
 
 /** Producer-side budget for a single inter-agent delivery (half of MAX_DELIVERY_BYTES by default,
  *  leaving room for headers, DB-changes section, and SDK request overhead).
@@ -216,14 +216,14 @@ export function collectAgentActivity(
   agents: Array<{ id: number; role: string; project_name: string | null }>,
   lastRunTs: string,
   newRunTs: string,
-  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
+  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
 ): string {
   const timestamped = collectAgentActivityWithTimestamps(
     system2Dir,
     agents,
     lastRunTs,
     newRunTs,
-    customMessageContentBudget
+    narratorMessageExcerptBytes
   );
   return renderAgentActivitySections(
     system2Dir,
@@ -231,7 +231,7 @@ export function collectAgentActivity(
     lastRunTs,
     newRunTs,
     timestamped,
-    customMessageContentBudget
+    narratorMessageExcerptBytes
   );
 }
 
@@ -246,13 +246,18 @@ export function collectAgentActivityWithTimestamps(
   agents: Array<{ id: number; role: string; project_name: string | null }>,
   lastRunTs: string,
   newRunTs: string,
-  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
+  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
 ): TimestampedEntry[] {
   const all: TimestampedEntry[] = [];
   for (const agent of agents) {
     const sessionDir = join(system2Dir, 'sessions', `${agent.role}_${agent.id}`);
     if (!existsSync(sessionDir)) continue;
-    const entries = readSessionEntries(sessionDir, lastRunTs, newRunTs, customMessageContentBudget);
+    const entries = readSessionEntries(
+      sessionDir,
+      lastRunTs,
+      newRunTs,
+      narratorMessageExcerptBytes
+    );
     all.push(...entries);
   }
   return all;
@@ -270,7 +275,7 @@ export function renderAgentActivitySections(
   lastRunTs: string,
   newRunTs: string,
   entries?: TimestampedEntry[],
-  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
+  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
 ): string {
   const sections: string[] = [];
 
@@ -293,7 +298,7 @@ export function renderAgentActivitySections(
         sessionDir,
         lastRunTs,
         newRunTs,
-        customMessageContentBudget
+        narratorMessageExcerptBytes
       );
       const keptSet = new Set(entries.map((e) => e.rendered));
       agentEntries = rawForAgent.filter((e) => keptSet.has(e.rendered)).map((e) => e.rendered);
@@ -302,7 +307,7 @@ export function renderAgentActivitySections(
         sessionDir,
         lastRunTs,
         newRunTs,
-        customMessageContentBudget
+        narratorMessageExcerptBytes
       ).map((e) => e.rendered);
     }
 
@@ -325,26 +330,26 @@ export function renderAgentActivitySections(
  * Operates on plain objects — never mutates the input.
  *
  * @param entry The parsed JSONL entry to strip.
- * @param customMessageContentBudget Per-custom_message content cap in bytes. Defaults to CUSTOM_MESSAGE_CONTENT_BUDGET.
+ * @param narratorMessageExcerptBytes Narrator message excerpt cap in bytes. Defaults to NARRATOR_MESSAGE_EXCERPT_BYTES.
  */
 export function stripSessionEntry(
   entry: Record<string, unknown>,
-  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
+  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
 ): Record<string, unknown> {
   const type = entry.type;
 
   if (type === 'custom_message') {
     const { details: _d, ...rest } = entry;
     if (typeof rest.content === 'string') {
-      if (Buffer.byteLength(rest.content, 'utf8') > customMessageContentBudget) {
-        let truncated = rest.content.slice(0, customMessageContentBudget);
+      if (Buffer.byteLength(rest.content, 'utf8') > narratorMessageExcerptBytes) {
+        let truncated = rest.content.slice(0, narratorMessageExcerptBytes);
         // Trim further if multi-byte chars pushed bytes over budget
-        while (Buffer.byteLength(truncated, 'utf8') > customMessageContentBudget) {
+        while (Buffer.byteLength(truncated, 'utf8') > narratorMessageExcerptBytes) {
           truncated = truncated.slice(0, -1);
         }
         rest.content =
           truncated +
-          `\n\n[...truncated: custom_message content exceeded ${customMessageContentBudget}-byte budget]`;
+          `\n\n[...truncated: narrator message excerpt exceeded ${narratorMessageExcerptBytes}-byte budget]`;
       }
     }
     return rest;
@@ -425,7 +430,7 @@ function readSessionEntries(
   sessionDir: string,
   lastRunTs: string,
   newRunTs: string,
-  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
+  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
 ): TimestampedEntry[] {
   const files = readdirSync(sessionDir)
     .filter((f) => f.endsWith('.jsonl'))
@@ -448,7 +453,7 @@ function readSessionEntries(
         if (ts >= lastRunTs && ts < newRunTs) {
           entries.push({
             timestamp: ts,
-            rendered: JSON.stringify(stripSessionEntry(entry, customMessageContentBudget)),
+            rendered: JSON.stringify(stripSessionEntry(entry, narratorMessageExcerptBytes)),
           });
         }
       } catch {
@@ -665,7 +670,7 @@ export async function buildAndDeliverDailySummary(
   system2Dir: string,
   intervalMinutes: number,
   catchUpBudgetBytes: number = CATCH_UP_BUDGET_BYTES,
-  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
+  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
 ): Promise<void> {
   const newRunTs = new Date().toISOString();
   const today = newRunTs.slice(0, 10);
@@ -770,7 +775,7 @@ export async function buildAndDeliverDailySummary(
       allProjectAgents,
       lastRunTs,
       newRunTs,
-      customMessageContentBudget
+      narratorMessageExcerptBytes
     );
     const projectDbChanges = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
 
@@ -780,7 +785,7 @@ export async function buildAndDeliverDailySummary(
       projectScopedAgents,
       lastRunTs,
       newRunTs,
-      customMessageContentBudget
+      narratorMessageExcerptBytes
     );
     projectDataList.push({
       projectId: project.id,
@@ -797,7 +802,7 @@ export async function buildAndDeliverDailySummary(
       lastRunTs,
       newRunTs,
       allProjectAgentEntries,
-      customMessageContentBudget
+      narratorMessageExcerptBytes
     );
     if (!hasActivity(allProjectAgentActivity, projectDbChanges)) continue;
 
@@ -829,7 +834,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       lastRunTs,
       newRunTs,
       projectLogTruncation.kept,
-      customMessageContentBudget
+      narratorMessageExcerptBytes
     );
     const projectLogAnnotation = annotateTruncation(projectLogTruncation, catchUpBudgetBytes);
 
@@ -859,7 +864,7 @@ ${projectDbChanges}`;
     dailySummarySystemAgents,
     lastRunTs,
     newRunTs,
-    customMessageContentBudget
+    narratorMessageExcerptBytes
   );
   const nonProjectAgentActivity = renderAgentActivitySections(
     system2Dir,
@@ -867,7 +872,7 @@ ${projectDbChanges}`;
     lastRunTs,
     newRunTs,
     nonProjectAgentEntries,
-    customMessageContentBudget
+    narratorMessageExcerptBytes
   );
   const nonProjectDbChanges = collectNonProjectDbChanges(db, activeProjectIds, lastRunTs, newRunTs);
 
@@ -904,7 +909,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       allAgents.filter((a) => a.project_name === pd.projectName),
       lastRunTs,
       newRunTs,
-      customMessageContentBudget
+      narratorMessageExcerptBytes
     )
   );
   const allActivityEntries = [...allProjectScopedEntries, ...nonProjectAgentEntries];
@@ -926,7 +931,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       lastRunTs,
       newRunTs,
       summaryTruncation.kept,
-      customMessageContentBudget
+      narratorMessageExcerptBytes
     );
     activeProjectParts.push(
       `### Project: ${pd.projectName} (#${pd.projectId})\n\n#### Agent Activity\n\n${renderedProjectActivity}\n#### Database Changes\n\n${pd.dbChanges}`
@@ -943,7 +948,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       lastRunTs,
       newRunTs,
       summaryTruncation.kept,
-      customMessageContentBudget
+      narratorMessageExcerptBytes
     );
     messageParts.push(
       `## Non-Project Activity\n\n#### Agent Activity\n\n${renderedNonProjectActivity}\n#### Database Changes\n\n${nonProjectDbChanges}`
@@ -1029,7 +1034,7 @@ export function registerNarratorJobs(
   knowledgeBudgetChars?: number,
   onJobChange?: () => void,
   catchUpBudgetBytes: number = CATCH_UP_BUDGET_BYTES,
-  customMessageContentBudget: number = CUSTOM_MESSAGE_CONTENT_BUDGET
+  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
 ): void {
   // Daily summary — configurable interval
   const cronPattern = 60 % intervalMinutes === 0 ? `*/${intervalMinutes} * * * *` : '*/30 * * * *';
@@ -1051,7 +1056,7 @@ export function registerNarratorJobs(
           system2Dir,
           intervalMinutes,
           catchUpBudgetBytes,
-          customMessageContentBudget
+          narratorMessageExcerptBytes
         );
       },
       onJobChange

@@ -37,7 +37,7 @@ export function createTriggerProjectStoryTool(
   db: DatabaseClient,
   agentId: number,
   registry: AgentRegistry,
-  customMessageContentBudget?: number
+  narratorMessageExcerptBytes?: number
 ) {
   const params = Type.Object({
     project_id: Type.Number({
@@ -141,7 +141,7 @@ export function createTriggerProjectStoryTool(
           projectLogAgents,
           lastRunTs,
           newRunTs,
-          customMessageContentBudget
+          narratorMessageExcerptBytes
         );
         const projectDbChanges = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
 

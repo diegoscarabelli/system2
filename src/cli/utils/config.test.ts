@@ -720,12 +720,12 @@ describe('convertTomlDelivery', () => {
     const result = convertTomlDelivery({
       max_bytes: 1048576,
       catch_up_budget_bytes: 524288,
-      custom_message_content_budget_bytes: 8192,
+      narrator_message_excerpt_bytes: 8192,
     });
     expect(result).toEqual({
       max_bytes: 1048576,
       catch_up_budget_bytes: 524288,
-      custom_message_content_budget_bytes: 8192,
+      narrator_message_excerpt_bytes: 8192,
     });
   });
 
@@ -738,8 +738,8 @@ describe('convertTomlDelivery', () => {
     const result = convertTomlDelivery({ max_bytes: 2097152 });
     expect(result.max_bytes).toBe(2097152);
     expect(result.catch_up_budget_bytes).toBe(DEFAULT_DELIVERY.catch_up_budget_bytes);
-    expect(result.custom_message_content_budget_bytes).toBe(
-      DEFAULT_DELIVERY.custom_message_content_budget_bytes
+    expect(result.narrator_message_excerpt_bytes).toBe(
+      DEFAULT_DELIVERY.narrator_message_excerpt_bytes
     );
   });
 
@@ -789,7 +789,7 @@ describe('buildConfigToml — [delivery] section', () => {
     expect(result).toContain(`max_bytes = ${DEFAULT_DELIVERY.max_bytes}`);
     expect(result).toContain(`catch_up_budget_bytes = ${DEFAULT_DELIVERY.catch_up_budget_bytes}`);
     expect(result).toContain(
-      `custom_message_content_budget_bytes = ${DEFAULT_DELIVERY.custom_message_content_budget_bytes}`
+      `narrator_message_excerpt_bytes = ${DEFAULT_DELIVERY.narrator_message_excerpt_bytes}`
     );
   });
 
@@ -798,20 +798,20 @@ describe('buildConfigToml — [delivery] section', () => {
       delivery: {
         max_bytes: 1048576,
         catch_up_budget_bytes: 524288,
-        custom_message_content_budget_bytes: 8192,
+        narrator_message_excerpt_bytes: 8192,
       },
     });
     expect(result).toContain('[delivery]');
     expect(result).toContain('max_bytes = 1048576');
     expect(result).toContain('catch_up_budget_bytes = 524288');
-    expect(result).toContain('custom_message_content_budget_bytes = 8192');
+    expect(result).toContain('narrator_message_excerpt_bytes = 8192');
   });
 
   it('round-trips [delivery] section through TOML.parse and convertTomlDelivery', () => {
     const input = {
       max_bytes: 2097152,
       catch_up_budget_bytes: 1048576,
-      custom_message_content_budget_bytes: 16384,
+      narrator_message_excerpt_bytes: 16384,
     };
     const toml = buildConfigToml({ delivery: input });
     const parsed = TOML.parse(toml) as Record<string, unknown>;

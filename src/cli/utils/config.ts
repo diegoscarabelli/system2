@@ -155,16 +155,16 @@ interface TomlConfig {
   delivery?: {
     max_bytes?: number;
     catch_up_budget_bytes?: number;
-    custom_message_content_budget_bytes?: number;
+    narrator_message_excerpt_bytes?: number;
   };
 }
 
 /** Default delivery budget values. Must stay in sync with MAX_DELIVERY_BYTES,
- *  CATCH_UP_BUDGET_BYTES, and CUSTOM_MESSAGE_CONTENT_BUDGET in the server package. */
+ *  CATCH_UP_BUDGET_BYTES, and NARRATOR_MESSAGE_EXCERPT_BYTES in the server package. */
 export const DEFAULT_DELIVERY: DeliveryConfig = {
   max_bytes: 1024 * 1024, // 1048576 — hard cap on inter-agent delivery size (~25% of a 1M-token context window)
   catch_up_budget_bytes: 512 * 1024, // 524288 — producer-side budget; half of max_bytes, leaves headroom for headers/DB-changes/SDK overhead
-  custom_message_content_budget_bytes: 16 * 1024, // 16384 — per-custom_message content cap; 16 KB captures most legitimate inter-agent payloads while truncating pathological 1+ MB cases
+  narrator_message_excerpt_bytes: 16 * 1024, // 16384 — per-message excerpt cap for Narrator-bound deliveries (daily-summary + project story); 16 KB captures most payloads while truncating pathological 1+ MB cases
 };
 
 /**
@@ -320,9 +320,9 @@ export function convertTomlDelivery(toml: NonNullable<TomlConfig['delivery']>): 
 
   const max_bytes = resolveField('max_bytes', toml.max_bytes);
   const catch_up_budget_bytes = resolveField('catch_up_budget_bytes', toml.catch_up_budget_bytes);
-  const custom_message_content_budget_bytes = resolveField(
-    'custom_message_content_budget_bytes',
-    toml.custom_message_content_budget_bytes
+  const narrator_message_excerpt_bytes = resolveField(
+    'narrator_message_excerpt_bytes',
+    toml.narrator_message_excerpt_bytes
   );
 
   if (catch_up_budget_bytes >= max_bytes) {
@@ -332,7 +332,7 @@ export function convertTomlDelivery(toml: NonNullable<TomlConfig['delivery']>): 
     );
   }
 
-  return { max_bytes, catch_up_budget_bytes, custom_message_content_budget_bytes };
+  return { max_bytes, catch_up_budget_bytes, narrator_message_excerpt_bytes };
 }
 
 /**
@@ -835,11 +835,9 @@ export function buildConfigToml(options: {
   lines.push(`catch_up_budget_bytes = ${delivery.catch_up_budget_bytes}`);
   lines.push('');
   lines.push(
-    `# Per-custom_message content cap when feeding session activity to the Narrator in bytes (default: ${DEFAULT_DELIVERY.custom_message_content_budget_bytes})`
+    `# Per-message excerpt cap for Narrator-bound deliveries (daily-summary + project story) in bytes (default: ${DEFAULT_DELIVERY.narrator_message_excerpt_bytes})`
   );
-  lines.push(
-    `custom_message_content_budget_bytes = ${delivery.custom_message_content_budget_bytes}`
-  );
+  lines.push(`narrator_message_excerpt_bytes = ${delivery.narrator_message_excerpt_bytes}`);
   lines.push('');
 
   return lines.join('\n');

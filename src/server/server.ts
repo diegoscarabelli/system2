@@ -51,7 +51,7 @@ import {
   buildAndDeliverDailySummary,
   buildAndDeliverMemoryUpdate,
   CATCH_UP_BUDGET_BYTES,
-  CUSTOM_MESSAGE_CONTENT_BUDGET,
+  NARRATOR_MESSAGE_EXCERPT_BYTES,
   readFrontmatterField,
   registerNarratorJobs,
   resolveDailySummaryTimestamp,
@@ -168,7 +168,7 @@ export class Server {
     this.guideAgentId = guideAgent.id;
     const callbacks = this.buildAgentCallbacks();
     const maxDeliveryBytes = config.deliveryConfig?.max_bytes ?? MAX_DELIVERY_BYTES;
-    const customMessageContentBudget = config.deliveryConfig?.custom_message_content_budget_bytes;
+    const narratorMessageExcerptBytes = config.deliveryConfig?.narrator_message_excerpt_bytes;
     this.agentHost = new AgentHost({
       db: this.db,
       agentId: guideAgent.id,
@@ -184,7 +184,7 @@ export class Server {
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
       maxDeliveryBytes,
-      customMessageContentBudget,
+      narratorMessageExcerptBytes,
       ...callbacks,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
@@ -205,7 +205,7 @@ export class Server {
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
       maxDeliveryBytes,
-      customMessageContentBudget,
+      narratorMessageExcerptBytes,
       ...callbacks,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
@@ -491,7 +491,7 @@ export class Server {
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: this.config.knowledgeConfig?.budget_chars,
       maxDeliveryBytes: this.config.deliveryConfig?.max_bytes ?? MAX_DELIVERY_BYTES,
-      customMessageContentBudget: this.config.deliveryConfig?.custom_message_content_budget_bytes,
+      narratorMessageExcerptBytes: this.config.deliveryConfig?.narrator_message_excerpt_bytes,
       ...this.buildAgentCallbacks(),
     });
 
@@ -620,8 +620,7 @@ export class Server {
       this.config.knowledgeConfig?.budget_chars,
       onJobChange,
       this.config.deliveryConfig?.catch_up_budget_bytes ?? CATCH_UP_BUDGET_BYTES,
-      this.config.deliveryConfig?.custom_message_content_budget_bytes ??
-        CUSTOM_MESSAGE_CONTENT_BUDGET
+      this.config.deliveryConfig?.narrator_message_excerpt_bytes ?? NARRATOR_MESSAGE_EXCERPT_BYTES
     );
 
     // Check if narrator needs catch-up after sleep/shutdown.
@@ -684,8 +683,8 @@ export class Server {
                 SYSTEM2_DIR,
                 intervalMinutes,
                 this.config.deliveryConfig?.catch_up_budget_bytes ?? CATCH_UP_BUDGET_BYTES,
-                this.config.deliveryConfig?.custom_message_content_budget_bytes ??
-                  CUSTOM_MESSAGE_CONTENT_BUDGET
+                this.config.deliveryConfig?.narrator_message_excerpt_bytes ??
+                  NARRATOR_MESSAGE_EXCERPT_BYTES
               ),
             onJobChange
           );

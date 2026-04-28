@@ -8,11 +8,11 @@ import type { DatabaseClient } from '../db/client.js';
 import {
   buildAndDeliverDailySummary,
   buildAndDeliverMemoryUpdate,
-  CUSTOM_MESSAGE_CONTENT_BUDGET,
   collectAgentActivity,
   collectAgentActivityWithTimestamps,
   formatMarkdownTable,
   JobSkipped,
+  NARRATOR_MESSAGE_EXCERPT_BYTES,
   readFrontmatterField,
   readTailChars,
   registerNarratorJobs,
@@ -552,7 +552,7 @@ describe('stripSessionEntry', () => {
       expect(stripSessionEntry(entry)).toEqual({ type: 'custom_message', content: 'hello' });
     });
 
-    it('truncates content exceeding CUSTOM_MESSAGE_CONTENT_BUDGET', () => {
+    it('truncates content exceeding NARRATOR_MESSAGE_EXCERPT_BYTES', () => {
       const longContent = 'x'.repeat(20 * 1024); // 20 KB, exceeds 16 KB budget
       const entry = {
         type: 'custom_message',
@@ -563,9 +563,9 @@ describe('stripSessionEntry', () => {
       expect(result).not.toHaveProperty('details');
       expect(typeof result.content).toBe('string');
       const contentStr = result.content as string;
-      expect(contentStr.length).toBeLessThanOrEqual(CUSTOM_MESSAGE_CONTENT_BUDGET + 100); // budget + truncation marker
+      expect(contentStr.length).toBeLessThanOrEqual(NARRATOR_MESSAGE_EXCERPT_BYTES + 100); // budget + truncation marker
       expect(contentStr).toContain(
-        `[...truncated: custom_message content exceeded ${CUSTOM_MESSAGE_CONTENT_BUDGET}-byte budget]`
+        `[...truncated: narrator message excerpt exceeded ${NARRATOR_MESSAGE_EXCERPT_BYTES}-byte budget]`
       );
     });
 
@@ -586,12 +586,12 @@ describe('stripSessionEntry', () => {
       const contentStr = result.content as string;
 
       // Verify the truncation marker is present
-      expect(contentStr).toContain('[...truncated: custom_message content exceeded');
+      expect(contentStr).toContain('[...truncated: narrator message excerpt exceeded');
 
       // Verify byte length is within budget (excludes the truncation marker)
       const truncatedPart = contentStr.split('\n\n[...truncated:')[0];
       const byteLength = Buffer.byteLength(truncatedPart, 'utf8');
-      expect(byteLength).toBeLessThanOrEqual(CUSTOM_MESSAGE_CONTENT_BUDGET);
+      expect(byteLength).toBeLessThanOrEqual(NARRATOR_MESSAGE_EXCERPT_BYTES);
     });
   });
 

@@ -109,5 +109,5 @@ export interface AgentsConfig {
 export interface DeliveryConfig {
   max_bytes: number;
   catch_up_budget_bytes: number;
-  custom_message_content_budget_bytes: number;
+  narrator_message_excerpt_bytes: number;
 }
