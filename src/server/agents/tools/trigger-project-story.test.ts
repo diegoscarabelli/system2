@@ -25,6 +25,9 @@ vi.mock('../../scheduler/jobs.js', () => ({
   readTailChars: vi.fn().mockReturnValue('(log tail)'),
 }));
 
+// Grab a typed reference to the mocked jobs module for per-test overrides
+import * as jobsMock from '../../scheduler/jobs.js';
+
 // Mock node:fs so no real files are read
 vi.mock('node:fs', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -283,5 +286,28 @@ describe('trigger_project_story tool', () => {
     } finally {
       (existsSync as Mock).mockReturnValue(false);
     }
+  });
+
+  it('regression: uses "(no DB changes)" placeholder when all DB tables are empty', async () => {
+    // Before the fix, projectDbTables.length > 0 was always true (collectProjectDbChanges
+    // always returns a fixed list of table structs), so the '(no DB changes)' branch was dead.
+    // Now the check is hasProjectDbChanges = projectDbTables.some(t => t.rows.length > 0).
+    (jobsMock.collectProjectDbChanges as Mock).mockReturnValueOnce([
+      { name: 'project', sql: 'SELECT ...', timeColumn: 'updated_at', rows: [] },
+      { name: 'task', sql: 'SELECT ...', timeColumn: 'updated_at', rows: [] },
+    ]);
+
+    const conductor = makeAgent(2, 'conductor', 1);
+    const narrator = makeAgent(10, 'narrator', null);
+    const project = makeProject(1, 'test-project');
+    const { tool, deliverMessage } = setup(2, [conductor, narrator], [project], [10]);
+
+    await exec(tool, { project_id: 1 });
+
+    const msg1 = deliverMessage.mock.calls[0][0] as string;
+    expect(msg1).toContain('(no DB changes)');
+    // Must NOT render table headers when there are no rows
+    expect(msg1).not.toContain('### project');
+    expect(msg1).not.toContain('### task');
   });
 });

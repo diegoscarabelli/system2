@@ -144,12 +144,13 @@ export function createTriggerProjectStoryTool(
           narratorMessageExcerptBytes
         );
         const projectDbTables = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
-        const projectDbChanges =
-          projectDbTables.length > 0
-            ? projectDbTables
-                .map((table) => `### ${table.name}\n\n${formatMarkdownTable(table.rows)}`)
-                .join('\n\n')
-            : '(no DB changes)';
+        const hasProjectDbChanges = projectDbTables.some((table) => table.rows.length > 0);
+        const projectDbChanges = hasProjectDbChanges
+          ? projectDbTables
+              .filter((table) => table.rows.length > 0)
+              .map((table) => `### ${table.name}\n\n${formatMarkdownTable(table.rows)}`)
+              .join('\n\n')
+          : '(no DB changes)';
 
         // Read log.md content (full file, for Message 2)
         const logContent = existsSync(logFile) ? readFileSync(logFile, 'utf-8') : '(no log file)';
