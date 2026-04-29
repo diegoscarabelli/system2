@@ -8,7 +8,7 @@
  * sender: 0 is a sentinel for system-generated messages (no agent sender).
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { JobExecution } from '../../shared/index.js';
 import type { AgentHost } from '../agents/host.js';
@@ -1459,7 +1459,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
     // For append-only knowledge files the tail is newest, so we keep the LAST N bytes and
     // drop the head; the truncation marker is placed at the START of the inlined content.
     const condensationInlineCap = NARRATOR_MESSAGE_EXCERPT_BYTES * 4;
-    const condensationEntries = oversizedFiles.map(({ path: f, content }) => {
+    const condensationItems = oversizedFiles.map(({ path: f, content }) => {
       const label = f.replace(system2Dir, '~/.system2');
       const overage = content.length - knowledgeBudgetChars;
       let inlinedContent = content;
@@ -1473,11 +1473,49 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
         inlinedContent = sliced;
         truncationMarker = `[truncated: head dropped — file exceeds ${condensationInlineCap.toLocaleString()}-byte inline cap — use \`read\` tool to see the full file]\n\n`;
       }
-      return `### ${label}\n\nCurrent size: ${content.length.toLocaleString()} chars (+${overage.toLocaleString()} over ${knowledgeBudgetChars.toLocaleString()} char budget)\n\n${truncationMarker}${inlinedContent}`;
+      const rendered = `### ${label}\n\nCurrent size: ${content.length.toLocaleString()} chars (+${overage.toLocaleString()} over ${knowledgeBudgetChars.toLocaleString()} char budget)\n\n${truncationMarker}${inlinedContent}`;
+      return { path: f, label, rendered };
     });
-    messageParts.push(
-      `## Knowledge Files Requiring Condensation\n\nThe following files exceed the ${knowledgeBudgetChars.toLocaleString()} character budget and are being truncated in agent contexts. For each: condense its content to under ${(knowledgeBudgetChars - 2_000).toLocaleString()} characters and write it back to the same path with \`commit_message: "knowledge: condense <filename>"\`. Preserve all structure and frontmatter. Drop outdated, redundant, or low-value content; merge similar entries; tighten prose. The full current content is provided below — no need to read the files separately.\n\n${condensationEntries.join('\n\n')}`
-    );
+
+    // Apply a collective cap so the condensation section (sum of all entries) cannot blow
+    // catchUpBudgetBytes when many oversized files exist. We pack each item into a
+    // TimestampedEntry keyed by file mtime so older (less-recently-modified) candidates are
+    // dropped first; recently-touched files are likelier to need condensation feedback.
+    const condensationTimestamped: TimestampedEntry[] = condensationItems.map((item, i) => {
+      let mtimeMs = 0;
+      try {
+        mtimeMs = statSync(item.path).mtimeMs;
+      } catch {
+        // If stat fails the file has likely been removed mid-flight; treat it as oldest.
+      }
+      return {
+        id: `knowledge_condensation:${item.label}:${i}`,
+        // Pad mtime so timestamps sort lexicographically the same as numerically.
+        timestamp: mtimeMs.toString().padStart(20, '0'),
+        rendered: item.rendered,
+        agentLabel: 'knowledge_condensation',
+      };
+    });
+    const condensationTruncation = truncateOldestToFit(condensationTimestamped, catchUpBudgetBytes);
+    if (condensationTruncation.droppedCount > 0) {
+      // Map kept ids back to original items so the warning can list dropped paths.
+      const keptIds = new Set(condensationTruncation.kept.map((e) => e.id));
+      const droppedLabels = condensationTimestamped
+        .filter((e) => !keptIds.has(e.id))
+        .map((e) => e.id.split(':')[1]);
+      log.warn(
+        `[Scheduler] Truncated ${condensationTruncation.droppedCount} oldest knowledge condensation entries ` +
+          `from memory-update delivery to fit ${catchUpBudgetBytes.toLocaleString()}-byte budget. ` +
+          `Dropped: ${droppedLabels.join(', ')}`
+      );
+    }
+
+    if (condensationTruncation.kept.length > 0) {
+      const renderedEntries = condensationTruncation.kept.map((e) => e.rendered);
+      messageParts.push(
+        `## Knowledge Files Requiring Condensation\n\nThe following files exceed the ${knowledgeBudgetChars.toLocaleString()} character budget and are being truncated in agent contexts. For each: condense its content to under ${(knowledgeBudgetChars - 2_000).toLocaleString()} characters and write it back to the same path with \`commit_message: "knowledge: condense <filename>"\`. Preserve all structure and frontmatter. Drop outdated, redundant, or low-value content; merge similar entries; tighten prose. The full current content is provided below — no need to read the files separately.\n\n${renderedEntries.join('\n\n')}`
+      );
+    }
   }
 
   const fixedHeader = `[Scheduled task: memory-update]

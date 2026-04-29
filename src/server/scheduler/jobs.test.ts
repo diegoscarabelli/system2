@@ -847,6 +847,53 @@ describe('buildAndDeliverMemoryUpdate', () => {
     expect(markerIdx).toBeGreaterThan(sectionIdx);
   });
 
+  it('regression: condensation section is collectively bounded by catchUpBudgetBytes', async () => {
+    // Several oversized knowledge files together must not exceed catchUpBudgetBytes.
+    // The oldest (lowest mtime) entries should be dropped first; a warn must list them.
+    const dir = trackTmpDir(makeTmpDir());
+    const knowledgeDir = join(dir, 'knowledge');
+    mkdirSync(knowledgeDir, { recursive: true });
+    writeFileSync(
+      join(knowledgeDir, 'memory.md'),
+      '---\nlast_narrator_update_ts: 2026-03-10T00:00:00Z\n---\n# Memory'
+    );
+
+    // Create 4 oversized knowledge files. Each is 70 KB so each individual entry is
+    // bounded to the 64 KB inline cap; combined they would still exceed a 100 KB budget.
+    const filenames = ['oldest.md', 'older.md', 'newer.md', 'newest.md'];
+    for (const name of filenames) {
+      writeFileSync(join(knowledgeDir, name), `# ${name}\n\n${'z'.repeat(70_000)}`);
+    }
+    // Set mtimes so 'oldest.md' is genuinely oldest. utimesSync from node:fs.
+    const { utimesSync } = await import('node:fs');
+    const baseTime = new Date('2026-04-01T00:00:00Z').getTime() / 1000;
+    filenames.forEach((name, i) => {
+      const t = baseTime + i * 3600; // each file is 1 hour newer than the prior
+      utimesSync(join(knowledgeDir, name), t, t);
+    });
+
+    const warnSpy = vi.spyOn(log, 'warn');
+    const host = mockNarratorHost();
+    // Tight catchUpBudgetBytes that fits ~1-2 entries (each ~64 KB after inline cap).
+    await buildAndDeliverMemoryUpdate(host, 2, dir, 20_000, 100_000);
+
+    expect(host.calls).toHaveLength(1);
+    const msg = host.calls[0].content;
+
+    // The full message must not exceed catchUpBudgetBytes (allowing a small overshoot
+    // for the standing section header). Assert it's well under the unbounded ~280 KB.
+    expect(Buffer.byteLength(msg, 'utf8')).toBeLessThan(150_000);
+
+    // Oldest file must be dropped; newest must be kept.
+    expect(msg).not.toContain('oldest.md');
+    expect(msg).toContain('newest.md');
+
+    // Warn was emitted listing dropped paths.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Truncated'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('oldest.md'));
+    warnSpy.mockRestore();
+  });
+
   describe('delivery size bounding (catchUpBudgetBytes)', () => {
     it('(a) does not truncate when total summaries fit within budget', async () => {
       const dir = trackTmpDir(makeTmpDir());
