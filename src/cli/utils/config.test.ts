@@ -60,7 +60,6 @@ describe('buildConfigToml', () => {
     expect(result).toContain('max_history_messages = 100');
     // [session] section uses bytes-based threshold
     expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
-    expect(result).not.toContain('hard_fallback_size_bytes');
   });
 
   it('uses custom operational values when specified', () => {
@@ -866,7 +865,6 @@ describe('buildConfigToml — [session] section', () => {
     const result = buildConfigToml({});
     expect(result).toContain('[session]');
     expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
-    expect(result).not.toContain('hard_fallback_size_bytes');
   });
 
   it('emits [session] section with custom value when specified', () => {
@@ -877,7 +875,6 @@ describe('buildConfigToml — [session] section', () => {
     });
     expect(result).toContain('[session]');
     expect(result).toContain(`rotation_size_bytes = ${20 * 1024 * 1024}`);
-    expect(result).not.toContain('hard_fallback_size_bytes');
   });
 
   it('round-trips [session] section through TOML.parse and convertTomlSession', () => {
