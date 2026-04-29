@@ -266,8 +266,18 @@ describe('truncateOldestToFit', () => {
 
   it('keeps all entries when total is under budget', () => {
     const entries = [
-      { timestamp: '2026-01-01T01:00:00Z', rendered: 'a'.repeat(100) },
-      { timestamp: '2026-01-01T02:00:00Z', rendered: 'b'.repeat(100) },
+      {
+        id: 'a:f:0',
+        timestamp: '2026-01-01T01:00:00Z',
+        rendered: 'a'.repeat(100),
+        agentLabel: 'a',
+      },
+      {
+        id: 'b:f:0',
+        timestamp: '2026-01-01T02:00:00Z',
+        rendered: 'b'.repeat(100),
+        agentLabel: 'b',
+      },
     ];
     const result = truncateOldestToFit(entries, 500);
     expect(result.droppedCount).toBe(0);
@@ -279,9 +289,24 @@ describe('truncateOldestToFit', () => {
 
   it('drops oldest entries first when total exceeds budget', () => {
     const entries = [
-      { timestamp: '2026-01-01T03:00:00Z', rendered: 'c'.repeat(200) },
-      { timestamp: '2026-01-01T01:00:00Z', rendered: 'a'.repeat(200) }, // oldest
-      { timestamp: '2026-01-01T02:00:00Z', rendered: 'b'.repeat(200) },
+      {
+        id: 'c:f:0',
+        timestamp: '2026-01-01T03:00:00Z',
+        rendered: 'c'.repeat(200),
+        agentLabel: 'c',
+      },
+      {
+        id: 'a:f:0',
+        timestamp: '2026-01-01T01:00:00Z',
+        rendered: 'a'.repeat(200),
+        agentLabel: 'a',
+      }, // oldest
+      {
+        id: 'b:f:0',
+        timestamp: '2026-01-01T02:00:00Z',
+        rendered: 'b'.repeat(200),
+        agentLabel: 'b',
+      },
     ];
     // Budget of 350 means the two oldest (400 total) must be trimmed to fit
     const result = truncateOldestToFit(entries, 350);
@@ -297,7 +322,14 @@ describe('truncateOldestToFit', () => {
   });
 
   it('handles a single entry that exceeds the budget on its own', () => {
-    const entries = [{ timestamp: '2026-01-01T01:00:00Z', rendered: 'x'.repeat(1000) }];
+    const entries = [
+      {
+        id: 'x:f:0',
+        timestamp: '2026-01-01T01:00:00Z',
+        rendered: 'x'.repeat(1000),
+        agentLabel: 'x',
+      },
+    ];
     const result = truncateOldestToFit(entries, 500);
     expect(result.kept).toEqual([]);
     expect(result.droppedCount).toBe(1);
@@ -596,7 +628,14 @@ describe('renderAgentActivitySections', () => {
 
     const agents = [{ id: 1, role: 'guide', project_name: null }];
     // Only pass the second entry as "kept"
-    const kept = [{ timestamp: ts2, rendered: JSON.stringify({ ...e2 }) }];
+    const kept = [
+      {
+        id: 'guide_1:session.jsonl:1',
+        timestamp: ts2,
+        rendered: JSON.stringify({ ...e2 }),
+        agentLabel: 'guide_1 (system-wide)',
+      },
+    ];
     const result = renderAgentActivitySections(
       dir,
       agents,
@@ -606,6 +645,65 @@ describe('renderAgentActivitySections', () => {
     );
     expect(result).toContain(ts2);
     expect(result).not.toContain(ts1);
+  });
+
+  it('regression: two entries with identical rendered strings from different agents each appear once (not deduped)', () => {
+    // Before the refactor, renderAgentActivitySections built a Set<string> keyed on
+    // rendered JSON. If two distinct entries had the same rendered string (e.g. same
+    // timestamp + same content from different agent sessions), both would appear in the
+    // keptSet but the filter could match both against the same bucket — or one could
+    // silently shadow the other. The stable-id / agentLabel grouping approach eliminates
+    // this class of bug: each entry is placed in its agent's bucket by label, not by
+    // rendered string.
+    const dir = trackTmpDir(makeTmpDir());
+
+    // Two agents with identical content in their sessions
+    const sessionDir1 = join(dir, 'sessions', 'guide_1');
+    const sessionDir2 = join(dir, 'sessions', 'guide_2');
+    mkdirSync(sessionDir1, { recursive: true });
+    mkdirSync(sessionDir2, { recursive: true });
+
+    // Identical timestamp and content — these entries render to the same JSON string
+    const ts = '2025-06-01T10:00:00Z';
+    const entry = {
+      type: 'message',
+      timestamp: ts,
+      message: { role: 'user', content: [{ type: 'text', text: 'identical content' }] },
+    };
+    writeFileSync(join(sessionDir1, 'session.jsonl'), JSON.stringify(entry));
+    writeFileSync(join(sessionDir2, 'session.jsonl'), JSON.stringify(entry));
+
+    const agents = [
+      { id: 1, role: 'guide', project_name: null },
+      { id: 2, role: 'guide', project_name: null },
+    ];
+
+    // Collect all entries (both agents, identical rendered strings)
+    const allEntries = collectAgentActivityWithTimestamps(
+      dir,
+      agents,
+      '2025-06-01T09:00:00Z',
+      '2025-06-01T11:00:00Z'
+    );
+    expect(allEntries).toHaveLength(2);
+
+    // Pass all as "kept" — both should appear in the output, one per agent section
+    const result = renderAgentActivitySections(
+      dir,
+      agents,
+      '2025-06-01T09:00:00Z',
+      '2025-06-01T11:00:00Z',
+      allEntries
+    );
+
+    // Both agent sections must be present and non-empty
+    expect(result).toContain('### guide_1 (system-wide)');
+    expect(result).toContain('### guide_2 (system-wide)');
+    // Neither section should show (no activity)
+    const guide1Section = result.split('### guide_2')[0];
+    const guide2Section = result.split('### guide_2')[1];
+    expect(guide1Section).not.toContain('(no activity)');
+    expect(guide2Section).not.toContain('(no activity)');
   });
 });
 

@@ -36,8 +36,12 @@ export const CATCH_UP_BUDGET_BYTES = 512 * 1024;
  * A session entry with its timestamp exposed alongside the pre-stripped JSON rendering.
  */
 export interface TimestampedEntry {
+  /** Stable per-entry identifier: `${agentRole}_${agentId}:${fileBasename}:${lineIndex}` */
+  id: string;
   timestamp: string;
   rendered: string; // pre-stripped, JSON-encoded line
+  /** Agent section label for grouping in renderAgentActivitySections */
+  agentLabel: string;
 }
 
 /**
@@ -254,13 +258,19 @@ export function collectAgentActivityWithTimestamps(
 ): TimestampedEntry[] {
   const all: TimestampedEntry[] = [];
   for (const agent of agents) {
-    const sessionDir = join(system2Dir, 'sessions', `${agent.role}_${agent.id}`);
+    const agentIdStr = `${agent.role}_${agent.id}`;
+    const sessionDir = join(system2Dir, 'sessions', agentIdStr);
     if (!existsSync(sessionDir)) continue;
+    const agentLabel = agent.project_name
+      ? `${agentIdStr} (project: ${agent.project_name})`
+      : `${agentIdStr} (system-wide)`;
     const entries = readSessionEntries(
       sessionDir,
       lastRunTs,
       newRunTs,
-      narratorMessageExcerptBytes
+      narratorMessageExcerptBytes,
+      agentIdStr,
+      agentLabel
     );
     all.push(...entries);
   }
@@ -272,6 +282,11 @@ export function collectAgentActivityWithTimestamps(
  * grouped by agent label. Agents with no entries get an "(no activity)" placeholder.
  * Accepts an optional pre-filtered `entries` array to support truncation: pass the result
  * of `truncateOldestToFit(...).kept` to render only retained entries.
+ *
+ * When `entries` is provided, grouping is done via the stable `agentLabel` field on each
+ * entry — no re-reads, no Set-based dedup (which was buggy when two distinct entries
+ * rendered to identical strings). Each entry appears at most once because it carries a
+ * stable `id` assigned at read time.
  */
 export function renderAgentActivitySections(
   system2Dir: string,
@@ -283,42 +298,59 @@ export function renderAgentActivitySections(
 ): string {
   const sections: string[] = [];
 
-  for (const agent of agents) {
-    const sessionDir = join(system2Dir, 'sessions', `${agent.role}_${agent.id}`);
-    const label = agent.project_name
-      ? `${agent.role}_${agent.id} (project: ${agent.project_name})`
-      : `${agent.role}_${agent.id} (system-wide)`;
-
-    if (!existsSync(sessionDir)) {
-      sections.push(`### ${label}\n\n(no activity)\n`);
-      continue;
+  if (entries !== undefined) {
+    // Fast path: group the pre-filtered entries by agentLabel, then render in agent order.
+    // No filesystem re-reads, no Set-based rendered-string dedup.
+    const byLabel = new Map<string, TimestampedEntry[]>();
+    for (const e of entries) {
+      let bucket = byLabel.get(e.agentLabel);
+      if (!bucket) {
+        bucket = [];
+        byLabel.set(e.agentLabel, bucket);
+      }
+      bucket.push(e);
     }
 
-    let agentEntries: string[];
-    if (entries !== undefined) {
-      // Use the pre-filtered set. Re-read the raw entries for this agent to match by
-      // rendered string — this avoids re-parsing while staying correct.
-      const rawForAgent = readSessionEntries(
+    for (const agent of agents) {
+      const agentIdStr = `${agent.role}_${agent.id}`;
+      const label = agent.project_name
+        ? `${agentIdStr} (project: ${agent.project_name})`
+        : `${agentIdStr} (system-wide)`;
+      const agentEntries = byLabel.get(label) ?? [];
+      if (agentEntries.length === 0) {
+        sections.push(`### ${label}\n\n(no activity)\n`);
+      } else {
+        sections.push(`### ${label}\n\n${agentEntries.map((e) => e.rendered).join('\n')}\n`);
+      }
+    }
+  } else {
+    // Slow path (no pre-filtering): read each agent's session entries from disk.
+    for (const agent of agents) {
+      const agentIdStr = `${agent.role}_${agent.id}`;
+      const sessionDir = join(system2Dir, 'sessions', agentIdStr);
+      const label = agent.project_name
+        ? `${agentIdStr} (project: ${agent.project_name})`
+        : `${agentIdStr} (system-wide)`;
+
+      if (!existsSync(sessionDir)) {
+        sections.push(`### ${label}\n\n(no activity)\n`);
+        continue;
+      }
+
+      const agentEntries = readSessionEntries(
         sessionDir,
         lastRunTs,
         newRunTs,
-        narratorMessageExcerptBytes
+        narratorMessageExcerptBytes,
+        agentIdStr,
+        label
       );
-      const keptSet = new Set(entries.map((e) => e.rendered));
-      agentEntries = rawForAgent.filter((e) => keptSet.has(e.rendered)).map((e) => e.rendered);
-    } else {
-      agentEntries = readSessionEntries(
-        sessionDir,
-        lastRunTs,
-        newRunTs,
-        narratorMessageExcerptBytes
-      ).map((e) => e.rendered);
-    }
 
-    if (agentEntries.length === 0) {
-      sections.push(`### ${label}\n\n(no activity)\n`);
-    } else {
-      sections.push(`### ${label}\n\n${agentEntries.join('\n')}\n`);
+      if (agentEntries.length === 0) {
+        sections.push(`### ${label}\n\n(no activity)\n`);
+      } else {
+        sections.push(`### ${label}\n\n${agentEntries.map((e) => e.rendered).join('\n')}\n`);
+      }
     }
   }
 
@@ -429,12 +461,17 @@ export function stripSessionEntry(
  * Read JSONL entries from all session files in a directory, filtered by time window.
  * Returns TimestampedEntry values so callers can apply oldest-first truncation before
  * rendering. The `rendered` field is the pre-stripped, JSON-encoded string.
+ *
+ * @param agentIdStr Stable agent identifier string (e.g. "guide_1") used to build entry IDs.
+ * @param agentLabel Human-readable section label for this agent (used for grouping in render).
  */
 function readSessionEntries(
   sessionDir: string,
   lastRunTs: string,
   newRunTs: string,
-  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
+  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES,
+  agentIdStr = 'unknown',
+  agentLabel = 'unknown'
 ): TimestampedEntry[] {
   const files = readdirSync(sessionDir)
     .filter((f) => f.endsWith('.jsonl'))
@@ -445,6 +482,7 @@ function readSessionEntries(
   for (const file of files) {
     const filePath = join(sessionDir, file);
     const content = readFileSync(filePath, 'utf-8');
+    let lineIndex = 0;
 
     for (const line of content.split('\n')) {
       if (!line.trim()) continue;
@@ -456,12 +494,16 @@ function readSessionEntries(
         const ts = entry.timestamp as string;
         if (ts >= lastRunTs && ts < newRunTs) {
           entries.push({
+            id: `${agentIdStr}:${file}:${lineIndex}`,
             timestamp: ts,
             rendered: JSON.stringify(stripSessionEntry(entry, narratorMessageExcerptBytes)),
+            agentLabel,
           });
         }
+        lineIndex++;
       } catch {
         // Skip malformed lines
+        lineIndex++;
       }
     }
   }
@@ -1362,13 +1404,15 @@ export async function buildAndDeliverMemoryUpdate(
   if (summaryFiles.length > 0) {
     // Convert each summary file to a TimestampedEntry for oldest-first truncation.
     // The timestamp is the date in the filename (e.g. "2026-03-10" from "2026-03-10.md").
-    const summaryEntryObjects: TimestampedEntry[] = summaryFiles.map((f) => {
+    const summaryEntryObjects: TimestampedEntry[] = summaryFiles.map((f, i) => {
       const content = readFileSync(f, 'utf-8');
       const filename = basename(f);
       const timestamp = filename.replace('.md', '');
       return {
+        id: `daily_summary:${filename}:${i}`,
         timestamp,
         rendered: `### ${filename}\n\n${content}`,
+        agentLabel: 'daily_summary',
       };
     });
 
