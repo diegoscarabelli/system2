@@ -156,10 +156,8 @@ export interface AgentHostConfig {
   maxDeliveryBytes?: number;
   /** Per-message excerpt cap for Narrator-bound deliveries in bytes. Defaults to NARRATOR_MESSAGE_EXCERPT_BYTES. */
   narratorMessageExcerptBytes?: number;
-  /** Regular session-rotation threshold in bytes. Defaults to SESSION_FILE_SIZE_LIMIT (10 MB). */
+  /** Session-rotation threshold in bytes. Defaults to SESSION_FILE_SIZE_LIMIT (10 MB). */
   sessionRotationSizeBytes?: number;
-  /** Hard-fallback session-rotation threshold in bytes. Defaults to SESSION_FILE_HARD_FALLBACK_LIMIT (15 MB). */
-  sessionHardFallbackSizeBytes?: number;
   /** Called when the agent's busy state changes. */
   onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
   /** Called when an agent is terminated via terminate_agent tool. */
@@ -221,7 +219,6 @@ export class AgentHost {
   private onAgentTerminate?: () => void;
   private maxDeliveryBytes: number;
   private sessionRotationSizeBytes: number | undefined;
-  private sessionHardFallbackSizeBytes: number | undefined;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -242,7 +239,6 @@ export class AgentHost {
     this.onAgentTerminate = config.onAgentTerminate;
     this.maxDeliveryBytes = config.maxDeliveryBytes ?? MAX_DELIVERY_BYTES;
     this.sessionRotationSizeBytes = config.sessionRotationSizeBytes;
-    this.sessionHardFallbackSizeBytes = config.sessionHardFallbackSizeBytes;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -322,8 +318,7 @@ export class AgentHost {
       const rotated = rotateSessionIfNeeded(
         agentSessionDir,
         SYSTEM2_DIR,
-        this.sessionRotationSizeBytes,
-        this.sessionHardFallbackSizeBytes
+        this.sessionRotationSizeBytes
       );
       if (rotated) {
         log.info('[AgentHost] Session file rotated to new file');

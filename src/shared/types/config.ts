@@ -113,12 +113,8 @@ export interface DeliveryConfig {
 }
 
 export interface SessionConfig {
-  /** Regular rotation threshold in bytes. Above this size, rotation reads the JSONL and
-   *  copies forward from the latest compaction anchor. */
+  /** Rotation threshold in bytes. Above this size, the JSONL is rotated. If a compaction anchor
+   *  exists, rotation copies forward from `firstKeptEntryId`. Otherwise it falls back to keeping
+   *  the session header + the most recent ~1 MB tail of entries (bare-bytes-tail rotation). */
   rotation_size_bytes: number;
-  /** Hard-fallback threshold in bytes. When the file exceeds this AND no compaction anchor
-   *  exists (e.g., the agent has been failing to complete turns for long enough that the SDK
-   *  never wrote a compaction), rotation force-keeps only the session header + the most recent
-   *  tail of entries so cold start can recover. Must be >= `rotation_size_bytes`. */
-  hard_fallback_size_bytes: number;
 }

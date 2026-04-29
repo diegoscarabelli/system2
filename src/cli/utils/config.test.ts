@@ -58,11 +58,9 @@ describe('buildConfigToml', () => {
     expect(result).toContain('max_archives = 5');
     expect(result).toContain('daily_summary_interval_minutes = 30');
     expect(result).toContain('max_history_messages = 100');
-    // [session] section uses bytes-based thresholds
+    // [session] section uses bytes-based threshold
     expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
-    expect(result).toContain(
-      `hard_fallback_size_bytes = ${DEFAULT_SESSION.hard_fallback_size_bytes}`
-    );
+    expect(result).not.toContain('hard_fallback_size_bytes');
   });
 
   it('uses custom operational values when specified', () => {
@@ -810,14 +808,12 @@ describe('convertTomlDelivery', () => {
 });
 
 describe('convertTomlSession', () => {
-  it('reads valid config correctly with all fields present', () => {
+  it('reads valid config correctly with rotation_size_bytes set', () => {
     const result = convertTomlSession({
       rotation_size_bytes: 5 * 1024 * 1024,
-      hard_fallback_size_bytes: 100 * 1024 * 1024,
     });
     expect(result).toEqual({
       rotation_size_bytes: 5 * 1024 * 1024,
-      hard_fallback_size_bytes: 100 * 1024 * 1024,
     });
   });
 
@@ -826,13 +822,11 @@ describe('convertTomlSession', () => {
     expect(result).toEqual(DEFAULT_SESSION);
   });
 
-  it('preserves user-configured values when valid', () => {
+  it('preserves user-configured value when valid', () => {
     const result = convertTomlSession({
       rotation_size_bytes: 20 * 1024 * 1024,
-      hard_fallback_size_bytes: 80 * 1024 * 1024,
     });
     expect(result.rotation_size_bytes).toBe(20 * 1024 * 1024);
-    expect(result.hard_fallback_size_bytes).toBe(80 * 1024 * 1024);
   });
 
   it('warns and uses default for non-positive rotation_size_bytes', () => {
@@ -843,13 +837,11 @@ describe('convertTomlSession', () => {
     warnSpy.mockRestore();
   });
 
-  it('warns and uses default for non-integer hard_fallback_size_bytes', () => {
+  it('warns and uses default for non-integer rotation_size_bytes', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = convertTomlSession({ hard_fallback_size_bytes: 1.5 });
-    expect(result.hard_fallback_size_bytes).toBe(DEFAULT_SESSION.hard_fallback_size_bytes);
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('session.hard_fallback_size_bytes')
-    );
+    const result = convertTomlSession({ rotation_size_bytes: 1.5 });
+    expect(result.rotation_size_bytes).toBe(DEFAULT_SESSION.rotation_size_bytes);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session.rotation_size_bytes'));
     warnSpy.mockRestore();
   });
 
@@ -861,67 +853,36 @@ describe('convertTomlSession', () => {
     warnSpy.mockRestore();
   });
 
-  it('clamps hard_fallback_size_bytes to rotation_size_bytes when smaller', () => {
+  it('does not warn when rotation_size_bytes is a valid positive integer', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = convertTomlSession({
-      rotation_size_bytes: 20 * 1024 * 1024,
-      hard_fallback_size_bytes: 5 * 1024 * 1024,
-    });
-    expect(result.rotation_size_bytes).toBe(20 * 1024 * 1024);
-    // Clamped upward to equal rotation_size_bytes
-    expect(result.hard_fallback_size_bytes).toBe(20 * 1024 * 1024);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('hard_fallback_size_bytes'));
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('clamped'));
-    warnSpy.mockRestore();
-  });
-
-  it('does not warn when hard_fallback_size_bytes >= rotation_size_bytes', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    convertTomlSession({
-      rotation_size_bytes: 10 * 1024 * 1024,
-      hard_fallback_size_bytes: 50 * 1024 * 1024,
-    });
-    expect(warnSpy).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  it('does not warn when hard_fallback_size_bytes equals rotation_size_bytes', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    convertTomlSession({
-      rotation_size_bytes: 10 * 1024 * 1024,
-      hard_fallback_size_bytes: 10 * 1024 * 1024,
-    });
+    convertTomlSession({ rotation_size_bytes: 10 * 1024 * 1024 });
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 });
 
 describe('buildConfigToml — [session] section', () => {
-  it('emits [session] section with default values when not specified', () => {
+  it('emits [session] section with default value when not specified', () => {
     const result = buildConfigToml({});
     expect(result).toContain('[session]');
     expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
-    expect(result).toContain(
-      `hard_fallback_size_bytes = ${DEFAULT_SESSION.hard_fallback_size_bytes}`
-    );
+    expect(result).not.toContain('hard_fallback_size_bytes');
   });
 
-  it('emits [session] section with custom values when specified', () => {
+  it('emits [session] section with custom value when specified', () => {
     const result = buildConfigToml({
       session: {
         rotation_size_bytes: 20 * 1024 * 1024,
-        hard_fallback_size_bytes: 100 * 1024 * 1024,
       },
     });
     expect(result).toContain('[session]');
     expect(result).toContain(`rotation_size_bytes = ${20 * 1024 * 1024}`);
-    expect(result).toContain(`hard_fallback_size_bytes = ${100 * 1024 * 1024}`);
+    expect(result).not.toContain('hard_fallback_size_bytes');
   });
 
   it('round-trips [session] section through TOML.parse and convertTomlSession', () => {
     const input = {
       rotation_size_bytes: 15 * 1024 * 1024,
-      hard_fallback_size_bytes: 75 * 1024 * 1024,
     };
     const toml = buildConfigToml({ session: input });
     const parsed = TOML.parse(toml) as Record<string, unknown>;

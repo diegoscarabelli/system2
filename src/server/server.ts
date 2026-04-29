@@ -172,7 +172,6 @@ export class Server {
     const maxDeliveryBytes = config.deliveryConfig?.max_bytes ?? MAX_DELIVERY_BYTES;
     const narratorMessageExcerptBytes = config.deliveryConfig?.narrator_message_excerpt_bytes;
     const sessionRotationSizeBytes = config.sessionConfig?.rotation_size_bytes;
-    const sessionHardFallbackSizeBytes = config.sessionConfig?.hard_fallback_size_bytes;
     this.agentHost = new AgentHost({
       db: this.db,
       agentId: guideAgent.id,
@@ -190,7 +189,6 @@ export class Server {
       maxDeliveryBytes,
       narratorMessageExcerptBytes,
       sessionRotationSizeBytes,
-      sessionHardFallbackSizeBytes,
       ...callbacks,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
@@ -213,7 +211,6 @@ export class Server {
       maxDeliveryBytes,
       narratorMessageExcerptBytes,
       sessionRotationSizeBytes,
-      sessionHardFallbackSizeBytes,
       ...callbacks,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
@@ -501,7 +498,6 @@ export class Server {
       maxDeliveryBytes: this.config.deliveryConfig?.max_bytes ?? MAX_DELIVERY_BYTES,
       narratorMessageExcerptBytes: this.config.deliveryConfig?.narrator_message_excerpt_bytes,
       sessionRotationSizeBytes: this.config.sessionConfig?.rotation_size_bytes,
-      sessionHardFallbackSizeBytes: this.config.sessionConfig?.hard_fallback_size_bytes,
       ...this.buildAgentCallbacks(),
     });
 

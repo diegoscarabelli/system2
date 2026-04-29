@@ -10,18 +10,15 @@ import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from '
 import { basename, join } from 'node:path';
 import { log } from '../utils/logger.js';
 
-/** Default regular rotation threshold. Rotation requires a compaction anchor in the JSONL. */
+/** Default rotation threshold. Above this size, the JSONL is rotated. The decision between the
+ *  two inner paths (anchored vs bare-bytes-tail) is made based on whether a compaction anchor
+ *  exists in the file, not on size. */
 const SESSION_FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 
-/** Default hard fallback threshold. When the file exceeds this AND no compaction anchor exists,
- *  rotation falls back to keeping only the most recent tail (HARD_FALLBACK_TAIL_BYTES) so the
- *  agent can recover from cascade failures where no successful turn ever produced a compaction. */
-const SESSION_FILE_HARD_FALLBACK_LIMIT = 15 * 1024 * 1024; // 15MB
-
-/** Tail-keep cap for the hard-fallback path. Intentionally small: forced fallback only fires when
- *  the agent has been failing for long enough to grow a 50 MB JSONL with no compactions, which
- *  means recent context is almost certainly polluted by error retries. Keeping more than ~1 MB
- *  defeats the purpose; the goal is to unblock cold start, not preserve the failure trail. */
+/** Tail-keep cap for the bare-bytes-tail path (no compaction anchor present). Intentionally small:
+ *  if the agent has grown the JSONL past `rotation_size_bytes` with no compactions, recent context
+ *  is almost certainly polluted by error retries. Keeping more than ~1 MB defeats the purpose; the
+ *  goal is to unblock cold start, not preserve the failure trail. */
 const HARD_FALLBACK_TAIL_BYTES = 1 * 1024 * 1024; // 1MB
 
 export interface SessionEntry {
@@ -175,31 +172,25 @@ function writeRotatedFile(
  *
  * Decision tree (file size = `stat.size`):
  *
- *   stat.size < thresholdBytes                         → return false (no-op)
- *   compaction anchor present                          → rotate the existing way
- *                                                        (header + entries-from-firstKeptEntryId-onward)
- *   no compaction AND stat.size >= hardFallbackBytes   → force-rotate by keeping the
- *                                                        session header + tail entries that fit
- *                                                        in HARD_FALLBACK_TAIL_BYTES
- *   no compaction AND stat.size < hardFallbackBytes    → log warning + skip
+ *   stat.size < thresholdBytes        → return false (no-op)
+ *   compaction anchor present         → anchored rotation: header + entries from
+ *                                       firstKeptEntryId onward
+ *   no compaction anchor              → bare-bytes-tail rotation: header + last
+ *                                       HARD_FALLBACK_TAIL_BYTES (~1 MB) of entries.
+ *                                       Emits a warn — the absence of a compaction at
+ *                                       this size signals the agent has been in a
+ *                                       failure loop.
  *
  * @param sessionDir - Directory containing session JSONL files
  * @param cwd - Current working directory for session header
- * @param thresholdBytes - Regular rotation threshold (default 10 MB)
- * @param hardFallbackBytes - Hard fallback threshold (default 50 MB).
- *   Clamped to >= thresholdBytes (a fallback below the regular threshold is meaningless).
+ * @param thresholdBytes - Rotation threshold (default 10 MB)
  * @returns true if rotation occurred, false otherwise
  */
 export function rotateSessionIfNeeded(
   sessionDir: string,
   cwd: string,
-  thresholdBytes: number = SESSION_FILE_SIZE_LIMIT,
-  hardFallbackBytes: number = SESSION_FILE_HARD_FALLBACK_LIMIT
+  thresholdBytes: number = SESSION_FILE_SIZE_LIMIT
 ): boolean {
-  // A hard-fallback threshold below the regular threshold can never fire (the regular
-  // path always handles it first), so clamp upward defensively.
-  const effectiveHardFallback = Math.max(hardFallbackBytes, thresholdBytes);
-
   // Find most recent session file
   const currentFile = findMostRecentSession(sessionDir);
   if (!currentFile) {
@@ -224,27 +215,23 @@ export function rotateSessionIfNeeded(
   // Find compaction entry
   const compaction = findLastCompaction(entries);
   if (!compaction) {
-    // No compaction anchor. Either fall back hard (file is dangerously large) or skip.
-    if (stat.size >= effectiveHardFallback) {
-      log.warn(
-        `[SessionRotation] No compaction found in ${currentFile} (size ${formatMB(stat.size)} MB) — exceeded hard fallback threshold (${formatMB(effectiveHardFallback)} MB). Forcing rotation: keeping header + last ${formatMB(HARD_FALLBACK_TAIL_BYTES)} MB of entries. Older state will be archived.`
-      );
-
-      const tailEntries = selectTailEntries(entries, HARD_FALLBACK_TAIL_BYTES);
-      const newEntries: SessionEntry[] = [createSessionHeader(cwd), ...tailEntries];
-      const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
-
-      log.info(
-        `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries (forced fallback)`
-      );
-      log.info(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
-      return true;
-    }
-
+    // No compaction anchor: bare-bytes-tail rotation. Reaching the threshold without a
+    // compaction means the agent has been failing turns long enough that the SDK never
+    // wrote one — preserve only the session header + a small recent tail to unblock
+    // cold start. The warn lets operators detect this failure-loop signal.
     log.warn(
-      `[SessionRotation] No compaction found in ${currentFile} (size ${formatMB(stat.size)} MB), skipping rotation. SDK should compact naturally — if this warns repeatedly, agent may be in a failure loop.`
+      `[SessionRotation] No compaction found in ${currentFile} (size ${formatMB(stat.size)} MB). Forcing bare-bytes-tail rotation: keeping header + last ${formatMB(HARD_FALLBACK_TAIL_BYTES)} MB of entries. Older state will be archived. Repeated occurrences signal the agent has been in a failure loop.`
     );
-    return false;
+
+    const tailEntries = selectTailEntries(entries, HARD_FALLBACK_TAIL_BYTES);
+    const newEntries: SessionEntry[] = [createSessionHeader(cwd), ...tailEntries];
+    const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
+
+    log.info(
+      `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries (bare-bytes-tail fallback)`
+    );
+    log.info(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
+    return true;
   }
 
   const { entry: compactionEntry, index: compactionIndex } = compaction;

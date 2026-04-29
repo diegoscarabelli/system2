@@ -107,8 +107,7 @@ max_history_messages = 1000  # Max messages in chat history ring buffer
 budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overruns
 
 [session]
-rotation_size_bytes = 10485760        # Regular rotation threshold (~10 MB); requires compaction anchor
-hard_fallback_size_bytes = 15728640   # Hard fallback threshold (~15 MB); force-rotate when no compaction exists
+rotation_size_bytes = 10485760        # Rotation threshold (~10 MB); anchored if compaction exists, bare-bytes-tail otherwise
 
 [delivery]
 max_bytes = 1048576                # Hard cap on inter-agent delivery wire size (~1 MB)
@@ -167,16 +166,16 @@ For the `message_agent` tool, if a single message payload exceeds `max_bytes`, i
 
 ## Session Rotation
 
-Each agent appends turns to a JSONL session file under `~/.system2/sessions/<role>_<id>/`. Files grow without bound unless rotated. The `[session]` section configures two thresholds that together cap session-file growth:
+Each agent appends turns to a JSONL session file under `~/.system2/sessions/<role>_<id>/`. Files grow without bound unless rotated. The `[session]` section configures a single rotation threshold; the rotation strategy is chosen by whether a compaction anchor exists in the file:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `rotation_size_bytes` | 10485760 (10 MB) | Regular rotation threshold. On agent cold start, if the active JSONL exceeds this size, rotation reads the file and copies forward starting from the latest compaction anchor (`firstKeptEntryId`). The old file is renamed to `<filename>.jsonl.archived`. |
-| `hard_fallback_size_bytes` | 15728640 (15 MB) | Hard-fallback threshold. When the file exceeds this size AND no compaction anchor is present (e.g., the agent has been failing every turn long enough that the SDK never wrote a compaction), rotation force-keeps only the session header + the most recent ~1 MB of entries. Older state is archived. This unblocks cold-start recovery from cascade failures where regular rotation would otherwise keep skipping. |
+| `rotation_size_bytes` | 10485760 (10 MB) | Rotation threshold. On agent cold start, if the active JSONL exceeds this size, the file is rotated and the old one is renamed to `<filename>.jsonl.archived`. |
 
-**Invariant:** `hard_fallback_size_bytes` must be `>= rotation_size_bytes`. A hard fallback below the regular threshold can never fire (the regular path always handles it first). If violated, the value is clamped upward at startup with a warning.
+**Two inner paths, one threshold.** Once `rotation_size_bytes` is exceeded:
 
-**When the hard fallback fires**, the server logs a `warn` line of the form `[SessionRotation] No compaction found in <path> (size <X> MB) — exceeded hard fallback threshold...`. Operators can use this as a signal that the agent has been in a failure loop. The keep-tail cap is intentionally small (~1 MB): if the agent has accumulated 15 MB of failed turns, recent context is almost certainly polluted by error retries; the goal is to unblock cold start, not preserve the failure trail.
+- **Anchored rotation (compaction anchor present).** Rotation copies forward starting from the latest compaction `firstKeptEntryId`. This is the normal case.
+- **Bare-bytes-tail rotation (no compaction anchor).** Rotation force-keeps only the session header + the most recent ~1 MB of entries. The server emits a `warn` of the form `[SessionRotation] No compaction found in <path> (size <X> MB). Forcing bare-bytes-tail rotation...`. Reaching the threshold without a compaction signals the agent has been in a failure loop (every turn 4xx'd before the SDK could write one). The keep-tail is intentionally small: at this size, recent context is almost certainly polluted by error retries; the goal is to unblock cold start, not preserve the failure trail.
 
 Rotation only runs on cold start, before any `SessionManager` is created. During in-process growth, the SDK holds an open reference to the active JSONL file; renaming it mid-run would cause the SDK to recreate the file without a header on the next append.
 
