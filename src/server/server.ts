@@ -117,8 +117,14 @@ export class Server {
 
     // Shared AuthResolver: all agents see the same cooldown/failover state
 
-    /** OAuth providers with refresh implementations available in v1. */
-    const SUPPORTED_OAUTH_PROVIDERS: ReadonlySet<LlmProvider> = new Set(['anthropic']);
+    /** OAuth providers with login + refresh implementations available via pi-ai's registry. */
+    const SUPPORTED_OAUTH_PROVIDERS: ReadonlySet<LlmProvider> = new Set([
+      'anthropic',
+      'github-copilot',
+      'google-antigravity',
+      'google-gemini-cli',
+      'openai-codex',
+    ]);
 
     const oauthCredentials: OAuthCredentialsMap = {};
     if (config.llmConfig.oauth) {

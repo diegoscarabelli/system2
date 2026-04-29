@@ -46,7 +46,7 @@ import { filterByRole } from '../skills/loader.js';
 import { log } from '../utils/logger.js';
 import type { AuthTier } from './auth-resolver.js';
 import { AuthResolver } from './auth-resolver.js';
-import { refreshAnthropic } from './oauth.js';
+import { refreshOAuthToken } from './oauth.js';
 import type { AgentRegistry } from './registry.js';
 import {
   calculateDelay,
@@ -542,12 +542,11 @@ export class AgentHost {
     // silently replace with a new empty session. Fall back to continueRecent() only
     // when no .jsonl file exists at all (first-time setup).
     // Refresh near-expiry OAuth tokens before snapshotting auth state into the SDK.
-    // `refreshAnthropic` is currently the only OAuth refresh implementation. server.ts
-    // validates that [llm.oauth] only contains supported providers; if support for
-    // additional OAuth providers is added, this should be extended into a refresh map
-    // keyed by provider.
+    // refreshOAuthToken dispatches to the correct provider-specific handler via pi-ai's
+    // registry; server.ts validates that [llm.oauth] only contains providers pi-ai
+    // supports.
     try {
-      await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
+      await this.authResolver.ensureFresh({ refresh: refreshOAuthToken });
     } catch (err) {
       log.warn('[AgentHost] OAuth refresh failed during initialize:', err);
       // Fall through with possibly-stale token; SDK will return 401 → handlePotentialError refreshes again.
@@ -794,7 +793,7 @@ export class AgentHost {
       this.oauthRefreshAttempted = true;
       try {
         const refreshed = await this.authResolver.ensureFresh({
-          refresh: refreshAnthropic,
+          refresh: refreshOAuthToken,
           force: [this.currentProvider],
         });
         if (refreshed.has(this.currentProvider)) {
@@ -1119,7 +1118,7 @@ export class AgentHost {
       }
 
       try {
-        await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
+        await this.authResolver.ensureFresh({ refresh: refreshOAuthToken });
       } catch (err) {
         log.warn('[AgentHost] OAuth refresh failed during reinitialize:', err);
       }
