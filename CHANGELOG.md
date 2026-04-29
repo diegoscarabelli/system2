@@ -7,11 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-29
+
+### Added
+
+- Claude Pro/Max OAuth support with two-tier auth: OAuth credentials are exhausted before API keys, with automatic refresh-and-retry on 401. New `system2 login` and `system2 logout` CLI commands ([#145](https://github.com/diegoscarabelli/system2/pull/145), [#147](https://github.com/diegoscarabelli/system2/pull/147), [#148](https://github.com/diegoscarabelli/system2/pull/148))
+- OAuth-aware startup banner shows OAuth and API key tiers separately ([#148](https://github.com/diegoscarabelli/system2/pull/148))
+- New `[delivery]` config section with tunable `max_bytes` (default 1 MB), `catch_up_budget_bytes` (default 512 KB), and `narrator_message_excerpt_bytes` (default 16 KB) ([#149](https://github.com/diegoscarabelli/system2/pull/149))
+
 ### Changed
 
 - Pruning compaction now fires on the next `agent_end` after `compaction_depth` is reached, regardless of context usage (previously gated at >= 30%) ([#144](https://github.com/diegoscarabelli/system2/pull/144))
 - Increase narrator `compaction_depth` from 2 to 3 to reduce no-op pruning on small cron-driven turns ([#144](https://github.com/diegoscarabelli/system2/pull/144))
 - Defer the `agent_end` signal (and `ready_for_input`) until pruning compaction completes, preventing a race where the UI could submit a prompt that interleaved with the in-flight compaction ([#144](https://github.com/diegoscarabelli/system2/pull/144))
+
+### Fixed
+
+- Bound inter-agent delivery sizes to prevent oversized-payload cascades: producer-side budget for catch-up payloads, transport cap on individual deliveries, and narrowed drop-pendings to wire-size errors only so token-window overflows still recover via compaction ([#149](https://github.com/diegoscarabelli/system2/pull/149))
+- Agent coordination, completion, and message-burst guardrails ([#146](https://github.com/diegoscarabelli/system2/pull/146))
 
 ## [0.1.3] - 2026-04-22
 
@@ -67,6 +80,7 @@ First published release.
 - Unify knowledge file commits via `commitIfStateDir` ([#125](https://github.com/diegoscarabelli/system2/pull/125))
 - Fall back to Guide when persisted agent no longer exists ([#122](https://github.com/diegoscarabelli/system2/pull/122))
 
-[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/diegoscarabelli/system2/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/diegoscarabelli/system2/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/diegoscarabelli/system2/releases/tag/v0.1.2
