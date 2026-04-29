@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LlmConfig } from '../../shared/index.js';
+import type { LlmConfig, LlmProvider } from '../../shared/index.js';
 import { AuthResolver } from './auth-resolver.js';
-import type { RefreshedTokens } from './oauth.js';
 import type { OAuthCredentials } from './oauth-credentials.js';
 
 function makeConfig(overrides?: Partial<LlmConfig>): LlmConfig {
@@ -438,10 +437,11 @@ describe('AuthResolver.ensureFresh', () => {
       persisted.push(creds);
     });
     const refreshed = await resolver.ensureFresh({
-      refresh: async (): Promise<RefreshedTokens> => ({
+      refresh: async (_provider, _cred): Promise<OAuthCredentials> => ({
         access: 'new-access',
         refresh: 'rt-2',
         expires: Date.now() + 60 * 60_000,
+        label: 'claude-pro',
       }),
     });
     expect(refreshed.has('anthropic')).toBe(true);
@@ -473,7 +473,7 @@ describe('AuthResolver.ensureFresh', () => {
     await resolver.ensureFresh({
       refresh: async () => {
         calls++;
-        return { access: 'x', refresh: 'y', expires: 1 };
+        return { access: 'x', refresh: 'y', expires: 1, label: 'l' };
       },
     });
     expect(calls).toBe(0);
@@ -486,10 +486,15 @@ describe('AuthResolver.ensureFresh', () => {
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
     let count = 0;
-    const slow = async (): Promise<RefreshedTokens> => {
+    const slow = async (): Promise<OAuthCredentials> => {
       count++;
       await new Promise((r) => setTimeout(r, 20));
-      return { access: 'new', refresh: 'rt-2', expires: Date.now() + 60 * 60_000 };
+      return {
+        access: 'new',
+        refresh: 'rt-2',
+        expires: Date.now() + 60 * 60_000,
+        label: 'claude-pro',
+      };
     };
     await Promise.all([
       resolver.ensureFresh({ refresh: slow }),
@@ -536,6 +541,7 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'recovered',
         refresh: 'rt-2',
         expires: Date.now() + 60 * 60_000,
+        label: 'claude-pro',
       }),
     });
     expect(refreshed.has('anthropic')).toBe(true);
@@ -555,7 +561,12 @@ describe('AuthResolver.ensureFresh', () => {
     const refreshed = await resolver.ensureFresh({
       refresh: async () => {
         called = true;
-        return { access: 'forced-new', refresh: 'rt-new', expires: Date.now() + 60 * 60_000 };
+        return {
+          access: 'forced-new',
+          refresh: 'rt-new',
+          expires: Date.now() + 60 * 60_000,
+          label: 'claude-pro',
+        };
       },
       force: ['anthropic'],
     });
@@ -576,11 +587,15 @@ describe('AuthResolver.ensureFresh', () => {
       openai: { ...makeOAuthCreds(60 * 60_000), label: 'openai-oauth' }, // fresh
     });
     await resolver.ensureFresh({
-      refresh: async (refreshToken) => {
-        // Identify which provider is being refreshed by the refresh token
-        if (refreshToken === 'rt-xyz') anthropicCalled = true;
+      refresh: async (provider, _cred) => {
+        if (provider === 'anthropic') anthropicCalled = true;
         else openaiCalled = true;
-        return { access: 'new', refresh: 'rt-new', expires: Date.now() + 60 * 60_000 };
+        return {
+          access: 'new',
+          refresh: 'rt-new',
+          expires: Date.now() + 60 * 60_000,
+          label: provider,
+        };
       },
       force: ['anthropic'], // only force anthropic
     });
@@ -601,16 +616,32 @@ describe('AuthResolver.ensureFresh', () => {
     const seen: string[] = [];
 
     // First refresh: slow, rotates refresh token (but result still expiring soon for second refresh)
-    const slow = async (refreshToken: string): Promise<RefreshedTokens> => {
-      seen.push(refreshToken);
+    const slow = async (
+      _provider: LlmProvider,
+      cred: OAuthCredentials
+    ): Promise<OAuthCredentials> => {
+      seen.push(cred.refresh);
       await new Promise((r) => setTimeout(r, 30));
-      return { access: 'a1', refresh: 'rt-rotated', expires: Date.now() + 1000 }; // still expiring
+      return {
+        access: 'a1',
+        refresh: 'rt-rotated',
+        expires: Date.now() + 1000,
+        label: cred.label,
+      }; // still expiring
     };
 
     // Second refresh: fast, uses the rotated token from the first refresh
-    const fast = async (refreshToken: string): Promise<RefreshedTokens> => {
-      seen.push(refreshToken);
-      return { access: 'a2', refresh: 'rt-final', expires: Date.now() + 60 * 60_000 };
+    const fast = async (
+      _provider: LlmProvider,
+      cred: OAuthCredentials
+    ): Promise<OAuthCredentials> => {
+      seen.push(cred.refresh);
+      return {
+        access: 'a2',
+        refresh: 'rt-final',
+        expires: Date.now() + 60 * 60_000,
+        label: cred.label,
+      };
     };
 
     // Kick off both with force so the second caller hits the post-await path
@@ -626,5 +657,47 @@ describe('AuthResolver.ensureFresh', () => {
     expect(seen[1]).toBe('rt-rotated');
     // Final state should reflect the second refresh
     expect(resolver.getActiveOAuthCredential('anthropic')?.refresh).toBe('rt-final');
+  });
+
+  it('passes full credential to refresh callback and persists extras', async () => {
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'google-antigravity', fallback: [] },
+    };
+    const expiredCred: OAuthCredentials = {
+      access: 'old-access',
+      refresh: 'r1',
+      expires: Date.now() - 1000,
+      label: 'google-antigravity',
+      projectId: 'proj-1',
+      email: 'a@b.com',
+    };
+    const resolver = new AuthResolver(cfg, undefined, {
+      'google-antigravity': expiredCred,
+    });
+
+    const persisted: OAuthCredentials[] = [];
+    resolver.setPersistOAuth('google-antigravity', async (c) => {
+      persisted.push(c);
+    });
+
+    const refresh = vi.fn(
+      async (_provider: LlmProvider, cred: OAuthCredentials): Promise<OAuthCredentials> => ({
+        access: 'new-access',
+        refresh: 'r2',
+        expires: Date.now() + 3600_000,
+        label: cred.label,
+        projectId: cred.projectId, // pi-ai's antigravity refresh round-trips this
+        email: cred.email,
+      })
+    );
+
+    const refreshed = await resolver.ensureFresh({ refresh });
+    expect(refresh).toHaveBeenCalledWith('google-antigravity', expiredCred);
+    expect(refreshed.has('google-antigravity')).toBe(true);
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].projectId).toBe('proj-1');
+    expect(persisted[0].email).toBe('a@b.com');
+    expect(persisted[0].access).toBe('new-access');
   });
 });

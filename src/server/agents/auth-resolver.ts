@@ -14,7 +14,7 @@
 import { AuthStorage } from '@mariozechner/pi-coding-agent';
 import type { LlmConfig, LlmProvider } from '../../shared/index.js';
 import { log } from '../utils/logger.js';
-import { isExpiringSoon, type RefreshedTokens } from './oauth.js';
+import { isExpiringSoon } from './oauth.js';
 import type { OAuthCredentials } from './oauth-credentials.js';
 
 /** Default cooldown durations */
@@ -366,7 +366,7 @@ export class AuthResolver {
    *   revoked-but-not-expired token). Defaults to empty — only expiry-based refresh occurs.
    */
   async ensureFresh(deps: {
-    refresh: (refreshToken: string) => Promise<RefreshedTokens>;
+    refresh: (provider: LlmProvider, credentials: OAuthCredentials) => Promise<OAuthCredentials>;
     /** Providers to refresh regardless of expiry (e.g., on 401 from a revoked-but-not-expired token). */
     force?: LlmProvider[];
   }): Promise<Set<LlmProvider>> {
@@ -414,22 +414,18 @@ export class AuthResolver {
   private async doRefresh(
     provider: LlmProvider,
     cred: OAuthCredentials,
-    refresh: (refreshToken: string) => Promise<RefreshedTokens>
+    refresh: (provider: LlmProvider, credentials: OAuthCredentials) => Promise<OAuthCredentials>
   ): Promise<void> {
-    const tokens = await refresh(cred.refresh);
-    const updated: OAuthCredentials = {
-      access: tokens.access,
-      refresh: tokens.refresh,
-      expires: tokens.expires,
-      label: cred.label,
-    };
-    this.oauthCredentials[provider] = updated;
+    const updated = await refresh(provider, cred);
+    // Preserve label (set during login, not by pi-ai's refresh) but accept any extras pi-ai returned.
+    const merged: OAuthCredentials = { ...updated, label: cred.label };
+    this.oauthCredentials[provider] = merged;
     log.info(`[AuthResolver] OAuth token refreshed for ${provider}:${cred.label}`);
 
     const persist = this.persistCallbacks[provider];
     if (persist) {
       try {
-        await persist(updated);
+        await persist(merged);
       } catch (err) {
         log.warn(`[AuthResolver] Failed to persist refreshed OAuth for ${provider}:`, err);
       }

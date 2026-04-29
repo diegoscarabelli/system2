@@ -58,6 +58,7 @@ describe('OAuth end-to-end flow', () => {
       access: 'sk-ant-oat-new',
       refresh: 'rt-2',
       expires: Date.now() + 60 * 60_000,
+      label: 'claude-pro',
     }));
     const refreshed = await resolver.ensureFresh({ refresh: fakeRefresh });
     expect(refreshed.has('anthropic')).toBe(true);
