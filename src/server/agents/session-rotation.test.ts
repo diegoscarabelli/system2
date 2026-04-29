@@ -351,6 +351,38 @@ describe('rotateSessionIfNeeded', () => {
       warnSpy.mockRestore();
     });
 
+    it('returns header-only when the newest entry alone exceeds the tail cap', () => {
+      // Single entry larger than HARD_FALLBACK_TAIL_BYTES (1 MB). Strict cap means
+      // we drop it rather than writing a rotated file still > 1 MB.
+      const file = join(tmpDir, 'session.jsonl');
+      const huge = 'x'.repeat(2 * 1024 * 1024); // 2 MB string
+      writeJsonl(file, [
+        sessionHeader(),
+        {
+          type: 'message',
+          id: 'huge1',
+          parentId: null,
+          timestamp: new Date().toISOString(),
+          message: { role: 'user', content: [{ type: 'text', text: huge }] },
+        },
+      ]);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+      expect(rotated).toBe(true);
+
+      const newFile = findMostRecentSession(tmpDir);
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+
+      // Only the new session header should remain.
+      expect(newEntries.length).toBe(1);
+      expect(newEntries[0].type).toBe('session');
+      warnSpy.mockRestore();
+    });
+
     it('returns header-only when kept range has no user turn (no safe restart anchor)', () => {
       // All entries are assistant — no user turn exists to anchor the resume on.
       // selectTailEntries walks past everything; rotation writes only the new header.

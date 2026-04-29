@@ -115,6 +115,8 @@ export interface DeliveryConfig {
 export interface SessionConfig {
   /** Rotation threshold in bytes. Above this size, the JSONL is rotated. If a compaction anchor
    *  exists, rotation copies forward from `firstKeptEntryId`. Otherwise it falls back to keeping
-   *  the session header + the most recent ~1 MB tail of entries (bare-bytes-tail rotation). */
+   *  the session header + a bounded tail (up to ~1 MB) starting at the first user-turn entry in
+   *  that tail. If no user turn exists in the kept window — or if a single entry alone exceeds
+   *  the tail cap — rotation writes only the new session header. */
   rotation_size_bytes: number;
 }

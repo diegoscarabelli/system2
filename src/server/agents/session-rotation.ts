@@ -133,31 +133,34 @@ function isUserTurnStart(entry: SessionEntry): boolean {
 }
 
 /**
- * Select the suffix of `entries` that fits within `tailBytes` total UTF-8 bytes
- * AND starts on a safe conversation boundary (a user turn).
+ * Select the suffix of `entries` that fits strictly within `tailBytes` total UTF-8
+ * bytes AND starts on a safe conversation boundary (a user turn).
  *
- * Step 1: walk backward from the end summing entry sizes until adding the next
- * older entry would exceed `tailBytes`. Entries are kept whole — never truncated
- * mid-entry.
+ * Step 1: walk backward from the end summing entry sizes; stop before any entry
+ * (including the newest) would push the total past `tailBytes`. If the newest
+ * entry alone exceeds `tailBytes`, returns empty — the bare-bytes-tail path
+ * exists to unblock cold start, and keeping a single oversized entry would
+ * defeat that purpose.
  *
  * Step 2: from that byte-budget cut, walk forward (toward the newest entries) to
  * the first user-turn entry. That becomes the actual cut point. If no user turn
  * exists in the kept range, returns an empty array — better to cold-start clean
  * than to resume on a dangling tool_result or assistant continuation.
  *
- * The forward walk in step 2 trades a few entries off the tail for SDK-safe
- * resumption. The net keep is always <= `tailBytes` and is always either empty
- * or starts with a user message.
+ * Returned bytes are always <= `tailBytes`, and the result is always either
+ * empty or starts with a user message. Entries are kept whole — never truncated
+ * mid-entry.
  */
 function selectTailEntries(entries: SessionEntry[], tailBytes: number): SessionEntry[] {
   if (entries.length === 0) return [];
 
-  // Step 1: byte-budget cut.
+  // Step 1: byte-budget cut. Strictly enforce tailBytes — never include an entry
+  // whose addition would push the total past the cap, even on the first iteration.
   let totalBytes = 0;
   let firstIndex = entries.length;
   for (let i = entries.length - 1; i >= 0; i--) {
     const entryBytes = Buffer.byteLength(JSON.stringify(entries[i]), 'utf8');
-    if (totalBytes + entryBytes > tailBytes && firstIndex < entries.length) {
+    if (totalBytes + entryBytes > tailBytes) {
       break;
     }
     totalBytes += entryBytes;
