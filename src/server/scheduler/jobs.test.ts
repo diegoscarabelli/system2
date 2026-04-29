@@ -713,6 +713,36 @@ describe('buildAndDeliverMemoryUpdate', () => {
     expect(msg).not.toContain('## Daily summaries to incorporate');
   });
 
+  it('regression: condensation entry is bounded when knowledge file exceeds inline cap', async () => {
+    // A knowledge file > 100 KB must be truncated in the delivery body to prevent blowing
+    // the delivery budget. The truncation marker must appear so the Narrator knows to use
+    // `read` for the rest.
+    const dir = trackTmpDir(makeTmpDir());
+    const knowledgeDir = join(dir, 'knowledge');
+    mkdirSync(knowledgeDir, { recursive: true });
+    writeFileSync(
+      join(knowledgeDir, 'memory.md'),
+      '---\nlast_narrator_update_ts: 2026-03-10T00:00:00Z\n---\n# Memory'
+    );
+    // Write a 110 KB knowledge file (well above the 64 KB inline cap at default settings)
+    const hugeContent = `# Huge knowledge file\n\n${'y'.repeat(110_000)}`;
+    writeFileSync(join(knowledgeDir, 'huge.md'), hugeContent);
+
+    const host = mockNarratorHost();
+    // Use default knowledgeBudgetChars=20_000 so the file is oversized
+    await buildAndDeliverMemoryUpdate(host, 2, dir);
+    expect(host.calls).toHaveLength(1);
+
+    const msg = host.calls[0].content;
+    // Truncation marker must be present
+    expect(msg).toContain('[...truncated: file exceeds');
+    expect(msg).toContain('inline cap');
+    // Full 110 KB of 'y' must NOT appear (message is bounded)
+    expect(msg).not.toContain('y'.repeat(110_000));
+    // But some content was included (not zero-length inline)
+    expect(msg).toContain('y'.repeat(100));
+  });
+
   describe('delivery size bounding (catchUpBudgetBytes)', () => {
     it('(a) does not truncate when total summaries fit within budget', async () => {
       const dir = trackTmpDir(makeTmpDir());
