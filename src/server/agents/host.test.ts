@@ -3718,7 +3718,8 @@ describe('AgentHost', () => {
         resetSessionAfterScheduledTask: opts.reset,
       });
       const internal = host as unknown as ResetInternal;
-      internal.session = { sendCustomMessage: vi.fn() };
+      // Stub dispose so resetSessionToHeader can call it before rotating the JSONL.
+      internal.session = { sendCustomMessage: vi.fn(), dispose: vi.fn() };
       internal._sessionDir = testDir;
       internal._chatCache = null;
       internal.agentRole = 'narrator';
@@ -3837,6 +3838,115 @@ describe('AgentHost', () => {
       expect(internal.initialize).not.toHaveBeenCalled();
     });
 
+    it('explicit caller-provided false beats frontmatter true (override-presence wins)', () => {
+      // Reproduce the precedence merge that initialize() runs at line 377-379:
+      //   if (!resetSessionAfterScheduledTaskOverridden) { reset = frontmatter === true; }
+      // With the override-presence flag, an explicit `false` from the caller must NOT be
+      // silently overridden by frontmatter `true`. Without the flag, this test would
+      // demonstrate the round-1 bug: frontmatter `true` flipping a caller-disabled `false`
+      // back on.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        resetSessionAfterScheduledTask: false,
+      });
+      const internal = host as unknown as {
+        resetSessionAfterScheduledTask: boolean;
+        resetSessionAfterScheduledTaskOverridden: boolean;
+      };
+      // Constructor should have captured the explicit override.
+      expect(internal.resetSessionAfterScheduledTaskOverridden).toBe(true);
+      expect(internal.resetSessionAfterScheduledTask).toBe(false);
+
+      // Mimic the initialize() merge with frontmatter saying `true`.
+      const frontmatterValue = true;
+      if (!internal.resetSessionAfterScheduledTaskOverridden) {
+        internal.resetSessionAfterScheduledTask = frontmatterValue === true;
+      }
+
+      // Override wins: stays false despite frontmatter `true`.
+      expect(internal.resetSessionAfterScheduledTask).toBe(false);
+    });
+
+    it('frontmatter true is honored when caller did not override', () => {
+      // No `resetSessionAfterScheduledTask` in config — so the override-presence flag is false
+      // and initialize()'s merge consults frontmatter.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const internal = host as unknown as {
+        resetSessionAfterScheduledTask: boolean;
+        resetSessionAfterScheduledTaskOverridden: boolean;
+      };
+      expect(internal.resetSessionAfterScheduledTaskOverridden).toBe(false);
+      expect(internal.resetSessionAfterScheduledTask).toBe(false);
+
+      // Mimic the initialize() merge with frontmatter saying `true`.
+      const frontmatterValue = true;
+      if (!internal.resetSessionAfterScheduledTaskOverridden) {
+        internal.resetSessionAfterScheduledTask = frontmatterValue === true;
+      }
+
+      // Caller didn't override, so frontmatter wins.
+      expect(internal.resetSessionAfterScheduledTask).toBe(true);
+    });
+
+    it('sets isReinitializing during reset+reinit window so concurrent deliveries are rejected', async () => {
+      const { internal } = makeHostWithSessionDir({ reset: true });
+      const host = internal as unknown as AgentHost;
+
+      // Hold initialize() in flight so we can observe the in-window state.
+      let resolveInit!: () => void;
+      const initPromise = new Promise<void>((resolve) => {
+        resolveInit = resolve;
+      });
+      internal.initialize = vi.fn().mockImplementation(() => initPromise);
+
+      const details = { sender: 1, receiver: 2, timestamp: Date.now() };
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /x',
+          details,
+          scheduledTask: true,
+          resolve: vi.fn(),
+          reject: vi.fn(),
+        },
+      ];
+      internal.deliverySendCount = 1;
+
+      // Trigger the reset+reinit path. After this returns, isReinitializing should be true.
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      const reinitFlag = (internal as unknown as { isReinitializing: boolean }).isReinitializing;
+      expect(reinitFlag).toBe(true);
+
+      // A delivery landing during the reinit window must be rejected with the cleaner
+      // "Agent is reinitializing" error, NOT the generic "not initialized" error. Even though
+      // resetSessionToHeader nulled `internal.session`, deliverMessage checks isReinitializing
+      // first so the more specific error wins.
+      await expect(
+        host.deliverMessage('[Message from guide agent (id=1)]\n\nhi', {
+          sender: 1,
+          receiver: 2,
+          timestamp: Date.now(),
+        })
+      ).rejects.toThrow(/Agent is reinitializing/);
+
+      // Let initialize() resolve and confirm the flag clears via the .finally hook.
+      resolveInit();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      const reinitFlagAfter = (internal as unknown as { isReinitializing: boolean })
+        .isReinitializing;
+      expect(reinitFlagAfter).toBe(false);
+    });
+
     it('replays queued deliveries against the fresh session after reset', async () => {
       const { internal } = makeHostWithSessionDir({ reset: true });
 
@@ -3846,7 +3956,7 @@ describe('AgentHost', () => {
       // (with its own sendCustomMessage spy) that the replay loop can write to.
       const freshSendCustomMessage = vi.fn().mockResolvedValue(undefined);
       internal.initialize = vi.fn().mockImplementation(async () => {
-        internal.session = { sendCustomMessage: freshSendCustomMessage };
+        internal.session = { sendCustomMessage: freshSendCustomMessage, dispose: vi.fn() };
       });
 
       const details = { sender: 1, receiver: 2, timestamp: Date.now() };

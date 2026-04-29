@@ -236,6 +236,12 @@ export class AgentHost {
   private maxDeliveryBytes: number;
   private sessionRotationSizeBytes: number | undefined;
   private resetSessionAfterScheduledTask: boolean;
+  /** True when the constructor caller passed `resetSessionAfterScheduledTask` explicitly (true OR
+   *  false). Used in initialize() to decide whether to consult the agent library frontmatter. We
+   *  cannot rely on the boolean field alone because `false` and "unset" are indistinguishable —
+   *  without this flag, a caller passing `false` to disable a role's frontmatter `true` would be
+   *  silently overridden right back. */
+  private resetSessionAfterScheduledTaskOverridden: boolean;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -258,6 +264,10 @@ export class AgentHost {
     this.sessionRotationSizeBytes = config.sessionRotationSizeBytes;
     // Caller-provided override; otherwise initialize() reads it from the agent library frontmatter
     // (`reset_session_after_scheduled_task` field). Default false: only opted-in roles reset.
+    // Track override-presence separately so a caller passing `false` (to disable a role's
+    // frontmatter `true`) is distinguishable from "caller did not specify".
+    this.resetSessionAfterScheduledTaskOverridden =
+      config.resetSessionAfterScheduledTask !== undefined;
     this.resetSessionAfterScheduledTask = config.resetSessionAfterScheduledTask ?? false;
 
     // Store LLM config for openai-compatible provider registration
@@ -372,9 +382,11 @@ export class AgentHost {
 
     this.agentModels = agentConfig.models ?? {};
     // Source the session-reset flag from the agent library frontmatter unless the constructor
-    // explicitly opted in. Caller-provided `true` always wins; otherwise the frontmatter value
-    // (default false for unset) governs reset behavior for this role.
-    if (!this.resetSessionAfterScheduledTask) {
+    // caller passed an explicit value. Precedence: explicit caller value (true OR false) wins;
+    // otherwise the frontmatter value (default false for unset) governs reset behavior. Gating on
+    // an "overridden" flag rather than the boolean itself lets a caller pass `false` to disable a
+    // role's frontmatter `true` — without this, `false` would be indistinguishable from "unset".
+    if (!this.resetSessionAfterScheduledTaskOverridden) {
       this.resetSessionAfterScheduledTask = agentConfig.reset_session_after_scheduled_task === true;
     }
     // Static parts of the system prompt (loaded once)
@@ -639,8 +651,13 @@ export class AgentHost {
       if (completedScheduledTask && this.resetSessionAfterScheduledTask) {
         this.resetSessionToHeader();
         // Reinitialize asynchronously so the next scheduled tick has a live session ready.
-        // Errors are logged inside reinitialize(); cron ticks are 30 min apart so this has
-        // plenty of headroom. Using void-and-catch to keep handleSessionEvent synchronous.
+        // Errors are logged in the .catch below; cron ticks are 30 min apart so initialize()
+        // has plenty of headroom. Using void-and-catch to keep handleSessionEvent synchronous.
+        // Set isReinitializing so any deliverMessage()/prompt() calls landing during the
+        // reset+reinit window get the existing "Agent is reinitializing" rejection instead of
+        // racing against a half-torn-down session, then clear it in .finally so the next tick
+        // is unblocked even if initialize() throws.
+        this.isReinitializing = true;
         void this.initialize()
           .then(() => {
             // Replay any deliveries queued while the just-completed scheduled task was running
@@ -650,6 +667,9 @@ export class AgentHost {
           })
           .catch((err) => {
             log.error('[AgentHost] Failed to reinitialize after scheduled-task reset:', err);
+          })
+          .finally(() => {
+            this.isReinitializing = false;
           });
       }
 
@@ -1391,6 +1411,9 @@ export class AgentHost {
    * @param options.isSteering If true, the message is queued as a steering message (inserted ASAP into the agent loop)
    */
   async prompt(content: string, options?: { isSteering?: boolean }): Promise<void> {
+    if (this.isReinitializing) {
+      throw new Error('Agent is reinitializing, prompt rejected');
+    }
     if (!this.session) {
       throw new Error('AgentHost not initialized. Call initialize() first.');
     }
@@ -1432,11 +1455,15 @@ export class AgentHost {
     details: { sender: number; receiver: number; timestamp: number },
     urgent?: boolean
   ): Promise<void> {
-    if (!this.session) {
-      return Promise.reject(new Error('AgentHost not initialized. Call initialize() first.'));
-    }
+    // Check isReinitializing BEFORE the null-session guard. The scheduled-task reset path
+    // explicitly nulls `this.session` before kicking off initialize(), so during that window
+    // both conditions hold; surfacing the more specific "reinitializing" error helps callers
+    // distinguish a transient reinit from a permanent uninitialized state.
     if (this.isReinitializing) {
       return Promise.reject(new Error('Agent is reinitializing, delivery rejected'));
+    }
+    if (!this.session) {
+      return Promise.reject(new Error('AgentHost not initialized. Call initialize() first.'));
     }
 
     // Check wire-size budget before queuing
@@ -1690,16 +1717,31 @@ export class AgentHost {
     if (!activeFile) return;
 
     try {
-      const newFilename = writeRotatedFile(sessionDir, activeFile, [
-        createSessionHeader(SYSTEM2_DIR),
-      ]);
-      // Detach session-event subscription before clearing the session so listeners don't fire
-      // against a torn-down session. The next prompt/delivery will trigger initialize().
+      // Tear the SDK session down BEFORE renaming the active JSONL. The pi-coding-agent
+      // SessionManager uses `appendFileSync(this.sessionFile, ...)` and resolves `sessionFile`
+      // up front. After we rename the active file, any further append from the live SDK session
+      // would recreate the file at the original path WITHOUT a header — exactly the hazard the
+      // existing rotateSessionIfNeeded path warns about. Order: detach our subscription, capture
+      // and null the session ref so concurrent paths can't reuse it, then call session.dispose()
+      // (which calls _disconnectFromAgent and clears the SDK's internal event listeners).
       if (this.unsubscribeSession) {
         this.unsubscribeSession();
         this.unsubscribeSession = null;
       }
+      const oldSession = this.session;
       this.session = null;
+      if (oldSession) {
+        try {
+          oldSession.dispose();
+        } catch (disposeErr) {
+          // dispose() should not throw — log and continue so the rotation still happens.
+          log.warn('[AgentHost] Error disposing old session during reset:', disposeErr);
+        }
+      }
+
+      const newFilename = writeRotatedFile(sessionDir, activeFile, [
+        createSessionHeader(SYSTEM2_DIR),
+      ]);
       // Reset compaction state alongside the session: the new JSONL has no prior compactions,
       // so leaving the counter at its prior value (observed at 241+ during the cascade this
       // feature fixes) would let the pruning trigger fire spuriously against the empty file.
