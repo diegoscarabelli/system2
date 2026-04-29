@@ -111,3 +111,14 @@ export interface DeliveryConfig {
   catch_up_budget_bytes: number;
   narrator_message_excerpt_bytes: number;
 }
+
+export interface SessionConfig {
+  /** Regular rotation threshold in bytes. Above this size, rotation reads the JSONL and
+   *  copies forward from the latest compaction anchor. */
+  rotation_size_bytes: number;
+  /** Hard-fallback threshold in bytes. When the file exceeds this AND no compaction anchor
+   *  exists (e.g., the agent has been failing to complete turns for long enough that the SDK
+   *  never wrote a compaction), rotation force-keeps only the session header + the most recent
+   *  tail of entries so cold start can recover. Must be >= `rotation_size_bytes`. */
+  hard_fallback_size_bytes: number;
+}

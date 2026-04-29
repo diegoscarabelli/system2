@@ -26,6 +26,7 @@ import type {
   SchedulerConfig,
   ServerMessage,
   ServicesConfig,
+  SessionConfig,
   ToolsConfig,
 } from '../shared/index.js';
 import type { OAuthCredentialsMap } from './agents/auth-resolver.js';
@@ -80,6 +81,7 @@ export interface ServerConfig {
   databasesConfig?: DatabasesConfig;
   agentsConfig?: AgentsConfig;
   deliveryConfig?: DeliveryConfig;
+  sessionConfig?: SessionConfig;
 }
 
 export class Server {
@@ -169,6 +171,8 @@ export class Server {
     const callbacks = this.buildAgentCallbacks();
     const maxDeliveryBytes = config.deliveryConfig?.max_bytes ?? MAX_DELIVERY_BYTES;
     const narratorMessageExcerptBytes = config.deliveryConfig?.narrator_message_excerpt_bytes;
+    const sessionRotationSizeBytes = config.sessionConfig?.rotation_size_bytes;
+    const sessionHardFallbackSizeBytes = config.sessionConfig?.hard_fallback_size_bytes;
     this.agentHost = new AgentHost({
       db: this.db,
       agentId: guideAgent.id,
@@ -185,6 +189,8 @@ export class Server {
       knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
       maxDeliveryBytes,
       narratorMessageExcerptBytes,
+      sessionRotationSizeBytes,
+      sessionHardFallbackSizeBytes,
       ...callbacks,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
@@ -206,6 +212,8 @@ export class Server {
       knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
       maxDeliveryBytes,
       narratorMessageExcerptBytes,
+      sessionRotationSizeBytes,
+      sessionHardFallbackSizeBytes,
       ...callbacks,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
@@ -492,6 +500,8 @@ export class Server {
       knowledgeBudgetChars: this.config.knowledgeConfig?.budget_chars,
       maxDeliveryBytes: this.config.deliveryConfig?.max_bytes ?? MAX_DELIVERY_BYTES,
       narratorMessageExcerptBytes: this.config.deliveryConfig?.narrator_message_excerpt_bytes,
+      sessionRotationSizeBytes: this.config.sessionConfig?.rotation_size_bytes,
+      sessionHardFallbackSizeBytes: this.config.sessionConfig?.hard_fallback_size_bytes,
       ...this.buildAgentCallbacks(),
     });
 

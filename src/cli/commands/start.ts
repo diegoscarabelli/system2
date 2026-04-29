@@ -107,6 +107,7 @@ export async function start(options: {
       databasesConfig: config.databases,
       agentsConfig: config.agents,
       deliveryConfig: config.delivery,
+      sessionConfig: config.session,
     });
 
     await server.start();
