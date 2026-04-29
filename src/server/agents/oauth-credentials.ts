@@ -9,6 +9,9 @@ export interface OAuthCredentials {
   /** Epoch ms when access token expires (already includes pi-ai's 5 min safety buffer). */
   expires: number;
   label: string;
+  /** Provider-specific extras (projectId, email, enterpriseDomain). Preserved through
+   *  save/load and refresh so pi-ai's per-provider refresh handlers can rely on them. */
+  [key: string]: unknown;
 }
 
 const OAUTH_DIR = 'oauth';
