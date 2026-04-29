@@ -3,20 +3,28 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentHost } from '../agents/host.js';
+import { type AgentHost, MAX_DELIVERY_BYTES } from '../agents/host.js';
 import type { DatabaseClient } from '../db/client.js';
+import { log } from '../utils/logger.js';
 import {
   buildAndDeliverDailySummary,
   buildAndDeliverMemoryUpdate,
   collectAgentActivity,
+  collectAgentActivityWithTimestamps,
+  type DbChangeTable,
   formatMarkdownTable,
   JobSkipped,
+  NARRATOR_MESSAGE_EXCERPT_BYTES,
   readFrontmatterField,
   readTailChars,
   registerNarratorJobs,
+  renderAgentActivitySections,
   resolveDailySummaryTimestamp,
   stripSessionEntry,
+  type TimestampedEntry,
   trackJobExecution,
+  truncateDbChangesToFit,
+  truncateOldestToFit,
   writeFrontmatterField,
 } from './jobs.js';
 import type { Scheduler } from './scheduler.js';
@@ -249,6 +257,521 @@ describe('collectAgentActivity', () => {
   });
 });
 
+describe('truncateOldestToFit', () => {
+  it('returns empty result for empty input', () => {
+    const result = truncateOldestToFit([], 1024);
+    expect(result.kept).toEqual([]);
+    expect(result.droppedCount).toBe(0);
+    expect(result.droppedRange).toBeNull();
+  });
+
+  it('keeps all entries when total is under budget', () => {
+    const entries = [
+      {
+        id: 'a:f:0',
+        timestamp: '2026-01-01T01:00:00Z',
+        rendered: 'a'.repeat(100),
+        agentLabel: 'a',
+      },
+      {
+        id: 'b:f:0',
+        timestamp: '2026-01-01T02:00:00Z',
+        rendered: 'b'.repeat(100),
+        agentLabel: 'b',
+      },
+    ];
+    const result = truncateOldestToFit(entries, 500);
+    expect(result.droppedCount).toBe(0);
+    expect(result.droppedRange).toBeNull();
+    expect(result.kept).toHaveLength(2);
+    // Returned in sorted order
+    expect(result.kept[0].timestamp).toBe('2026-01-01T01:00:00Z');
+  });
+
+  it('drops oldest entries first when total exceeds budget', () => {
+    const entries = [
+      {
+        id: 'c:f:0',
+        timestamp: '2026-01-01T03:00:00Z',
+        rendered: 'c'.repeat(200),
+        agentLabel: 'c',
+      },
+      {
+        id: 'a:f:0',
+        timestamp: '2026-01-01T01:00:00Z',
+        rendered: 'a'.repeat(200),
+        agentLabel: 'a',
+      }, // oldest
+      {
+        id: 'b:f:0',
+        timestamp: '2026-01-01T02:00:00Z',
+        rendered: 'b'.repeat(200),
+        agentLabel: 'b',
+      },
+    ];
+    // Budget of 350 means the two oldest (400 total) must be trimmed to fit
+    const result = truncateOldestToFit(entries, 350);
+    expect(result.droppedCount).toBeGreaterThan(0);
+    // Total rendered size of kept entries must fit within budget
+    const keptSize = result.kept.reduce((s, e) => s + e.rendered.length, 0);
+    expect(keptSize).toBeLessThanOrEqual(350);
+    // The newest entry should survive
+    const keptTimestamps = result.kept.map((e) => e.timestamp);
+    expect(keptTimestamps).toContain('2026-01-01T03:00:00Z');
+    // The dropped range starts at the oldest
+    expect(result.droppedRange?.from).toBe('2026-01-01T01:00:00Z');
+  });
+
+  it('handles a single entry that exceeds the budget on its own', () => {
+    const entries = [
+      {
+        id: 'x:f:0',
+        timestamp: '2026-01-01T01:00:00Z',
+        rendered: 'x'.repeat(1000),
+        agentLabel: 'x',
+      },
+    ];
+    const result = truncateOldestToFit(entries, 500);
+    expect(result.kept).toEqual([]);
+    expect(result.droppedCount).toBe(1);
+    expect(result.droppedRange?.from).toBe('2026-01-01T01:00:00Z');
+    expect(result.droppedRange?.to).toBe('2026-01-01T01:00:00Z');
+  });
+});
+
+describe('truncateDbChangesToFit', () => {
+  function makeTable(
+    name: string,
+    timeColumn: string,
+    rows: Record<string, unknown>[]
+  ): DbChangeTable {
+    return { name, sql: `SELECT * FROM ${name}`, rows, timeColumn };
+  }
+
+  it('returns empty result for empty input', () => {
+    const result = truncateDbChangesToFit([], 1024);
+    expect(result.rendered).toBe('');
+    expect(result.droppedTotal).toBe(0);
+    expect(result.droppedRanges).toEqual([]);
+  });
+
+  it('keeps all rows when total is under budget', () => {
+    const rows = [
+      { id: 1, updated_at: '2026-01-01T10:00:00Z', title: 'Task A' },
+      { id: 2, updated_at: '2026-01-01T11:00:00Z', title: 'Task B' },
+    ];
+    const result = truncateDbChangesToFit([makeTable('task', 'updated_at', rows)], 100_000);
+    expect(result.droppedTotal).toBe(0);
+    expect(result.droppedRanges).toEqual([]);
+    expect(result.rendered).toContain('Task A');
+    expect(result.rendered).toContain('Task B');
+    expect(result.rendered).not.toContain('[NOTE: dropped');
+  });
+
+  it('keeps newest rows and drops oldest when over budget', () => {
+    const rows: Record<string, unknown>[] = [];
+    for (let i = 0; i < 50; i++) {
+      rows.push({
+        id: i,
+        updated_at: `2026-01-01T${String(i).padStart(2, '0')}:00:00Z`,
+        payload: 'x'.repeat(200),
+      });
+    }
+    // Budget tight enough to force truncation: each row is ~220 bytes
+    const result = truncateDbChangesToFit([makeTable('task', 'updated_at', rows)], 2_000);
+    expect(result.droppedTotal).toBeGreaterThan(0);
+    expect(result.droppedRanges).toHaveLength(1);
+    expect(result.droppedRanges[0].table).toBe('task');
+    // Annotation is present in the rendered output
+    expect(result.rendered).toContain('[NOTE: dropped');
+    expect(result.rendered).toContain('oldest DB-change rows from task');
+    // Only newest rows kept (highest timestamps survive)
+    expect(result.rendered).toContain('2026-01-01T49:00:00Z');
+    // Oldest row id 0 must not appear as a table row (it may appear in the annotation range)
+    const tableRows = result.rendered
+      .split('\n')
+      .filter((l) => l.startsWith('|') && !l.startsWith('| id') && !l.startsWith('|---'));
+    const rowIds = tableRows.map((l) => Number(l.split('|')[1].trim()));
+    expect(rowIds).not.toContain(0); // id=0 is the oldest row, should be dropped
+  });
+
+  it('handles multiple tables, splitting budget evenly', () => {
+    const taskRows: Record<string, unknown>[] = [];
+    const commentRows: Record<string, unknown>[] = [];
+    for (let i = 0; i < 30; i++) {
+      taskRows.push({
+        id: i,
+        updated_at: `2026-01-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
+        payload: 'a'.repeat(200),
+      });
+      commentRows.push({
+        id: i + 100,
+        created_at: `2026-01-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
+        payload: 'b'.repeat(200),
+      });
+    }
+    const tables = [
+      makeTable('task', 'updated_at', taskRows),
+      makeTable('task_comment', 'created_at', commentRows),
+    ];
+    // Very tight budget to force truncation in both tables
+    const result = truncateDbChangesToFit(tables, 2_000);
+    expect(result.rendered).toContain('### task');
+    expect(result.rendered).toContain('### task_comment');
+    // Both tables were independently truncated
+    expect(result.droppedTotal).toBeGreaterThan(0);
+  });
+
+  it('reclaims unused budget from empty tables to non-empty ones', () => {
+    // 4 tables: 3 empty + 1 with many rows
+    const emptyTaskRows: Record<string, unknown>[] = [];
+    const emptyCommentRows: Record<string, unknown>[] = [];
+    const emptyLinkRows: Record<string, unknown>[] = [];
+
+    // One table with many rows
+    const projectRows: Record<string, unknown>[] = [];
+    for (let i = 0; i < 50; i++) {
+      projectRows.push({
+        id: i,
+        updated_at: `2026-01-01T${String(i).padStart(2, '0')}:00:00Z`,
+        name: `Project ${i}`,
+        payload: 'x'.repeat(150),
+      });
+    }
+
+    const tables = [
+      makeTable('task', 'updated_at', emptyTaskRows),
+      makeTable('task_comment', 'created_at', emptyCommentRows),
+      makeTable('task_link', 'created_at', emptyLinkRows),
+      makeTable('project', 'updated_at', projectRows),
+    ];
+
+    // With budget = 4000:
+    // Without reclamation: perTableBudget = 4000 / 4 = 1000 per table
+    //   - The 1 non-empty table would get only 1000 bytes, dropping most rows
+    // With reclamation: perTableBudget = 4000 / 1 = 4000 for the 1 non-empty table
+    //   - The 1 non-empty table gets the full 4000 bytes, keeping more rows
+    const budget = 4000;
+    const result = truncateDbChangesToFit(tables, budget);
+
+    // All 4 table headers must be present (including the empty ones)
+    expect(result.rendered).toContain('### task');
+    expect(result.rendered).toContain('### task_comment');
+    expect(result.rendered).toContain('### task_link');
+    expect(result.rendered).toContain('### project');
+
+    // Empty tables render "(no changes)" placeholder
+    expect(result.rendered).toContain('(no changes)');
+
+    // Some rows should be kept from the non-empty table
+    expect(result.rendered).toContain('Project');
+
+    // With the full budget available to the single non-empty table,
+    // fewer rows should be dropped compared to even-split budget.
+    // A single row is ~175 bytes, so at 1000 bytes per table (4-way split),
+    // we'd keep ~5 rows. With 4000 bytes (reclaimed), we'd keep ~22 rows.
+    // We verify by checking that the project section uses more of its budget.
+    const projectSection = result.rendered.split('### project')[1].split('###')[0];
+    const projectTableLines = projectSection
+      .split('\n')
+      .filter((l) => l.startsWith('|') && !l.startsWith('| id') && !l.startsWith('|---'));
+    expect(projectTableLines.length).toBeGreaterThan(5);
+  });
+
+  it('integration: large project DB changes fit within MAX_DELIVERY_BYTES', async () => {
+    // Simulate 2000 task updates (~200 bytes each = ~400 KB raw)
+    const rows: Record<string, unknown>[] = [];
+    for (let i = 0; i < 2000; i++) {
+      rows.push({
+        id: i,
+        project: 1,
+        title: `Task ${i}`,
+        status: 'done',
+        updated_at: `2026-01-01T${String(Math.floor(i / 100)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00Z`,
+        description: 'y'.repeat(100),
+      });
+    }
+
+    const CATCH_UP_BUDGET = 512 * 1024;
+    const DB_BUDGET = Math.floor(CATCH_UP_BUDGET * 0.25); // 25%
+    const result = truncateDbChangesToFit([makeTable('task', 'updated_at', rows)], DB_BUDGET);
+
+    // The rendered DB section must fit within the DB budget
+    expect(Buffer.byteLength(result.rendered, 'utf8')).toBeLessThanOrEqual(
+      DB_BUDGET + 500 // allow small annotation overhead
+    );
+    expect(result.droppedTotal).toBeGreaterThan(0);
+    expect(result.rendered).toContain('[NOTE: dropped');
+  });
+
+  it('drops ALL rows when first (newest) row alone exceeds per-table budget', () => {
+    // A single row with a description field that is larger than the budget
+    const hugeDescription = 'x'.repeat(5000);
+    const rows = [
+      {
+        id: 1,
+        title: 'Task with giant description',
+        description: hugeDescription,
+        updated_at: '2026-01-01T10:00:00Z',
+      },
+    ];
+    const budget = 1000; // 1 KB — the row alone is ~5000+ bytes
+
+    const result = truncateDbChangesToFit([makeTable('task', 'updated_at', rows)], budget);
+
+    // All rows must be dropped
+    expect(result.droppedTotal).toBe(1);
+    expect(result.droppedRanges).toHaveLength(1);
+    expect(result.droppedRanges[0].table).toBe('task');
+    expect(result.droppedRanges[0].count).toBe(1);
+
+    // Annotation must name the table and mention budget
+    expect(result.rendered).toContain('dropped all 1 rows from task');
+    expect(result.rendered).toContain('first row alone exceeds per-table budget');
+
+    // Must NOT contain [object Object] or any row data
+    expect(result.rendered).not.toContain('[object Object]');
+    expect(result.rendered).not.toContain('x'.repeat(100)); // no huge content leaked
+  });
+});
+
+describe('collectAgentActivityWithTimestamps', () => {
+  it('returns empty array for agents without session dirs', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const agents = [{ id: 1, role: 'guide', project_name: null }];
+    const result = collectAgentActivityWithTimestamps(
+      dir,
+      agents,
+      '2025-01-01T00:00:00Z',
+      '2025-12-31T23:59:59Z'
+    );
+    expect(result).toEqual([]);
+  });
+
+  it('returns TimestampedEntry objects for in-window entries', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(sessionDir, { recursive: true });
+
+    const entryTs = '2025-06-01T10:30:00Z';
+    const entry = JSON.stringify({
+      type: 'message',
+      timestamp: entryTs,
+      message: { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+    });
+    writeFileSync(join(sessionDir, 'session.jsonl'), entry);
+
+    const agents = [{ id: 1, role: 'guide', project_name: null }];
+    const result = collectAgentActivityWithTimestamps(
+      dir,
+      agents,
+      '2025-06-01T10:00:00Z',
+      '2025-06-01T11:00:00Z'
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].timestamp).toBe(entryTs);
+    expect(typeof result[0].rendered).toBe('string');
+    // rendered is a JSON string of the stripped entry
+    const parsed = JSON.parse(result[0].rendered);
+    expect(parsed.timestamp).toBe(entryTs);
+  });
+
+  it('reuses cached entries on a second call with the same cache (no re-read)', () => {
+    const dir = trackTmpDir(makeTmpDir());
+
+    // Two agents, one session each, all entries in-window
+    const guideDir = join(dir, 'sessions', 'guide_1');
+    const conductorDir = join(dir, 'sessions', 'conductor_2');
+    mkdirSync(guideDir, { recursive: true });
+    mkdirSync(conductorDir, { recursive: true });
+
+    const guideEntry = JSON.stringify({
+      type: 'message',
+      timestamp: '2025-06-01T10:30:00Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'guide msg' }] },
+    });
+    const conductorEntry = JSON.stringify({
+      type: 'message',
+      timestamp: '2025-06-01T10:31:00Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'conductor msg' }] },
+    });
+    writeFileSync(join(guideDir, 'session.jsonl'), guideEntry);
+    writeFileSync(join(conductorDir, 'session.jsonl'), conductorEntry);
+
+    const agents = [
+      { id: 1, role: 'guide', project_name: null },
+      { id: 2, role: 'conductor', project_name: null },
+    ];
+    const cache = new Map<string, TimestampedEntry[]>();
+    const lastRunTs = '2025-06-01T10:00:00Z';
+    const newRunTs = '2025-06-01T11:00:00Z';
+
+    const first = collectAgentActivityWithTimestamps(
+      dir,
+      agents,
+      lastRunTs,
+      newRunTs,
+      undefined,
+      cache
+    );
+    expect(first).toHaveLength(2);
+    expect(cache.size).toBe(2);
+    expect(cache.has('guide_1')).toBe(true);
+    expect(cache.has('conductor_2')).toBe(true);
+
+    // Mutate session files between calls. If the second call re-read from disk,
+    // it would return the new (now out-of-window) content. With the cache hit it
+    // returns the originally-cached entries unchanged.
+    writeFileSync(join(guideDir, 'session.jsonl'), '');
+    writeFileSync(join(conductorDir, 'session.jsonl'), '');
+
+    const second = collectAgentActivityWithTimestamps(
+      dir,
+      agents,
+      lastRunTs,
+      newRunTs,
+      undefined,
+      cache
+    );
+    expect(second).toHaveLength(2);
+    expect(second[0].id).toBe(first[0].id);
+    expect(second[1].id).toBe(first[1].id);
+    expect(second[0].rendered).toBe(first[0].rendered);
+    expect(second[1].rendered).toBe(first[1].rendered);
+  });
+});
+
+describe('renderAgentActivitySections', () => {
+  it('renders (no activity) when entries array is empty', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(sessionDir, { recursive: true });
+
+    // Write an entry so the session dir exists but pass an empty kept array
+    const entryTs = '2025-06-01T10:30:00Z';
+    writeFileSync(
+      join(sessionDir, 'session.jsonl'),
+      JSON.stringify({
+        type: 'message',
+        timestamp: entryTs,
+        message: { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+      })
+    );
+
+    const agents = [{ id: 1, role: 'guide', project_name: null }];
+    const result = renderAgentActivitySections(
+      dir,
+      agents,
+      '2025-06-01T10:00:00Z',
+      '2025-06-01T11:00:00Z',
+      [] // empty kept set
+    );
+    expect(result).toContain('(no activity)');
+  });
+
+  it('renders only the kept entries when a subset is passed', () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(sessionDir, { recursive: true });
+
+    const ts1 = '2025-06-01T10:00:00Z';
+    const ts2 = '2025-06-01T10:30:00Z';
+    const e1 = {
+      type: 'message',
+      timestamp: ts1,
+      message: { role: 'user', content: [{ type: 'text', text: 'first' }] },
+    };
+    const e2 = {
+      type: 'message',
+      timestamp: ts2,
+      message: { role: 'user', content: [{ type: 'text', text: 'second' }] },
+    };
+    writeFileSync(
+      join(sessionDir, 'session.jsonl'),
+      [JSON.stringify(e1), JSON.stringify(e2)].join('\n')
+    );
+
+    const agents = [{ id: 1, role: 'guide', project_name: null }];
+    // Only pass the second entry as "kept"
+    const kept = [
+      {
+        id: 'guide_1:session.jsonl:1',
+        timestamp: ts2,
+        rendered: JSON.stringify({ ...e2 }),
+        agentLabel: 'guide_1 (system-wide)',
+      },
+    ];
+    const result = renderAgentActivitySections(
+      dir,
+      agents,
+      '2025-06-01T09:00:00Z',
+      '2025-06-01T11:00:00Z',
+      kept
+    );
+    expect(result).toContain(ts2);
+    expect(result).not.toContain(ts1);
+  });
+
+  it('regression: two entries with identical rendered strings from different agents each appear once (not deduped)', () => {
+    // Before the refactor, renderAgentActivitySections built a Set<string> keyed on
+    // rendered JSON. If two distinct entries had the same rendered string (e.g. same
+    // timestamp + same content from different agent sessions), both would appear in the
+    // keptSet but the filter could match both against the same bucket — or one could
+    // silently shadow the other. The stable-id / agentLabel grouping approach eliminates
+    // this class of bug: each entry is placed in its agent's bucket by label, not by
+    // rendered string.
+    const dir = trackTmpDir(makeTmpDir());
+
+    // Two agents with identical content in their sessions
+    const sessionDir1 = join(dir, 'sessions', 'guide_1');
+    const sessionDir2 = join(dir, 'sessions', 'guide_2');
+    mkdirSync(sessionDir1, { recursive: true });
+    mkdirSync(sessionDir2, { recursive: true });
+
+    // Identical timestamp and content — these entries render to the same JSON string
+    const ts = '2025-06-01T10:00:00Z';
+    const entry = {
+      type: 'message',
+      timestamp: ts,
+      message: { role: 'user', content: [{ type: 'text', text: 'identical content' }] },
+    };
+    writeFileSync(join(sessionDir1, 'session.jsonl'), JSON.stringify(entry));
+    writeFileSync(join(sessionDir2, 'session.jsonl'), JSON.stringify(entry));
+
+    const agents = [
+      { id: 1, role: 'guide', project_name: null },
+      { id: 2, role: 'guide', project_name: null },
+    ];
+
+    // Collect all entries (both agents, identical rendered strings)
+    const allEntries = collectAgentActivityWithTimestamps(
+      dir,
+      agents,
+      '2025-06-01T09:00:00Z',
+      '2025-06-01T11:00:00Z'
+    );
+    expect(allEntries).toHaveLength(2);
+
+    // Pass all as "kept" — both should appear in the output, one per agent section
+    const result = renderAgentActivitySections(
+      dir,
+      agents,
+      '2025-06-01T09:00:00Z',
+      '2025-06-01T11:00:00Z',
+      allEntries
+    );
+
+    // Both agent sections must be present and non-empty
+    expect(result).toContain('### guide_1 (system-wide)');
+    expect(result).toContain('### guide_2 (system-wide)');
+    // Neither section should show (no activity)
+    const guide1Section = result.split('### guide_2')[0];
+    const guide2Section = result.split('### guide_2')[1];
+    expect(guide1Section).not.toContain('(no activity)');
+    expect(guide2Section).not.toContain('(no activity)');
+  });
+});
+
 describe('buildAndDeliverMemoryUpdate', () => {
   it('throws JobSkipped when no daily summary files exist', async () => {
     const dir = trackTmpDir(makeTmpDir());
@@ -352,6 +875,235 @@ describe('buildAndDeliverMemoryUpdate', () => {
     expect(msg).toContain('infrastructure.md');
     expect(msg).not.toContain('## Daily summaries to incorporate');
   });
+
+  it('regression: condensation entry is bounded when knowledge file exceeds inline cap', async () => {
+    // A knowledge file > 100 KB must be truncated in the delivery body to prevent blowing
+    // the delivery budget. The truncation marker must appear so the Narrator knows to use
+    // `read` for the rest.
+    const dir = trackTmpDir(makeTmpDir());
+    const knowledgeDir = join(dir, 'knowledge');
+    mkdirSync(knowledgeDir, { recursive: true });
+    writeFileSync(
+      join(knowledgeDir, 'memory.md'),
+      '---\nlast_narrator_update_ts: 2026-03-10T00:00:00Z\n---\n# Memory'
+    );
+    // Write a 110 KB knowledge file (well above the 64 KB inline cap at default settings)
+    const hugeContent = `# Huge knowledge file\n\n${'y'.repeat(110_000)}`;
+    writeFileSync(join(knowledgeDir, 'huge.md'), hugeContent);
+
+    const host = mockNarratorHost();
+    // Use default knowledgeBudgetChars=20_000 so the file is oversized
+    await buildAndDeliverMemoryUpdate(host, 2, dir);
+    expect(host.calls).toHaveLength(1);
+
+    const msg = host.calls[0].content;
+    // Truncation marker must be present (head dropped, tail kept for append-only files)
+    expect(msg).toContain('[truncated: head dropped');
+    expect(msg).toContain('inline cap');
+    // Full 110 KB of 'y' must NOT appear (message is bounded)
+    expect(msg).not.toContain('y'.repeat(110_000));
+    // But some content was included (not zero-length inline)
+    expect(msg).toContain('y'.repeat(100));
+    // The header (oldest content) must NOT be present — we keep the TAIL.
+    expect(msg).not.toContain('# Huge knowledge file');
+    // The marker must appear BEFORE any kept content within the file's section.
+    const sectionIdx = msg.indexOf('Current size: ');
+    const markerIdx = msg.indexOf('[truncated: head dropped');
+    expect(markerIdx).toBeGreaterThan(sectionIdx);
+  });
+
+  it('regression: condensation section is collectively bounded by catchUpBudgetBytes', async () => {
+    // Several oversized knowledge files together must not exceed catchUpBudgetBytes.
+    // The oldest (lowest mtime) entries should be dropped first; a warn must list them.
+    const dir = trackTmpDir(makeTmpDir());
+    const knowledgeDir = join(dir, 'knowledge');
+    mkdirSync(knowledgeDir, { recursive: true });
+    writeFileSync(
+      join(knowledgeDir, 'memory.md'),
+      '---\nlast_narrator_update_ts: 2026-03-10T00:00:00Z\n---\n# Memory'
+    );
+
+    // Create 4 oversized knowledge files. Each is 70 KB so each individual entry is
+    // bounded to the 64 KB inline cap; combined they would still exceed a 100 KB budget.
+    const filenames = ['oldest.md', 'older.md', 'newer.md', 'newest.md'];
+    for (const name of filenames) {
+      writeFileSync(join(knowledgeDir, name), `# ${name}\n\n${'z'.repeat(70_000)}`);
+    }
+    // Set mtimes so 'oldest.md' is genuinely oldest. utimesSync from node:fs.
+    const { utimesSync } = await import('node:fs');
+    const baseTime = new Date('2026-04-01T00:00:00Z').getTime() / 1000;
+    filenames.forEach((name, i) => {
+      const t = baseTime + i * 3600; // each file is 1 hour newer than the prior
+      utimesSync(join(knowledgeDir, name), t, t);
+    });
+
+    const warnSpy = vi.spyOn(log, 'warn');
+    const host = mockNarratorHost();
+    // Tight catchUpBudgetBytes that fits ~1-2 entries (each ~64 KB after inline cap).
+    await buildAndDeliverMemoryUpdate(host, 2, dir, 20_000, 100_000);
+
+    expect(host.calls).toHaveLength(1);
+    const msg = host.calls[0].content;
+
+    // The full message must not exceed catchUpBudgetBytes (allowing a small overshoot
+    // for the standing section header). Assert it's well under the unbounded ~280 KB.
+    expect(Buffer.byteLength(msg, 'utf8')).toBeLessThan(150_000);
+
+    // Oldest file must be dropped; newest must be kept.
+    expect(msg).not.toContain('oldest.md');
+    expect(msg).toContain('newest.md');
+
+    // Warn was emitted listing dropped paths.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Truncated'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('oldest.md'));
+    warnSpy.mockRestore();
+  });
+
+  describe('delivery size bounding (catchUpBudgetBytes)', () => {
+    it('(a) does not truncate when total summaries fit within budget', async () => {
+      const dir = trackTmpDir(makeTmpDir());
+      const knowledgeDir = join(dir, 'knowledge');
+      const summariesDir = join(knowledgeDir, 'daily_summaries');
+      mkdirSync(summariesDir, { recursive: true });
+      writeFileSync(
+        join(knowledgeDir, 'memory.md'),
+        '---\nlast_narrator_update_ts: 2026-03-09T00:00:00Z\n---\n# Memory'
+      );
+      writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Summary 10\nDay ten.');
+      writeFileSync(join(summariesDir, '2026-03-11.md'), '---\n---\n# Summary 11\nDay eleven.');
+
+      const warnSpy = vi.spyOn(log, 'warn');
+      const host = mockNarratorHost();
+      // Large budget: both summaries are tiny, should fit easily
+      await buildAndDeliverMemoryUpdate(host, 2, dir, 20_000, 512 * 1024);
+      expect(host.calls).toHaveLength(1);
+
+      const msg = host.calls[0].content;
+      expect(msg).toContain('Day ten.');
+      expect(msg).toContain('Day eleven.');
+      expect(msg).not.toContain('[NOTE: dropped');
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Truncated'));
+      warnSpy.mockRestore();
+
+      // Cursor advances
+      const updatedTs = readFrontmatterField(
+        join(knowledgeDir, 'memory.md'),
+        'last_narrator_update_ts'
+      );
+      expect(updatedTs).not.toBeNull();
+      expect(updatedTs).not.toBe('2026-03-09T00:00:00Z');
+    });
+
+    it('(b) drops oldest summaries when over budget and annotates + warns', async () => {
+      const dir = trackTmpDir(makeTmpDir());
+      const knowledgeDir = join(dir, 'knowledge');
+      const summariesDir = join(knowledgeDir, 'daily_summaries');
+      mkdirSync(summariesDir, { recursive: true });
+      writeFileSync(
+        join(knowledgeDir, 'memory.md'),
+        '---\nlast_narrator_update_ts: 2026-03-09T00:00:00Z\n---\n# Memory'
+      );
+      // Write 5 files, each ~300 bytes
+      const days = ['2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13', '2026-03-14'];
+      for (const day of days) {
+        writeFileSync(
+          join(summariesDir, `${day}.md`),
+          `---\n---\n# Summary ${day}\n${'content for day '.repeat(10)}${day}\n`
+        );
+      }
+
+      const warnSpy = vi.spyOn(log, 'warn');
+      const host = mockNarratorHost();
+      // Very small budget: only ~500 bytes for summaries section — forces truncation
+      await buildAndDeliverMemoryUpdate(host, 2, dir, 20_000, 500);
+      expect(host.calls).toHaveLength(1);
+
+      const msg = host.calls[0].content;
+      // Annotation present
+      expect(msg).toContain('[NOTE: dropped');
+      expect(msg).toContain('to fit 500-byte delivery budget]');
+      // warn fired
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Truncated'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('memory-update delivery'));
+      warnSpy.mockRestore();
+
+      // Cursor still advances
+      const updatedTs = readFrontmatterField(
+        join(knowledgeDir, 'memory.md'),
+        'last_narrator_update_ts'
+      );
+      expect(updatedTs).not.toBeNull();
+      expect(updatedTs).not.toBe('2026-03-09T00:00:00Z');
+    });
+
+    it('(c) drops all files when each individually exceeds budget; message still has header', async () => {
+      const dir = trackTmpDir(makeTmpDir());
+      const knowledgeDir = join(dir, 'knowledge');
+      const summariesDir = join(knowledgeDir, 'daily_summaries');
+      mkdirSync(summariesDir, { recursive: true });
+      writeFileSync(
+        join(knowledgeDir, 'memory.md'),
+        '---\nlast_narrator_update_ts: 2026-03-09T00:00:00Z\n---\n# Memory'
+      );
+      // Write 2 very large files, each >> 100 bytes
+      writeFileSync(
+        join(summariesDir, '2026-03-10.md'),
+        `---\n---\n# Summary\n${'x'.repeat(500)}\n`
+      );
+      writeFileSync(
+        join(summariesDir, '2026-03-11.md'),
+        `---\n---\n# Summary\n${'y'.repeat(500)}\n`
+      );
+
+      const warnSpy = vi.spyOn(log, 'warn');
+      const host = mockNarratorHost();
+      // Extremely tiny budget (100 bytes) — both files are individually too big
+      await buildAndDeliverMemoryUpdate(host, 2, dir, 20_000, 100);
+      expect(host.calls).toHaveLength(1);
+
+      const msg = host.calls[0].content;
+      // Header must still be present (Narrator gets a valid signal)
+      expect(msg).toContain('[Scheduled task: memory-update]');
+      // Annotation present
+      expect(msg).toContain('[NOTE: dropped');
+      // Both summaries dropped
+      expect(msg).not.toContain('x'.repeat(50));
+      expect(msg).not.toContain('y'.repeat(50));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Truncated'));
+      warnSpy.mockRestore();
+
+      // Cursor still advances
+      const updatedTs = readFrontmatterField(
+        join(knowledgeDir, 'memory.md'),
+        'last_narrator_update_ts'
+      );
+      expect(updatedTs).not.toBeNull();
+      expect(updatedTs).not.toBe('2026-03-09T00:00:00Z');
+    });
+
+    it('(d) cursor advances in all truncation scenarios', async () => {
+      // Re-verify cursor advancement explicitly for each scenario via a thin integration check.
+      // Scenario: exactly at budget (no truncation) — cursor must advance.
+      const dir = trackTmpDir(makeTmpDir());
+      const knowledgeDir = join(dir, 'knowledge');
+      const summariesDir = join(knowledgeDir, 'daily_summaries');
+      mkdirSync(summariesDir, { recursive: true });
+      const memoryPath = join(knowledgeDir, 'memory.md');
+      writeFileSync(
+        memoryPath,
+        '---\nlast_narrator_update_ts: 2026-03-09T00:00:00Z\n---\n# Memory'
+      );
+      writeFileSync(join(summariesDir, '2026-03-10.md'), '---\n---\n# Day 10\nSmall content.\n');
+
+      const host = mockNarratorHost();
+      const before = '2026-03-09T00:00:00Z';
+      await buildAndDeliverMemoryUpdate(host, 2, dir, 20_000, 512 * 1024);
+
+      const after = readFrontmatterField(memoryPath, 'last_narrator_update_ts');
+      expect(after).not.toBeNull();
+      expect(after).not.toBe(before);
+    });
+  });
 });
 
 describe('stripSessionEntry', () => {
@@ -389,6 +1141,48 @@ describe('stripSessionEntry', () => {
     it('does not crash when details is absent', () => {
       const entry = { type: 'custom_message', content: 'hello' };
       expect(stripSessionEntry(entry)).toEqual({ type: 'custom_message', content: 'hello' });
+    });
+
+    it('truncates content exceeding NARRATOR_MESSAGE_EXCERPT_BYTES', () => {
+      const longContent = 'x'.repeat(20 * 1024); // 20 KB, exceeds 16 KB budget
+      const entry = {
+        type: 'custom_message',
+        content: longContent,
+        details: { sender: 1, receiver: 2, timestamp: 0 },
+      };
+      const result = stripSessionEntry(entry) as Record<string, unknown>;
+      expect(result).not.toHaveProperty('details');
+      expect(typeof result.content).toBe('string');
+      const contentStr = result.content as string;
+      expect(contentStr.length).toBeLessThanOrEqual(NARRATOR_MESSAGE_EXCERPT_BYTES + 100); // budget + truncation marker
+      expect(contentStr).toContain(
+        `[...truncated: narrator message excerpt exceeded ${NARRATOR_MESSAGE_EXCERPT_BYTES}-byte budget]`
+      );
+    });
+
+    it('respects byte budget with multi-byte UTF-8 content (regression test)', () => {
+      // Create content with 4-byte UTF-8 emoji characters
+      // Each emoji is 4 bytes in UTF-8
+      const emoji = '🔥'; // 4 bytes in UTF-8
+      // Budget is 16KB (16384 bytes), so we need > 4096 emojis to exceed it
+      const emojisNeeded = 5000; // 20000 bytes total, exceeds 16KB budget
+      const multiByteContent = emoji.repeat(emojisNeeded);
+
+      const entry = {
+        type: 'custom_message',
+        content: multiByteContent,
+        details: { sender: 1, receiver: 2, timestamp: 0 },
+      };
+      const result = stripSessionEntry(entry) as Record<string, unknown>;
+      const contentStr = result.content as string;
+
+      // Verify the truncation marker is present
+      expect(contentStr).toContain('[...truncated: narrator message excerpt exceeded');
+
+      // Verify byte length is within budget (excludes the truncation marker)
+      const truncatedPart = contentStr.split('\n\n[...truncated:')[0];
+      const byteLength = Buffer.byteLength(truncatedPart, 'utf8');
+      expect(byteLength).toBeLessThanOrEqual(NARRATOR_MESSAGE_EXCERPT_BYTES);
     });
   });
 
@@ -1092,6 +1886,345 @@ describe('buildAndDeliverDailySummary', () => {
     const cursor = readFrontmatterField(todayFile, 'last_narrator_update_ts');
     expect(cursor).not.toBeNull();
     expect(cursor).not.toBe(lastRunTs);
+  });
+
+  it('truncates oversized catch-up activity to fit the budget and includes a dropped-range note', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+
+    // Set lastRunTs to a wide window so all 100 entries fall inside
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString(); // 1 hour ago
+    writeFileSync(
+      join(summariesDir, '2026-03-15.md'),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — 2026-03-15\n`
+    );
+
+    // Build 100 entries totalling ~1 MB. Each rendered entry is ~10 KB.
+    // Timestamps are spaced 10 seconds apart so they're sortable.
+    const baseTime = Date.now() - 50 * 60_000; // 50 minutes ago
+    const lines: string[] = [];
+    for (let i = 0; i < 100; i++) {
+      const ts = new Date(baseTime + i * 10_000).toISOString();
+      lines.push(
+        JSON.stringify({
+          type: 'custom_message',
+          timestamp: ts,
+          content: `entry-${i}-${'x'.repeat(10_000)}`,
+        })
+      );
+    }
+    writeFileSync(join(sessionDir, 'session.jsonl'), lines.join('\n'));
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    // Use a tight catch-up budget (100 KB) to deterministically trigger truncation
+    // regardless of future default-budget changes.
+    const tightBudget = 100 * 1024;
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    // Should have delivered exactly one message (daily-summary; no projects)
+    expect(host.calls).toHaveLength(1);
+    const deliveredContent = host.calls[0].content;
+
+    // Must be within the tight catch-up budget plus overhead — well under MAX_DELIVERY_BYTES
+    expect(Buffer.byteLength(deliveredContent, 'utf8')).toBeLessThanOrEqual(MAX_DELIVERY_BYTES);
+
+    // Must contain the dropped-range note
+    expect(deliveredContent).toContain('[NOTE: dropped');
+    expect(deliveredContent).toContain('oldest entries spanning');
+    expect(deliveredContent).toContain('to fit');
+
+    // Cursor must have advanced to newRunTs
+    const today = new Date().toISOString().slice(0, 10);
+    const todayFile = join(summariesDir, `${today}.md`);
+    const cursor = readFrontmatterField(todayFile, 'last_narrator_update_ts');
+    expect(cursor).not.toBeNull();
+    expect(cursor).not.toBe(lastRunTs);
+  });
+
+  it('emits log.warn when catch-up activity truncation drops entries', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    writeFileSync(
+      join(summariesDir, '2026-03-15.md'),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — 2026-03-15\n`
+    );
+
+    // Build entries large enough to trigger truncation at a 100 KB budget
+    const baseTime = Date.now() - 50 * 60_000;
+    const lines: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const ts = new Date(baseTime + i * 10_000).toISOString();
+      lines.push(
+        JSON.stringify({
+          type: 'custom_message',
+          timestamp: ts,
+          content: `entry-${i}-${'x'.repeat(10_000)}`,
+        })
+      );
+    }
+    writeFileSync(join(sessionDir, 'session.jsonl'), lines.join('\n'));
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }]);
+    const tightBudget = 100 * 1024;
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => args.join(' '));
+    const truncationWarn = warnCalls.find(
+      (msg) => msg.includes('[Scheduler] Truncated') && msg.includes('oldest activity entries')
+    );
+    expect(truncationWarn).toBeDefined();
+    expect(truncationWarn).toContain('combined daily summary activity');
+    expect(truncationWarn).toContain('byte budget');
+
+    warnSpy.mockRestore();
+  });
+
+  it('emits log.warn when project-log activity truncation drops entries', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    // Project conductor session directory
+    const projectDir = join(dir, 'projects', 'proj_1');
+    const sessionDir = join(dir, 'sessions', 'conductor_2');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
+    mkdirSync(join(projectDir, 'scratchpad'), { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(summariesDir, `${today}.md`),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
+    );
+
+    // Build many large conductor entries so the project-log activity budget is exceeded
+    const baseTime = Date.now() - 50 * 60_000;
+    const lines: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const ts = new Date(baseTime + i * 10_000).toISOString();
+      lines.push(
+        JSON.stringify({
+          type: 'custom_message',
+          timestamp: ts,
+          content: `entry-${i}-${'x'.repeat(10_000)}`,
+        })
+      );
+    }
+    writeFileSync(join(sessionDir, 'session.jsonl'), lines.join('\n'));
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    // Tight budget forces project-log activity to be truncated
+    const tightBudget = 100 * 1024;
+    const db = {
+      query(sql: string) {
+        if (sql.includes('FROM agent'))
+          return [
+            { id: 1, role: 'guide', project_name: null },
+            { id: 2, role: 'conductor', project_name: 'TestProject' },
+          ];
+        if (sql.includes('FROM project p'))
+          return [{ id: 1, name: 'TestProject', dir_name: 'proj_1' }];
+        return [];
+      },
+    } as unknown as DatabaseClient;
+    const host = mockHost();
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => args.join(' '));
+    const truncationWarn = warnCalls.find(
+      (msg) =>
+        msg.includes('[Scheduler] Truncated') &&
+        msg.includes('oldest activity entries') &&
+        msg.includes('TestProject') &&
+        msg.includes('delivery to fit')
+    );
+    expect(truncationWarn).toBeDefined();
+
+    warnSpy.mockRestore();
+  });
+
+  it('emits log.warn when project-log DB-changes truncation drops rows', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const projectDir = join(dir, 'projects', 'proj_1');
+    const sessionDir = join(dir, 'sessions', 'conductor_2');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
+    mkdirSync(join(projectDir, 'scratchpad'), { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(summariesDir, `${today}.md`),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
+    );
+
+    // Write one small conductor entry so there is activity (and the project-log block is entered)
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+    writeFileSync(
+      join(sessionDir, 'session.jsonl'),
+      JSON.stringify({ type: 'custom_message', timestamp: entryTs, content: 'hi' })
+    );
+
+    // Return many large DB rows so DB-changes budget is exceeded even at 100 KB
+    const manyRows = Array.from({ length: 50 }, (_, i) => ({
+      id: i,
+      title: 'x'.repeat(300),
+      status: 'done',
+      updated_at: entryTs,
+      project: 1,
+    }));
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    const tightBudget = 100 * 1024;
+    const db = {
+      query(sql: string) {
+        if (sql.includes('FROM agent'))
+          return [
+            { id: 1, role: 'guide', project_name: null },
+            { id: 2, role: 'conductor', project_name: 'TestProject' },
+          ];
+        if (sql.includes('FROM project p'))
+          return [{ id: 1, name: 'TestProject', dir_name: 'proj_1' }];
+        // Return many rows for project DB queries so truncation fires
+        if (sql.includes('project = 1') || sql.includes('t.project = 1')) return manyRows;
+        return [];
+      },
+    } as unknown as DatabaseClient;
+    const host = mockHost();
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => args.join(' '));
+    const truncationWarn = warnCalls.find((msg) =>
+      msg.includes('[Scheduler] Truncated DB-change rows from project TestProject delivery')
+    );
+    expect(truncationWarn).toBeDefined();
+    expect(truncationWarn).toContain('budget=');
+
+    warnSpy.mockRestore();
+  });
+
+  it('emits log.warn when per-project daily-summary DB-changes truncation drops rows', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const projectDir = join(dir, 'projects', 'proj_1');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(join(projectDir, 'artifacts'), { recursive: true });
+    mkdirSync(join(projectDir, 'scratchpad'), { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(summariesDir, `${today}.md`),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
+    );
+
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+    // Many large DB rows for the project so daily-summary per-project DB budget is exceeded
+    const manyRows = Array.from({ length: 50 }, (_, i) => ({
+      id: i,
+      title: 'x'.repeat(300),
+      status: 'done',
+      updated_at: entryTs,
+      project: 1,
+    }));
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    const tightBudget = 100 * 1024;
+    const db = {
+      query(sql: string) {
+        if (sql.includes('FROM agent'))
+          return [
+            { id: 1, role: 'guide', project_name: null },
+            { id: 2, role: 'conductor', project_name: 'TestProject' },
+          ];
+        if (sql.includes('FROM project p'))
+          return [{ id: 1, name: 'TestProject', dir_name: 'proj_1' }];
+        if (sql.includes('project = 1') || sql.includes('t.project = 1')) return manyRows;
+        return [];
+      },
+    } as unknown as DatabaseClient;
+    const host = mockHost();
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => args.join(' '));
+    const truncationWarn = warnCalls.find((msg) =>
+      msg.includes('[Scheduler] Truncated DB-change rows from project TestProject daily summary')
+    );
+    expect(truncationWarn).toBeDefined();
+    expect(truncationWarn).toContain('budget=');
+
+    warnSpy.mockRestore();
+  });
+
+  it('emits log.warn when non-project daily-summary DB-changes truncation drops rows', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    mkdirSync(summariesDir, { recursive: true });
+
+    const lastRunTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(summariesDir, `${today}.md`),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
+    );
+
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+    // Many large standalone (non-project) task rows to blow the non-project DB budget
+    const manyRows = Array.from({ length: 50 }, (_, i) => ({
+      id: i,
+      title: 'x'.repeat(300),
+      status: 'done',
+      updated_at: entryTs,
+      project: null,
+    }));
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    const tightBudget = 100 * 1024;
+    const db = {
+      query(sql: string) {
+        // No projects, no project agents — just guide (non-project)
+        if (sql.includes('FROM agent')) return [{ id: 1, role: 'guide', project_name: null }];
+        if (sql.includes('FROM project p')) return [];
+        // Non-project DB queries: return many rows for all table queries
+        if (
+          sql.includes('FROM task') ||
+          sql.includes('FROM task_comment') ||
+          sql.includes('FROM task_link') ||
+          sql.includes('FROM project')
+        )
+          return manyRows;
+        return [];
+      },
+    } as unknown as DatabaseClient;
+    const host = mockHost();
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30, tightBudget);
+
+    const warnCalls = warnSpy.mock.calls.map((args) => args.join(' '));
+    const truncationWarn = warnCalls.find((msg) =>
+      msg.includes('[Scheduler] Truncated DB-change rows from non-project daily summary delivery')
+    );
+    expect(truncationWarn).toBeDefined();
+    expect(truncationWarn).toContain('budget=');
+
+    warnSpy.mockRestore();
   });
 });
 

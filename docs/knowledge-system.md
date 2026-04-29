@@ -94,7 +94,7 @@ budget_chars = 20000  # default; comment out to use the default
 
 1. Reads `infrastructure.md`, `user.md`, `memory.md`
 2. Reads `{role}.md` for the agent's role (guide.md, conductor.md, narrator.md, reviewer.md, worker.md)
-3. Skips empty files; files exceeding the character budget are truncated at the tail with a notice. For knowledge files (`knowledge/*.md`), the Narrator condenses oversized files during the next memory-update run. Daily summaries and project logs are not condensed (they are append-only).
+3. Skips empty files; files exceeding the character budget are handled differently depending on type. Curated knowledge files (`infrastructure.md`, `user.md`, `memory.md`, `{role}.md`) are truncated at the tail — the Narrator condenses them during the next memory-update run. Activity logs (`log.md` and daily summaries) are chronologically appended, so truncation keeps the YAML frontmatter and the newest (trailing) content, dropping the oldest middle with a notice; this preserves the most actionable context for agents.
 4. Loads role-aware context based on the agent's project assignment:
    - **Project-scoped agents** (Conductor, Worker, Reviewer): loads `projects/{dir_name}/log.md`
    - **System-wide agents** (Guide, Narrator): loads the 2 most recent daily summary files (sorted by filename, chronological order)

@@ -85,26 +85,76 @@ export function categorizeError(error: unknown): ErrorCategory {
 }
 
 /**
+ * Patterns that indicate a wire-size overflow — the request payload is too large to
+ * transmit, regardless of token count. Errors matching these patterns cannot be
+ * recovered by compaction or provider failover (the same oversized bytes would be
+ * replayed). Pending deliveries should be dropped rather than retried.
+ *
+ * Distinct from TOKEN_OVERFLOW_PATTERNS (e.g. "input token count exceeds maximum"),
+ * which ARE recoverable via compaction.
+ *
+ * Checked against the lowercased error message.
+ */
+const WIRE_SIZE_PATTERNS: RegExp[] = [
+  // HTTP 413 from Anthropic and other providers
+  /request exceeds the maximum size/,
+  /input size exceeds.*mb/,
+  /payload too large/,
+  /request too large/,
+  /body too large/,
+  /exceeds maximum size/,
+  // Anthropic OAuth long-context misclassifier (Pro/Max, post-March-2026):
+  // fires on requests over a soft size threshold — smaller request will pass.
+  /extra usage is required for long context/,
+  /long context request/,
+];
+
+/**
+ * Patterns that indicate a token-window overflow. These ARE recoverable via compaction
+ * (the same bytes, stripped down to fit, will succeed).
+ *
+ * Checked against the lowercased error message.
+ */
+const TOKEN_OVERFLOW_PATTERNS: RegExp[] = [
+  // Google: "The input token count (N) exceeds the maximum number of tokens allowed (N)"
+  /input token count.*exceeds.*maximum/,
+  // OpenAI, Groq, Cerebras, OpenRouter, Mistral:
+  //   "This model's maximum context length is N tokens"
+  //   "This endpoint's maximum context length is N tokens" (OpenRouter)
+  //   "too large for model with N maximum context length" (Mistral)
+  /maximum context length/,
+  // Anthropic: "prompt is too long: N tokens > N maximum"
+  /prompt is too long.*tokens/,
+  // xAI/Grok: "This model's maximum prompt length is N but the request contains M tokens"
+  /maximum prompt length/,
+  // OpenAI Responses API: "Your input exceeds the context window of this model"
+  /exceeds the context window/,
+  // Providers that surface the error code verbatim in the message
+  /context.?length.?exceeded/,
+];
+
+/**
+ * Check if an error message indicates a wire-size overflow — a payload that is too
+ * large to transmit, regardless of how many tokens it represents. These errors cannot
+ * be recovered by compaction or provider failover (the same oversized bytes would be
+ * replayed). Pending deliveries should be dropped rather than retried.
+ *
+ * Distinct from token-window overflows (e.g. "input token count exceeds maximum"),
+ * which ARE recoverable via compaction.
+ */
+export function isWireSizeOverflow(message: string): boolean {
+  const m = message.toLowerCase();
+  return WIRE_SIZE_PATTERNS.some((p) => p.test(m));
+}
+
+/**
  * Check if an error message indicates context window overflow.
- * Matches patterns from all supported providers.
+ * Matches patterns from all supported providers (both wire-size and token-window).
  */
 function isContextOverflow(message: string): boolean {
   return (
-    // Google: "The input token count (N) exceeds the maximum number of tokens allowed (N)"
-    /input token count.*exceeds.*maximum/.test(message) ||
-    // OpenAI, Groq, Cerebras, OpenRouter, Mistral:
-    //   "This model's maximum context length is N tokens"
-    //   "This endpoint's maximum context length is N tokens" (OpenRouter)
-    //   "too large for model with N maximum context length" (Mistral)
-    /maximum context length/.test(message) ||
-    // Anthropic: "prompt is too long: N tokens > N maximum"
-    /prompt is too long.*tokens/.test(message) ||
-    // xAI/Grok: "This model's maximum prompt length is N but the request contains M tokens"
-    /maximum prompt length/.test(message) ||
-    // OpenAI Responses API: "Your input exceeds the context window of this model"
-    /exceeds the context window/.test(message) ||
-    // Providers that surface the error code verbatim in the message
-    /context.?length.?exceeded/.test(message)
+    TOKEN_OVERFLOW_PATTERNS.some((p) => p.test(message)) ||
+    WIRE_SIZE_PATTERNS.some((p) => p.test(message))
   );
 }
 

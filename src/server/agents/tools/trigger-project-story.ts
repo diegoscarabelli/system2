@@ -36,7 +36,8 @@ type AgentRow = { id: number; role: string; project_name: string | null };
 export function createTriggerProjectStoryTool(
   db: DatabaseClient,
   agentId: number,
-  registry: AgentRegistry
+  registry: AgentRegistry,
+  narratorMessageExcerptBytes?: number
 ) {
   const params = Type.Object({
     project_id: Type.Number({
@@ -139,9 +140,17 @@ export function createTriggerProjectStoryTool(
           SYSTEM2_DIR,
           projectLogAgents,
           lastRunTs,
-          newRunTs
+          newRunTs,
+          narratorMessageExcerptBytes
         );
-        const projectDbChanges = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
+        const projectDbTables = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
+        const hasProjectDbChanges = projectDbTables.some((table) => table.rows.length > 0);
+        const projectDbChanges = hasProjectDbChanges
+          ? projectDbTables
+              .filter((table) => table.rows.length > 0)
+              .map((table) => `### ${table.name}\n\n${formatMarkdownTable(table.rows)}`)
+              .join('\n\n')
+          : '(no DB changes)';
 
         // Read log.md content (full file, for Message 2)
         const logContent = existsSync(logFile) ? readFileSync(logFile, 'utf-8') : '(no log file)';

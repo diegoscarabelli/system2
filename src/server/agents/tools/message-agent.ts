@@ -10,12 +10,14 @@ import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
 import { log } from '../../utils/logger.js';
+import { MAX_DELIVERY_BYTES } from '../host.js';
 import type { AgentRegistry } from '../registry.js';
 
 export function createMessageAgentTool(
   selfId: number,
   registry: AgentRegistry,
-  db: DatabaseClient
+  db: DatabaseClient,
+  maxDeliveryBytes: number = MAX_DELIVERY_BYTES
 ) {
   const params = Type.Object({
     agent_id: Type.Number({
@@ -83,6 +85,25 @@ export function createMessageAgentTool(
       const senderAgent = db.getAgent(selfId);
       const senderRole = senderAgent?.role ?? 'unknown';
       const content = `[${senderRole}_${selfId} message]\n\n${message}`;
+
+      // Synchronous size pre-check: give the calling agent a clear error rather than
+      // a fake-success result when the delivery would be silently dropped server-side.
+      const messageBytes = Buffer.byteLength(content, 'utf8');
+      if (messageBytes > maxDeliveryBytes) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error: Message size ${messageBytes.toLocaleString()} bytes exceeds the inter-agent delivery cap of ${maxDeliveryBytes.toLocaleString()} bytes (configurable via [delivery] max_bytes in config.toml). Reduce the message size — for large data, write to a file and pass the path instead.`,
+            },
+          ],
+          details: {
+            error: 'message_too_large',
+            message_bytes: messageBytes,
+            max_bytes: maxDeliveryBytes,
+          },
+        };
+      }
 
       const timestamp = Date.now();
 

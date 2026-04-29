@@ -44,8 +44,8 @@ For each active project (those with a non-archived Conductor):
 1. Resolve `~/.system2/projects/{id}_{slug}/` directory via `resolveProjectDir()` (finds existing folder by ID prefix, renames if the project title changed, creates if missing, and patches stale `project_name` in `log.md` frontmatter)
 2. Create `log.md` with YAML frontmatter if it doesn't exist
 3. Read most recent `log.md` content (last 10,000 characters via `readTailChars`)
-4. Collect activity from all agents involved in the project (project-scoped agents + Guide; Narrator is excluded via `projectLogSystemAgents` to prevent recursive embedding). JSONL entries are stripped before injection: thinking blocks (type `thinking`) are dropped entirely; metadata fields `thoughtSignature`, `usage`, `api`, `provider`, `model`, and `details` are removed; tool call argument values and tool result content are truncated to 100 chars.
-5. Collect project-scoped DB changes (task, project, task_comment, task_link records belonging to the project)
+4. Collect activity from all agents involved in the project (project-scoped agents + Guide; Narrator is excluded via `projectLogSystemAgents` to prevent recursive embedding). JSONL entries are stripped before injection: thinking blocks (type `thinking`) are dropped entirely; metadata fields `thoughtSignature`, `usage`, `api`, `provider`, `model`, and `details` are removed; tool call argument values and tool result content are truncated to 100 chars. Per-`custom_message` content is capped at `[delivery].narrator_message_excerpt_bytes`.
+5. Collect project-scoped DB changes (task, project, task_comment, task_link records belonging to the project), bounded to ~25% of `[delivery].catch_up_budget_bytes`, with oldest DB rows dropped per-table when budget is exceeded
 6. If there is activity, deliver a `[Scheduled task: project-log]` message to the Narrator
 
 Each project log is a single continuous file per project lifetime (unlike daily summaries which create a new file per day).
@@ -60,11 +60,12 @@ Each project log is a single continuous file per project lifetime (unlike daily 
    - `memory.md` frontmatter
    - Fall back to `intervalMinutes` ago
 4. **Check for activity:** skip delivery if neither project activity (agent JSONL entries or DB changes) nor non-project activity is detected in the time window. Existing file content does not influence the skip decision: even if the file already has a narrative from an earlier run, a new delivery only happens when fresh activity arrives.
-5. **Build message** with only the sections that have activity:
-   - **Project Activity:** included only for projects that have agent JSONL entries or DB changes in the window; inactive projects are omitted entirely. The entire section is omitted when no project has changes.
-   - **Non-Project Activity:** Guide JSONL (via `dailySummarySystemAgents`, which excludes Narrator to prevent recursive embedding of its own `custom_message` injections) and DB changes not tied to any active project. Omitted when there is no non-project activity.
-6. **Deliver:** send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel)
-7. **Advance cursors:** after all deliveries complete (or on skip), the server writes `newRunTs` to `last_narrator_update_ts` in the daily summary file and each project's `log.md` frontmatter, committing each file individually for durability. This runs after `agent_end`, so the Narrator has already finished editing the files. On skip (no activity), the cursor still advances to prevent re-scanning the same empty window.
+5. **Build message** with only the sections that have activity, bounded to `[delivery].catch_up_budget_bytes`:
+   - **Project Activity:** included only for projects that have agent JSONL entries or DB changes in the window; inactive projects are omitted entirely. The entire section is omitted when no project has changes. Oldest activity entries are dropped first when budget is exceeded.
+   - **Non-Project Activity:** Guide JSONL (via `dailySummarySystemAgents`, which excludes Narrator to prevent recursive embedding of its own `custom_message` injections) and DB changes not tied to any active project, bounded to `~25%` of catch-up budget with per-table newest-first truncation. Omitted when there is no non-project activity.
+   - **Activity Annotation:** when oldest entries are dropped due to size constraints, a note is prepended to the message body: `[NOTE: dropped N oldest entries spanning timestamp-A → timestamp-B to fit within delivery budget]`. Per-table DB truncations are also annotated.
+6. **Deliver:** send to Narrator via `deliverMessage()` with `sender: 0` (system sentinel). The server logs truncations at warn level.
+7. **Advance cursors:** after all deliveries complete (or on skip), the server writes `newRunTs` to `last_narrator_update_ts` in the daily summary file and each project's `log.md` frontmatter, committing each file individually for durability. This runs after `agent_end`, so the Narrator has already finished editing the files. On skip (no activity), the cursor still advances to prevent re-scanning the same empty window. Cursor advancement happens regardless of truncation: dropped entries (older than the bounding window) are intentionally lost and not re-scanned on future runs.
 
 The Narrator synthesizes each section into narrative summaries, avoiding repetition of project-specific content already covered in project-log entries (which are processed first).
 
@@ -90,6 +91,8 @@ Croner does **not** catch up missed jobs after laptop sleep or server shutdown. 
 This runs once at server start, after agent sessions are initialized. Catch-up executions are tracked in the `job_execution` table with `trigger_type: 'catch-up'`.
 
 Both checks use `last_narrator_update_ts` as a cursor. The server advances the cursor in the file's frontmatter after successful delivery (or on skip when no activity is found) and commits immediately, so it does not depend on the Narrator LLM to update it. If a job fails, the cursor stays stale and the next restart will re-trigger catch-up.
+
+**Bounding during catch-up:** when catching up on missed deliveries (at server startup or after network outage), the same size bounds from `[delivery]` apply. The oldest activity entries are dropped first to fit within `catch_up_budget_bytes`, and the cursor still advances to `newRunTs` to prevent re-scanning the same window. This means stale entries lost during catch-up are not retried when the network becomes available; catch-up is best-effort and time-bounded.
 
 **Within a single server lifecycle:** if the server starts without network, catch-up is skipped entirely. The `daily-summary` job self-recovers within one cron interval (default 30 min) once the network is back, because its staleness check runs on every cron tick. The `memory-update` catch-up is lost until its next scheduled run (daily at 11 AM), since the cron handler only fires once per day. A server restart recovers both.
 

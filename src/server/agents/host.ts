@@ -40,6 +40,7 @@ import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
 import { resolveProjectDir } from '../projects/dir.js'; // used for backfilling dir_name on legacy projects
 import type { ReminderManager } from '../reminders/manager.js';
+import { NARRATOR_MESSAGE_EXCERPT_BYTES } from '../scheduler/jobs.js';
 import { filterByRole } from '../skills/loader.js';
 import { log } from '../utils/logger.js';
 import type { AuthTier } from './auth-resolver.js';
@@ -51,6 +52,7 @@ import {
   categorizeError,
   type ErrorCategory,
   extractStatusCode,
+  isWireSizeOverflow,
   shouldFailover,
   shouldRetry,
   sleep,
@@ -109,6 +111,12 @@ const AGENT_LIBRARY_DIR = join(AGENT_DIR, 'library');
 /** Roles that can spawn, manage, and resurrect agents. Single source of truth for tool access. */
 const ORCHESTRATOR_ROLES = new Set(['guide', 'conductor']);
 
+/** Hard cap on inter-agent delivery content. Producers should self-bound; this is the loud-fail
+ *  boundary against accidental large deliveries (catch-up payloads, tool result dumps, etc.).
+ *  Default ~1 MB ≈ 25% of a 1M-token context window — leaves room for the recipient's system
+ *  prompt, history, and knowledge files. Configurable via [delivery] max_bytes in config.toml. */
+export const MAX_DELIVERY_BYTES = 1024 * 1024;
+
 interface AgentDefinition {
   name: string;
   description: string;
@@ -144,6 +152,10 @@ export interface AgentHostConfig {
   knowledgeBudgetChars?: number;
   /** Called after every successful write_system2_db operation. */
   onDatabaseWrite?: OnDatabaseWrite;
+  /** Hard cap on inter-agent delivery size in bytes. Defaults to MAX_DELIVERY_BYTES. */
+  maxDeliveryBytes?: number;
+  /** Per-message excerpt cap for Narrator-bound deliveries in bytes. Defaults to NARRATOR_MESSAGE_EXCERPT_BYTES. */
+  narratorMessageExcerptBytes?: number;
   /** Called when the agent's busy state changes. */
   onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
   /** Called when an agent is terminated via terminate_agent tool. */
@@ -198,10 +210,12 @@ export class AgentHost {
   private agentsConfig?: AgentsConfig;
   private reminderManager?: ReminderManager;
   private knowledgeBudgetChars: number;
+  private narratorMessageExcerptBytes: number;
   private unsubscribeSession: (() => void) | null = null;
   private onDatabaseWrite?: OnDatabaseWrite;
   private onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
   private onAgentTerminate?: () => void;
+  private maxDeliveryBytes: number;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -215,9 +229,12 @@ export class AgentHost {
     this.chatMaxMessages = config.chatMaxMessages ?? 1000;
     this.reminderManager = config.reminderManager;
     this.knowledgeBudgetChars = Math.max(config.knowledgeBudgetChars ?? 20_000, 5_000);
+    this.narratorMessageExcerptBytes =
+      config.narratorMessageExcerptBytes ?? NARRATOR_MESSAGE_EXCERPT_BYTES;
     this.onDatabaseWrite = config.onDatabaseWrite;
     this.onBusyChange = config.onBusyChange;
     this.onAgentTerminate = config.onAgentTerminate;
+    this.maxDeliveryBytes = config.maxDeliveryBytes ?? MAX_DELIVERY_BYTES;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -640,6 +657,30 @@ export class AgentHost {
     // on error turns, but we still snapshot for the failover path where
     // reinitializeWithProvider needs the values passed as arguments.
     const promptToRetry = this.pendingPrompt;
+
+    // Drop pending deliveries only on wire-size overflows (413/"request exceeds maximum size",
+    // "extra usage is required for long context", etc.). These payloads are too large to
+    // transmit regardless of provider — replaying them would just duplicate the failure.
+    // Token-window overflows ("input token count exceeds maximum", "maximum context length",
+    // "prompt is too long") are RECOVERABLE via compaction and must NOT drop pending
+    // deliveries — they should continue through the compaction-and-replay path below.
+    if (
+      category === 'context_overflow' &&
+      isWireSizeOverflow(errorMessage) &&
+      this.pendingDeliveries.length > 0
+    ) {
+      log.warn(
+        `[AgentHost] Dropping ${this.pendingDeliveries.length} pending delivery(ies) on wire-size overflow ` +
+          `(re-sending oversized message would just duplicate the failure).`
+      );
+      for (const d of this.pendingDeliveries) {
+        d.reject(
+          new Error('Delivery dropped: message exceeded wire-size limits across all providers.')
+        );
+      }
+      this.pendingDeliveries = [];
+    }
+
     const deliveriesToRetry = [...this.pendingDeliveries];
     // Reset the send counter: the failed turn's sends are abandoned.
     // The retry/failover path will re-send and re-increment as needed.
@@ -1138,11 +1179,16 @@ export class AgentHost {
     }
 
     // Role-aware activity context:
-    // Project-scoped agents get their project log; system-wide agents get daily summaries
+    // Project-scoped agents get their project log; system-wide agents get daily summaries.
+    // Activity logs are chronologically appended, so we keep the newest content (tail) and
+    // drop the oldest middle when truncation is needed — the opposite of curated files.
     if (this.agentProject !== null && this.agentProjectDirName) {
       const projectLogPath = join(SYSTEM2_DIR, 'projects', this.agentProjectDirName, 'log.md');
       if (existsSync(projectLogPath)) {
-        addSection(projectLogPath, readWithBudget(projectLogPath));
+        addSection(
+          projectLogPath,
+          this.readActivityLogWithBudget(projectLogPath, MAX_KNOWLEDGE_CHARS)
+        );
       }
     } else {
       const summariesDir = join(knowledgeDir, 'daily_summaries');
@@ -1155,13 +1201,43 @@ export class AgentHost {
           .reverse(); // chronological order
         for (const file of summaryFiles) {
           const filePath = join(summariesDir, file);
-          addSection(filePath, readWithBudget(filePath));
+          addSection(filePath, this.readActivityLogWithBudget(filePath, MAX_KNOWLEDGE_CHARS));
         }
       }
     }
 
     if (sections.length === 0) return '';
     return `\n\n## Knowledge Base\n\n${sections.join('\n\n---\n\n')}`;
+  }
+
+  /**
+   * Truncate an activity-log file (chronologically appended) keeping the YAML frontmatter
+   * and the newest trailing content. Drops the oldest middle content with a marker.
+   */
+  private readActivityLogWithBudget(filePath: string, budget: number): string {
+    const raw = readFileSync(filePath, 'utf-8');
+    if (raw.length <= budget) return raw;
+
+    let frontmatter = '';
+    let body = raw;
+    const fmMatch = raw.match(/^---\n[\s\S]*?\n---\n/);
+    if (fmMatch) {
+      frontmatter = fmMatch[0];
+      body = raw.slice(fmMatch[0].length);
+    }
+
+    const notice = `\n\n[...truncated: dropped oldest content from this activity log to fit ${budget.toLocaleString()}-char budget; newest entries below]\n\n`;
+    const tailBudget = budget - frontmatter.length - notice.length;
+    if (tailBudget <= 0) {
+      // Frontmatter alone exceeds budget; degenerate case
+      return (
+        raw.slice(0, budget) +
+        `\n\n[...truncated: file exceeds ${budget.toLocaleString()} char budget]`
+      );
+    }
+
+    const tail = body.slice(-tailBudget);
+    return frontmatter + notice + tail;
   }
 
   /**
@@ -1172,7 +1248,7 @@ export class AgentHost {
     const tools: AgentTool<any>[] = [
       createReadSystem2DbTool(this.db),
       createWriteSystem2DbTool(this.db, this.agentId, this.onDatabaseWrite),
-      createMessageAgentTool(this.agentId, this.registry, this.db),
+      createMessageAgentTool(this.agentId, this.registry, this.db, this.maxDeliveryBytes),
       createBashTool((content, details) => {
         this.session?.sendCustomMessage(
           { customType: 'bash_background', content, display: false, details },
@@ -1217,7 +1293,14 @@ export class AgentHost {
       tools.push(
         createTerminateAgentTool(this.db, this.agentId, this.registry, this.onAgentTerminate)
       );
-      tools.push(createTriggerProjectStoryTool(this.db, this.agentId, this.registry));
+      tools.push(
+        createTriggerProjectStoryTool(
+          this.db,
+          this.agentId,
+          this.registry,
+          this.narratorMessageExcerptBytes
+        )
+      );
     }
 
     if (canOrchestrate && this.resurrector) {
@@ -1287,6 +1370,16 @@ export class AgentHost {
     }
     if (this.isReinitializing) {
       return Promise.reject(new Error('Agent is reinitializing, delivery rejected'));
+    }
+
+    // Check wire-size budget before queuing
+    if (Buffer.byteLength(content, 'utf8') > this.maxDeliveryBytes) {
+      return Promise.reject(
+        new Error(
+          `Delivery content exceeds max_bytes (${this.maxDeliveryBytes} bytes). ` +
+            `Producer should pre-bound. Receiver=${details.receiver}, sender=${details.sender}.`
+        )
+      );
     }
 
     // Create deferred promise for completion notification. Resolves when

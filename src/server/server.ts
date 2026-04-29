@@ -18,6 +18,7 @@ import type {
   AgentsConfig,
   ChatConfig,
   DatabasesConfig,
+  DeliveryConfig,
   JobExecution,
   KnowledgeConfig,
   LlmConfig,
@@ -29,7 +30,7 @@ import type {
 } from '../shared/index.js';
 import type { OAuthCredentialsMap } from './agents/auth-resolver.js';
 import { AuthResolver } from './agents/auth-resolver.js';
-import { AgentHost } from './agents/host.js';
+import { AgentHost, MAX_DELIVERY_BYTES } from './agents/host.js';
 import {
   loadOAuthCredentials,
   type OAuthCredentials,
@@ -49,6 +50,8 @@ import { ReminderManager } from './reminders/manager.js';
 import {
   buildAndDeliverDailySummary,
   buildAndDeliverMemoryUpdate,
+  CATCH_UP_BUDGET_BYTES,
+  NARRATOR_MESSAGE_EXCERPT_BYTES,
   readFrontmatterField,
   registerNarratorJobs,
   resolveDailySummaryTimestamp,
@@ -76,6 +79,7 @@ export interface ServerConfig {
   knowledgeConfig?: KnowledgeConfig;
   databasesConfig?: DatabasesConfig;
   agentsConfig?: AgentsConfig;
+  deliveryConfig?: DeliveryConfig;
 }
 
 export class Server {
@@ -163,6 +167,8 @@ export class Server {
     const guideAgent = this.db.getOrCreateGuideAgent();
     this.guideAgentId = guideAgent.id;
     const callbacks = this.buildAgentCallbacks();
+    const maxDeliveryBytes = config.deliveryConfig?.max_bytes ?? MAX_DELIVERY_BYTES;
+    const narratorMessageExcerptBytes = config.deliveryConfig?.narrator_message_excerpt_bytes;
     this.agentHost = new AgentHost({
       db: this.db,
       agentId: guideAgent.id,
@@ -177,6 +183,8 @@ export class Server {
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
+      maxDeliveryBytes,
+      narratorMessageExcerptBytes,
       ...callbacks,
     });
     this.agentRegistry.register(guideAgent.id, this.agentHost);
@@ -196,6 +204,8 @@ export class Server {
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: config.knowledgeConfig?.budget_chars,
+      maxDeliveryBytes,
+      narratorMessageExcerptBytes,
       ...callbacks,
     });
     this.agentRegistry.register(narratorAgent.id, this.narratorHost);
@@ -480,6 +490,8 @@ export class Server {
       authResolver: this.authResolver,
       reminderManager: this.reminderManager,
       knowledgeBudgetChars: this.config.knowledgeConfig?.budget_chars,
+      maxDeliveryBytes: this.config.deliveryConfig?.max_bytes ?? MAX_DELIVERY_BYTES,
+      narratorMessageExcerptBytes: this.config.deliveryConfig?.narrator_message_excerpt_bytes,
       ...this.buildAgentCallbacks(),
     });
 
@@ -606,7 +618,9 @@ export class Server {
       SYSTEM2_DIR,
       intervalMinutes,
       this.config.knowledgeConfig?.budget_chars,
-      onJobChange
+      onJobChange,
+      this.config.deliveryConfig?.catch_up_budget_bytes ?? CATCH_UP_BUDGET_BYTES,
+      this.config.deliveryConfig?.narrator_message_excerpt_bytes ?? NARRATOR_MESSAGE_EXCERPT_BYTES
     );
 
     // Check if narrator needs catch-up after sleep/shutdown.
@@ -667,7 +681,10 @@ export class Server {
                 this.narratorHost,
                 this.narratorId,
                 SYSTEM2_DIR,
-                intervalMinutes
+                intervalMinutes,
+                this.config.deliveryConfig?.catch_up_budget_bytes ?? CATCH_UP_BUDGET_BYTES,
+                this.config.deliveryConfig?.narrator_message_excerpt_bytes ??
+                  NARRATOR_MESSAGE_EXCERPT_BYTES
               ),
             onJobChange
           );
@@ -698,7 +715,10 @@ export class Server {
                 this.narratorHost,
                 this.narratorId,
                 SYSTEM2_DIR,
-                this.config.knowledgeConfig?.budget_chars
+                this.config.knowledgeConfig?.budget_chars,
+                this.config.deliveryConfig?.catch_up_budget_bytes ?? CATCH_UP_BUDGET_BYTES,
+                this.config.deliveryConfig?.narrator_message_excerpt_bytes ??
+                  NARRATOR_MESSAGE_EXCERPT_BYTES
               ),
             onJobChange
           );

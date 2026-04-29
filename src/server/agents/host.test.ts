@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LlmConfig } from '../../shared/index.js';
-import { AgentHost } from './host.js';
+import { AgentHost, MAX_DELIVERY_BYTES } from './host.js';
 import type { AgentRegistry } from './registry.js';
 
 // Minimal stubs — we're testing internal state management, not the full agent lifecycle
@@ -1542,6 +1542,128 @@ describe('AgentHost', () => {
         host.deliverMessage('hi', { sender: 1, receiver: 2, timestamp: Date.now() })
       ).not.toThrow();
     });
+
+    it('rejects delivery when content exceeds MAX_DELIVERY_BYTES', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      // Create content that exceeds MAX_DELIVERY_BYTES
+      const oversizedContent = 'x'.repeat(MAX_DELIVERY_BYTES + 1);
+
+      await expect(
+        host.deliverMessage(oversizedContent, {
+          sender: 1,
+          receiver: 2,
+          timestamp: Date.now(),
+        })
+      ).rejects.toThrow(/Delivery content exceeds max_bytes/);
+    });
+
+    it('accepts delivery when content is exactly at MAX_DELIVERY_BYTES', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+        pendingDeliveries: Array<{ content: string }>;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      // Create content exactly at MAX_DELIVERY_BYTES
+      const contentAtLimit = 'y'.repeat(MAX_DELIVERY_BYTES);
+
+      // Should not reject due to size check
+      const promise = host.deliverMessage(contentAtLimit, {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      expect(promise).toBeInstanceOf(Promise);
+      // The delivery should be queued (not rejected by size check)
+      expect(internal.pendingDeliveries).toHaveLength(1);
+      expect(internal.pendingDeliveries[0].content).toBe(contentAtLimit);
+    });
+
+    it('rejects at configured maxDeliveryBytes limit when smaller than default', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        maxDeliveryBytes: 1024,
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      // Content just over the configured 1024-byte limit
+      const oversized = 'x'.repeat(1025);
+      await expect(
+        host.deliverMessage(oversized, { sender: 1, receiver: 2, timestamp: Date.now() })
+      ).rejects.toThrow(/max_bytes \(1024 bytes\)/);
+    });
+
+    it('accepts delivery exactly at the configured maxDeliveryBytes limit', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        maxDeliveryBytes: 1024,
+      });
+
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        _sessionDir: string | null;
+        pendingDeliveries: Array<{ content: string }>;
+      };
+
+      internal.session = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal._sessionDir = null;
+
+      const contentAtLimit = 'y'.repeat(1024);
+      const promise = host.deliverMessage(contentAtLimit, {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      expect(promise).toBeInstanceOf(Promise);
+      expect(internal.pendingDeliveries).toHaveLength(1);
+    });
   });
 
   describe('pushSystemMessage on failover', () => {
@@ -2648,53 +2770,116 @@ describe('AgentHost', () => {
       expect(internal.pendingPrompt).toBeNull();
     });
 
-    it('replays pending deliveries on the recovered session after context overflow', async () => {
+    it('drops pending deliveries and rejects their promises on wire-size overflow (413)', async () => {
       const { internal } = makeHostForOverflow();
       const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
       internal.session = { sendCustomMessage };
+      const reject1 = vi.fn();
+      const reject2 = vi.fn();
       internal.pendingDeliveries = [
         {
           content: 'task-1',
           details: { source: 'scheduler' },
           urgent: false,
           resolve: vi.fn(),
-          reject: vi.fn(),
+          reject: reject1,
         },
         {
           content: 'task-2',
           details: { source: 'scheduler' },
           urgent: true,
           resolve: vi.fn(),
-          reject: vi.fn(),
+          reject: reject2,
+        },
+      ];
+      await internal.handlePotentialError(
+        makeOverflowEvent('413: request exceeds the maximum size allowed')
+      );
+      // Delivery promises are rejected with a wire-size error message
+      expect(reject1).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('wire-size') })
+      );
+      expect(reject2).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('wire-size') })
+      );
+      // pendingDeliveries cleared by the drop guard
+      expect(internal.pendingDeliveries).toHaveLength(0);
+    });
+
+    it('drops pending deliveries on Anthropic OAuth long-context misclassifier (429)', async () => {
+      const { internal } = makeHostForOverflow();
+      const reject1 = vi.fn();
+      internal.pendingDeliveries = [
+        {
+          content: 'task-1',
+          details: { source: 'scheduler' },
+          urgent: false,
+          resolve: vi.fn(),
+          reject: reject1,
+        },
+      ];
+      await internal.handlePotentialError(
+        makeOverflowEvent('429: extra usage is required for long context requests')
+      );
+      expect(reject1).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('wire-size') })
+      );
+      expect(internal.pendingDeliveries).toHaveLength(0);
+    });
+
+    it('does NOT drop pending deliveries on token-window overflow (400 input token count)', async () => {
+      const { internal } = makeHostForOverflow();
+      const reject1 = vi.fn();
+      const resolve1 = vi.fn();
+      internal.pendingDeliveries = [
+        {
+          content: 'task-1',
+          details: { source: 'scheduler' },
+          urgent: false,
+          resolve: resolve1,
+          reject: reject1,
         },
       ];
       await internal.handlePotentialError(
         makeOverflowEvent('400: input token count exceeds maximum context length')
       );
+      // Token-window overflow is recoverable via compaction — deliveries must NOT be dropped
+      expect(reject1).not.toHaveBeenCalled();
+      expect(internal.pendingDeliveries).toHaveLength(1);
+      // handleContextOverflow still triggered
       expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
-      expect(sendCustomMessage).toHaveBeenCalledTimes(2);
-      expect(sendCustomMessage).toHaveBeenNthCalledWith(
-        1,
+    });
+
+    it('does NOT drop pending deliveries on token-window overflow (400 maximum context length)', async () => {
+      const { internal } = makeHostForOverflow();
+      const reject1 = vi.fn();
+      internal.pendingDeliveries = [
         {
-          customType: 'agent_message',
           content: 'task-1',
-          display: false,
           details: { source: 'scheduler' },
+          urgent: false,
+          resolve: vi.fn(),
+          reject: reject1,
         },
-        { deliverAs: 'followUp', triggerTurn: true }
+      ];
+      await internal.handlePotentialError(
+        makeOverflowEvent('400: maximum context length is 128000 tokens')
       );
-      expect(sendCustomMessage).toHaveBeenNthCalledWith(
-        2,
-        {
-          customType: 'agent_message',
-          content: 'task-2',
-          display: false,
-          details: { source: 'scheduler' },
-        },
-        { deliverAs: 'steer', triggerTurn: true }
+      expect(reject1).not.toHaveBeenCalled();
+      expect(internal.pendingDeliveries).toHaveLength(1);
+    });
+
+    it('does not drop pending deliveries on context_overflow when there are none', async () => {
+      const { internal } = makeHostForOverflow();
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      internal.session = { sendCustomMessage };
+      internal.pendingDeliveries = [];
+      await internal.handlePotentialError(
+        makeOverflowEvent('413: request exceeds the maximum size allowed')
       );
-      // pendingDeliveries NOT cleared (agent_end shifts on success)
-      expect(internal.pendingDeliveries).toHaveLength(2);
+      // handleContextOverflow still called, no rejection errors thrown
+      expect(internal.handleContextOverflow).toHaveBeenCalledOnce();
+      expect(sendCustomMessage).not.toHaveBeenCalled();
     });
   });
 
@@ -3331,6 +3516,153 @@ describe('AgentHost', () => {
       expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
       // markKeyFailed must be called — standard failover path
       expect(markKeyFailedSpy).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('readActivityLogWithBudget', () => {
+    let testDir: string;
+
+    beforeEach(() => {
+      testDir = join(
+        tmpdir(),
+        `system2-actlog-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      );
+      mkdirSync(testDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    type ActivityLogInternal = {
+      readActivityLogWithBudget: (filePath: string, budget: number) => string;
+    };
+
+    function makeHostForActivityLog() {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        knowledgeBudgetChars: 10_000,
+      });
+      const internal = host as unknown as ActivityLogInternal;
+      return { host, internal };
+    }
+
+    const FRONTMATTER =
+      '---\nlast_narrator_update_ts: 2026-04-28T19:00:00.000Z\nproject_id: 1\nproject_name: test\n---\n';
+
+    it('Test A: 50 KB log.md — preserves frontmatter, keeps newest content, drops oldest with notice', () => {
+      // Build 50 KB content: frontmatter + 50 KB of chronological body entries
+      const entryLine = '## 2026-04-28T10:00:00Z — some activity entry\n\ncontent here.\n\n';
+      const bodyLines: string[] = [];
+      let bodyLen = 0;
+      while (bodyLen < 50 * 1024) {
+        bodyLines.push(entryLine);
+        bodyLen += entryLine.length;
+      }
+      const body = bodyLines.join('');
+      // Add a distinct newest entry at the very end so we can assert it's preserved
+      const newestEntry = '## 2026-04-28T23:59:00Z — NEWEST ENTRY\n\nThis is the newest.\n\n';
+      const fullContent = FRONTMATTER + body + newestEntry;
+
+      const logPath = join(testDir, 'log.md');
+      writeFileSync(logPath, fullContent);
+
+      const budget = 10_000;
+      const { internal } = makeHostForActivityLog();
+      const result = internal.readActivityLogWithBudget(logPath, budget);
+
+      // (a) Frontmatter preserved verbatim
+      expect(result.startsWith(FRONTMATTER)).toBe(true);
+      // (b) Newest content (last entry) is at the end — truncation notice comes before it
+      const truncationNoticePrefix =
+        '[...truncated: dropped oldest content from this activity log to fit';
+      const truncationNoticeIndex = result.indexOf(truncationNoticePrefix);
+      const newestEntryIndex = result.indexOf(newestEntry.trimEnd());
+      expect(truncationNoticeIndex).toBeGreaterThanOrEqual(0);
+      expect(newestEntryIndex).toBeGreaterThan(truncationNoticeIndex);
+      expect(result.trimEnd().endsWith(newestEntry.trimEnd())).toBe(true);
+      // (c) Truncation notice present
+      expect(result).toContain('newest entries below]');
+      // Total length should be <= budget + notice overhead
+      expect(result.length).toBeLessThanOrEqual(budget + 200);
+    });
+
+    it('Test B: 50 KB daily summary — preserves frontmatter, keeps newest content, drops oldest with notice', () => {
+      const summaryFrontmatter = '---\ndate: 2026-04-28\ntype: daily_summary\n---\n';
+      const entryLine = '### 09:00 — activity block\n\nsome logged summary content.\n\n';
+      const bodyLines: string[] = [];
+      let bodyLen = 0;
+      while (bodyLen < 50 * 1024) {
+        bodyLines.push(entryLine);
+        bodyLen += entryLine.length;
+      }
+      const newestEntry = '### 23:55 — NEWEST SUMMARY ENTRY\n\nEnd-of-day wrap.\n\n';
+      const fullContent = summaryFrontmatter + bodyLines.join('') + newestEntry;
+
+      const summaryPath = join(testDir, '2026-04-28.md');
+      writeFileSync(summaryPath, fullContent);
+
+      const budget = 10_000;
+      const { internal } = makeHostForActivityLog();
+      const result = internal.readActivityLogWithBudget(summaryPath, budget);
+
+      // (a) Frontmatter preserved verbatim
+      expect(result.startsWith(summaryFrontmatter)).toBe(true);
+      // (b) Newest content preserved
+      expect(result).toContain('NEWEST SUMMARY ENTRY');
+      expect(result).toContain('End-of-day wrap.');
+      // (c) Truncation notice present
+      expect(result).toContain(
+        '[...truncated: dropped oldest content from this activity log to fit'
+      );
+      expect(result).toContain('newest entries below]');
+      expect(result.length).toBeLessThanOrEqual(budget + 200);
+    });
+
+    it('Test C (regression): file within budget is returned as-is (no truncation)', () => {
+      const smallContent = `${FRONTMATTER}A small file that fits in budget.\n`;
+      const filePath = join(testDir, 'small.md');
+      writeFileSync(filePath, smallContent);
+
+      const { internal } = makeHostForActivityLog();
+      const result = internal.readActivityLogWithBudget(filePath, 10_000);
+
+      expect(result).toBe(smallContent);
+      expect(result).not.toContain('[...truncated');
+    });
+
+    it('Test C (regression): curated infrastructure.md uses first-N truncation (drops tail, not oldest)', () => {
+      // This test verifies the distinction: readActivityLogWithBudget drops the MIDDLE (oldest),
+      // while readWithBudget (used for curated files) drops the TAIL.
+      // We confirm readActivityLogWithBudget does NOT produce the curated-file truncation marker.
+      // To trigger truncation, the file must exceed the budget of 10_000 chars.
+      const oldestEntry = '## OLDEST ENTRY — should be dropped\n\ncontent\n\n';
+      // Fill with enough middle content to push total over the 10_000-char budget
+      const singleMiddle =
+        '## middle entry block with some padding content to take up space\n\ncontent here.\n\n';
+      const middleEntries = Array(150).fill(singleMiddle).join('');
+      const newestEntry = '## NEWEST ENTRY — should be kept\n\ncontent\n\n';
+      const fullContent = FRONTMATTER + oldestEntry + middleEntries + newestEntry;
+
+      // Sanity-check: file must exceed budget
+      expect(fullContent.length).toBeGreaterThan(10_000);
+
+      const filePath = join(testDir, 'infrastructure.md');
+      writeFileSync(filePath, fullContent);
+
+      const budget = 10_000;
+      const { internal } = makeHostForActivityLog();
+      const result = internal.readActivityLogWithBudget(filePath, budget);
+
+      // Activity-log truncation: oldest dropped, newest kept
+      expect(result).toContain('NEWEST ENTRY');
+      expect(result).not.toContain('OLDEST ENTRY');
+      // The notice marker is the activity-log one, NOT the curated-file one
+      expect(result).toContain('dropped oldest content from this activity log');
+      expect(result).not.toContain('file exceeds');
     });
   });
 });

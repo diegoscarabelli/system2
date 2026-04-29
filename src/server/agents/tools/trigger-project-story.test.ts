@@ -8,11 +8,25 @@ import { createTriggerProjectStoryTool } from './trigger-project-story.js';
 // Mock scheduler/jobs helpers so the tool doesn't touch the filesystem
 vi.mock('../../scheduler/jobs.js', () => ({
   collectAgentActivity: vi.fn().mockReturnValue('(agent activity)'),
-  collectProjectDbChanges: vi.fn().mockReturnValue('(db changes)'),
-  formatMarkdownTable: vi.fn().mockReturnValue('| col |\n| --- |'),
+  collectProjectDbChanges: vi.fn().mockReturnValue([
+    {
+      name: 'task',
+      sql: 'SELECT * FROM task WHERE ...',
+      timeColumn: 'updated_at',
+      rows: [{ id: 1, title: 'A task', updated_at: '2026-01-01T00:00:00Z' }],
+    },
+  ]),
+  formatMarkdownTable: vi
+    .fn()
+    .mockReturnValue(
+      '| id | title | updated_at |\n|---|---|---|\n| 1 | A task | 2026-01-01T00:00:00Z |'
+    ),
   readFrontmatterField: vi.fn().mockReturnValue(null),
   readTailChars: vi.fn().mockReturnValue('(log tail)'),
 }));
+
+// Grab a typed reference to the mocked jobs module for per-test overrides
+import * as jobsMock from '../../scheduler/jobs.js';
 
 // Mock node:fs so no real files are read
 vi.mock('node:fs', async (importOriginal) => {
@@ -235,6 +249,23 @@ describe('trigger_project_story tool', () => {
     expect((result.content[0] as { text: string }).text).toContain('Project story triggered');
   });
 
+  it('regression: DB-changes section contains markdown tables, NOT [object Object]', async () => {
+    const conductor = makeAgent(2, 'conductor', 1);
+    const narrator = makeAgent(10, 'narrator', null);
+    const project = makeProject(1, 'test-project');
+    const { tool, deliverMessage } = setup(2, [conductor, narrator], [project], [10]);
+
+    await exec(tool, { project_id: 1 });
+
+    const msg1 = deliverMessage.mock.calls[0][0] as string;
+    // Must contain the markdown table pipe character (from formatMarkdownTable mock)
+    expect(msg1).toContain('|');
+    // Must contain the table name as a section header
+    expect(msg1).toContain('### task');
+    // Must NOT contain the string interpolation artifact
+    expect(msg1).not.toContain('[object Object]');
+  });
+
   it('includes existing story note when project_story.md exists', async () => {
     (existsSync as Mock).mockImplementation(
       (p: string) =>
@@ -255,5 +286,28 @@ describe('trigger_project_story tool', () => {
     } finally {
       (existsSync as Mock).mockReturnValue(false);
     }
+  });
+
+  it('regression: uses "(no DB changes)" placeholder when all DB tables are empty', async () => {
+    // Before the fix, projectDbTables.length > 0 was always true (collectProjectDbChanges
+    // always returns a fixed list of table structs), so the '(no DB changes)' branch was dead.
+    // Now the check is hasProjectDbChanges = projectDbTables.some(t => t.rows.length > 0).
+    (jobsMock.collectProjectDbChanges as Mock).mockReturnValueOnce([
+      { name: 'project', sql: 'SELECT ...', timeColumn: 'updated_at', rows: [] },
+      { name: 'task', sql: 'SELECT ...', timeColumn: 'updated_at', rows: [] },
+    ]);
+
+    const conductor = makeAgent(2, 'conductor', 1);
+    const narrator = makeAgent(10, 'narrator', null);
+    const project = makeProject(1, 'test-project');
+    const { tool, deliverMessage } = setup(2, [conductor, narrator], [project], [10]);
+
+    await exec(tool, { project_id: 1 });
+
+    const msg1 = deliverMessage.mock.calls[0][0] as string;
+    expect(msg1).toContain('(no DB changes)');
+    // Must NOT render table headers when there are no rows
+    expect(msg1).not.toContain('### project');
+    expect(msg1).not.toContain('### task');
   });
 });

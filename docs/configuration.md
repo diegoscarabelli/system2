@@ -108,6 +108,11 @@ max_history_messages = 1000  # Max messages in chat history ring buffer
 
 [knowledge]
 budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overruns
+
+[delivery]
+max_bytes = 1048576                # Hard cap on inter-agent delivery wire size (~1 MB)
+catch_up_budget_bytes = 524288     # Producer budget for catch-up / daily-summary deliveries (~512 KB)
+narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Narrator-bound deliveries (~16 KB)
 ```
 
 ## Sections
@@ -125,6 +130,7 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 | `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
 | `[chat]` | Chat history settings | `ChatConfig` |
 | `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
+| `[delivery]` | Inter-agent delivery size bounds | -- |
 
 ## LLM Providers
 
@@ -142,6 +148,22 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
 
+## Delivery Size Bounds
+
+To prevent oversized inter-agent deliveries from triggering provider context-overflow errors or cooldown cascades, the `[delivery]` section configures producer-side size limits:
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `max_bytes` | 1048576 (1 MB) | Hard wire-size cap. Approximately 25% of a 1M-token context window. Producers should self-bound; this is the loud-fail boundary at which deliveries are rejected. |
+| `catch_up_budget_bytes` | 524288 (512 KB) | Producer-side budget for catch-up and daily-summary deliveries. Typically half of `max_bytes`, leaving headroom for headers, DB-changes sections, and SDK overhead. When activity exceeds this budget, oldest entries are dropped first. |
+| `narrator_message_excerpt_bytes` | 16384 (16 KB) | Per-`custom_message` content cap when feeding session JSONL into Narrator-bound deliveries (daily-summary cron and `trigger_project_story` tool). Prevents individual messages with oversized content from bloating the delivery. |
+
+**Invariant:** `catch_up_budget_bytes` must be less than `max_bytes`. This is validated at startup; if violated, a warning is logged.
+
+When a catch-up delivery (e.g., daily summary) exceeds `catch_up_budget_bytes`, the oldest activity entries are dropped first, with a note prepended: `[NOTE: dropped N oldest entries spanning timestamp-A → timestamp-B to fit within delivery budget]`. The server logs this action at warn level. Cursor advancement is unaffected: the `last_narrator_update_ts` advances to the current run timestamp regardless, so dropped entries are intentionally not re-scanned.
+
+For the `message_agent` tool, if a single message payload exceeds `max_bytes`, it is synchronously rejected with error code `message_too_large`.
+
 The `openrouter` provider supports an optional `[llm.openrouter.routing]` section that controls upstream provider routing. Keys are model ID prefixes matched against the resolved model (longest prefix wins), values are arrays of OpenRouter provider slugs tried in order. Prefixes containing special characters like `/` must be quoted in TOML (e.g. `"google/" = [...]`). For example, `google = ["google-vertex/global", "google-vertex", "google-ai-studio"]` routes all `google/*` models through Vertex AI first. If no prefix matches, no routing preference is set and OpenRouter uses its default load balancing.
 
 The `openai-compatible` provider requires `base_url` and `model` fields in addition to keys. Use it for self-hosted proxies or providers not listed above. The optional `compat_reasoning` field (default `true`) declares whether the model supports extended thinking. For built-in providers (anthropic, openai, etc.), the SDK already knows which models support reasoning; `compat_reasoning` only applies to `openai-compatible` since the SDK has no way to know the capabilities of an arbitrary endpoint. Setting it to `true` for a model that doesn't support reasoning is safe: the SDK only sends `reasoning_effort` when the provider's compatibility layer confirms support, and most backends ignore unknown parameters.
@@ -152,17 +174,17 @@ When API errors occur, System2 automatically retries and fails over:
 
 | Error | Behavior |
 |-------|----------|
-| **401/403** (auth) | Immediate failover. Key permanently marked failed. |
-| **429** (rate limit) | Retry 3x with exponential backoff, then failover. |
-| **500/503/timeout** | Retry 2x with exponential backoff, then failover. |
-| **400** (bad request) | Surface error to user. No retry or failover. |
+| **401/403** (auth) | Immediate failover. Key enters 5-minute cooldown. |
+| **429** (rate limit) | Retry up to 7x with exponential backoff, then failover. Key enters 90-second cooldown. |
+| **500/503/timeout** | Retry 2x with exponential backoff, then failover. Key enters 5-minute cooldown. |
+| **400** (bad request) | Immediate failover. Key enters 5-minute cooldown. |
 
 **Failover order:**
 1. Next key for the current provider
 2. First fallback provider's keys
 3. Continue through fallback providers
 
-**Cooldown recovery:** Rate limit and transient failures enter a 5-minute cooldown. Keys become available again automatically after cooldown expires. Auth errors (invalid/revoked keys) are permanent until you edit config.toml.
+**Cooldown recovery:** All failures enter a timed cooldown (90 seconds for rate limits, 5 minutes for everything else). Keys become available again automatically after the cooldown expires. All cooldowns are in-memory only; restarting the daemon clears them immediately.
 
 See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 

@@ -86,7 +86,7 @@ export function createWebFetchTool() {
         const reader = new Readability(document);
         const article = reader.parse();
 
-        if (!article || !article.textContent?.trim()) {
+        if (!article?.textContent?.trim()) {
           const { document: fallbackDoc } = parseHTML(html);
           for (const tag of ['script', 'style', 'nav', 'header', 'footer']) {
             for (const el of fallbackDoc.querySelectorAll(tag)) {
