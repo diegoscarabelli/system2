@@ -1703,9 +1703,12 @@ export class AgentHost {
    * Called after `agent_end` for a scheduled-task delivery on roles that opt in via
    * `reset_session_after_scheduled_task: true`.
    *
-   * The old JSONL is archived as `<name>.jsonl.archived` (mirrors session-rotation behavior, so
-   * compaction baseline scanning still finds prior summaries). The next prompt or delivery sees
-   * `this.session === null` and drives reinitialization, which reads the new header-only JSONL.
+   * The old JSONL is archived as `<name>.jsonl.archived` for forensic inspection (the active-
+   * session scanner only reads files ending in `.jsonl`, so archived files are excluded from
+   * subsequent loads). Compaction state is also reset to 0, so baseline lookup will start fresh
+   * on the new session — no scanner traversal of older files is needed. The next prompt or
+   * delivery sees `this.session === null` and drives reinitialization, which reads the new
+   * header-only JSONL.
    *
    * Failures are logged but never thrown: a failed reset must not break the agent. The next cron
    * tick simply runs against the unrotated file and may eventually hit the size-rotation path.
