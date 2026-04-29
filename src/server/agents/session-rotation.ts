@@ -238,7 +238,9 @@ export function rotateSessionIfNeeded(
   // Parse entries
   const entries = parseSessionEntries(currentFile);
   if (entries.length === 0) {
-    log.info('[SessionRotation] No entries found, skipping rotation');
+    log.warn(
+      `[SessionRotation] File exceeded threshold but parsed to 0 entries: ${currentFile} (size ${formatMB(stat.size)} MB). All lines may be malformed JSON. Skipping rotation.`
+    );
     return false;
   }
 
