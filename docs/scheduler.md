@@ -69,6 +69,14 @@ Each project log is a single continuous file per project lifetime (unlike daily 
 
 The Narrator synthesizes each section into narrative summaries, avoiding repetition of project-specific content already covered in project-log entries (which are processed first).
 
+## Narrator Session Reset
+
+After each scheduled-task delivery completes (`agent_end` for content starting with `[Scheduled task: ...]`), the AgentHost truncates the Narrator's session JSONL to a fresh session header and reinitializes the SDK session. The Narrator's durable memory lives in the knowledge files it writes (daily summaries, `memory.md`, project logs), not in its session. This prevents accumulating context over scheduled-task cycles, which previously caused 200K-token overflows on the Narrator's Haiku 4.5 model when restored-session + system-prompt + delivery exceeded the limit.
+
+The reset always fires on the trailing scheduled-task `agent_end`, even if other deliveries (catch-up storms, daily-summary + memory-update overlap) are queued. After reinitialize() resolves, queued deliveries are replayed against the fresh session via `sendCustomMessage`, so no work is lost. Compaction state (`compactionCount` plus the persisted `.compaction-count` file) is also reset so the pruning trigger does not fire spuriously against the new empty session.
+
+Controlled by the agent library frontmatter `reset_session_after_scheduled_task: true` (set on Narrator only). See `resetSessionToHeader()` in `src/server/agents/host.ts`.
+
 ## Memory Update Pipeline
 
 `buildAndDeliverMemoryUpdate()` runs daily at 11 AM:

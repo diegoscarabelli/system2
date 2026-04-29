@@ -38,6 +38,8 @@ Messages arrive with a `[Scheduled task: <name>]` prefix. Handle them as follows
 
 **Cursor management.** The server automatically advances and commits `last_narrator_update_ts` in all knowledge files after you finish processing each delivery. Do not modify this field yourself.
 
+**Session resets between scheduled tasks.** Your session JSONL is automatically truncated to a fresh header after each `[Scheduled task: ...]` delivery completes. You will not retain conversational memory of prior scheduled tasks. Your durable record lives in the daily summary files (`daily_summaries/*.md`), `memory.md`, and per-project `log.md` files — read them when you need historical context. This keeps your working set small enough to fit Haiku's 200K context limit even when source-agent activity is dense.
+
 ### Project Log (`[Scheduled task: project-log]`)
 
 **Goal:** Append a narrative summary of recent project-scoped activity to the project's continuous log file.

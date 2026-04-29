@@ -3697,6 +3697,8 @@ describe('AgentHost', () => {
       resetSessionAfterScheduledTask: boolean;
       agentRole: string | null;
       unsubscribeSession: (() => void) | null;
+      compactionCount: number;
+      lastTurnErrored: boolean;
       handleSessionEvent: (event: Record<string, unknown>) => void;
       handlePotentialError: ReturnType<typeof vi.fn>;
       handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -3833,6 +3835,105 @@ describe('AgentHost', () => {
       expect(archived.length).toBe(0);
       expect(internal.session).toBe(sessionBefore);
       expect(internal.initialize).not.toHaveBeenCalled();
+    });
+
+    it('replays queued deliveries against the fresh session after reset', async () => {
+      const { internal } = makeHostWithSessionDir({ reset: true });
+
+      // After reset clears `this.session = null`, the production code awaits initialize()
+      // which rebuilds the session. The test stub doesn't really call initialize, so we
+      // simulate the side effect: when initialize resolves, install a fresh session mock
+      // (with its own sendCustomMessage spy) that the replay loop can write to.
+      const freshSendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      internal.initialize = vi.fn().mockImplementation(async () => {
+        internal.session = { sendCustomMessage: freshSendCustomMessage };
+      });
+
+      const details = { sender: 1, receiver: 2, timestamp: Date.now() };
+
+      // Two scheduled-task deliveries pending: A is the one whose agent_end we are about
+      // to fire, B was queued behind it (e.g. memory-update piled up while daily-summary
+      // was running, or two cron ticks queued during a startup catch-up storm). Without
+      // replay, B would be stranded once resetSessionToHeader nulls out the session.
+      const resolveA = vi.fn();
+      const resolveB = vi.fn();
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /a',
+          details,
+          scheduledTask: true,
+          resolve: resolveA,
+          reject: vi.fn(),
+        },
+        {
+          content: '[Scheduled task: memory-update]\n\nfile: /b',
+          details,
+          scheduledTask: true,
+          resolve: resolveB,
+          reject: vi.fn(),
+        },
+      ];
+      // Only A's send has been counted: B is queued but not yet flushed to the SDK because
+      // the session is busy on A. `agent_end` for A will shift A and leave B in the queue.
+      internal.deliverySendCount = 1;
+
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      // A's promise resolved as part of the pre-reset cleanup
+      expect(resolveA).toHaveBeenCalledOnce();
+      expect(resolveB).not.toHaveBeenCalled();
+
+      // Reset HAPPENED even though B is still queued — this is the round-1 fix.
+      const archived = readdirSync(testDir).filter((f) => f.endsWith('.jsonl.archived'));
+      expect(archived.length).toBe(1);
+      // Briefly null between resetSessionToHeader and initialize().then(), but after the
+      // microtask flush below the freshSendCustomMessage stub will be in place.
+
+      // Reinit was scheduled.
+      expect(internal.initialize).toHaveBeenCalledOnce();
+
+      // Flush microtasks so the void initialize().then(replay) chain runs.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Fresh session is installed and B was replayed against it via sendCustomMessage.
+      expect(internal.session).not.toBeNull();
+      expect(freshSendCustomMessage).toHaveBeenCalledTimes(1);
+      const callArg = freshSendCustomMessage.mock.calls[0][0] as { content: string };
+      expect(callArg.content).toBe('[Scheduled task: memory-update]\n\nfile: /b');
+
+      // B is still in pendingDeliveries — replay does not pop, agent_end does on the next turn.
+      expect(internal.pendingDeliveries).toHaveLength(1);
+      expect(internal.pendingDeliveries[0].content).toContain('memory-update');
+    });
+
+    it('resets compactionCount (in-memory and persisted) on reset', () => {
+      const { internal } = makeHostWithSessionDir({ reset: true });
+
+      // Seed a non-zero compaction count to simulate a long-running narrator session.
+      internal.compactionCount = 241;
+      // Pre-write the persisted file so we can verify it gets clobbered to 0.
+      const countFile = join(testDir, '.compaction-count');
+      writeFileSync(countFile, '241');
+
+      const details = { sender: 1, receiver: 2, timestamp: Date.now() };
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /x',
+          details,
+          scheduledTask: true,
+          resolve: vi.fn(),
+          reject: vi.fn(),
+        },
+      ];
+      internal.deliverySendCount = 1;
+      internal.lastTurnErrored = false;
+
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      expect(internal.compactionCount).toBe(0);
+      expect(readFileSync(countFile, 'utf-8').trim()).toBe('0');
+      expect(internal.lastTurnErrored).toBe(false);
     });
 
     it('deliverMessage marks scheduled-task content with scheduledTask flag', () => {

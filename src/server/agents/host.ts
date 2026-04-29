@@ -631,21 +631,26 @@ export class AgentHost {
       // losing semantic context. Reset happens after delivery promises have resolved (above) so
       // awaiting callers see success before reinit kicks off.
       //
-      // Skip reset if other deliveries are still queued (would be stranded with session=null
-      // until reinit completes). For the Narrator, scheduler jobs serialize one tick at a time,
-      // so this is the common case; the guard is a safety net for unusual interleavings.
-      if (
-        completedScheduledTask &&
-        this.resetSessionAfterScheduledTask &&
-        this.pendingDeliveries.length === 0
-      ) {
+      // Always reset, even if other deliveries are still queued. The pathological case this
+      // feature protects against (e.g. daily-summary + memory-update overlap, or catch-up
+      // storms at startup queueing multiple scheduled tasks) is precisely when several
+      // deliveries pile up. After reinitialize() resolves, replay the queued deliveries
+      // against the fresh session.
+      if (completedScheduledTask && this.resetSessionAfterScheduledTask) {
         this.resetSessionToHeader();
         // Reinitialize asynchronously so the next scheduled tick has a live session ready.
         // Errors are logged inside reinitialize(); cron ticks are 30 min apart so this has
         // plenty of headroom. Using void-and-catch to keep handleSessionEvent synchronous.
-        void this.initialize().catch((err) => {
-          log.error('[AgentHost] Failed to reinitialize after scheduled-task reset:', err);
-        });
+        void this.initialize()
+          .then(() => {
+            // Replay any deliveries queued while the just-completed scheduled task was running
+            // (or that arrived between agent_end and this point). Without replay they would be
+            // stranded in pendingDeliveries with the now-fresh session never seeing them.
+            this.replayPendingDeliveries('after scheduled-task reset');
+          })
+          .catch((err) => {
+            log.error('[AgentHost] Failed to reinitialize after scheduled-task reset:', err);
+          });
       }
 
       // Track compaction for pruning. May synchronously schedule pruning,
@@ -1695,6 +1700,16 @@ export class AgentHost {
         this.unsubscribeSession = null;
       }
       this.session = null;
+      // Reset compaction state alongside the session: the new JSONL has no prior compactions,
+      // so leaving the counter at its prior value (observed at 241+ during the cascade this
+      // feature fixes) would let the pruning trigger fire spuriously against the empty file.
+      // Persist 0 to disk too, since initialize() rehydrates compactionCount from the
+      // .compaction-count file.
+      this.compactionCount = 0;
+      this.writeCompactionCount(0);
+      // Clear lastTurnErrored: a leftover error flag from the just-completed scheduled task
+      // would otherwise corrupt cleanup decisions on the first agent_end of the fresh session.
+      this.lastTurnErrored = false;
       log.info(
         `[AgentHost] Reset ${this.agentRole ?? 'agent'} session after scheduled task; JSONL truncated to fresh header (${newFilename}).`
       );
@@ -1876,32 +1891,44 @@ export class AgentHost {
     // Clear the overflow-causing prompt so a future failover doesn't retry it
     this.pendingPrompt = null;
     this.deliverySendCount = 0;
-    // Replay pending deliveries on the recovered session. Don't clear
-    // pendingDeliveries: agent_end will shift each one as turns succeed.
-    if (this.pendingDeliveries.length > 0 && this.session) {
-      for (const delivery of this.pendingDeliveries) {
-        this.deliverySendCount++;
-        this.session
-          .sendCustomMessage(
-            {
-              customType: 'agent_message',
-              content: delivery.content,
-              display: false,
-              details: delivery.details,
-            },
-            {
-              deliverAs: delivery.urgent ? 'steer' : 'followUp',
-              triggerTurn: true,
-            }
-          )
-          .catch((error) => {
-            this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
-            log.error('[AgentHost] Failed to replay delivery after context overflow:', error);
-            const idx = this.pendingDeliveries.indexOf(delivery);
-            if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
-            delivery.reject(error instanceof Error ? error : new Error(String(error)));
-          });
-      }
+    this.replayPendingDeliveries('after context overflow');
+  }
+
+  /**
+   * Replay pending deliveries against the current session via sendCustomMessage.
+   *
+   * Used by recovery paths (context overflow, scheduled-task session reset) that swap or
+   * rebuild the underlying SDK session: deliveries that were queued during the disruption
+   * need to be re-sent so the fresh session actually sees them. Don't clear
+   * `pendingDeliveries` here — `agent_end` will shift each one as turns succeed.
+   *
+   * Caller is responsible for clearing `pendingPrompt` / `deliverySendCount` first if the
+   * recovery path requires it.
+   */
+  private replayPendingDeliveries(context: string): void {
+    if (this.pendingDeliveries.length === 0 || !this.session) return;
+    for (const delivery of this.pendingDeliveries) {
+      this.deliverySendCount++;
+      this.session
+        .sendCustomMessage(
+          {
+            customType: 'agent_message',
+            content: delivery.content,
+            display: false,
+            details: delivery.details,
+          },
+          {
+            deliverAs: delivery.urgent ? 'steer' : 'followUp',
+            triggerTurn: true,
+          }
+        )
+        .catch((error) => {
+          this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
+          log.error(`[AgentHost] Failed to replay delivery ${context}:`, error);
+          const idx = this.pendingDeliveries.indexOf(delivery);
+          if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+          delivery.reject(error instanceof Error ? error : new Error(String(error)));
+        });
     }
   }
 
