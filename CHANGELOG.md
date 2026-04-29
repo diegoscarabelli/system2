@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-29
+
+### Added
+
+- New `[session]` config section with tunable `rotation_size_bytes` (default 10 MB) for session JSONL rotation threshold ([#153](https://github.com/diegoscarabelli/system2/pull/153))
+
+### Fixed
+
+- Session JSONLs no longer grow unboundedly when the SDK never produces a compaction anchor (e.g., during sustained provider-failover cascades). Every threshold-exceeding cold start now rotates the file: anchored rotation when a compaction exists, bare-bytes-tail otherwise (header + up to 1 MB of recent entries aligned to a user-turn boundary), or header-only when the file is unreadable or anchor is malformed ([#153](https://github.com/diegoscarabelli/system2/pull/153))
+- `bash.test.ts` "active output prevents inactivity timeout" test was flaky under system load: framework timeout (15s) could preempt the bash tool's `total_timeout_seconds=30`, producing exit code 124. Bumped framework timeout to 30s ([#153](https://github.com/diegoscarabelli/system2/pull/153))
+
 ## [0.2.0] - 2026-04-29
 
 ### Added
@@ -80,7 +91,8 @@ First published release.
 - Unify knowledge file commits via `commitIfStateDir` ([#125](https://github.com/diegoscarabelli/system2/pull/125))
 - Fall back to Guide when persisted agent no longer exists ([#122](https://github.com/diegoscarabelli/system2/pull/122))
 
-[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/diegoscarabelli/system2/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/diegoscarabelli/system2/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/diegoscarabelli/system2/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/diegoscarabelli/system2/releases/tag/v0.1.2
