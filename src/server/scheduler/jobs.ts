@@ -496,11 +496,14 @@ export interface DbTruncateResult {
 const DB_CHANGES_BUDGET_FRACTION = 0.25;
 
 /**
- * Truncate DB-change tables to fit within a byte budget, keeping the newest rows.
- * Budget is split evenly across non-empty tables only. Unused budget from empty
- * tables is reclaimed and distributed to tables with data. Empty tables still
- * render their "(no changes)" placeholders for visibility.
- * Dropped rows are annotated per table.
+ * Truncate DB-change tables toward a byte budget, keeping the newest rows.
+ * The budget is split evenly across non-empty tables only and is used for
+ * retained row content. Unused budget from empty tables is reclaimed and
+ * distributed to tables with data. Empty tables still render their
+ * "(no changes)" placeholders for visibility, and fixed rendering overhead
+ * such as table headers, SQL text, blank lines, and dropped-row annotations
+ * is added separately. As a result, the final rendered output is best-effort
+ * and may exceed `budget`.
  */
 export function truncateDbChangesToFit(tables: DbChangeTable[], budget: number): DbTruncateResult {
   if (tables.length === 0) return { rendered: '', droppedTotal: 0, droppedRanges: [] };
