@@ -317,6 +317,67 @@ describe('rotateSessionIfNeeded', () => {
       expect(ids).toContain('e2');
       warnSpy.mockRestore();
     });
+
+    it('bare-bytes-tail cut lands on a user-turn boundary, never on assistant/tool', () => {
+      // Setup: assistant, assistant, assistant, user, assistant, assistant
+      // Without user-turn alignment, the kept tail could start on an assistant
+      // entry, leaving a dangling continuation when the SDK restores.
+      const file = join(tmpDir, 'session.jsonl');
+      const entries: object[] = [
+        sessionHeader(),
+        messageEntry('a1', null, 'assistant'),
+        messageEntry('a2', 'a1', 'assistant'),
+        messageEntry('a3', 'a2', 'assistant'),
+        messageEntry('u1', 'a3', 'user'),
+        messageEntry('a4', 'u1', 'assistant'),
+        messageEntry('a5', 'a4', 'assistant'),
+      ];
+      writeJsonl(file, entries);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+      expect(rotated).toBe(true);
+
+      const newFile = findMostRecentSession(tmpDir);
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+
+      // First entry is the new session header, second must be the user turn 'u1'.
+      expect(newEntries[0].type).toBe('session');
+      expect(newEntries[1].id).toBe('u1');
+      expect(newEntries[1].message.role).toBe('user');
+      warnSpy.mockRestore();
+    });
+
+    it('returns header-only when kept range has no user turn (no safe restart anchor)', () => {
+      // All entries are assistant — no user turn exists to anchor the resume on.
+      // selectTailEntries walks past everything; rotation writes only the new header.
+      const file = join(tmpDir, 'session.jsonl');
+      const entries: object[] = [
+        sessionHeader(),
+        messageEntry('a1', null, 'assistant'),
+        messageEntry('a2', 'a1', 'assistant'),
+        messageEntry('a3', 'a2', 'assistant'),
+      ];
+      writeJsonl(file, entries);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+      expect(rotated).toBe(true);
+
+      const newFile = findMostRecentSession(tmpDir);
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+
+      // Only the new session header should remain.
+      expect(newEntries.length).toBe(1);
+      expect(newEntries[0].type).toBe('session');
+      warnSpy.mockRestore();
+    });
   });
 
   describe('skip-path warn logs', () => {
