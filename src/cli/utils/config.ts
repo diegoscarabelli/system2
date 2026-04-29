@@ -26,6 +26,7 @@ import type {
   ThinkingLevel,
   ToolsConfig,
 } from '../../shared/index.js';
+import { DEFAULT_SESSION_ROTATION_SIZE_BYTES } from '../../shared/index.js';
 
 export const SYSTEM2_DIR = join(homedir(), '.system2');
 export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
@@ -165,10 +166,10 @@ export const DEFAULT_DELIVERY: DeliveryConfig = {
   narrator_message_excerpt_bytes: 16 * 1024, // 16384 — per-message excerpt cap for Narrator-bound deliveries (daily-summary + project story); 16 KB captures most payloads while truncating pathological 1+ MB cases
 };
 
-/** Default session-rotation threshold. Must stay in sync with SESSION_FILE_SIZE_LIMIT in
- *  src/server/agents/session-rotation.ts. */
+/** Default session-rotation threshold. Imports the shared constant so CLI defaults and
+ *  server-side defaults cannot drift. */
 export const DEFAULT_SESSION: SessionConfig = {
-  rotation_size_bytes: 10 * 1024 * 1024, // 10 MB — rotation threshold (anchored if compaction exists, bare-bytes-tail otherwise)
+  rotation_size_bytes: DEFAULT_SESSION_ROTATION_SIZE_BYTES, // 10 MB — rotation threshold (anchored if compaction exists, bare-bytes-tail otherwise)
 };
 
 /**

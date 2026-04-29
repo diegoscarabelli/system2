@@ -102,16 +102,6 @@ describe('rotateSessionIfNeeded', () => {
     expect(rotateSessionIfNeeded(tmpDir, '/tmp', 10 * 1024 * 1024)).toBe(false);
   });
 
-  it('returns false when firstKeptEntryId is not found', () => {
-    const file = join(tmpDir, 'session.jsonl');
-    writeJsonl(file, [
-      sessionHeader(),
-      messageEntry('e1', null, 'user'),
-      compactionEntry('c1', 'e1', 'missing-id'),
-    ]);
-    expect(rotateSessionIfNeeded(tmpDir, '/tmp', 0)).toBe(false);
-  });
-
   it('creates a new file and renames the old one to .archived on rotation', () => {
     const file = join(tmpDir, 'session.jsonl');
     writeJsonl(file, [
@@ -412,28 +402,33 @@ describe('rotateSessionIfNeeded', () => {
     });
   });
 
-  describe('skip-path warn logs', () => {
-    it('emits warn with file path + size when firstKeptEntryId is missing on the compaction', () => {
+  describe('malformed-anchor fallback paths', () => {
+    it('falls back to bare-bytes-tail when compaction is missing firstKeptEntryId', () => {
       const file = join(tmpDir, 'session.jsonl');
-      // Compaction entry without firstKeptEntryId
       writeJsonl(file, [
         sessionHeader(),
         messageEntry('e1', null, 'user'),
-        { type: 'compaction', id: 'c1', parentId: 'e1', timestamp: new Date().toISOString() },
+        messageEntry('e2', 'e1', 'assistant'),
+        // Compaction entry without firstKeptEntryId
+        { type: 'compaction', id: 'c1', parentId: 'e2', timestamp: new Date().toISOString() },
       ]);
 
       const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
       const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
 
-      expect(rotated).toBe(false);
+      expect(rotated).toBe(true);
+      // Old file archived
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(`${file}.archived`)).toBe(true);
       const warnText = warnSpy.mock.calls.flat().map(String).join(' ');
       expect(warnText).toContain('firstKeptEntryId');
+      expect(warnText).toContain('bare-bytes-tail');
       expect(warnText).toContain(file);
       expect(warnText).toMatch(/\d+\.\d+ MB/);
       warnSpy.mockRestore();
     });
 
-    it('emits warn with file path + size when firstKeptEntryId is not present in the file', () => {
+    it('falls back to bare-bytes-tail when firstKeptEntryId points to a missing entry', () => {
       const file = join(tmpDir, 'session.jsonl');
       writeJsonl(file, [
         sessionHeader(),
@@ -444,9 +439,41 @@ describe('rotateSessionIfNeeded', () => {
       const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
       const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
 
-      expect(rotated).toBe(false);
+      expect(rotated).toBe(true);
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(`${file}.archived`)).toBe(true);
       const warnText = warnSpy.mock.calls.flat().map(String).join(' ');
       expect(warnText).toContain('missing-id');
+      expect(warnText).toContain('bare-bytes-tail');
+      expect(warnText).toContain(file);
+      expect(warnText).toMatch(/\d+\.\d+ MB/);
+      warnSpy.mockRestore();
+    });
+
+    it('falls back to header-only rotation when file parses to 0 entries', () => {
+      const file = join(tmpDir, 'session.jsonl');
+      // Write only malformed lines so parseSessionEntries returns 0 entries.
+      writeFileSync(file, 'not-json\nstill-not-json\nbroken{lines\n');
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+
+      expect(rotated).toBe(true);
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(`${file}.archived`)).toBe(true);
+
+      const newFile = findMostRecentSession(tmpDir);
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      // Only the new session header
+      expect(newEntries.length).toBe(1);
+      expect(newEntries[0].type).toBe('session');
+
+      const warnText = warnSpy.mock.calls.flat().map(String).join(' ');
+      expect(warnText).toContain('parsed to 0 entries');
+      expect(warnText).toContain('header-only');
       expect(warnText).toContain(file);
       expect(warnText).toMatch(/\d+\.\d+ MB/);
       warnSpy.mockRestore();

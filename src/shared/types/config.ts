@@ -120,3 +120,8 @@ export interface SessionConfig {
    *  the tail cap — rotation writes only the new session header. */
   rotation_size_bytes: number;
 }
+
+/** Single source of truth for the default session-rotation threshold (10 MB). Both the CLI's
+ *  generated config.toml and the server's `rotateSessionIfNeeded` parameter default reference
+ *  this constant so they cannot drift. */
+export const DEFAULT_SESSION_ROTATION_SIZE_BYTES = 10 * 1024 * 1024;

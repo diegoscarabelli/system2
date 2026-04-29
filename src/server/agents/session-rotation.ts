@@ -8,12 +8,14 @@
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { DEFAULT_SESSION_ROTATION_SIZE_BYTES } from '../../shared/types/config.js';
 import { log } from '../utils/logger.js';
 
-/** Default rotation threshold. Above this size, the JSONL is rotated. The decision between the
+/** Default rotation threshold. Imported from shared so CLI config defaults and server-side
+ *  defaults cannot drift. Above this size, the JSONL is rotated. The decision between the
  *  two inner paths (anchored vs bare-bytes-tail) is made based on whether a compaction anchor
  *  exists in the file, not on size. */
-const SESSION_FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
+const SESSION_FILE_SIZE_LIMIT = DEFAULT_SESSION_ROTATION_SIZE_BYTES;
 
 /** Tail-keep cap for the bare-bytes-tail path (no compaction anchor present). Intentionally small:
  *  if the agent has grown the JSONL past `rotation_size_bytes` with no compactions, recent context
@@ -196,6 +198,47 @@ function writeRotatedFile(
 }
 
 /**
+ * Bare-bytes-tail fallback: write a fresh session header + a bounded recent tail
+ * (selected via selectTailEntries, anchored to a user turn) and archive the old file.
+ * Used when no compaction anchor exists or the anchor is malformed.
+ */
+function forceBareBytesTailRotation(
+  sessionDir: string,
+  cwd: string,
+  currentFile: string,
+  entries: SessionEntry[],
+  reason: string
+): true {
+  const tailEntries = selectTailEntries(entries, HARD_FALLBACK_TAIL_BYTES);
+  const newEntries: SessionEntry[] = [createSessionHeader(cwd), ...tailEntries];
+  const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
+  log.info(
+    `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries (bare-bytes-tail fallback: ${reason})`
+  );
+  log.info(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
+  return true;
+}
+
+/**
+ * Header-only fallback: write a fresh session header (no tail) and archive the old file.
+ * Used when the file has no recoverable entries (e.g., 0 parsed lines).
+ */
+function forceHeaderOnlyRotation(
+  sessionDir: string,
+  cwd: string,
+  currentFile: string,
+  reason: string
+): true {
+  const newEntries: SessionEntry[] = [createSessionHeader(cwd)];
+  const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
+  log.info(
+    `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entry (header-only fallback: ${reason})`
+  );
+  log.info(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
+  return true;
+}
+
+/**
  * Rotate session file if it exceeds the size threshold.
  *
  * Only call this during initialization, before a SessionManager is created.
@@ -205,14 +248,18 @@ function writeRotatedFile(
  *
  * Decision tree (file size = `stat.size`):
  *
- *   stat.size < thresholdBytes        → return false (no-op)
- *   compaction anchor present         → anchored rotation: header + entries from
- *                                       firstKeptEntryId onward
- *   no compaction anchor              → bare-bytes-tail rotation: header + last
- *                                       HARD_FALLBACK_TAIL_BYTES (~1 MB) of entries.
- *                                       Emits a warn — the absence of a compaction at
- *                                       this size signals the agent has been in a
- *                                       failure loop.
+ *   stat.size < thresholdBytes              → return false (no-op)
+ *   parsed 0 entries (malformed file)       → header-only rotation: write fresh header,
+ *                                             archive bad file. Bounds disk; unblocks cold start.
+ *   compaction anchor + valid firstKeptEntryId → anchored rotation: header + entries from
+ *                                                firstKeptEntryId onward.
+ *   no compaction anchor                    → bare-bytes-tail rotation: header + tail
+ *                                             (selectTailEntries, ~1 MB cap, user-turn aligned).
+ *   compaction missing/broken firstKeptEntryId → fall back to bare-bytes-tail rotation
+ *                                                (anchor can't be trusted).
+ *
+ * Every path that reaches the threshold rotates the file — no path leaves an oversized JSONL on
+ * disk. Fallback paths emit `warn` logs so operators see them.
  *
  * @param sessionDir - Directory containing session JSONL files
  * @param cwd - Current working directory for session header
@@ -238,13 +285,15 @@ export function rotateSessionIfNeeded(
 
   log.info(`[SessionRotation] File size ${formatMB(stat.size)}MB exceeds threshold, rotating...`);
 
-  // Parse entries
+  // Parse entries. If parsing yields zero usable entries (every line malformed, or whitespace-only
+  // file), the file has no recoverable state — write a fresh header-only session and archive the
+  // bad one. Leaving the oversized file on disk would re-trigger this branch on every cold start.
   const entries = parseSessionEntries(currentFile);
   if (entries.length === 0) {
     log.warn(
-      `[SessionRotation] File exceeded threshold but parsed to 0 entries: ${currentFile} (size ${formatMB(stat.size)} MB). All lines may be malformed JSON. Skipping rotation.`
+      `[SessionRotation] File exceeded threshold but parsed to 0 entries: ${currentFile} (size ${formatMB(stat.size)} MB). All lines may be malformed JSON. Forcing header-only rotation so cold start is unblocked and disk usage remains bounded.`
     );
-    return false;
+    return forceHeaderOnlyRotation(sessionDir, cwd, currentFile, 'parsed to 0 entries');
   }
 
   // Find compaction entry
@@ -257,35 +306,48 @@ export function rotateSessionIfNeeded(
     log.warn(
       `[SessionRotation] No compaction found in ${currentFile} (size ${formatMB(stat.size)} MB). Forcing bare-bytes-tail rotation: keeping header + last ${formatMB(HARD_FALLBACK_TAIL_BYTES)} MB of entries. Older state will be archived. Repeated occurrences signal the agent has been in a failure loop.`
     );
-
-    const tailEntries = selectTailEntries(entries, HARD_FALLBACK_TAIL_BYTES);
-    const newEntries: SessionEntry[] = [createSessionHeader(cwd), ...tailEntries];
-    const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
-
-    log.info(
-      `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries (bare-bytes-tail fallback)`
+    return forceBareBytesTailRotation(
+      sessionDir,
+      cwd,
+      currentFile,
+      entries,
+      'no compaction anchor'
     );
-    log.info(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
-    return true;
   }
 
   const { entry: compactionEntry, index: compactionIndex } = compaction;
   const firstKeptEntryId = compactionEntry.firstKeptEntryId;
 
   if (!firstKeptEntryId) {
+    // Compaction is malformed — its firstKeptEntryId is null/undefined. We can't trust the anchor
+    // to define the kept range, so treat it as if no compaction existed and fall back.
     log.warn(
-      `[SessionRotation] Compaction has no firstKeptEntryId in ${currentFile} (size ${formatMB(stat.size)} MB), skipping rotation`
+      `[SessionRotation] Compaction has no firstKeptEntryId in ${currentFile} (size ${formatMB(stat.size)} MB). Falling back to bare-bytes-tail rotation.`
     );
-    return false;
+    return forceBareBytesTailRotation(
+      sessionDir,
+      cwd,
+      currentFile,
+      entries,
+      'compaction missing firstKeptEntryId'
+    );
   }
 
   // Find index of firstKeptEntryId
   const firstKeptIndex = entries.findIndex((e) => e.id === firstKeptEntryId);
   if (firstKeptIndex === -1) {
+    // firstKeptEntryId doesn't match any kept entry — anchor is broken (corruption, partial
+    // truncation, or rotation boundary mismatch). Same fallback as above.
     log.warn(
-      `[SessionRotation] firstKeptEntryId ${firstKeptEntryId} not found in ${currentFile} (size ${formatMB(stat.size)} MB), skipping rotation`
+      `[SessionRotation] firstKeptEntryId ${firstKeptEntryId} not found in ${currentFile} (size ${formatMB(stat.size)} MB). Falling back to bare-bytes-tail rotation.`
     );
-    return false;
+    return forceBareBytesTailRotation(
+      sessionDir,
+      cwd,
+      currentFile,
+      entries,
+      `firstKeptEntryId ${firstKeptEntryId} not found`
+    );
   }
 
   // Build new entries in chronological order:
