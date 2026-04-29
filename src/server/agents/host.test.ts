@@ -16,7 +16,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LlmConfig } from '../../shared/index.js';
 import { AgentHost, MAX_DELIVERY_BYTES } from './host.js';
@@ -4115,7 +4115,7 @@ describe('AgentHost', () => {
 
       // The freshly archived active file must be among the kept (it had the newest mtime).
       const archivedActive = `${activeFile}.archived`;
-      expect(archives).toContain(archivedActive.split('/').pop());
+      expect(archives).toContain(basename(archivedActive));
 
       // The two oldest stale archives must be gone.
       expect(existsSync(stalePaths[0])).toBe(false);

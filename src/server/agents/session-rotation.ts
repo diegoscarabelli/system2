@@ -228,23 +228,39 @@ export function pruneArchives(sessionDir: string, keepCount: number): void {
   }
   if (archived.length <= keepCount) return;
 
-  // Sort by mtime descending (newest first); delete everything past keepCount.
+  // Sort by mtime descending (newest first); delete everything past keepCount. statSync is
+  // wrapped per-file: a concurrently-removed archive, broken symlink, or unreadable inode
+  // should skip+log, never abort rotation.
   const sorted = archived
-    .map((f) => {
+    .flatMap((f) => {
       const fullPath = join(sessionDir, f);
-      const stat = statSync(fullPath);
-      return { path: fullPath, mtime: stat.mtime.getTime() };
+      try {
+        const stat = statSync(fullPath);
+        return [{ path: fullPath, mtime: stat.mtime.getTime() }];
+      } catch (err) {
+        log.warn(`[SessionRotation] Failed to stat archive ${fullPath}: ${err}`);
+        return [];
+      }
     })
     .sort((a, b) => b.mtime - a.mtime);
 
   const toDelete = sorted.slice(keepCount);
+  const prunedNames: string[] = [];
   for (const entry of toDelete) {
     try {
       unlinkSync(entry.path);
-      log.info(`[SessionRotation] Pruned old archive: ${basename(entry.path)}`);
+      prunedNames.push(basename(entry.path));
     } catch (err) {
       log.warn(`[SessionRotation] Failed to prune ${entry.path}: ${err}`);
     }
+  }
+
+  // Single summary line so first-prune-after-upgrade (potentially many archives) doesn't
+  // flood the log with one line per file.
+  if (prunedNames.length > 0) {
+    log.info(
+      `[SessionRotation] Pruned ${prunedNames.length} old archive(s) in ${sessionDir}: newest=${prunedNames[0]}, oldest=${prunedNames[prunedNames.length - 1]}`
+    );
   }
 }
 
