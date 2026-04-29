@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-29
+
+### Added
+
+- New `archive_keep_count` field in the `[session]` config section (default 5) — caps the number of `.jsonl.archived` files retained per agent's session directory. Older archives are pruned by mtime after every successful rotation. Prevents unbounded archive accumulation introduced by the narrator session reset (~48 archives/day on the default 30-min cron) ([#157](https://github.com/diegoscarabelli/system2/pull/157))
+
+### Fixed
+
+- Narrator session JSONL is now reset to a fresh header after each completed scheduled task (via the new agent library frontmatter flag `reset_session_after_scheduled_task: true`, opt-in per role). Prevents the context-overflow cascade where each cron tick's restored session (long writeup + tool-call traces) plus the new catch-up delivery exceeded Haiku 4.5's 200K window. The Narrator's durable memory remains in `daily_summaries/*.md`, `memory.md`, and per-project `log.md`; only the in-session JSONL is cleared. The reset is robust across queued deliveries, malformed sessions, and Anthropic OAuth long-context misclassifier 429s. Other agents (Guide, Conductor, Reviewer) keep their conversational sessions ([#155](https://github.com/diegoscarabelli/system2/pull/155))
+
 ## [0.2.1] - 2026-04-29
 
 ### Added
@@ -91,7 +101,8 @@ First published release.
 - Unify knowledge file commits via `commitIfStateDir` ([#125](https://github.com/diegoscarabelli/system2/pull/125))
 - Fall back to Guide when persisted agent no longer exists ([#122](https://github.com/diegoscarabelli/system2/pull/122))
 
-[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/diegoscarabelli/system2/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/diegoscarabelli/system2/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/diegoscarabelli/system2/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/diegoscarabelli/system2/compare/v0.1.2...v0.1.3
