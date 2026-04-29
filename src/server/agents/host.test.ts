@@ -6,7 +6,7 @@
  * session.prompt() resolves.
  */
 
-import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -3663,6 +3663,209 @@ describe('AgentHost', () => {
       // The notice marker is the activity-log one, NOT the curated-file one
       expect(result).toContain('dropped oldest content from this activity log');
       expect(result).not.toContain('file exceeds');
+    });
+  });
+
+  describe('reset session after scheduled task', () => {
+    let testDir: string;
+
+    beforeEach(() => {
+      testDir = join(
+        tmpdir(),
+        `system2-test-reset-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      );
+      mkdirSync(testDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    type ResetInternal = {
+      pendingDeliveries: Array<{
+        content: string;
+        details: { sender: number; receiver: number; timestamp: number };
+        urgent?: boolean;
+        scheduledTask?: boolean;
+        resolve: () => void;
+        reject: (reason: Error) => void;
+      }>;
+      deliverySendCount: number;
+      session: unknown;
+      _sessionDir: string | null;
+      _chatCache: null;
+      resetSessionAfterScheduledTask: boolean;
+      agentRole: string | null;
+      unsubscribeSession: (() => void) | null;
+      handleSessionEvent: (event: Record<string, unknown>) => void;
+      handlePotentialError: ReturnType<typeof vi.fn>;
+      handleCompactionTracking: ReturnType<typeof vi.fn>;
+      initialize: ReturnType<typeof vi.fn>;
+    };
+
+    /** Build a host with stubbed lifecycle methods, ready for handleSessionEvent('agent_end'). */
+    function makeHostWithSessionDir(opts: { reset: boolean; sessionFile?: string }): {
+      host: AgentHost;
+      internal: ResetInternal;
+    } {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        resetSessionAfterScheduledTask: opts.reset,
+      });
+      const internal = host as unknown as ResetInternal;
+      internal.session = { sendCustomMessage: vi.fn() };
+      internal._sessionDir = testDir;
+      internal._chatCache = null;
+      internal.agentRole = 'narrator';
+      internal.unsubscribeSession = null;
+      internal.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+      internal.handleCompactionTracking = vi.fn();
+      // Stub initialize so the post-reset reinit doesn't try to load real config
+      internal.initialize = vi.fn().mockResolvedValue(undefined);
+
+      // Seed an existing JSONL with prior session state (header + a tool-call line)
+      const filename = opts.sessionFile ?? `${Date.now()}_seed.jsonl`;
+      const filePath = join(testDir, filename);
+      const seedLines = [
+        JSON.stringify({ type: 'session', version: 3, id: 'old-id', cwd: '/some/cwd' }),
+        JSON.stringify({ type: 'message', message: { role: 'user', content: 'hi' } }),
+        JSON.stringify({ type: 'message', message: { role: 'assistant', content: 'hello' } }),
+      ];
+      writeFileSync(filePath, `${seedLines.join('\n')}\n`);
+
+      return { host, internal };
+    }
+
+    it('truncates JSONL to fresh header and clears session after scheduled-task delivery', () => {
+      const { internal } = makeHostWithSessionDir({ reset: true });
+
+      const details = { sender: 1, receiver: 2, timestamp: Date.now() };
+      const resolveDelivery = vi.fn();
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /x',
+          details,
+          scheduledTask: true,
+          resolve: resolveDelivery,
+          reject: vi.fn(),
+        },
+      ];
+      internal.deliverySendCount = 1;
+
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      // Delivery promise resolved (cleanup happened before reset)
+      expect(resolveDelivery).toHaveBeenCalledOnce();
+
+      // Old file archived
+      const files = readdirSync(testDir);
+      const archived = files.filter((f) => f.endsWith('.jsonl.archived'));
+      expect(archived.length).toBe(1);
+
+      // Active JSONL contains exactly one line: a fresh session header
+      const active = files.filter((f) => f.endsWith('.jsonl'));
+      expect(active.length).toBe(1);
+      const activePath = join(testDir, active[0]);
+      const lines = readFileSync(activePath, 'utf-8')
+        .split('\n')
+        .filter((l) => l.length > 0);
+      expect(lines).toHaveLength(1);
+      const header = JSON.parse(lines[0]);
+      expect(header.type).toBe('session');
+      expect(header.version).toBe(3);
+      expect(header.id).toBeTruthy();
+      // Header is fresh, not the seeded one
+      expect(header.id).not.toBe('old-id');
+
+      // In-memory session was cleared so the next prompt forces reinit
+      expect(internal.session).toBeNull();
+
+      // Reinit was kicked off asynchronously
+      expect(internal.initialize).toHaveBeenCalledOnce();
+    });
+
+    it('does not reset when delivery content lacks the [Scheduled task: prefix', () => {
+      const { internal } = makeHostWithSessionDir({ reset: true });
+
+      const details = { sender: 1, receiver: 2, timestamp: Date.now() };
+      internal.pendingDeliveries = [
+        {
+          content: '[Message from guide agent (id=1)]\n\nplease look at this',
+          details,
+          scheduledTask: false,
+          resolve: vi.fn(),
+          reject: vi.fn(),
+        },
+      ];
+      internal.deliverySendCount = 1;
+
+      const sessionBefore = internal.session;
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      const archived = readdirSync(testDir).filter((f) => f.endsWith('.archived'));
+      expect(archived.length).toBe(0);
+      expect(internal.session).toBe(sessionBefore);
+      expect(internal.initialize).not.toHaveBeenCalled();
+    });
+
+    it('does not reset when resetSessionAfterScheduledTask is false', () => {
+      const { internal } = makeHostWithSessionDir({ reset: false });
+
+      const details = { sender: 1, receiver: 2, timestamp: Date.now() };
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /x',
+          details,
+          scheduledTask: true,
+          resolve: vi.fn(),
+          reject: vi.fn(),
+        },
+      ];
+      internal.deliverySendCount = 1;
+
+      const sessionBefore = internal.session;
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      const archived = readdirSync(testDir).filter((f) => f.endsWith('.archived'));
+      expect(archived.length).toBe(0);
+      expect(internal.session).toBe(sessionBefore);
+      expect(internal.initialize).not.toHaveBeenCalled();
+    });
+
+    it('deliverMessage marks scheduled-task content with scheduledTask flag', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean }>;
+      };
+      internal.session = { sendCustomMessage: vi.fn() };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 1', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Message from guide agent (id=1)]\n\nhi', {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      expect(internal.pendingDeliveries).toHaveLength(2);
+      expect(internal.pendingDeliveries[0].scheduledTask).toBe(true);
+      expect(internal.pendingDeliveries[1].scheduledTask).toBe(false);
     });
   });
 });

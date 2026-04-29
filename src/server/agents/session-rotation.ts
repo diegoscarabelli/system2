@@ -106,7 +106,7 @@ function generateSessionFilename(): string {
 /**
  * Create a new session header.
  */
-function createSessionHeader(cwd: string): SessionEntry {
+export function createSessionHeader(cwd: string): SessionEntry {
   return {
     type: 'session',
     version: 3,
@@ -181,7 +181,7 @@ function selectTailEntries(entries: SessionEntry[], tailBytes: number): SessionE
 /**
  * Write rotated entries to a new JSONL and archive the old file.
  */
-function writeRotatedFile(
+export function writeRotatedFile(
   sessionDir: string,
   oldFilePath: string,
   newEntries: SessionEntry[]

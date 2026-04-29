@@ -4,6 +4,7 @@ description: "Memory keeper: maintains long-term memory and creates daily activi
 version: 3.0.0
 thinking_level: medium
 compaction_depth: 3
+reset_session_after_scheduled_task: true
 models:
   anthropic: claude-haiku-4-5-20251001
   cerebras: gpt-oss-120b

@@ -58,9 +58,11 @@ import {
   sleep,
 } from './retry.js';
 import {
+  createSessionHeader,
   findMostRecentSession,
   parseSessionEntries,
   rotateSessionIfNeeded,
+  writeRotatedFile,
 } from './session-rotation.js';
 
 /** Human-readable label for error categories shown in chat messages. */
@@ -123,6 +125,12 @@ interface AgentDefinition {
   version: string;
   thinking_level?: ThinkingLevel;
   compaction_depth?: number;
+  /** When true and a delivery's content starts with `[Scheduled task:`, the agent's session JSONL
+   *  is truncated to a fresh session header after `agent_end` for that delivery. Intended for
+   *  cron-driven, stateless agents (e.g., Narrator) whose durable memory lives in files
+   *  (`daily_summaries/*.md`, `memory.md`, per-project `log.md`) rather than in their session.
+   *  Prevents context-overflow loops where each tick's restored session keeps growing. */
+  reset_session_after_scheduled_task?: boolean;
   models: {
     anthropic: string;
     cerebras: string;
@@ -158,6 +166,11 @@ export interface AgentHostConfig {
   narratorMessageExcerptBytes?: number;
   /** Session-rotation threshold in bytes. Defaults to SESSION_FILE_SIZE_LIMIT (10 MB). */
   sessionRotationSizeBytes?: number;
+  /** When true and a delivery's content starts with `[Scheduled task:`, truncate the agent's
+   *  session JSONL to header-only after `agent_end` for that delivery. Sourced from the agent
+   *  library frontmatter (`reset_session_after_scheduled_task: true`). Intended for cron-driven,
+   *  stateless agents (Narrator) whose durable memory lives in files, not in their session. */
+  resetSessionAfterScheduledTask?: boolean;
   /** Called when the agent's busy state changes. */
   onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
   /** Called when an agent is terminated via terminate_agent tool. */
@@ -187,6 +200,9 @@ export class AgentHost {
     content: string;
     details: { sender: number; receiver: number; timestamp: number };
     urgent?: boolean;
+    /** True when `content` starts with `[Scheduled task:`. Set at deliverMessage() time and
+     *  read in handleSessionEvent() on `agent_end` to decide whether to reset session JSONL. */
+    scheduledTask?: boolean;
     resolve: () => void;
     reject: (reason: Error) => void;
   }> = [];
@@ -219,6 +235,7 @@ export class AgentHost {
   private onAgentTerminate?: () => void;
   private maxDeliveryBytes: number;
   private sessionRotationSizeBytes: number | undefined;
+  private resetSessionAfterScheduledTask: boolean;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -239,6 +256,9 @@ export class AgentHost {
     this.onAgentTerminate = config.onAgentTerminate;
     this.maxDeliveryBytes = config.maxDeliveryBytes ?? MAX_DELIVERY_BYTES;
     this.sessionRotationSizeBytes = config.sessionRotationSizeBytes;
+    // Caller-provided override; otherwise initialize() reads it from the agent library frontmatter
+    // (`reset_session_after_scheduled_task` field). Default false: only opted-in roles reset.
+    this.resetSessionAfterScheduledTask = config.resetSessionAfterScheduledTask ?? false;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -351,6 +371,12 @@ export class AgentHost {
     }
 
     this.agentModels = agentConfig.models ?? {};
+    // Source the session-reset flag from the agent library frontmatter unless the constructor
+    // explicitly opted in. Caller-provided `true` always wins; otherwise the frontmatter value
+    // (default false for unset) governs reset behavior for this role.
+    if (!this.resetSessionAfterScheduledTask) {
+      this.resetSessionAfterScheduledTask = agentConfig.reset_session_after_scheduled_task === true;
+    }
     // Static parts of the system prompt (loaded once)
     const staticPrompt = `${agentsRefContent}\n\n${agentPrompt}`;
 
@@ -573,6 +599,7 @@ export class AgentHost {
       // On error turns, lastTurnErrored is true (set synchronously in
       // handlePotentialError before agent_end fires). Skip cleanup so the
       // failed prompt/delivery stays tracked for retry or failover.
+      let completedScheduledTask = false;
       if (!this.lastTurnErrored) {
         // Clear pendingPrompt: one agent_end fires after ALL turns (prompt +
         // follow-ups) are processed, so it's always safe to clear here.
@@ -585,7 +612,10 @@ export class AgentHost {
         const toResolve = Math.min(this.deliverySendCount, this.pendingDeliveries.length);
         for (let i = 0; i < toResolve; i++) {
           const completed = this.pendingDeliveries.shift();
-          if (completed) completed.resolve();
+          if (completed) {
+            if (completed.scheduledTask) completedScheduledTask = true;
+            completed.resolve();
+          }
         }
         this.deliverySendCount = 0;
         // Re-arm the OAuth refresh guard so a future 401 on a fresh token can
@@ -593,6 +623,30 @@ export class AgentHost {
         this.oauthRefreshAttempted = false;
       }
       this.lastTurnErrored = false;
+
+      // If this turn completed a scheduled-task delivery for a role configured to reset,
+      // truncate the session JSONL to a fresh header. The Narrator's durable memory lives in
+      // files (`daily_summaries/*.md`, `memory.md`, per-project `log.md`) — not in its session
+      // — so dropping session state between cron ticks prevents context-overflow loops without
+      // losing semantic context. Reset happens after delivery promises have resolved (above) so
+      // awaiting callers see success before reinit kicks off.
+      //
+      // Skip reset if other deliveries are still queued (would be stranded with session=null
+      // until reinit completes). For the Narrator, scheduler jobs serialize one tick at a time,
+      // so this is the common case; the guard is a safety net for unusual interleavings.
+      if (
+        completedScheduledTask &&
+        this.resetSessionAfterScheduledTask &&
+        this.pendingDeliveries.length === 0
+      ) {
+        this.resetSessionToHeader();
+        // Reinitialize asynchronously so the next scheduled tick has a live session ready.
+        // Errors are logged inside reinitialize(); cron ticks are 30 min apart so this has
+        // plenty of headroom. Using void-and-catch to keep handleSessionEvent synchronous.
+        void this.initialize().catch((err) => {
+          log.error('[AgentHost] Failed to reinitialize after scheduled-task reset:', err);
+        });
+      }
 
       // Track compaction for pruning. May synchronously schedule pruning,
       // setting isPruning = true.
@@ -1403,7 +1457,8 @@ export class AgentHost {
     // Track for failover retry. If the session is destroyed during reinitialization,
     // queued sendCustomMessage calls are lost. This queue lets handlePotentialError
     // replay them on the new session. Cleared per-turn by agent_end (shift).
-    this.pendingDeliveries.push({ content, details, urgent, resolve, reject });
+    const scheduledTask = content.startsWith('[Scheduled task:');
+    this.pendingDeliveries.push({ content, details, urgent, scheduledTask, resolve, reject });
 
     // Capture delivered message in chat cache for UI history.
     // Inter-agent messages and summaries store full content (tag + body).
@@ -1609,6 +1664,43 @@ export class AgentHost {
     this.listeners.forEach((listener) => {
       listener(deferred);
     });
+  }
+
+  /**
+   * Truncate the active session JSONL to a fresh session header and clear in-memory session state.
+   * Called after `agent_end` for a scheduled-task delivery on roles that opt in via
+   * `reset_session_after_scheduled_task: true`.
+   *
+   * The old JSONL is archived as `<name>.jsonl.archived` (mirrors session-rotation behavior, so
+   * compaction baseline scanning still finds prior summaries). The next prompt or delivery sees
+   * `this.session === null` and drives reinitialization, which reads the new header-only JSONL.
+   *
+   * Failures are logged but never thrown: a failed reset must not break the agent. The next cron
+   * tick simply runs against the unrotated file and may eventually hit the size-rotation path.
+   */
+  private resetSessionToHeader(): void {
+    const sessionDir = this._sessionDir;
+    if (!sessionDir) return;
+    const activeFile = findMostRecentSession(sessionDir);
+    if (!activeFile) return;
+
+    try {
+      const newFilename = writeRotatedFile(sessionDir, activeFile, [
+        createSessionHeader(SYSTEM2_DIR),
+      ]);
+      // Detach session-event subscription before clearing the session so listeners don't fire
+      // against a torn-down session. The next prompt/delivery will trigger initialize().
+      if (this.unsubscribeSession) {
+        this.unsubscribeSession();
+        this.unsubscribeSession = null;
+      }
+      this.session = null;
+      log.info(
+        `[AgentHost] Reset ${this.agentRole ?? 'agent'} session after scheduled task; JSONL truncated to fresh header (${newFilename}).`
+      );
+    } catch (err) {
+      log.error('[AgentHost] Failed to reset session JSONL after scheduled task:', err);
+    }
   }
 
   /**
