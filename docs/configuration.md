@@ -108,6 +108,7 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 
 [session]
 rotation_size_bytes = 10485760        # Rotation threshold (~10 MB); anchored if compaction exists, bare-bytes-tail otherwise
+archive_keep_count = 5                # Max .jsonl.archived files retained per agent's session directory
 
 [delivery]
 max_bytes = 1048576                # Hard cap on inter-agent delivery wire size (~1 MB)
@@ -171,6 +172,7 @@ Each agent appends turns to a JSONL session file under `~/.system2/sessions/<rol
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `rotation_size_bytes` | 10485760 (10 MB) | Rotation threshold. On agent cold start, if the active JSONL exceeds this size, the file is rotated and the old one is renamed to `<filename>.jsonl.archived`. |
+| `archive_keep_count` | 5 | Maximum number of `.jsonl.archived` files retained per agent's session directory. After every successful rotation (size-based on cold start, or the per-task narrator session reset), older archives are pruned by mtime so disk usage stays bounded for high-volume agents. The Narrator alone produces ~48 archives/day on a 30-min cron; without a cap, archive disk grows monotonically. |
 
 **Two inner paths, one threshold.** Once `rotation_size_bytes` is exceeded:
 

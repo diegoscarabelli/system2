@@ -6,9 +6,19 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import {
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, join } from 'node:path';
-import { DEFAULT_SESSION_ROTATION_SIZE_BYTES } from '../../shared/types/config.js';
+import {
+  DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
+  DEFAULT_SESSION_ROTATION_SIZE_BYTES,
+} from '../../shared/types/config.js';
 import { log } from '../utils/logger.js';
 
 /** Default rotation threshold. Imported from shared so CLI config defaults and server-side
@@ -198,6 +208,63 @@ export function writeRotatedFile(
 }
 
 /**
+ * Prune `.jsonl.archived` files in `sessionDir`, keeping only the `keepCount` most recent by mtime.
+ *
+ * No-op if `keepCount <= 0`, if the directory cannot be read, or if there are fewer archives than
+ * the cap. Failures to delete individual files are logged at warn level but do not throw — pruning
+ * is best-effort cleanup, not load-bearing for correctness.
+ *
+ * Called after every successful `writeRotatedFile` (anchored rotation, bare-bytes-tail fallback,
+ * header-only fallback, and the narrator session-reset path) so archive count stays bounded for
+ * high-volume agents.
+ */
+export function pruneArchives(sessionDir: string, keepCount: number): void {
+  if (keepCount <= 0) return;
+  let archived: string[];
+  try {
+    archived = readdirSync(sessionDir).filter((f) => f.endsWith('.jsonl.archived'));
+  } catch {
+    return;
+  }
+  if (archived.length <= keepCount) return;
+
+  // Sort by mtime descending (newest first); delete everything past keepCount. statSync is
+  // wrapped per-file: a concurrently-removed archive, broken symlink, or unreadable inode
+  // should skip+log, never abort rotation.
+  const sorted = archived
+    .flatMap((f) => {
+      const fullPath = join(sessionDir, f);
+      try {
+        const stat = statSync(fullPath);
+        return [{ path: fullPath, mtime: stat.mtime.getTime() }];
+      } catch (err) {
+        log.warn(`[SessionRotation] Failed to stat archive ${fullPath}: ${err}`);
+        return [];
+      }
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+
+  const toDelete = sorted.slice(keepCount);
+  const prunedNames: string[] = [];
+  for (const entry of toDelete) {
+    try {
+      unlinkSync(entry.path);
+      prunedNames.push(basename(entry.path));
+    } catch (err) {
+      log.warn(`[SessionRotation] Failed to prune ${entry.path}: ${err}`);
+    }
+  }
+
+  // Single summary line so first-prune-after-upgrade (potentially many archives) doesn't
+  // flood the log with one line per file.
+  if (prunedNames.length > 0) {
+    log.info(
+      `[SessionRotation] Pruned ${prunedNames.length} old archive(s) in ${sessionDir}: newest=${prunedNames[0]}, oldest=${prunedNames[prunedNames.length - 1]}`
+    );
+  }
+}
+
+/**
  * Bare-bytes-tail fallback: write a fresh session header + a bounded recent tail
  * (selected via selectTailEntries, anchored to a user turn) and archive the old file.
  * Used when no compaction anchor exists or the anchor is malformed.
@@ -264,12 +331,15 @@ function forceHeaderOnlyRotation(
  * @param sessionDir - Directory containing session JSONL files
  * @param cwd - Current working directory for session header
  * @param thresholdBytes - Rotation threshold (default 10 MB)
+ * @param archiveKeepCount - Maximum `.jsonl.archived` files to retain (default 5).
+ *                          Pruning runs after every successful rotation in this function.
  * @returns true if rotation occurred, false otherwise
  */
 export function rotateSessionIfNeeded(
   sessionDir: string,
   cwd: string,
-  thresholdBytes: number = SESSION_FILE_SIZE_LIMIT
+  thresholdBytes: number = SESSION_FILE_SIZE_LIMIT,
+  archiveKeepCount: number = DEFAULT_SESSION_ARCHIVE_KEEP_COUNT
 ): boolean {
   // Find most recent session file
   const currentFile = findMostRecentSession(sessionDir);
@@ -293,7 +363,9 @@ export function rotateSessionIfNeeded(
     log.warn(
       `[SessionRotation] File exceeded threshold but parsed to 0 entries: ${currentFile} (size ${formatMB(stat.size)} MB). All lines may be malformed JSON. Forcing header-only rotation so cold start is unblocked and disk usage remains bounded.`
     );
-    return forceHeaderOnlyRotation(sessionDir, cwd, currentFile, 'parsed to 0 entries');
+    const rotated = forceHeaderOnlyRotation(sessionDir, cwd, currentFile, 'parsed to 0 entries');
+    pruneArchives(sessionDir, archiveKeepCount);
+    return rotated;
   }
 
   // Find compaction entry
@@ -306,13 +378,15 @@ export function rotateSessionIfNeeded(
     log.warn(
       `[SessionRotation] No compaction found in ${currentFile} (size ${formatMB(stat.size)} MB). Forcing bare-bytes-tail rotation: keeping the header plus up to the last ${formatMB(HARD_FALLBACK_TAIL_BYTES)} MB of entries. If no safe user-turn anchor exists within that window, or if a single entry exceeds the cap, rotation may fall back to header-only. Older state will be archived. Repeated occurrences signal the agent has been in a failure loop.`
     );
-    return forceBareBytesTailRotation(
+    const rotated = forceBareBytesTailRotation(
       sessionDir,
       cwd,
       currentFile,
       entries,
       'no compaction anchor'
     );
+    pruneArchives(sessionDir, archiveKeepCount);
+    return rotated;
   }
 
   const { entry: compactionEntry, index: compactionIndex } = compaction;
@@ -324,13 +398,15 @@ export function rotateSessionIfNeeded(
     log.warn(
       `[SessionRotation] Compaction has no firstKeptEntryId in ${currentFile} (size ${formatMB(stat.size)} MB). Falling back to bare-bytes-tail rotation.`
     );
-    return forceBareBytesTailRotation(
+    const rotated = forceBareBytesTailRotation(
       sessionDir,
       cwd,
       currentFile,
       entries,
       'compaction missing firstKeptEntryId'
     );
+    pruneArchives(sessionDir, archiveKeepCount);
+    return rotated;
   }
 
   // Find index of firstKeptEntryId
@@ -341,13 +417,15 @@ export function rotateSessionIfNeeded(
     log.warn(
       `[SessionRotation] firstKeptEntryId ${firstKeptEntryId} not found in ${currentFile} (size ${formatMB(stat.size)} MB). Falling back to bare-bytes-tail rotation.`
     );
-    return forceBareBytesTailRotation(
+    const rotated = forceBareBytesTailRotation(
       sessionDir,
       cwd,
       currentFile,
       entries,
       `firstKeptEntryId ${firstKeptEntryId} not found`
     );
+    pruneArchives(sessionDir, archiveKeepCount);
+    return rotated;
   }
 
   // Build new entries in chronological order:
@@ -381,5 +459,6 @@ export function rotateSessionIfNeeded(
   );
   log.info(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
 
+  pruneArchives(sessionDir, archiveKeepCount);
   return true;
 }
