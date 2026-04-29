@@ -10,7 +10,19 @@ import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from '
 import { basename, join } from 'node:path';
 import { log } from '../utils/logger.js';
 
+/** Default regular rotation threshold. Rotation requires a compaction anchor in the JSONL. */
 const SESSION_FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
+
+/** Default hard fallback threshold. When the file exceeds this AND no compaction anchor exists,
+ *  rotation falls back to keeping only the most recent tail (HARD_FALLBACK_TAIL_BYTES) so the
+ *  agent can recover from cascade failures where no successful turn ever produced a compaction. */
+const SESSION_FILE_HARD_FALLBACK_LIMIT = 50 * 1024 * 1024; // 50MB
+
+/** Tail-keep cap for the hard-fallback path. Intentionally small: forced fallback only fires when
+ *  the agent has been failing for long enough to grow a 50 MB JSONL with no compactions, which
+ *  means recent context is almost certainly polluted by error retries. Keeping more than ~1 MB
+ *  defeats the purpose; the goal is to unblock cold start, not preserve the failure trail. */
+const HARD_FALLBACK_TAIL_BYTES = 1 * 1024 * 1024; // 1MB
 
 export interface SessionEntry {
   type: string;
@@ -106,6 +118,54 @@ function createSessionHeader(cwd: string): SessionEntry {
 }
 
 /**
+ * Format a byte count as megabytes with 2 decimal places.
+ */
+function formatMB(bytes: number): string {
+  return (bytes / 1024 / 1024).toFixed(2);
+}
+
+/**
+ * Select the suffix of `entries` that fits within `tailBytes` total UTF-8 bytes
+ * (sum of `JSON.stringify(entry)` lengths). Walks from the end backward; stops
+ * once adding the next-newer entry would exceed the cap. Always returns at least
+ * the single newest entry, even if that one entry exceeds the cap.
+ */
+function selectTailEntries(entries: SessionEntry[], tailBytes: number): SessionEntry[] {
+  if (entries.length === 0) return [];
+
+  let totalBytes = 0;
+  let firstIndex = entries.length;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entryBytes = Buffer.byteLength(JSON.stringify(entries[i]), 'utf8');
+    if (totalBytes + entryBytes > tailBytes && firstIndex < entries.length) {
+      break;
+    }
+    totalBytes += entryBytes;
+    firstIndex = i;
+  }
+  return entries.slice(firstIndex);
+}
+
+/**
+ * Write rotated entries to a new JSONL and archive the old file.
+ */
+function writeRotatedFile(
+  sessionDir: string,
+  oldFilePath: string,
+  newEntries: SessionEntry[]
+): string {
+  const newFilename = generateSessionFilename();
+  const newFilePath = join(sessionDir, newFilename);
+  const content = `${newEntries.map((e) => JSON.stringify(e)).join('\n')}\n`;
+  writeFileSync(newFilePath, content);
+
+  const archivedPath = `${oldFilePath}.archived`;
+  renameSync(oldFilePath, archivedPath);
+
+  return newFilename;
+}
+
+/**
  * Rotate session file if it exceeds the size threshold.
  *
  * Only call this during initialization, before a SessionManager is created.
@@ -113,25 +173,33 @@ function createSessionHeader(cwd: string): SessionEntry {
  * reference to the current file and will recreate it (without a header) on
  * the next append if it disappears.
  *
- * When rotation occurs:
- * 1. Creates new JSONL file with:
- *    - New session header
- *    - Entries from firstKeptEntryId up to compaction entry
- *    - The compaction entry
- *    - All entries after the compaction entry
- * 2. Old file is renamed to <filename>.jsonl.archived
- * 3. New file is picked up by findMostRecentSession() on next initialize()
+ * Decision tree (file size = `stat.size`):
+ *
+ *   stat.size < thresholdBytes                         → return false (no-op)
+ *   compaction anchor present                          → rotate the existing way
+ *                                                        (header + entries-from-firstKeptEntryId-onward)
+ *   no compaction AND stat.size >= hardFallbackBytes   → force-rotate by keeping the
+ *                                                        session header + tail entries that fit
+ *                                                        in HARD_FALLBACK_TAIL_BYTES
+ *   no compaction AND stat.size < hardFallbackBytes    → log warning + skip
  *
  * @param sessionDir - Directory containing session JSONL files
  * @param cwd - Current working directory for session header
- * @param thresholdBytes - Size threshold (default 10MB)
+ * @param thresholdBytes - Regular rotation threshold (default 10 MB)
+ * @param hardFallbackBytes - Hard fallback threshold (default 50 MB).
+ *   Clamped to >= thresholdBytes (a fallback below the regular threshold is meaningless).
  * @returns true if rotation occurred, false otherwise
  */
 export function rotateSessionIfNeeded(
   sessionDir: string,
   cwd: string,
-  thresholdBytes: number = SESSION_FILE_SIZE_LIMIT
+  thresholdBytes: number = SESSION_FILE_SIZE_LIMIT,
+  hardFallbackBytes: number = SESSION_FILE_HARD_FALLBACK_LIMIT
 ): boolean {
+  // A hard-fallback threshold below the regular threshold can never fire (the regular
+  // path always handles it first), so clamp upward defensively.
+  const effectiveHardFallback = Math.max(hardFallbackBytes, thresholdBytes);
+
   // Find most recent session file
   const currentFile = findMostRecentSession(sessionDir);
   if (!currentFile) {
@@ -144,9 +212,7 @@ export function rotateSessionIfNeeded(
     return false;
   }
 
-  log.info(
-    `[SessionRotation] File size ${(stat.size / 1024 / 1024).toFixed(2)}MB exceeds threshold, rotating...`
-  );
+  log.info(`[SessionRotation] File size ${formatMB(stat.size)}MB exceeds threshold, rotating...`);
 
   // Parse entries
   const entries = parseSessionEntries(currentFile);
@@ -158,8 +224,25 @@ export function rotateSessionIfNeeded(
   // Find compaction entry
   const compaction = findLastCompaction(entries);
   if (!compaction) {
-    log.info(
-      '[SessionRotation] No compaction found, SDK will compact naturally. Skipping rotation.'
+    // No compaction anchor. Either fall back hard (file is dangerously large) or skip.
+    if (stat.size >= effectiveHardFallback) {
+      log.warn(
+        `[SessionRotation] No compaction found in ${currentFile} (size ${formatMB(stat.size)} MB) — exceeded hard fallback threshold (${formatMB(effectiveHardFallback)} MB). Forcing rotation: keeping header + last ${formatMB(HARD_FALLBACK_TAIL_BYTES)} MB of entries. Older state will be archived.`
+      );
+
+      const tailEntries = selectTailEntries(entries, HARD_FALLBACK_TAIL_BYTES);
+      const newEntries: SessionEntry[] = [createSessionHeader(cwd), ...tailEntries];
+      const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
+
+      log.info(
+        `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries (forced fallback)`
+      );
+      log.info(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
+      return true;
+    }
+
+    log.warn(
+      `[SessionRotation] No compaction found in ${currentFile} (size ${formatMB(stat.size)} MB), skipping rotation. SDK should compact naturally — if this warns repeatedly, agent may be in a failure loop.`
     );
     return false;
   }
@@ -168,14 +251,18 @@ export function rotateSessionIfNeeded(
   const firstKeptEntryId = compactionEntry.firstKeptEntryId;
 
   if (!firstKeptEntryId) {
-    log.info('[SessionRotation] Compaction has no firstKeptEntryId, skipping rotation');
+    log.warn(
+      `[SessionRotation] Compaction has no firstKeptEntryId in ${currentFile} (size ${formatMB(stat.size)} MB), skipping rotation`
+    );
     return false;
   }
 
   // Find index of firstKeptEntryId
   const firstKeptIndex = entries.findIndex((e) => e.id === firstKeptEntryId);
   if (firstKeptIndex === -1) {
-    log.info(`[SessionRotation] firstKeptEntryId ${firstKeptEntryId} not found, skipping rotation`);
+    log.warn(
+      `[SessionRotation] firstKeptEntryId ${firstKeptEntryId} not found in ${currentFile} (size ${formatMB(stat.size)} MB), skipping rotation`
+    );
     return false;
   }
 
@@ -202,15 +289,8 @@ export function rotateSessionIfNeeded(
     newEntries.push(entries[i]);
   }
 
-  // Write new file
-  const newFilename = generateSessionFilename();
-  const newFilePath = join(sessionDir, newFilename);
-  const content = `${newEntries.map((e) => JSON.stringify(e)).join('\n')}\n`;
-  writeFileSync(newFilePath, content);
-
-  // Rename old file so it is no longer picked up as a candidate session
-  const archivedPath = `${currentFile}.archived`;
-  renameSync(currentFile, archivedPath);
+  // Write new file (and archive old)
+  const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
 
   log.info(
     `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries`
