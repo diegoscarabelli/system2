@@ -1349,7 +1349,8 @@ export function registerNarratorJobs(
           narratorId,
           system2Dir,
           knowledgeBudgetChars,
-          catchUpBudgetBytes
+          catchUpBudgetBytes,
+          narratorMessageExcerptBytes
         );
       },
       onJobChange
@@ -1366,7 +1367,8 @@ export async function buildAndDeliverMemoryUpdate(
   narratorId: number,
   system2Dir: string,
   knowledgeBudgetChars = 20_000,
-  catchUpBudgetBytes: number = CATCH_UP_BUDGET_BYTES
+  catchUpBudgetBytes: number = CATCH_UP_BUDGET_BYTES,
+  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
 ): Promise<void> {
   knowledgeBudgetChars = Math.max(knowledgeBudgetChars, 5_000);
   const newRunTs = new Date().toISOString();
@@ -1461,7 +1463,7 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
     // (default: 4 × 16 KB = 64 KB). A single huge file must not blow the delivery budget.
     // For append-only knowledge files the tail is newest, so we keep the LAST N bytes and
     // drop the head; the truncation marker is placed at the START of the inlined content.
-    const condensationInlineCap = NARRATOR_MESSAGE_EXCERPT_BYTES * 4;
+    const condensationInlineCap = narratorMessageExcerptBytes * 4;
     const condensationItems = oversizedFiles.map(({ path: f, content }) => {
       const label = f.replace(system2Dir, '~/.system2');
       const overage = content.length - knowledgeBudgetChars;
