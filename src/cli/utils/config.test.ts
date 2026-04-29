@@ -807,12 +807,14 @@ describe('convertTomlDelivery', () => {
 });
 
 describe('convertTomlSession', () => {
-  it('reads valid config correctly with rotation_size_bytes set', () => {
+  it('reads valid config correctly with all fields set', () => {
     const result = convertTomlSession({
       rotation_size_bytes: 5 * 1024 * 1024,
+      archive_keep_count: 8,
     });
     expect(result).toEqual({
       rotation_size_bytes: 5 * 1024 * 1024,
+      archive_keep_count: 8,
     });
   });
 
@@ -826,6 +828,8 @@ describe('convertTomlSession', () => {
       rotation_size_bytes: 20 * 1024 * 1024,
     });
     expect(result.rotation_size_bytes).toBe(20 * 1024 * 1024);
+    // Missing archive_keep_count falls back to the default.
+    expect(result.archive_keep_count).toBe(DEFAULT_SESSION.archive_keep_count);
   });
 
   it('warns and uses default for non-positive rotation_size_bytes', () => {
@@ -858,28 +862,69 @@ describe('convertTomlSession', () => {
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
+
+  it('preserves a valid archive_keep_count', () => {
+    const result = convertTomlSession({ archive_keep_count: 12 });
+    expect(result.archive_keep_count).toBe(12);
+    expect(result.rotation_size_bytes).toBe(DEFAULT_SESSION.rotation_size_bytes);
+  });
+
+  it('warns and uses default for non-positive archive_keep_count', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlSession({ archive_keep_count: 0 });
+    expect(result.archive_keep_count).toBe(DEFAULT_SESSION.archive_keep_count);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session.archive_keep_count'));
+    warnSpy.mockRestore();
+  });
+
+  it('warns and uses default for negative archive_keep_count', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlSession({ archive_keep_count: -3 });
+    expect(result.archive_keep_count).toBe(DEFAULT_SESSION.archive_keep_count);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session.archive_keep_count'));
+    warnSpy.mockRestore();
+  });
+
+  it('warns and uses default for non-integer archive_keep_count', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlSession({ archive_keep_count: 5.7 });
+    expect(result.archive_keep_count).toBe(DEFAULT_SESSION.archive_keep_count);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session.archive_keep_count'));
+    warnSpy.mockRestore();
+  });
+
+  it('does not warn when archive_keep_count is a valid positive integer', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    convertTomlSession({ archive_keep_count: 5 });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
 });
 
 describe('buildConfigToml — [session] section', () => {
-  it('emits [session] section with default value when not specified', () => {
+  it('emits [session] section with default values when not specified', () => {
     const result = buildConfigToml({});
     expect(result).toContain('[session]');
     expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
+    expect(result).toContain(`archive_keep_count = ${DEFAULT_SESSION.archive_keep_count}`);
   });
 
-  it('emits [session] section with custom value when specified', () => {
+  it('emits [session] section with custom values when specified', () => {
     const result = buildConfigToml({
       session: {
         rotation_size_bytes: 20 * 1024 * 1024,
+        archive_keep_count: 10,
       },
     });
     expect(result).toContain('[session]');
     expect(result).toContain(`rotation_size_bytes = ${20 * 1024 * 1024}`);
+    expect(result).toContain('archive_keep_count = 10');
   });
 
   it('round-trips [session] section through TOML.parse and convertTomlSession', () => {
     const input = {
       rotation_size_bytes: 15 * 1024 * 1024,
+      archive_keep_count: 7,
     };
     const toml = buildConfigToml({ session: input });
     const parsed = TOML.parse(toml) as Record<string, unknown>;

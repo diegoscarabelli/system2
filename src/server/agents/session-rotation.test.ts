@@ -1,9 +1,19 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { log } from '../utils/logger.js';
-import { findMostRecentSession, rotateSessionIfNeeded } from './session-rotation.js';
+import { findMostRecentSession, pruneArchives, rotateSessionIfNeeded } from './session-rotation.js';
 
 function makeTmpDir(): string {
   const dir = join(
@@ -478,5 +488,170 @@ describe('rotateSessionIfNeeded', () => {
       expect(warnText).toMatch(/\d+\.\d+ MB/);
       warnSpy.mockRestore();
     });
+  });
+});
+
+describe('pruneArchives', () => {
+  function makeArchive(name: string, mtimeSeconds: number): string {
+    const fullPath = join(tmpDir, name);
+    writeFileSync(fullPath, 'archived content');
+    utimesSync(fullPath, new Date(mtimeSeconds * 1000), new Date(mtimeSeconds * 1000));
+    return fullPath;
+  }
+
+  it('keeps exactly keepCount newest archives by mtime', () => {
+    const a = makeArchive('a.jsonl.archived', 1000);
+    const b = makeArchive('b.jsonl.archived', 2000);
+    const c = makeArchive('c.jsonl.archived', 3000);
+    const d = makeArchive('d.jsonl.archived', 4000);
+    const e = makeArchive('e.jsonl.archived', 5000);
+
+    pruneArchives(tmpDir, 2);
+
+    // Only the 2 newest (d, e) remain; a/b/c are pruned.
+    expect(existsSync(a)).toBe(false);
+    expect(existsSync(b)).toBe(false);
+    expect(existsSync(c)).toBe(false);
+    expect(existsSync(d)).toBe(true);
+    expect(existsSync(e)).toBe(true);
+  });
+
+  it('is a no-op when there are fewer archives than keepCount', () => {
+    const a = makeArchive('a.jsonl.archived', 1000);
+    const b = makeArchive('b.jsonl.archived', 2000);
+
+    pruneArchives(tmpDir, 5);
+
+    expect(existsSync(a)).toBe(true);
+    expect(existsSync(b)).toBe(true);
+  });
+
+  it('is a no-op when count exactly equals keepCount', () => {
+    const a = makeArchive('a.jsonl.archived', 1000);
+    const b = makeArchive('b.jsonl.archived', 2000);
+    const c = makeArchive('c.jsonl.archived', 3000);
+
+    pruneArchives(tmpDir, 3);
+
+    expect(existsSync(a)).toBe(true);
+    expect(existsSync(b)).toBe(true);
+    expect(existsSync(c)).toBe(true);
+  });
+
+  it('does nothing when keepCount <= 0', () => {
+    const a = makeArchive('a.jsonl.archived', 1000);
+    const b = makeArchive('b.jsonl.archived', 2000);
+
+    pruneArchives(tmpDir, 0);
+    pruneArchives(tmpDir, -1);
+
+    expect(existsSync(a)).toBe(true);
+    expect(existsSync(b)).toBe(true);
+  });
+
+  it('does not delete non-archive files in the same directory', () => {
+    const archive = makeArchive('old.jsonl.archived', 1000);
+    const otherArchive = makeArchive('newer.jsonl.archived', 2000);
+    const active = join(tmpDir, 'active.jsonl');
+    writeFileSync(active, 'active');
+    const sibling = join(tmpDir, 'compaction-count.txt');
+    writeFileSync(sibling, '5');
+
+    pruneArchives(tmpDir, 1);
+
+    // Only the older archive is removed.
+    expect(existsSync(archive)).toBe(false);
+    expect(existsSync(otherArchive)).toBe(true);
+    expect(existsSync(active)).toBe(true);
+    expect(existsSync(sibling)).toBe(true);
+  });
+
+  it('returns silently when sessionDir does not exist', () => {
+    expect(() => pruneArchives('/nonexistent/path/xyz-123', 5)).not.toThrow();
+  });
+});
+
+describe('rotateSessionIfNeeded — archive pruning', () => {
+  function seedSession(): void {
+    const file = join(tmpDir, 'session.jsonl');
+    writeJsonl(file, [
+      sessionHeader(),
+      messageEntry('e1', null, 'user'),
+      messageEntry('e2', 'e1', 'assistant'),
+      compactionEntry('c1', 'e2', 'e1'),
+      messageEntry('e3', 'c1', 'user'),
+    ]);
+  }
+
+  it('after 7 rotations with archive_keep_count=5, only 5 archives remain (newest kept)', () => {
+    // Simulate 7 rotations; each call rotates the active jsonl into a new .archived file.
+    const archivedPaths: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      seedSession();
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0, 5);
+      expect(rotated).toBe(true);
+      // Stamp the resulting archive's mtime so the keep-newest-by-mtime ordering is deterministic
+      // (multiple rotations within a single ms could otherwise collide on the filesystem).
+      const file = join(tmpDir, 'session.jsonl');
+      const archivedPath = `${file}.archived`;
+      const mtime = new Date((i + 1) * 1000);
+      utimesSync(archivedPath, mtime, mtime);
+      // Rename so the next iteration's `session.jsonl` rotates cleanly without colliding with
+      // the freshly-created `session.jsonl.archived` from the previous iteration.
+      const renamed = join(tmpDir, `archive-${i}.jsonl.archived`);
+      renameSync(archivedPath, renamed);
+      utimesSync(renamed, mtime, mtime);
+      archivedPaths.push(renamed);
+
+      // Remove the freshly written `session.jsonl` (the new active file generated by rotation
+      // is named with a timestamp+uuid, not `session.jsonl`). Clean any *.jsonl files the
+      // rotator emitted so the next iteration's seedSession can reuse `session.jsonl`.
+      const remainingJsonl = readdirSync(tmpDir).filter(
+        (f) => f.endsWith('.jsonl') && !f.endsWith('.archived')
+      );
+      for (const r of remainingJsonl) {
+        unlinkSync(join(tmpDir, r));
+      }
+    }
+
+    // After 7 rotations + prune-on-each-rotation cap of 5: 5 archives remain.
+    const archives = readdirSync(tmpDir).filter((f) => f.endsWith('.jsonl.archived'));
+    expect(archives.length).toBe(5);
+
+    // The 5 remaining must be the 5 newest by mtime — the last 5 we created (i=2..6).
+    const remainingPaths = archives.map((f) => join(tmpDir, f)).sort();
+    const expectedKept = archivedPaths.slice(2).sort();
+    expect(remainingPaths).toEqual(expectedKept);
+  });
+
+  it('bare-bytes-tail rotation also prunes archives', () => {
+    // Pre-seed 6 stale archives with old mtimes so the prune step has work to do.
+    for (let i = 0; i < 6; i++) {
+      const path = join(tmpDir, `stale-${i}.jsonl.archived`);
+      writeFileSync(path, 'old');
+      utimesSync(path, new Date(1000 + i), new Date(1000 + i));
+    }
+
+    // Build a session with no compaction so rotation goes through the bare-bytes-tail path.
+    const file = join(tmpDir, 'session.jsonl');
+    const entries: object[] = [sessionHeader()];
+    for (let i = 0; i < 8; i++) {
+      const prev = i === 0 ? null : `e${i - 1}`;
+      entries.push(messageEntry(`e${i}`, prev, i % 2 === 0 ? 'user' : 'assistant'));
+    }
+    writeJsonl(file, entries);
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0, 3);
+    expect(rotated).toBe(true);
+    warnSpy.mockRestore();
+
+    // Bare-bytes-tail rotation creates one new archive; with cap=3 and 6 stale + 1 new = 7
+    // archives, the 4 oldest must be pruned, leaving exactly 3.
+    const archives = readdirSync(tmpDir).filter((f) => f.endsWith('.jsonl.archived'));
+    expect(archives.length).toBe(3);
+    // The newly rotated archive (session.jsonl.archived, written just now) must be among the
+    // 3 newest by mtime and therefore preserved.
+    expect(archives).toContain('session.jsonl.archived');
   });
 });

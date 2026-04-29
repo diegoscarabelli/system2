@@ -26,7 +26,10 @@ import type {
   ThinkingLevel,
   ToolsConfig,
 } from '../../shared/index.js';
-import { DEFAULT_SESSION_ROTATION_SIZE_BYTES } from '../../shared/index.js';
+import {
+  DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
+  DEFAULT_SESSION_ROTATION_SIZE_BYTES,
+} from '../../shared/index.js';
 
 export const SYSTEM2_DIR = join(homedir(), '.system2');
 export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
@@ -137,6 +140,7 @@ interface TomlConfig {
   };
   session?: {
     rotation_size_bytes?: number;
+    archive_keep_count?: number;
   };
   logs?: {
     rotation_threshold_mb?: number;
@@ -170,6 +174,7 @@ export const DEFAULT_DELIVERY: DeliveryConfig = {
  *  server-side defaults cannot drift. */
 export const DEFAULT_SESSION: SessionConfig = {
   rotation_size_bytes: DEFAULT_SESSION_ROTATION_SIZE_BYTES, // 10 MB — rotation threshold (anchored if compaction exists, bare-bytes-tail otherwise)
+  archive_keep_count: DEFAULT_SESSION_ARCHIVE_KEEP_COUNT, // keep the 5 most-recent .jsonl.archived files per agent
 };
 
 /**
@@ -361,8 +366,9 @@ export function convertTomlSession(toml: NonNullable<TomlConfig['session']>): Se
   }
 
   const rotation_size_bytes = resolveField('rotation_size_bytes', toml.rotation_size_bytes);
+  const archive_keep_count = resolveField('archive_keep_count', toml.archive_keep_count);
 
-  return { rotation_size_bytes };
+  return { rotation_size_bytes, archive_keep_count };
 }
 
 /**
@@ -857,6 +863,17 @@ export function buildConfigToml(options: {
     `# (the absence of a compaction at this size signals the agent has been in a failure loop).`
   );
   lines.push(`rotation_size_bytes = ${session.rotation_size_bytes}`);
+  lines.push('');
+  lines.push(
+    `# Maximum number of .jsonl.archived files to retain per agent's session directory (default: ${DEFAULT_SESSION.archive_keep_count}).`
+  );
+  lines.push(
+    `# After each rotation or session reset, older archives are pruned by mtime so disk usage stays bounded`
+  );
+  lines.push(
+    `# even for high-volume agents (e.g. the Narrator, which archives once per scheduled task).`
+  );
+  lines.push(`archive_keep_count = ${session.archive_keep_count}`);
   lines.push('');
 
   const delivery = options.delivery ?? DEFAULT_DELIVERY;

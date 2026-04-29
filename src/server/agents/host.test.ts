@@ -6,7 +6,15 @@
  * session.prompt() resolves.
  */
 
-import { mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -4044,6 +4052,74 @@ describe('AgentHost', () => {
       expect(internal.compactionCount).toBe(0);
       expect(readFileSync(countFile, 'utf-8').trim()).toBe('0');
       expect(internal.lastTurnErrored).toBe(false);
+    });
+
+    it('prunes old .jsonl.archived files after writing the new session header', () => {
+      // Pre-seed 6 stale archives spread across distinct mtimes so the prune step has
+      // unambiguous newest/oldest ordering. The reset path then archives the active JSONL,
+      // making 7 archives total; with the default cap of 5, the 2 oldest must be deleted.
+      const stalePaths: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        const p = join(testDir, `stale-${i}.jsonl.archived`);
+        writeFileSync(p, 'old');
+        utimesSync(p, new Date(1000 + i * 10), new Date(1000 + i * 10));
+        stalePaths.push(p);
+      }
+
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        resetSessionAfterScheduledTask: true,
+        // Use a custom keepCount distinct from the default to confirm the value flows through.
+        archiveKeepCount: 3,
+      });
+      const internal = host as unknown as ResetInternal;
+      internal.session = { sendCustomMessage: vi.fn(), dispose: vi.fn() };
+      internal._sessionDir = testDir;
+      internal._chatCache = null;
+      internal.agentRole = 'narrator';
+      internal.unsubscribeSession = null;
+      internal.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+      internal.handleCompactionTracking = vi.fn();
+      internal.initialize = vi.fn().mockResolvedValue(undefined);
+
+      // Active JSONL has the newest mtime (it will become the newest .archived after reset).
+      const activeFile = join(testDir, `${Date.now()}_seed.jsonl`);
+      const seedLines = [
+        JSON.stringify({ type: 'session', version: 3, id: 'old-id', cwd: '/some/cwd' }),
+        JSON.stringify({ type: 'message', message: { role: 'user', content: 'hi' } }),
+      ];
+      writeFileSync(activeFile, `${seedLines.join('\n')}\n`);
+      // Stamp the active file with a clearly newer mtime so it survives pruning.
+      utimesSync(activeFile, new Date(10_000), new Date(10_000));
+
+      const details = { sender: 1, receiver: 2, timestamp: Date.now() };
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /x',
+          details,
+          scheduledTask: true,
+          resolve: vi.fn(),
+          reject: vi.fn(),
+        },
+      ];
+      internal.deliverySendCount = 1;
+
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      // Active file is renamed to .archived → 7 total → cap=3 → 4 oldest pruned.
+      const archives = readdirSync(testDir).filter((f) => f.endsWith('.jsonl.archived'));
+      expect(archives.length).toBe(3);
+
+      // The freshly archived active file must be among the kept (it had the newest mtime).
+      const archivedActive = `${activeFile}.archived`;
+      expect(archives).toContain(archivedActive.split('/').pop());
+
+      // The two oldest stale archives must be gone.
+      expect(existsSync(stalePaths[0])).toBe(false);
+      expect(existsSync(stalePaths[1])).toBe(false);
     });
 
     it('deliverMessage marks scheduled-task content with scheduledTask flag', () => {

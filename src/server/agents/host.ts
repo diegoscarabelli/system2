@@ -28,13 +28,14 @@ import {
   SettingsManager,
 } from '@mariozechner/pi-coding-agent';
 import matter from 'gray-matter';
-import type {
-  AgentsConfig,
-  LlmConfig,
-  LlmProvider,
-  ServicesConfig,
-  ThinkingLevel,
-  ToolsConfig,
+import {
+  type AgentsConfig,
+  DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
+  type LlmConfig,
+  type LlmProvider,
+  type ServicesConfig,
+  type ThinkingLevel,
+  type ToolsConfig,
 } from '../../shared/index.js';
 import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
@@ -61,6 +62,7 @@ import {
   createSessionHeader,
   findMostRecentSession,
   parseSessionEntries,
+  pruneArchives,
   rotateSessionIfNeeded,
   writeRotatedFile,
 } from './session-rotation.js';
@@ -166,6 +168,10 @@ export interface AgentHostConfig {
   narratorMessageExcerptBytes?: number;
   /** Session-rotation threshold in bytes. Defaults to SESSION_FILE_SIZE_LIMIT (10 MB). */
   sessionRotationSizeBytes?: number;
+  /** Maximum number of `.jsonl.archived` files to retain per agent's session directory.
+   *  Defaults to DEFAULT_SESSION_ARCHIVE_KEEP_COUNT (5). Pruning runs after every successful
+   *  rotation (size-based) and after the narrator session-reset path. */
+  archiveKeepCount?: number;
   /** When true and a delivery's content starts with `[Scheduled task:`, truncate the agent's
    *  session JSONL to header-only after `agent_end` for that delivery. Sourced from the agent
    *  library frontmatter (`reset_session_after_scheduled_task: true`). Intended for cron-driven,
@@ -235,6 +241,7 @@ export class AgentHost {
   private onAgentTerminate?: () => void;
   private maxDeliveryBytes: number;
   private sessionRotationSizeBytes: number | undefined;
+  private archiveKeepCount: number;
   private resetSessionAfterScheduledTask: boolean;
   /** True when the constructor caller passed `resetSessionAfterScheduledTask` explicitly (true OR
    *  false). Used in initialize() to decide whether to consult the agent library frontmatter. We
@@ -262,6 +269,7 @@ export class AgentHost {
     this.onAgentTerminate = config.onAgentTerminate;
     this.maxDeliveryBytes = config.maxDeliveryBytes ?? MAX_DELIVERY_BYTES;
     this.sessionRotationSizeBytes = config.sessionRotationSizeBytes;
+    this.archiveKeepCount = config.archiveKeepCount ?? DEFAULT_SESSION_ARCHIVE_KEEP_COUNT;
     // Caller-provided override; otherwise initialize() reads it from the agent library frontmatter
     // (`reset_session_after_scheduled_task` field). Default false: only opted-in roles reset.
     // Track override-presence separately so a caller passing `false` (to disable a role's
@@ -348,7 +356,8 @@ export class AgentHost {
       const rotated = rotateSessionIfNeeded(
         agentSessionDir,
         SYSTEM2_DIR,
-        this.sessionRotationSizeBytes
+        this.sessionRotationSizeBytes,
+        this.archiveKeepCount
       );
       if (rotated) {
         log.info('[AgentHost] Session file rotated to new file');
@@ -1745,6 +1754,10 @@ export class AgentHost {
       const newFilename = writeRotatedFile(sessionDir, activeFile, [
         createSessionHeader(SYSTEM2_DIR),
       ]);
+      // Cap archive count: this path runs once per scheduled task on opted-in roles (Narrator
+      // produces ~48 archives/day on a 30-min cron), so unbounded retention drives steady disk
+      // pressure. Prune to the configured cap so storage stays bounded regardless of runtime.
+      pruneArchives(sessionDir, this.archiveKeepCount);
       // Reset compaction state alongside the session: the new JSONL has no prior compactions,
       // so leaving the counter at its prior value (observed at 241+ during the cascade this
       // feature fixes) would let the pruning trigger fire spuriously against the empty file.

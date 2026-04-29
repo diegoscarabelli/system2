@@ -119,9 +119,18 @@ export interface SessionConfig {
    *  that tail. If no user turn exists in the kept window — or if a single entry alone exceeds
    *  the tail cap — rotation writes only the new session header. */
   rotation_size_bytes: number;
+  /** Maximum number of `.jsonl.archived` files to retain per agent's session directory.
+   *  After each rotation or session reset, older archives are pruned by mtime.
+   *  Default 5 (forensic value drops sharply past the most-recent few). */
+  archive_keep_count: number;
 }
 
 /** Single source of truth for the default session-rotation threshold (10 MB). Both the CLI's
  *  generated config.toml and the server's `rotateSessionIfNeeded` parameter default reference
  *  this constant so they cannot drift. */
 export const DEFAULT_SESSION_ROTATION_SIZE_BYTES = 10 * 1024 * 1024;
+
+/** Default archive-retention count. Mirrors the existing log-rotation cap in
+ *  `src/cli/utils/log-rotation.ts` (5 archives) and bounds long-running narrator deployments
+ *  at ~5 × archive_size of disk per agent regardless of runtime. */
+export const DEFAULT_SESSION_ARCHIVE_KEEP_COUNT = 5;
