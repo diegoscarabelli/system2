@@ -767,10 +767,31 @@ describe('convertTomlDelivery', () => {
     warnSpy.mockRestore();
   });
 
-  it('warns when catch_up_budget_bytes >= max_bytes', () => {
+  it('warns and clamps when catch_up_budget_bytes >= max_bytes', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    convertTomlDelivery({ max_bytes: 1024, catch_up_budget_bytes: 1024 });
+    const result = convertTomlDelivery({ max_bytes: 1024, catch_up_budget_bytes: 1024 });
+    // max_bytes (1024) is below the default catch_up_budget_bytes, so we fall back to
+    // max_bytes - 1 to keep the producer budget strictly below the transport cap.
+    expect(result.max_bytes).toBe(1024);
+    expect(result.catch_up_budget_bytes).toBe(1023);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('catch_up_budget_bytes'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('clamped to 1023'));
+    warnSpy.mockRestore();
+  });
+
+  it('clamps catch_up_budget_bytes to default when default fits below max_bytes', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // max_bytes large enough that DEFAULT_DELIVERY.catch_up_budget_bytes < max_bytes,
+    // and the user-provided catch_up_budget_bytes >= max_bytes.
+    const max_bytes = DEFAULT_DELIVERY.catch_up_budget_bytes * 4;
+    const result = convertTomlDelivery({
+      max_bytes,
+      catch_up_budget_bytes: max_bytes,
+    });
+    expect(result.catch_up_budget_bytes).toBe(DEFAULT_DELIVERY.catch_up_budget_bytes);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(`clamped to ${DEFAULT_DELIVERY.catch_up_budget_bytes}`)
+    );
     warnSpy.mockRestore();
   });
 

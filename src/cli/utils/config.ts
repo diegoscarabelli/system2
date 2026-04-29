@@ -319,16 +319,25 @@ export function convertTomlDelivery(toml: NonNullable<TomlConfig['delivery']>): 
   }
 
   const max_bytes = resolveField('max_bytes', toml.max_bytes);
-  const catch_up_budget_bytes = resolveField('catch_up_budget_bytes', toml.catch_up_budget_bytes);
+  let catch_up_budget_bytes = resolveField('catch_up_budget_bytes', toml.catch_up_budget_bytes);
   const narrator_message_excerpt_bytes = resolveField(
     'narrator_message_excerpt_bytes',
     toml.narrator_message_excerpt_bytes
   );
 
   if (catch_up_budget_bytes >= max_bytes) {
+    // Producer budget must stay strictly below the transport cap; otherwise the scheduler
+    // builds messages up to catch_up_budget_bytes that deliverMessage rejects at max_bytes,
+    // causing recurring job failures. Clamp to max_bytes - 1, but if that's smaller than
+    // the default we prefer the default (which is half of max_bytes when both come from
+    // DEFAULT_DELIVERY) when it actually fits.
+    const original = catch_up_budget_bytes;
+    const clamped = Math.max(max_bytes - 1, 1);
+    const def = DEFAULT_DELIVERY.catch_up_budget_bytes;
+    catch_up_budget_bytes = def < max_bytes ? def : clamped;
     console.warn(
-      `[Config] delivery.catch_up_budget_bytes (${catch_up_budget_bytes}) >= delivery.max_bytes (${max_bytes}). ` +
-        `Producer budget should be less than the transport cap to leave headroom.`
+      `[Config] delivery.catch_up_budget_bytes (${original}) >= delivery.max_bytes (${max_bytes}). ` +
+        `Producer budget must be less than the transport cap; clamped to ${catch_up_budget_bytes}.`
     );
   }
 
