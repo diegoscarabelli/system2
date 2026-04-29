@@ -1,6 +1,7 @@
 import TOML from '@iarna/toml';
 import { describe, expect, it, vi } from 'vitest';
 import type { LlmConfig } from '../../shared/index.js';
+import type { AgentsConfig } from '../../shared/index.js';
 import {
   buildConfigToml,
   convertTomlAgents,
@@ -10,6 +11,7 @@ import {
   convertTomlSession,
   DEFAULT_DELIVERY,
   DEFAULT_SESSION,
+  validateAgentModels,
 } from './config.js';
 
 describe('buildConfigToml', () => {
@@ -970,5 +972,58 @@ describe('buildConfigToml — [delivery] section', () => {
     const deliverySection = parsed.delivery as Parameters<typeof convertTomlDelivery>[0];
     const reconstructed = convertTomlDelivery(deliverySection);
     expect(reconstructed).toEqual(input);
+  });
+});
+
+describe('validateAgentModels', () => {
+  it('passes when all models are in pi-ai catalog', () => {
+    const agents: AgentsConfig = {
+      narrator: {
+        models: { anthropic: 'claude-haiku-4-5-20251001', openai: 'gpt-4o-mini' },
+      },
+    };
+    expect(() => validateAgentModels(agents)).not.toThrow();
+  });
+
+  it('passes for the new OAuth providers when models exist in their catalogs', () => {
+    const agents: AgentsConfig = {
+      conductor: {
+        models: {
+          'openai-codex': 'gpt-5.3-codex',
+          'google-gemini-cli': 'gemini-3-pro-preview',
+          'google-antigravity': 'gemini-3.1-pro-high',
+          'github-copilot': 'claude-sonnet-4.6',
+        },
+      },
+    };
+    expect(() => validateAgentModels(agents)).not.toThrow();
+  });
+
+  it('throws with did-you-mean suggestion on a model typo', () => {
+    const agents: AgentsConfig = {
+      narrator: { models: { anthropic: 'claude-sonet-4-6' } },
+    };
+    expect(() => validateAgentModels(agents)).toThrow(/Did you mean ".*claude.*"/i);
+  });
+
+  it('throws when model is not in catalog and no close match exists', () => {
+    const agents: AgentsConfig = {
+      narrator: { models: { anthropic: 'totally-fake-model-xyz' } },
+    };
+    expect(() => validateAgentModels(agents)).toThrow(/not in pi-ai's catalog/);
+  });
+
+  it('skips providers absent from pi-ai catalog (e.g., openai-compatible)', () => {
+    const agents = {
+      narrator: { models: { 'openai-compatible': 'whatever-local-model' } },
+    } as unknown as AgentsConfig;
+    expect(() => validateAgentModels(agents)).not.toThrow();
+  });
+
+  it('treats agents without models as no-op', () => {
+    const agents: AgentsConfig = {
+      narrator: { thinking_level: 'medium' },
+    };
+    expect(() => validateAgentModels(agents)).not.toThrow();
   });
 });

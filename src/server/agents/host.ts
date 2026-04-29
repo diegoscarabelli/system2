@@ -28,6 +28,7 @@ import {
   SettingsManager,
 } from '@mariozechner/pi-coding-agent';
 import matter from 'gray-matter';
+import { validateAgentModels } from '../../cli/utils/config.js';
 import {
   type AgentsConfig,
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
@@ -390,6 +391,10 @@ export class AgentHost {
     }
 
     this.agentModels = agentConfig.models ?? {};
+    // Validate the merged (provider, modelId) pairs against pi-ai's catalog.
+    // Fails fast on typos in agent frontmatter or [agents.<role>.models] overrides
+    // so the user gets a clear error at startup rather than a runtime API failure.
+    validateAgentModels({ [agentRecord.role]: { models: this.agentModels } });
     // Source the session-reset flag from the agent library frontmatter unless the constructor
     // caller passed an explicit value. Precedence: explicit caller value (true OR false) wins;
     // otherwise the frontmatter value (default false for unset) governs reset behavior. Gating on

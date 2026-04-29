@@ -11,6 +11,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getModels, getProviders } from '@mariozechner/pi-ai';
 import TOML from '@iarna/toml';
 import type {
   AgentOverrideConfig,
@@ -422,10 +423,14 @@ const VALID_THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', '
 const VALID_MODEL_PROVIDERS = new Set<string>([
   'anthropic',
   'cerebras',
+  'github-copilot',
   'google',
+  'google-antigravity',
+  'google-gemini-cli',
   'groq',
   'mistral',
   'openai',
+  'openai-codex',
   'openrouter',
   'xai',
 ]);
@@ -489,6 +494,75 @@ export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): Agen
   }
 
   return agents;
+}
+
+/**
+ * Compute Levenshtein edit distance for did-you-mean suggestions on model id typos.
+ */
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp: number[] = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+function getCatalogIds(provider: string): string[] | undefined {
+  // pi-ai's getModels accepts a KnownProvider; use unknown cast since we may pass any string.
+  // Returns undefined if the provider isn't in pi-ai's catalog (e.g., openai-compatible).
+  const knownProviders = getProviders() as readonly string[];
+  if (!knownProviders.includes(provider)) return undefined;
+  const models = getModels(provider as Parameters<typeof getModels>[0]);
+  return models.map((m) => m.id);
+}
+
+function nearestModelId(provider: string, attempted: string): string | undefined {
+  const ids = getCatalogIds(provider);
+  if (!ids) return undefined;
+  let best: { id: string; dist: number } | undefined;
+  for (const id of ids) {
+    const dist = levenshtein(attempted, id);
+    if (best === undefined || dist < best.dist) best = { id, dist };
+  }
+  return best && best.dist <= 3 ? best.id : undefined;
+}
+
+/**
+ * Validate every (provider, modelId) pair declared in an agents config against
+ * pi-ai's MODELS catalog. Throws on first mismatch with provider, model, and a
+ * Levenshtein-nearest "did you mean" suggestion.
+ *
+ * Skips providers absent from pi-ai's catalog (e.g., openai-compatible, which
+ * registers its own model dynamically at runtime).
+ */
+export function validateAgentModels(agents: AgentsConfig): void {
+  for (const [role, override] of Object.entries(agents)) {
+    if (!override.models) continue;
+    for (const [provider, modelId] of Object.entries(override.models)) {
+      if (!modelId) continue;
+      const ids = getCatalogIds(provider);
+      if (!ids) continue; // provider not in pi-ai catalog (e.g., openai-compatible)
+      if (!ids.includes(modelId)) {
+        const nearest = nearestModelId(provider, modelId);
+        const suggestion = nearest ? ` Did you mean "${nearest}"?` : '';
+        throw new Error(
+          `Agent "${role}" references model "${modelId}" for provider "${provider}", ` +
+            `which is not in pi-ai's catalog.${suggestion}`
+        );
+      }
+    }
+  }
 }
 
 /**
