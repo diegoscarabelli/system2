@@ -4,6 +4,7 @@ import {
   categorizeError,
   DEFAULT_RETRY_CONFIG,
   extractErrorMessage,
+  isWireSizeOverflow,
   shouldFailover,
   shouldRetry,
 } from './retry.js';
@@ -172,6 +173,49 @@ describe('categorizeError', () => {
 
   it('returns "context_overflow" for long context request rejected errors', () => {
     expect(categorizeError(new Error('long context request rejected'))).toBe('context_overflow');
+  });
+
+  it('regression: "429 long context request" classifies as context_overflow (not rate_limit)', () => {
+    // Ensures wire-size patterns are checked before the 429 status code fallback so
+    // the oversized-message replay cascade cannot happen.
+    expect(categorizeError(new Error('429 long context request rejected'))).toBe(
+      'context_overflow'
+    );
+  });
+});
+
+describe('isWireSizeOverflow', () => {
+  it('returns true for HTTP 413 request-exceeds-size pattern', () => {
+    expect(isWireSizeOverflow('413 Request exceeds the maximum size')).toBe(true);
+  });
+
+  it('returns true for input size exceeds MB pattern', () => {
+    expect(isWireSizeOverflow('400 input size exceeds 8 MB')).toBe(true);
+  });
+
+  it('returns true for payload too large', () => {
+    expect(isWireSizeOverflow('Payload Too Large')).toBe(true);
+  });
+
+  it('returns true for Anthropic OAuth long-context misclassifier pattern', () => {
+    expect(
+      isWireSizeOverflow('429 Extra usage is required for long context requests on your account')
+    ).toBe(true);
+  });
+
+  it('regression: returns true for generic "long context request" phrasing', () => {
+    // This pattern was missing before the WIRE_SIZE_PATTERNS refactor, causing
+    // drop-pendings to be skipped for this error variant.
+    expect(isWireSizeOverflow('429 long context request rejected')).toBe(true);
+  });
+
+  it('returns false for token-window overflow (recoverable via compaction)', () => {
+    expect(isWireSizeOverflow('maximum context length is 128000 tokens')).toBe(false);
+    expect(
+      isWireSizeOverflow(
+        'The input token count (1075988) exceeds the maximum number of tokens allowed (1048575).'
+      )
+    ).toBe(false);
   });
 });
 
