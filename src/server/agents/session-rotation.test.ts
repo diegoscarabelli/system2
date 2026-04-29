@@ -5,6 +5,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   utimesSync,
   writeFileSync,
@@ -547,6 +548,35 @@ describe('pruneArchives', () => {
 
     expect(existsSync(a)).toBe(true);
     expect(existsSync(b)).toBe(true);
+  });
+
+  it('skips archives whose stat throws (broken symlink) and prunes the rest', () => {
+    // Real archives with distinct mtimes.
+    const a = makeArchive('a.jsonl.archived', 1000);
+    const b = makeArchive('b.jsonl.archived', 2000);
+    const c = makeArchive('c.jsonl.archived', 3000);
+
+    // Broken symlink: matches the archive glob, but statSync follows symlinks and
+    // throws ENOENT on a missing target. This exercises the per-file try/catch in
+    // pruneArchives: the bad entry is skipped, the real entries still sort + prune.
+    const brokenLink = join(tmpDir, 'broken.jsonl.archived');
+    symlinkSync(join(tmpDir, 'does-not-exist.jsonl.archived'), brokenLink);
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+
+    pruneArchives(tmpDir, 2);
+
+    // Two newest real archives kept, oldest pruned.
+    expect(existsSync(a)).toBe(false);
+    expect(existsSync(b)).toBe(true);
+    expect(existsSync(c)).toBe(true);
+    // Broken symlink untouched: stat failed, so it never entered the sort or delete list.
+    // (lstat would still succeed on the dangling link itself, but we don't lstat in pruneArchives.)
+    expect(readdirSync(tmpDir)).toContain('broken.jsonl.archived');
+    // A warn fired for the failed stat.
+    const warns = warnSpy.mock.calls.flat().map(String).join(' ');
+    expect(warns).toContain('Failed to stat archive');
+    warnSpy.mockRestore();
   });
 
   it('does not delete non-archive files in the same directory', () => {
