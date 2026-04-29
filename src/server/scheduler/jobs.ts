@@ -481,9 +481,12 @@ function readSessionEntries(
   for (const file of files) {
     const filePath = join(sessionDir, file);
     const content = readFileSync(filePath, 'utf-8');
-    let lineIndex = 0;
+    const lines = content.split('\n');
 
-    for (const line of content.split('\n')) {
+    // Increment lineIndex once per non-empty line regardless of filtering or parse outcome,
+    // so entry IDs stay stable as INCLUDED_ENTRY_TYPES or other filters change.
+    let lineIndex = 0;
+    for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const entry = JSON.parse(line);
@@ -499,9 +502,9 @@ function readSessionEntries(
             agentLabel,
           });
         }
-        lineIndex++;
       } catch {
         // Skip malformed lines
+      } finally {
         lineIndex++;
       }
     }
