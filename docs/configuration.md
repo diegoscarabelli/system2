@@ -108,7 +108,7 @@ budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overrun
 
 [session]
 rotation_size_bytes = 10485760        # Regular rotation threshold (~10 MB); requires compaction anchor
-hard_fallback_size_bytes = 52428800   # Hard fallback threshold (~50 MB); force-rotate when no compaction exists
+hard_fallback_size_bytes = 15728640   # Hard fallback threshold (~15 MB); force-rotate when no compaction exists
 
 [delivery]
 max_bytes = 1048576                # Hard cap on inter-agent delivery wire size (~1 MB)
@@ -172,11 +172,11 @@ Each agent appends turns to a JSONL session file under `~/.system2/sessions/<rol
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `rotation_size_bytes` | 10485760 (10 MB) | Regular rotation threshold. On agent cold start, if the active JSONL exceeds this size, rotation reads the file and copies forward starting from the latest compaction anchor (`firstKeptEntryId`). The old file is renamed to `<filename>.jsonl.archived`. |
-| `hard_fallback_size_bytes` | 52428800 (50 MB) | Hard-fallback threshold. When the file exceeds this size AND no compaction anchor is present (e.g., the agent has been failing every turn long enough that the SDK never wrote a compaction), rotation force-keeps only the session header + the most recent ~1 MB of entries. Older state is archived. This unblocks cold-start recovery from cascade failures where regular rotation would otherwise keep skipping. |
+| `hard_fallback_size_bytes` | 15728640 (15 MB) | Hard-fallback threshold. When the file exceeds this size AND no compaction anchor is present (e.g., the agent has been failing every turn long enough that the SDK never wrote a compaction), rotation force-keeps only the session header + the most recent ~1 MB of entries. Older state is archived. This unblocks cold-start recovery from cascade failures where regular rotation would otherwise keep skipping. |
 
 **Invariant:** `hard_fallback_size_bytes` must be `>= rotation_size_bytes`. A hard fallback below the regular threshold can never fire (the regular path always handles it first). If violated, the value is clamped upward at startup with a warning.
 
-**When the hard fallback fires**, the server logs a `warn` line of the form `[SessionRotation] No compaction found in <path> (size <X> MB) — exceeded hard fallback threshold...`. Operators can use this as a signal that the agent has been in a failure loop. The keep-tail cap is intentionally small (~1 MB): if the agent has accumulated 50 MB of failed turns, recent context is almost certainly polluted by error retries; the goal is to unblock cold start, not preserve the failure trail.
+**When the hard fallback fires**, the server logs a `warn` line of the form `[SessionRotation] No compaction found in <path> (size <X> MB) — exceeded hard fallback threshold...`. Operators can use this as a signal that the agent has been in a failure loop. The keep-tail cap is intentionally small (~1 MB): if the agent has accumulated 15 MB of failed turns, recent context is almost certainly polluted by error retries; the goal is to unblock cold start, not preserve the failure trail.
 
 Rotation only runs on cold start, before any `SessionManager` is created. During in-process growth, the SDK holds an open reference to the active JSONL file; renaming it mid-run would cause the SDK to recreate the file without a header on the next append.
 

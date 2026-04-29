@@ -158,7 +158,7 @@ export interface AgentHostConfig {
   narratorMessageExcerptBytes?: number;
   /** Regular session-rotation threshold in bytes. Defaults to SESSION_FILE_SIZE_LIMIT (10 MB). */
   sessionRotationSizeBytes?: number;
-  /** Hard-fallback session-rotation threshold in bytes. Defaults to SESSION_FILE_HARD_FALLBACK_LIMIT (50 MB). */
+  /** Hard-fallback session-rotation threshold in bytes. Defaults to SESSION_FILE_HARD_FALLBACK_LIMIT (15 MB). */
   sessionHardFallbackSizeBytes?: number;
   /** Called when the agent's busy state changes. */
   onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;

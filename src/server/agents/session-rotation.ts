@@ -16,7 +16,7 @@ const SESSION_FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 /** Default hard fallback threshold. When the file exceeds this AND no compaction anchor exists,
  *  rotation falls back to keeping only the most recent tail (HARD_FALLBACK_TAIL_BYTES) so the
  *  agent can recover from cascade failures where no successful turn ever produced a compaction. */
-const SESSION_FILE_HARD_FALLBACK_LIMIT = 50 * 1024 * 1024; // 50MB
+const SESSION_FILE_HARD_FALLBACK_LIMIT = 15 * 1024 * 1024; // 15MB
 
 /** Tail-keep cap for the hard-fallback path. Intentionally small: forced fallback only fires when
  *  the agent has been failing for long enough to grow a 50 MB JSONL with no compactions, which

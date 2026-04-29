@@ -170,7 +170,7 @@ export const DEFAULT_DELIVERY: DeliveryConfig = {
  *  SESSION_FILE_HARD_FALLBACK_LIMIT in src/server/agents/session-rotation.ts. */
 export const DEFAULT_SESSION: SessionConfig = {
   rotation_size_bytes: 10 * 1024 * 1024, // 10 MB — regular rotation threshold (requires compaction anchor)
-  hard_fallback_size_bytes: 50 * 1024 * 1024, // 50 MB — force-rotate even without compaction (cascade safety net)
+  hard_fallback_size_bytes: 15 * 1024 * 1024, // 15 MB — force-rotate even without compaction (cascade safety net)
 };
 
 /**
