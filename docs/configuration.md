@@ -129,7 +129,7 @@ narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Nar
 | `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
 | `[chat]` | Chat history settings | `ChatConfig` |
 | `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
-| `[session]` | Session JSONL rotation thresholds | `SessionConfig` |
+| `[session]` | Session JSONL rotation threshold | `SessionConfig` |
 | `[delivery]` | Inter-agent delivery size bounds | `DeliveryConfig` |
 
 ## LLM Providers

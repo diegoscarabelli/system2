@@ -283,7 +283,7 @@ export function rotateSessionIfNeeded(
     return false;
   }
 
-  log.info(`[SessionRotation] File size ${formatMB(stat.size)}MB exceeds threshold, rotating...`);
+  log.info(`[SessionRotation] File size ${formatMB(stat.size)} MB exceeds threshold, rotating...`);
 
   // Parse entries. If parsing yields zero usable entries (every line malformed, or whitespace-only
   // file), the file has no recoverable state — write a fresh header-only session and archive the
@@ -304,7 +304,7 @@ export function rotateSessionIfNeeded(
     // wrote one — preserve only the session header + a small recent tail to unblock
     // cold start. The warn lets operators detect this failure-loop signal.
     log.warn(
-      `[SessionRotation] No compaction found in ${currentFile} (size ${formatMB(stat.size)} MB). Forcing bare-bytes-tail rotation: keeping header + last ${formatMB(HARD_FALLBACK_TAIL_BYTES)} MB of entries. Older state will be archived. Repeated occurrences signal the agent has been in a failure loop.`
+      `[SessionRotation] No compaction found in ${currentFile} (size ${formatMB(stat.size)} MB). Forcing bare-bytes-tail rotation: keeping the header plus up to the last ${formatMB(HARD_FALLBACK_TAIL_BYTES)} MB of entries. If no safe user-turn anchor exists within that window, or if a single entry exceeds the cap, rotation may fall back to header-only. Older state will be archived. Repeated occurrences signal the agent has been in a failure loop.`
     );
     return forceBareBytesTailRotation(
       sessionDir,
