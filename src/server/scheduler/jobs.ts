@@ -1456,7 +1456,8 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
   if (oversizedFiles.length > 0) {
     // Cap each condensation entry's inlined content to 4× the per-message excerpt budget
     // (default: 4 × 16 KB = 64 KB). A single huge file must not blow the delivery budget.
-    // Content is truncated from the END (tail is newest for append-only knowledge files).
+    // For append-only knowledge files the tail is newest, so we keep the LAST N bytes and
+    // drop the head; the truncation marker is placed at the START of the inlined content.
     const condensationInlineCap = NARRATOR_MESSAGE_EXCERPT_BYTES * 4;
     const condensationEntries = oversizedFiles.map(({ path: f, content }) => {
       const label = f.replace(system2Dir, '~/.system2');
@@ -1464,15 +1465,15 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       let inlinedContent = content;
       let truncationMarker = '';
       if (Buffer.byteLength(content, 'utf8') > condensationInlineCap) {
-        // Slice to byte cap (approximate via char count first, then trim to byte boundary)
-        let sliced = content.slice(0, condensationInlineCap);
+        // Keep the tail: slice from the end and trim to a byte boundary if needed.
+        let sliced = content.slice(-condensationInlineCap);
         while (Buffer.byteLength(sliced, 'utf8') > condensationInlineCap) {
-          sliced = sliced.slice(0, -1);
+          sliced = sliced.slice(1);
         }
         inlinedContent = sliced;
-        truncationMarker = `\n\n[...truncated: file exceeds ${condensationInlineCap.toLocaleString()}-byte inline cap — use \`read\` tool to see the rest]`;
+        truncationMarker = `[truncated: head dropped — file exceeds ${condensationInlineCap.toLocaleString()}-byte inline cap — use \`read\` tool to see the full file]\n\n`;
       }
-      return `### ${label}\n\nCurrent size: ${content.length.toLocaleString()} chars (+${overage.toLocaleString()} over ${knowledgeBudgetChars.toLocaleString()} char budget)\n\n${inlinedContent}${truncationMarker}`;
+      return `### ${label}\n\nCurrent size: ${content.length.toLocaleString()} chars (+${overage.toLocaleString()} over ${knowledgeBudgetChars.toLocaleString()} char budget)\n\n${truncationMarker}${inlinedContent}`;
     });
     messageParts.push(
       `## Knowledge Files Requiring Condensation\n\nThe following files exceed the ${knowledgeBudgetChars.toLocaleString()} character budget and are being truncated in agent contexts. For each: condense its content to under ${(knowledgeBudgetChars - 2_000).toLocaleString()} characters and write it back to the same path with \`commit_message: "knowledge: condense <filename>"\`. Preserve all structure and frontmatter. Drop outdated, redundant, or low-value content; merge similar entries; tighten prose. The full current content is provided below — no need to read the files separately.\n\n${condensationEntries.join('\n\n')}`

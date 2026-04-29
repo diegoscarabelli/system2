@@ -832,13 +832,19 @@ describe('buildAndDeliverMemoryUpdate', () => {
     expect(host.calls).toHaveLength(1);
 
     const msg = host.calls[0].content;
-    // Truncation marker must be present
-    expect(msg).toContain('[...truncated: file exceeds');
+    // Truncation marker must be present (head dropped, tail kept for append-only files)
+    expect(msg).toContain('[truncated: head dropped');
     expect(msg).toContain('inline cap');
     // Full 110 KB of 'y' must NOT appear (message is bounded)
     expect(msg).not.toContain('y'.repeat(110_000));
     // But some content was included (not zero-length inline)
     expect(msg).toContain('y'.repeat(100));
+    // The header (oldest content) must NOT be present — we keep the TAIL.
+    expect(msg).not.toContain('# Huge knowledge file');
+    // The marker must appear BEFORE any kept content within the file's section.
+    const sectionIdx = msg.indexOf('Current size: ');
+    const markerIdx = msg.indexOf('[truncated: head dropped');
+    expect(markerIdx).toBeGreaterThan(sectionIdx);
   });
 
   describe('delivery size bounding (catchUpBudgetBytes)', () => {
