@@ -241,6 +241,8 @@ Agent sessions are persisted as JSONL files in `~/.system2/sessions/{role}_{id}/
 
 **Session rotation** (`session-rotation.ts`): when a JSONL file exceeds 10MB at initialization, a new file is created carrying over the compacted history. The old file is renamed to `.jsonl.archived` so it is no longer picked up as a continuation candidate. Rotation only runs on cold start (when no prior session exists in memory), before a `SessionManager` is created. It is skipped during failover re-initialization because the outgoing SDK session still holds an open reference to the file and would recreate it without a header on the next append.
 
+**Per-task session reset** (Narrator-only): agents can opt in via `reset_session_after_scheduled_task: true` in their library frontmatter. When enabled, after `agent_end` for any delivery whose content starts with `[Scheduled task: ...]`, the active JSONL is archived and replaced with a fresh header-only file, and the in-memory session is cleared and reinitialized asynchronously. The Narrator runs on a 30-minute cron and does stateless "summarize this window" work: its durable memory lives in `daily_summaries/*.md`, `memory.md`, and per-project `log.md`, never in its session JSONL. Without reset, each tick's restored session keeps the prior writeup plus tool-call traces, and the next tick's catch-up delivery plus system prompt routinely exceeds Haiku's 200K context limit, triggering a context-overflow loop. Other agents (Guide, Conductor, Reviewer) keep their conversational sessions because they need cross-turn memory.
+
 See the [pi-coding-agent session format docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md) for details.
 
 ## Agent Lifecycle: Spawn and Terminate

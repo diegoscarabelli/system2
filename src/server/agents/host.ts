@@ -58,9 +58,11 @@ import {
   sleep,
 } from './retry.js';
 import {
+  createSessionHeader,
   findMostRecentSession,
   parseSessionEntries,
   rotateSessionIfNeeded,
+  writeRotatedFile,
 } from './session-rotation.js';
 
 /** Human-readable label for error categories shown in chat messages. */
@@ -123,6 +125,12 @@ interface AgentDefinition {
   version: string;
   thinking_level?: ThinkingLevel;
   compaction_depth?: number;
+  /** When true and a delivery's content starts with `[Scheduled task:`, the agent's session JSONL
+   *  is truncated to a fresh session header after `agent_end` for that delivery. Intended for
+   *  cron-driven, stateless agents (e.g., Narrator) whose durable memory lives in files
+   *  (`daily_summaries/*.md`, `memory.md`, per-project `log.md`) rather than in their session.
+   *  Prevents context-overflow loops where each tick's restored session keeps growing. */
+  reset_session_after_scheduled_task?: boolean;
   models: {
     anthropic: string;
     cerebras: string;
@@ -158,6 +166,11 @@ export interface AgentHostConfig {
   narratorMessageExcerptBytes?: number;
   /** Session-rotation threshold in bytes. Defaults to SESSION_FILE_SIZE_LIMIT (10 MB). */
   sessionRotationSizeBytes?: number;
+  /** When true and a delivery's content starts with `[Scheduled task:`, truncate the agent's
+   *  session JSONL to header-only after `agent_end` for that delivery. Sourced from the agent
+   *  library frontmatter (`reset_session_after_scheduled_task: true`). Intended for cron-driven,
+   *  stateless agents (Narrator) whose durable memory lives in files, not in their session. */
+  resetSessionAfterScheduledTask?: boolean;
   /** Called when the agent's busy state changes. */
   onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
   /** Called when an agent is terminated via terminate_agent tool. */
@@ -187,6 +200,9 @@ export class AgentHost {
     content: string;
     details: { sender: number; receiver: number; timestamp: number };
     urgent?: boolean;
+    /** True when `content` starts with `[Scheduled task:`. Set at deliverMessage() time and
+     *  read in handleSessionEvent() on `agent_end` to decide whether to reset session JSONL. */
+    scheduledTask?: boolean;
     resolve: () => void;
     reject: (reason: Error) => void;
   }> = [];
@@ -219,6 +235,13 @@ export class AgentHost {
   private onAgentTerminate?: () => void;
   private maxDeliveryBytes: number;
   private sessionRotationSizeBytes: number | undefined;
+  private resetSessionAfterScheduledTask: boolean;
+  /** True when the constructor caller passed `resetSessionAfterScheduledTask` explicitly (true OR
+   *  false). Used in initialize() to decide whether to consult the agent library frontmatter. We
+   *  cannot rely on the boolean field alone because `false` and "unset" are indistinguishable —
+   *  without this flag, a caller passing `false` to disable a role's frontmatter `true` would be
+   *  silently overridden right back. */
+  private resetSessionAfterScheduledTaskOverridden: boolean;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -239,6 +262,13 @@ export class AgentHost {
     this.onAgentTerminate = config.onAgentTerminate;
     this.maxDeliveryBytes = config.maxDeliveryBytes ?? MAX_DELIVERY_BYTES;
     this.sessionRotationSizeBytes = config.sessionRotationSizeBytes;
+    // Caller-provided override; otherwise initialize() reads it from the agent library frontmatter
+    // (`reset_session_after_scheduled_task` field). Default false: only opted-in roles reset.
+    // Track override-presence separately so a caller passing `false` (to disable a role's
+    // frontmatter `true`) is distinguishable from "caller did not specify".
+    this.resetSessionAfterScheduledTaskOverridden =
+      config.resetSessionAfterScheduledTask !== undefined;
+    this.resetSessionAfterScheduledTask = config.resetSessionAfterScheduledTask ?? false;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -351,6 +381,14 @@ export class AgentHost {
     }
 
     this.agentModels = agentConfig.models ?? {};
+    // Source the session-reset flag from the agent library frontmatter unless the constructor
+    // caller passed an explicit value. Precedence: explicit caller value (true OR false) wins;
+    // otherwise the frontmatter value (default false for unset) governs reset behavior. Gating on
+    // an "overridden" flag rather than the boolean itself lets a caller pass `false` to disable a
+    // role's frontmatter `true` — without this, `false` would be indistinguishable from "unset".
+    if (!this.resetSessionAfterScheduledTaskOverridden) {
+      this.resetSessionAfterScheduledTask = agentConfig.reset_session_after_scheduled_task === true;
+    }
     // Static parts of the system prompt (loaded once)
     const staticPrompt = `${agentsRefContent}\n\n${agentPrompt}`;
 
@@ -573,6 +611,7 @@ export class AgentHost {
       // On error turns, lastTurnErrored is true (set synchronously in
       // handlePotentialError before agent_end fires). Skip cleanup so the
       // failed prompt/delivery stays tracked for retry or failover.
+      let completedScheduledTask = false;
       if (!this.lastTurnErrored) {
         // Clear pendingPrompt: one agent_end fires after ALL turns (prompt +
         // follow-ups) are processed, so it's always safe to clear here.
@@ -585,7 +624,10 @@ export class AgentHost {
         const toResolve = Math.min(this.deliverySendCount, this.pendingDeliveries.length);
         for (let i = 0; i < toResolve; i++) {
           const completed = this.pendingDeliveries.shift();
-          if (completed) completed.resolve();
+          if (completed) {
+            if (completed.scheduledTask) completedScheduledTask = true;
+            completed.resolve();
+          }
         }
         this.deliverySendCount = 0;
         // Re-arm the OAuth refresh guard so a future 401 on a fresh token can
@@ -593,6 +635,43 @@ export class AgentHost {
         this.oauthRefreshAttempted = false;
       }
       this.lastTurnErrored = false;
+
+      // If this turn completed a scheduled-task delivery for a role configured to reset,
+      // truncate the session JSONL to a fresh header. The Narrator's durable memory lives in
+      // files (`daily_summaries/*.md`, `memory.md`, per-project `log.md`) — not in its session
+      // — so dropping session state between cron ticks prevents context-overflow loops without
+      // losing semantic context. Reset happens after delivery promises have resolved (above) so
+      // awaiting callers see success before reinit kicks off.
+      //
+      // Always reset, even if other deliveries are still queued. The pathological case this
+      // feature protects against (e.g. daily-summary + memory-update overlap, or catch-up
+      // storms at startup queueing multiple scheduled tasks) is precisely when several
+      // deliveries pile up. After reinitialize() resolves, replay the queued deliveries
+      // against the fresh session.
+      if (completedScheduledTask && this.resetSessionAfterScheduledTask) {
+        this.resetSessionToHeader();
+        // Reinitialize asynchronously so the next scheduled tick has a live session ready.
+        // Errors are logged in the .catch below; cron ticks are 30 min apart so initialize()
+        // has plenty of headroom. Using void-and-catch to keep handleSessionEvent synchronous.
+        // Set isReinitializing so any deliverMessage()/prompt() calls landing during the
+        // reset+reinit window get the existing "Agent is reinitializing" rejection instead of
+        // racing against a half-torn-down session, then clear it in .finally so the next tick
+        // is unblocked even if initialize() throws.
+        this.isReinitializing = true;
+        void this.initialize()
+          .then(() => {
+            // Replay any deliveries queued while the just-completed scheduled task was running
+            // (or that arrived between agent_end and this point). Without replay they would be
+            // stranded in pendingDeliveries with the now-fresh session never seeing them.
+            this.replayPendingDeliveries('after scheduled-task reset');
+          })
+          .catch((err) => {
+            log.error('[AgentHost] Failed to reinitialize after scheduled-task reset:', err);
+          })
+          .finally(() => {
+            this.isReinitializing = false;
+          });
+      }
 
       // Track compaction for pruning. May synchronously schedule pruning,
       // setting isPruning = true.
@@ -1332,6 +1411,9 @@ export class AgentHost {
    * @param options.isSteering If true, the message is queued as a steering message (inserted ASAP into the agent loop)
    */
   async prompt(content: string, options?: { isSteering?: boolean }): Promise<void> {
+    if (this.isReinitializing) {
+      throw new Error('Agent is reinitializing, prompt rejected');
+    }
     if (!this.session) {
       throw new Error('AgentHost not initialized. Call initialize() first.');
     }
@@ -1373,11 +1455,15 @@ export class AgentHost {
     details: { sender: number; receiver: number; timestamp: number },
     urgent?: boolean
   ): Promise<void> {
-    if (!this.session) {
-      return Promise.reject(new Error('AgentHost not initialized. Call initialize() first.'));
-    }
+    // Check isReinitializing BEFORE the null-session guard. The scheduled-task reset path
+    // explicitly nulls `this.session` before kicking off initialize(), so during that window
+    // both conditions hold; surfacing the more specific "reinitializing" error helps callers
+    // distinguish a transient reinit from a permanent uninitialized state.
     if (this.isReinitializing) {
       return Promise.reject(new Error('Agent is reinitializing, delivery rejected'));
+    }
+    if (!this.session) {
+      return Promise.reject(new Error('AgentHost not initialized. Call initialize() first.'));
     }
 
     // Check wire-size budget before queuing
@@ -1403,7 +1489,8 @@ export class AgentHost {
     // Track for failover retry. If the session is destroyed during reinitialization,
     // queued sendCustomMessage calls are lost. This queue lets handlePotentialError
     // replay them on the new session. Cleared per-turn by agent_end (shift).
-    this.pendingDeliveries.push({ content, details, urgent, resolve, reject });
+    const scheduledTask = content.startsWith('[Scheduled task:');
+    this.pendingDeliveries.push({ content, details, urgent, scheduledTask, resolve, reject });
 
     // Capture delivered message in chat cache for UI history.
     // Inter-agent messages and summaries store full content (tag + body).
@@ -1612,6 +1699,71 @@ export class AgentHost {
   }
 
   /**
+   * Truncate the active session JSONL to a fresh session header and clear in-memory session state.
+   * Called after `agent_end` for a scheduled-task delivery on roles that opt in via
+   * `reset_session_after_scheduled_task: true`.
+   *
+   * The old JSONL is archived as `<name>.jsonl.archived` for forensic inspection (the active-
+   * session scanner only reads files ending in `.jsonl`, so archived files are excluded from
+   * subsequent loads). Compaction state is also reset to 0, so baseline lookup will start fresh
+   * on the new session — no scanner traversal of older files is needed. The next prompt or
+   * delivery sees `this.session === null` and drives reinitialization, which reads the new
+   * header-only JSONL.
+   *
+   * Failures are logged but never thrown: a failed reset must not break the agent. The next cron
+   * tick simply runs against the unrotated file and may eventually hit the size-rotation path.
+   */
+  private resetSessionToHeader(): void {
+    const sessionDir = this._sessionDir;
+    if (!sessionDir) return;
+    const activeFile = findMostRecentSession(sessionDir);
+    if (!activeFile) return;
+
+    try {
+      // Tear the SDK session down BEFORE renaming the active JSONL. The pi-coding-agent
+      // SessionManager uses `appendFileSync(this.sessionFile, ...)` and resolves `sessionFile`
+      // up front. After we rename the active file, any further append from the live SDK session
+      // would recreate the file at the original path WITHOUT a header — exactly the hazard the
+      // existing rotateSessionIfNeeded path warns about. Order: detach our subscription, capture
+      // and null the session ref so concurrent paths can't reuse it, then call session.dispose()
+      // (which calls _disconnectFromAgent and clears the SDK's internal event listeners).
+      if (this.unsubscribeSession) {
+        this.unsubscribeSession();
+        this.unsubscribeSession = null;
+      }
+      const oldSession = this.session;
+      this.session = null;
+      if (oldSession) {
+        try {
+          oldSession.dispose();
+        } catch (disposeErr) {
+          // dispose() should not throw — log and continue so the rotation still happens.
+          log.warn('[AgentHost] Error disposing old session during reset:', disposeErr);
+        }
+      }
+
+      const newFilename = writeRotatedFile(sessionDir, activeFile, [
+        createSessionHeader(SYSTEM2_DIR),
+      ]);
+      // Reset compaction state alongside the session: the new JSONL has no prior compactions,
+      // so leaving the counter at its prior value (observed at 241+ during the cascade this
+      // feature fixes) would let the pruning trigger fire spuriously against the empty file.
+      // Persist 0 to disk too, since initialize() rehydrates compactionCount from the
+      // .compaction-count file.
+      this.compactionCount = 0;
+      this.writeCompactionCount(0);
+      // Clear lastTurnErrored: a leftover error flag from the just-completed scheduled task
+      // would otherwise corrupt cleanup decisions on the first agent_end of the fresh session.
+      this.lastTurnErrored = false;
+      log.info(
+        `[AgentHost] Reset ${this.agentRole ?? 'agent'} session after scheduled task; JSONL truncated to fresh header (${newFilename}).`
+      );
+    } catch (err) {
+      log.error('[AgentHost] Failed to reset session JSONL after scheduled task:', err);
+    }
+  }
+
+  /**
    * Read the persisted compaction count from the session directory.
    * Returns 0 if the file doesn't exist (first run or deleted).
    */
@@ -1784,32 +1936,44 @@ export class AgentHost {
     // Clear the overflow-causing prompt so a future failover doesn't retry it
     this.pendingPrompt = null;
     this.deliverySendCount = 0;
-    // Replay pending deliveries on the recovered session. Don't clear
-    // pendingDeliveries: agent_end will shift each one as turns succeed.
-    if (this.pendingDeliveries.length > 0 && this.session) {
-      for (const delivery of this.pendingDeliveries) {
-        this.deliverySendCount++;
-        this.session
-          .sendCustomMessage(
-            {
-              customType: 'agent_message',
-              content: delivery.content,
-              display: false,
-              details: delivery.details,
-            },
-            {
-              deliverAs: delivery.urgent ? 'steer' : 'followUp',
-              triggerTurn: true,
-            }
-          )
-          .catch((error) => {
-            this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
-            log.error('[AgentHost] Failed to replay delivery after context overflow:', error);
-            const idx = this.pendingDeliveries.indexOf(delivery);
-            if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
-            delivery.reject(error instanceof Error ? error : new Error(String(error)));
-          });
-      }
+    this.replayPendingDeliveries('after context overflow');
+  }
+
+  /**
+   * Replay pending deliveries against the current session via sendCustomMessage.
+   *
+   * Used by recovery paths (context overflow, scheduled-task session reset) that swap or
+   * rebuild the underlying SDK session: deliveries that were queued during the disruption
+   * need to be re-sent so the fresh session actually sees them. Don't clear
+   * `pendingDeliveries` here — `agent_end` will shift each one as turns succeed.
+   *
+   * Caller is responsible for clearing `pendingPrompt` / `deliverySendCount` first if the
+   * recovery path requires it.
+   */
+  private replayPendingDeliveries(context: string): void {
+    if (this.pendingDeliveries.length === 0 || !this.session) return;
+    for (const delivery of this.pendingDeliveries) {
+      this.deliverySendCount++;
+      this.session
+        .sendCustomMessage(
+          {
+            customType: 'agent_message',
+            content: delivery.content,
+            display: false,
+            details: delivery.details,
+          },
+          {
+            deliverAs: delivery.urgent ? 'steer' : 'followUp',
+            triggerTurn: true,
+          }
+        )
+        .catch((error) => {
+          this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
+          log.error(`[AgentHost] Failed to replay delivery ${context}:`, error);
+          const idx = this.pendingDeliveries.indexOf(delivery);
+          if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+          delivery.reject(error instanceof Error ? error : new Error(String(error)));
+        });
     }
   }
 
