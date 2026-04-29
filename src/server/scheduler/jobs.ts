@@ -1122,8 +1122,12 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
   const summaryDbSectionCount = projectDataList.filter((pd) => pd.hasChanges).length + 1;
   const perSectionDbBudget = Math.floor(summaryDbBudget / Math.max(summaryDbSectionCount, 1));
 
+  // Only build/render DB truncations for projects that will actually contribute a section
+  // (pd.hasChanges). Including projects with no changes inflates summaryDbRenderedSize, which
+  // shrinks the activity budget and causes unnecessary activity truncation.
   const projectDbTruncations = new Map<number, DbTruncateResult>();
   for (const pd of projectDataList) {
+    if (!pd.hasChanges) continue;
     const result = truncateDbChangesToFit(pd.dbTables, perSectionDbBudget);
     projectDbTruncations.set(pd.projectId, result);
     if (result.droppedTotal > 0 && result.droppedRanges.length > 0) {
