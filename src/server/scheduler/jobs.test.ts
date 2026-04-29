@@ -21,6 +21,7 @@ import {
   renderAgentActivitySections,
   resolveDailySummaryTimestamp,
   stripSessionEntry,
+  type TimestampedEntry,
   trackJobExecution,
   truncateDbChangesToFit,
   truncateOldestToFit,
@@ -573,6 +574,70 @@ describe('collectAgentActivityWithTimestamps', () => {
     // rendered is a JSON string of the stripped entry
     const parsed = JSON.parse(result[0].rendered);
     expect(parsed.timestamp).toBe(entryTs);
+  });
+
+  it('reuses cached entries on a second call with the same cache (no re-read)', () => {
+    const dir = trackTmpDir(makeTmpDir());
+
+    // Two agents, one session each, all entries in-window
+    const guideDir = join(dir, 'sessions', 'guide_1');
+    const conductorDir = join(dir, 'sessions', 'conductor_2');
+    mkdirSync(guideDir, { recursive: true });
+    mkdirSync(conductorDir, { recursive: true });
+
+    const guideEntry = JSON.stringify({
+      type: 'message',
+      timestamp: '2025-06-01T10:30:00Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'guide msg' }] },
+    });
+    const conductorEntry = JSON.stringify({
+      type: 'message',
+      timestamp: '2025-06-01T10:31:00Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'conductor msg' }] },
+    });
+    writeFileSync(join(guideDir, 'session.jsonl'), guideEntry);
+    writeFileSync(join(conductorDir, 'session.jsonl'), conductorEntry);
+
+    const agents = [
+      { id: 1, role: 'guide', project_name: null },
+      { id: 2, role: 'conductor', project_name: null },
+    ];
+    const cache = new Map<string, TimestampedEntry[]>();
+    const lastRunTs = '2025-06-01T10:00:00Z';
+    const newRunTs = '2025-06-01T11:00:00Z';
+
+    const first = collectAgentActivityWithTimestamps(
+      dir,
+      agents,
+      lastRunTs,
+      newRunTs,
+      undefined,
+      cache
+    );
+    expect(first).toHaveLength(2);
+    expect(cache.size).toBe(2);
+    expect(cache.has('guide_1')).toBe(true);
+    expect(cache.has('conductor_2')).toBe(true);
+
+    // Mutate session files between calls. If the second call re-read from disk,
+    // it would return the new (now out-of-window) content. With the cache hit it
+    // returns the originally-cached entries unchanged.
+    writeFileSync(join(guideDir, 'session.jsonl'), '');
+    writeFileSync(join(conductorDir, 'session.jsonl'), '');
+
+    const second = collectAgentActivityWithTimestamps(
+      dir,
+      agents,
+      lastRunTs,
+      newRunTs,
+      undefined,
+      cache
+    );
+    expect(second).toHaveLength(2);
+    expect(second[0].id).toBe(first[0].id);
+    expect(second[1].id).toBe(first[1].id);
+    expect(second[0].rendered).toBe(first[0].rendered);
+    expect(second[1].rendered).toBe(first[1].rendered);
   });
 });
 

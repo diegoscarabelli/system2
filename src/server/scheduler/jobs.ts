@@ -253,11 +253,17 @@ export function collectAgentActivityWithTimestamps(
   agents: Array<{ id: number; role: string; project_name: string | null }>,
   lastRunTs: string,
   newRunTs: string,
-  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
+  narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES,
+  cache?: Map<string, TimestampedEntry[]>
 ): TimestampedEntry[] {
   const all: TimestampedEntry[] = [];
   for (const agent of agents) {
     const agentIdStr = `${agent.role}_${agent.id}`;
+    const cached = cache?.get(agentIdStr);
+    if (cached !== undefined) {
+      all.push(...cached);
+      continue;
+    }
     const sessionDir = join(system2Dir, 'sessions', agentIdStr);
     if (!existsSync(sessionDir)) continue;
     const agentLabel = agent.project_name
@@ -271,6 +277,7 @@ export function collectAgentActivityWithTimestamps(
       agentIdStr,
       agentLabel
     );
+    cache?.set(agentIdStr, entries);
     all.push(...entries);
   }
   return all;
@@ -882,6 +889,9 @@ export async function buildAndDeliverDailySummary(
   const summariesDir = join(system2Dir, 'knowledge', 'daily_summaries');
   const filePath = join(summariesDir, `${today}.md`);
 
+  // Per-tick cache; keyed by agent id only since agent.project_name is stable within one tick.
+  const sessionEntryCache = new Map<string, TimestampedEntry[]>();
+
   // Ensure directory exists
   if (!existsSync(summariesDir)) {
     mkdirSync(summariesDir, { recursive: true });
@@ -980,7 +990,8 @@ export async function buildAndDeliverDailySummary(
       allProjectAgents,
       lastRunTs,
       newRunTs,
-      narratorMessageExcerptBytes
+      narratorMessageExcerptBytes,
+      sessionEntryCache
     );
     const projectDbTables = collectProjectDbChanges(db, project.id, lastRunTs, newRunTs);
 
@@ -990,7 +1001,8 @@ export async function buildAndDeliverDailySummary(
       projectScopedAgents,
       lastRunTs,
       newRunTs,
-      narratorMessageExcerptBytes
+      narratorMessageExcerptBytes,
+      sessionEntryCache
     );
     projectDataList.push({
       projectId: project.id,
@@ -1088,7 +1100,8 @@ ${projectDbTruncation.rendered}`;
     dailySummarySystemAgents,
     lastRunTs,
     newRunTs,
-    narratorMessageExcerptBytes
+    narratorMessageExcerptBytes,
+    sessionEntryCache
   );
   const nonProjectAgentActivity = renderAgentActivitySections(
     system2Dir,
@@ -1167,7 +1180,8 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
       allAgents.filter((a) => a.project_name === pd.projectName),
       lastRunTs,
       newRunTs,
-      narratorMessageExcerptBytes
+      narratorMessageExcerptBytes,
+      sessionEntryCache
     )
   );
   const allActivityEntries = [...allProjectScopedEntries, ...nonProjectAgentEntries];
