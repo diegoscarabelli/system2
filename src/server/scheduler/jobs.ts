@@ -62,23 +62,22 @@ export interface TruncateResult {
 export function truncateOldestToFit(entries: TimestampedEntry[], budget: number): TruncateResult {
   if (entries.length === 0) return { kept: [], droppedCount: 0, droppedRange: null };
   const sorted = [...entries].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  let total = sorted.reduce((s, e) => s + Buffer.byteLength(e.rendered, 'utf8'), 0);
+  const sizes = sorted.map((e) => Buffer.byteLength(e.rendered, 'utf8'));
+  let total = sizes.reduce((s, size) => s + size, 0);
   if (total <= budget) return { kept: sorted, droppedCount: 0, droppedRange: null };
 
-  const dropped: TimestampedEntry[] = [];
-  while (total > budget && sorted.length > 0) {
-    const e = sorted.shift();
-    if (e) {
-      dropped.push(e);
-      total -= Buffer.byteLength(e.rendered, 'utf8');
-    }
+  let droppedCount = 0;
+  while (total > budget && droppedCount < sorted.length) {
+    total -= sizes[droppedCount];
+    droppedCount += 1;
   }
+
   return {
-    kept: sorted,
-    droppedCount: dropped.length,
+    kept: sorted.slice(droppedCount),
+    droppedCount,
     droppedRange:
-      dropped.length > 0
-        ? { from: dropped[0].timestamp, to: dropped[dropped.length - 1].timestamp }
+      droppedCount > 0
+        ? { from: sorted[0].timestamp, to: sorted[droppedCount - 1].timestamp }
         : null,
   };
 }
