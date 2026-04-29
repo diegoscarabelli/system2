@@ -7,7 +7,9 @@ import {
   convertTomlDatabases,
   convertTomlDelivery,
   convertTomlLlm,
+  convertTomlSession,
   DEFAULT_DELIVERY,
+  DEFAULT_SESSION,
 } from './config.js';
 
 describe('buildConfigToml', () => {
@@ -51,23 +53,24 @@ describe('buildConfigToml', () => {
     const result = buildConfigToml({});
     expect(result).toContain('cooldown_hours = 24');
     expect(result).toContain('max_backups = 3');
+    // [logs] section uses MB-based threshold
     expect(result).toContain('rotation_threshold_mb = 10');
     expect(result).toContain('max_archives = 5');
     expect(result).toContain('daily_summary_interval_minutes = 30');
     expect(result).toContain('max_history_messages = 100');
+    // [session] section uses bytes-based threshold
+    expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
   });
 
   it('uses custom operational values when specified', () => {
     const result = buildConfigToml({
       backup: { cooldownHours: 12, maxBackups: 3 },
-      session: { rotationThresholdMB: 20 },
       logs: { rotationThresholdMB: 5, maxArchives: 10 },
       scheduler: { dailySummaryIntervalMinutes: 15 },
       chat: { maxHistoryMessages: 50 },
     });
     expect(result).toContain('cooldown_hours = 12');
     expect(result).toContain('max_backups = 3');
-    expect(result).toContain('rotation_threshold_mb = 20');
     expect(result).toContain('rotation_threshold_mb = 5');
     expect(result).toContain('max_archives = 10');
     expect(result).toContain('daily_summary_interval_minutes = 15');
@@ -800,6 +803,89 @@ describe('convertTomlDelivery', () => {
     convertTomlDelivery({ max_bytes: 2048, catch_up_budget_bytes: 1024 });
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+});
+
+describe('convertTomlSession', () => {
+  it('reads valid config correctly with rotation_size_bytes set', () => {
+    const result = convertTomlSession({
+      rotation_size_bytes: 5 * 1024 * 1024,
+    });
+    expect(result).toEqual({
+      rotation_size_bytes: 5 * 1024 * 1024,
+    });
+  });
+
+  it('applies defaults for missing keys', () => {
+    const result = convertTomlSession({});
+    expect(result).toEqual(DEFAULT_SESSION);
+  });
+
+  it('preserves user-configured value when valid', () => {
+    const result = convertTomlSession({
+      rotation_size_bytes: 20 * 1024 * 1024,
+    });
+    expect(result.rotation_size_bytes).toBe(20 * 1024 * 1024);
+  });
+
+  it('warns and uses default for non-positive rotation_size_bytes', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlSession({ rotation_size_bytes: 0 });
+    expect(result.rotation_size_bytes).toBe(DEFAULT_SESSION.rotation_size_bytes);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session.rotation_size_bytes'));
+    warnSpy.mockRestore();
+  });
+
+  it('warns and uses default for non-integer rotation_size_bytes', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlSession({ rotation_size_bytes: 1.5 });
+    expect(result.rotation_size_bytes).toBe(DEFAULT_SESSION.rotation_size_bytes);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session.rotation_size_bytes'));
+    warnSpy.mockRestore();
+  });
+
+  it('warns and uses default for negative value', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = convertTomlSession({ rotation_size_bytes: -1024 });
+    expect(result.rotation_size_bytes).toBe(DEFAULT_SESSION.rotation_size_bytes);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session.rotation_size_bytes'));
+    warnSpy.mockRestore();
+  });
+
+  it('does not warn when rotation_size_bytes is a valid positive integer', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    convertTomlSession({ rotation_size_bytes: 10 * 1024 * 1024 });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
+describe('buildConfigToml — [session] section', () => {
+  it('emits [session] section with default value when not specified', () => {
+    const result = buildConfigToml({});
+    expect(result).toContain('[session]');
+    expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
+  });
+
+  it('emits [session] section with custom value when specified', () => {
+    const result = buildConfigToml({
+      session: {
+        rotation_size_bytes: 20 * 1024 * 1024,
+      },
+    });
+    expect(result).toContain('[session]');
+    expect(result).toContain(`rotation_size_bytes = ${20 * 1024 * 1024}`);
+  });
+
+  it('round-trips [session] section through TOML.parse and convertTomlSession', () => {
+    const input = {
+      rotation_size_bytes: 15 * 1024 * 1024,
+    };
+    const toml = buildConfigToml({ session: input });
+    const parsed = TOML.parse(toml) as Record<string, unknown>;
+    const sessionSection = parsed.session as Parameters<typeof convertTomlSession>[0];
+    const reconstructed = convertTomlSession(sessionSection);
+    expect(reconstructed).toEqual(input);
   });
 });
 

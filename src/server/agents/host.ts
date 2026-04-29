@@ -156,6 +156,8 @@ export interface AgentHostConfig {
   maxDeliveryBytes?: number;
   /** Per-message excerpt cap for Narrator-bound deliveries in bytes. Defaults to NARRATOR_MESSAGE_EXCERPT_BYTES. */
   narratorMessageExcerptBytes?: number;
+  /** Session-rotation threshold in bytes. Defaults to SESSION_FILE_SIZE_LIMIT (10 MB). */
+  sessionRotationSizeBytes?: number;
   /** Called when the agent's busy state changes. */
   onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
   /** Called when an agent is terminated via terminate_agent tool. */
@@ -216,6 +218,7 @@ export class AgentHost {
   private onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
   private onAgentTerminate?: () => void;
   private maxDeliveryBytes: number;
+  private sessionRotationSizeBytes: number | undefined;
 
   constructor(config: AgentHostConfig) {
     this.db = config.db;
@@ -235,6 +238,7 @@ export class AgentHost {
     this.onBusyChange = config.onBusyChange;
     this.onAgentTerminate = config.onAgentTerminate;
     this.maxDeliveryBytes = config.maxDeliveryBytes ?? MAX_DELIVERY_BYTES;
+    this.sessionRotationSizeBytes = config.sessionRotationSizeBytes;
 
     // Store LLM config for openai-compatible provider registration
     this.llmConfig = config.llmConfig;
@@ -311,7 +315,11 @@ export class AgentHost {
     // renaming it would cause the SDK to recreate the file without a header on
     // the next append — exactly the hazard rotation is meant to prevent.
     if (!this.session) {
-      const rotated = rotateSessionIfNeeded(agentSessionDir, SYSTEM2_DIR);
+      const rotated = rotateSessionIfNeeded(
+        agentSessionDir,
+        SYSTEM2_DIR,
+        this.sessionRotationSizeBytes
+      );
       if (rotated) {
         log.info('[AgentHost] Session file rotated to new file');
       }

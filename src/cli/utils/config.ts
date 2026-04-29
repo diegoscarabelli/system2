@@ -22,9 +22,11 @@ import type {
   LlmProvider,
   LlmProviderConfig,
   ServicesConfig,
+  SessionConfig,
   ThinkingLevel,
   ToolsConfig,
 } from '../../shared/index.js';
+import { DEFAULT_SESSION_ROTATION_SIZE_BYTES } from '../../shared/index.js';
 
 export const SYSTEM2_DIR = join(homedir(), '.system2');
 export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
@@ -39,15 +41,12 @@ export interface System2Config {
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
   delivery?: DeliveryConfig;
+  session?: SessionConfig;
   backup: {
     /** Hours between automatic backups (default: 24) */
     cooldownHours: number;
     /** Maximum number of automatic backups to keep (default: 5) */
     maxBackups: number;
-  };
-  session: {
-    /** Session file size threshold for rotation in MB (default: 10) */
-    rotationThresholdMB: number;
   };
   logs: {
     /** Log file size threshold for rotation in MB (default: 10) */
@@ -137,7 +136,7 @@ interface TomlConfig {
     max_backups?: number;
   };
   session?: {
-    rotation_threshold_mb?: number;
+    rotation_size_bytes?: number;
   };
   logs?: {
     rotation_threshold_mb?: number;
@@ -167,19 +166,22 @@ export const DEFAULT_DELIVERY: DeliveryConfig = {
   narrator_message_excerpt_bytes: 16 * 1024, // 16384 — per-message excerpt cap for Narrator-bound deliveries (daily-summary + project story); 16 KB captures most payloads while truncating pathological 1+ MB cases
 };
 
+/** Default session-rotation threshold. Imports the shared constant so CLI defaults and
+ *  server-side defaults cannot drift. */
+export const DEFAULT_SESSION: SessionConfig = {
+  rotation_size_bytes: DEFAULT_SESSION_ROTATION_SIZE_BYTES, // 10 MB — rotation threshold (anchored if compaction exists, bare-bytes-tail otherwise)
+};
+
 /**
  * Default operational configuration values.
  */
 const DEFAULT_OPERATIONAL: Pick<
   System2Config,
-  'backup' | 'session' | 'logs' | 'scheduler' | 'chat' | 'knowledge'
+  'backup' | 'logs' | 'scheduler' | 'chat' | 'knowledge'
 > = {
   backup: {
     cooldownHours: 24,
     maxBackups: 3,
-  },
-  session: {
-    rotationThresholdMB: 10,
   },
   logs: {
     rotationThresholdMB: 10,
@@ -342,6 +344,28 @@ export function convertTomlDelivery(toml: NonNullable<TomlConfig['delivery']>): 
 }
 
 /**
+ * Convert TOML session section to SessionConfig, applying defaults for missing or invalid keys.
+ * Emits a warning and falls back to the default for any non-positive or non-integer value.
+ */
+export function convertTomlSession(toml: NonNullable<TomlConfig['session']>): SessionConfig {
+  function resolveField(key: keyof SessionConfig, raw: number | undefined): number {
+    const def = DEFAULT_SESSION[key];
+    if (raw === undefined) return def;
+    if (!Number.isInteger(raw) || raw <= 0) {
+      console.warn(
+        `[Config] Invalid session.${key} = ${raw}. Must be a positive integer. Using default (${def}).`
+      );
+      return def;
+    }
+    return raw;
+  }
+
+  const rotation_size_bytes = resolveField('rotation_size_bytes', toml.rotation_size_bytes);
+
+  return { rotation_size_bytes };
+}
+
+/**
  * Convert TOML databases section to DatabasesConfig.
  * Entries missing required fields (type, database) are skipped with a warning.
  */
@@ -466,24 +490,15 @@ export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): Agen
  */
 function convertTomlOperational(
   toml: TomlConfig
-): Partial<
-  Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler' | 'chat' | 'knowledge'>
-> {
+): Partial<Pick<System2Config, 'backup' | 'logs' | 'scheduler' | 'chat' | 'knowledge'>> {
   const config: Partial<
-    Pick<System2Config, 'backup' | 'session' | 'logs' | 'scheduler' | 'chat' | 'knowledge'>
+    Pick<System2Config, 'backup' | 'logs' | 'scheduler' | 'chat' | 'knowledge'>
   > = {};
 
   if (toml.backup) {
     config.backup = {
       cooldownHours: toml.backup.cooldown_hours ?? DEFAULT_OPERATIONAL.backup.cooldownHours,
       maxBackups: toml.backup.max_backups ?? DEFAULT_OPERATIONAL.backup.maxBackups,
-    };
-  }
-
-  if (toml.session) {
-    config.session = {
-      rotationThresholdMB:
-        toml.session.rotation_threshold_mb ?? DEFAULT_OPERATIONAL.session.rotationThresholdMB,
     };
   }
 
@@ -583,6 +598,10 @@ export function loadConfig(): System2Config {
       config.delivery = convertTomlDelivery(tomlConfig.delivery);
     }
 
+    if (tomlConfig.session) {
+      config.session = convertTomlSession(tomlConfig.session);
+    }
+
     return config;
   } catch (_error) {
     console.warn('[Config] Failed to parse config.toml, using defaults');
@@ -600,8 +619,8 @@ export function buildConfigToml(options: {
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
   delivery?: DeliveryConfig;
+  session?: SessionConfig;
   backup?: System2Config['backup'];
-  session?: System2Config['session'];
   logs?: System2Config['logs'];
   scheduler?: System2Config['scheduler'];
   chat?: System2Config['chat'];
@@ -788,7 +807,6 @@ export function buildConfigToml(options: {
 
   // Operational sections
   const backup = options.backup ?? DEFAULT_OPERATIONAL.backup;
-  const session = options.session ?? DEFAULT_OPERATIONAL.session;
   const logs = options.logs ?? DEFAULT_OPERATIONAL.logs;
 
   lines.push('[backup]');
@@ -797,10 +815,6 @@ export function buildConfigToml(options: {
   lines.push('');
   lines.push(`# Maximum number of automatic backups to keep`);
   lines.push(`max_backups = ${backup.maxBackups}`);
-  lines.push('');
-  lines.push('[session]');
-  lines.push(`# Session file size threshold for rotation in MB`);
-  lines.push(`rotation_threshold_mb = ${session.rotationThresholdMB}`);
   lines.push('');
   lines.push('[logs]');
   lines.push(`# Log file size threshold for rotation in MB`);
@@ -826,6 +840,23 @@ export function buildConfigToml(options: {
   lines.push('[knowledge]');
   lines.push(`# Maximum characters per knowledge file before truncation`);
   lines.push(`budget_chars = ${knowledge.budgetChars}`);
+  lines.push('');
+
+  const session = options.session ?? DEFAULT_SESSION;
+  lines.push('[session]');
+  lines.push(
+    `# Rotation threshold in bytes (default: ${DEFAULT_SESSION.rotation_size_bytes}). Above this size, the JSONL is rotated.`
+  );
+  lines.push(
+    `# If a compaction anchor exists, rotation copies forward from firstKeptEntryId. Otherwise it falls back`
+  );
+  lines.push(
+    `# to keeping the session header + the most recent ~1 MB tail (bare-bytes-tail rotation), and emits a warn`
+  );
+  lines.push(
+    `# (the absence of a compaction at this size signals the agent has been in a failure loop).`
+  );
+  lines.push(`rotation_size_bytes = ${session.rotation_size_bytes}`);
   lines.push('');
 
   const delivery = options.delivery ?? DEFAULT_DELIVERY;

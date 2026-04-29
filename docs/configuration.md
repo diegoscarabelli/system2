@@ -93,9 +93,6 @@ max_results = 5
 cooldown_hours = 24    # Min hours between auto-backups
 max_backups = 3        # Max backup copies to keep
 
-[session]
-rotation_threshold_mb = 10  # JSONL session file rotation threshold
-
 [logs]
 rotation_threshold_mb = 10  # Log file rotation threshold
 max_archives = 5            # Max rotated log files
@@ -108,6 +105,9 @@ max_history_messages = 1000  # Max messages in chat history ring buffer
 
 [knowledge]
 budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overruns
+
+[session]
+rotation_size_bytes = 10485760        # Rotation threshold (~10 MB); anchored if compaction exists, bare-bytes-tail otherwise
 
 [delivery]
 max_bytes = 1048576                # Hard cap on inter-agent delivery wire size (~1 MB)
@@ -125,12 +125,12 @@ narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Nar
 | `[tools.*]` | Tool feature flags | `ToolsConfig` |
 | `[databases.*]` | External database connections | `DatabasesConfig` |
 | `[backup]` | Auto-backup frequency and retention | -- |
-| `[session]` | Session file rotation threshold | -- |
 | `[logs]` | Log rotation threshold and archive count | -- |
 | `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
 | `[chat]` | Chat history settings | `ChatConfig` |
 | `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
-| `[delivery]` | Inter-agent delivery size bounds | -- |
+| `[session]` | Session JSONL rotation threshold | `SessionConfig` |
+| `[delivery]` | Inter-agent delivery size bounds | `DeliveryConfig` |
 
 ## LLM Providers
 
@@ -163,6 +163,21 @@ To prevent oversized inter-agent deliveries from triggering provider context-ove
 When a catch-up delivery (e.g., daily summary) exceeds `catch_up_budget_bytes`, the oldest activity entries are dropped first, with a note prepended: `[NOTE: dropped N oldest entries spanning timestamp-A → timestamp-B to fit within delivery budget]`. The server logs this action at warn level. Cursor advancement is unaffected: the `last_narrator_update_ts` advances to the current run timestamp regardless, so dropped entries are intentionally not re-scanned.
 
 For the `message_agent` tool, if a single message payload exceeds `max_bytes`, it is synchronously rejected with error code `message_too_large`.
+
+## Session Rotation
+
+Each agent appends turns to a JSONL session file under `~/.system2/sessions/<role>_<id>/`. Files grow without bound unless rotated. The `[session]` section configures a single rotation threshold; the rotation strategy is chosen by whether a compaction anchor exists in the file:
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `rotation_size_bytes` | 10485760 (10 MB) | Rotation threshold. On agent cold start, if the active JSONL exceeds this size, the file is rotated and the old one is renamed to `<filename>.jsonl.archived`. |
+
+**Two inner paths, one threshold.** Once `rotation_size_bytes` is exceeded:
+
+- **Anchored rotation (compaction anchor present).** Rotation copies forward starting from the latest compaction `firstKeptEntryId`. This is the normal case.
+- **Bare-bytes-tail rotation (no compaction anchor).** Rotation force-keeps the session header + a bounded recent tail (cap ~1 MB), then advances the cut to the first user-turn entry in that window so the rotated file restarts on a safe API-valid anchor. The server emits a `warn` of the form `[SessionRotation] No compaction found in <path> (size <X> MB). Forcing bare-bytes-tail rotation...`. Reaching the threshold without a compaction signals the agent has been in a failure loop (every turn 4xx'd before the SDK could write one). The keep-tail is intentionally small: at this size, recent context is almost certainly polluted by error retries; the goal is to unblock cold start, not preserve the failure trail. **If no user-turn entry exists in the kept window, or if a single entry alone exceeds the ~1 MB cap, rotation writes only the new session header** — better to cold-start clean than resume on a dangling tool-pair fragment or a payload that defeats the unblock-cold-start purpose.
+
+Rotation only runs on cold start, before any `SessionManager` is created. During in-process growth, the SDK holds an open reference to the active JSONL file; renaming it mid-run would cause the SDK to recreate the file without a header on the next append.
 
 The `openrouter` provider supports an optional `[llm.openrouter.routing]` section that controls upstream provider routing. Keys are model ID prefixes matched against the resolved model (longest prefix wins), values are arrays of OpenRouter provider slugs tried in order. Prefixes containing special characters like `/` must be quoted in TOML (e.g. `"google/" = [...]`). For example, `google = ["google-vertex/global", "google-vertex", "google-ai-studio"]` routes all `google/*` models through Vertex AI first. If no prefix matches, no routing preference is set and OpenRouter uses its default load balancing.
 

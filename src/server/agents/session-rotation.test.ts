@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { log } from '../utils/logger.js';
 import { findMostRecentSession, rotateSessionIfNeeded } from './session-rotation.js';
 
 function makeTmpDir(): string {
@@ -101,26 +102,6 @@ describe('rotateSessionIfNeeded', () => {
     expect(rotateSessionIfNeeded(tmpDir, '/tmp', 10 * 1024 * 1024)).toBe(false);
   });
 
-  it('returns false when file has no compaction entry', () => {
-    const file = join(tmpDir, 'session.jsonl');
-    writeJsonl(file, [
-      sessionHeader(),
-      messageEntry('e1', null, 'user'),
-      messageEntry('e2', 'e1', 'assistant'),
-    ]);
-    expect(rotateSessionIfNeeded(tmpDir, '/tmp', 0)).toBe(false);
-  });
-
-  it('returns false when firstKeptEntryId is not found', () => {
-    const file = join(tmpDir, 'session.jsonl');
-    writeJsonl(file, [
-      sessionHeader(),
-      messageEntry('e1', null, 'user'),
-      compactionEntry('c1', 'e1', 'missing-id'),
-    ]);
-    expect(rotateSessionIfNeeded(tmpDir, '/tmp', 0)).toBe(false);
-  });
-
   it('creates a new file and renames the old one to .archived on rotation', () => {
     const file = join(tmpDir, 'session.jsonl');
     writeJsonl(file, [
@@ -189,5 +170,313 @@ describe('rotateSessionIfNeeded', () => {
     expect(ids).toContain('e2');
     expect(ids).toContain('c1');
     expect(ids).toContain('e3');
+  });
+
+  describe('unified threshold — anchored vs bare-bytes-tail paths', () => {
+    it('size >= threshold AND compaction anchor present: anchored rotation runs', () => {
+      const file = join(tmpDir, 'session.jsonl');
+      writeJsonl(file, [
+        sessionHeader(),
+        messageEntry('e1', null, 'user'),
+        messageEntry('e2', 'e1', 'assistant'),
+        compactionEntry('c1', 'e2', 'e1'),
+        messageEntry('e3', 'c1', 'user'),
+      ]);
+
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+
+      expect(rotated).toBe(true);
+      // Old file archived
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(`${file}.archived`)).toBe(true);
+
+      // New file: header + entries from firstKeptEntryId onward (e1, e2, c1, e3)
+      const newFile = findMostRecentSession(tmpDir);
+      expect(newFile).not.toBeNull();
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      expect(newEntries[0].type).toBe('session');
+      const ids = newEntries.map((e: { id?: string }) => e.id);
+      expect(ids).toContain('e1');
+      expect(ids).toContain('e2');
+      expect(ids).toContain('c1');
+      expect(ids).toContain('e3');
+    });
+
+    it('size >= threshold AND no compaction anchor: bare-bytes-tail rotation runs, emits warn', () => {
+      const file = join(tmpDir, 'session.jsonl');
+      const entries: object[] = [sessionHeader()];
+      for (let i = 0; i < 64; i++) {
+        const prev = i === 0 ? null : `e${i - 1}`;
+        entries.push(messageEntry(`e${i}`, prev, i % 2 === 0 ? 'user' : 'assistant'));
+      }
+      writeJsonl(file, entries);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      // threshold=0 forces past the gate. No compaction anchor → bare-bytes-tail path.
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+
+      expect(rotated).toBe(true);
+      // Old file archived
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(`${file}.archived`)).toBe(true);
+
+      // New file: header + tail entries within ~1 MB
+      const newFile = findMostRecentSession(tmpDir);
+      expect(newFile).not.toBeNull();
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      expect(newEntries[0].type).toBe('session');
+      const ids = newEntries.map((e: { id?: string }) => e.id);
+      // Newest entry must be retained
+      expect(ids).toContain('e63');
+
+      // Total tail bytes (excluding header) should be <= ~1 MB
+      const tailBytes = newEntries
+        .slice(1)
+        .reduce((acc: number, e: object) => acc + Buffer.byteLength(JSON.stringify(e), 'utf8'), 0);
+      expect(tailBytes).toBeLessThanOrEqual(1 * 1024 * 1024);
+
+      // Warn must mention bare-bytes-tail rotation + path + size
+      const warnText = warnSpy.mock.calls.flat().map(String).join(' ');
+      expect(warnText).toContain('No compaction found');
+      expect(warnText).toContain('bare-bytes-tail');
+      expect(warnText).toContain(file);
+      expect(warnText).toMatch(/\d+\.\d+ MB/);
+      warnSpy.mockRestore();
+    });
+
+    it('size < threshold: returns false, no rotation, no warn', () => {
+      const file = join(tmpDir, 'session.jsonl');
+      writeJsonl(file, [
+        sessionHeader(),
+        messageEntry('e1', null, 'user'),
+        messageEntry('e2', 'e1', 'assistant'),
+      ]);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      // Threshold far above file size — no-op
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 50 * 1024 * 1024);
+
+      expect(rotated).toBe(false);
+      // File untouched
+      expect(existsSync(file)).toBe(true);
+      expect(existsSync(`${file}.archived`)).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('bare-bytes-tail caps tail at ~1 MB even when entries are very large', () => {
+      const file = join(tmpDir, 'session.jsonl');
+      // 3 large entries of ~600 KB each; tail cap is 1 MB so only ~1-2 should fit.
+      const big = 'x'.repeat(600 * 1024);
+      const entries: object[] = [sessionHeader()];
+      for (let i = 0; i < 3; i++) {
+        entries.push({
+          type: 'message',
+          id: `e${i}`,
+          parentId: i === 0 ? null : `e${i - 1}`,
+          timestamp: new Date().toISOString(),
+          message: { role: 'user', content: [{ type: 'text', text: big }] },
+        });
+      }
+      writeJsonl(file, entries);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+
+      expect(rotated).toBe(true);
+      const newFile = findMostRecentSession(tmpDir);
+      expect(newFile).not.toBeNull();
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+
+      // Header + at most 2 tail entries (each ~600 KB; pair would be 1.2 MB > 1 MB)
+      const tailEntryCount = newEntries.length - 1;
+      expect(tailEntryCount).toBeGreaterThanOrEqual(1);
+      expect(tailEntryCount).toBeLessThanOrEqual(2);
+
+      // Newest entry always preserved
+      const ids = newEntries.map((e: { id?: string }) => e.id);
+      expect(ids).toContain('e2');
+      warnSpy.mockRestore();
+    });
+
+    it('bare-bytes-tail cut lands on a user-turn boundary, never on assistant/tool', () => {
+      // Setup: assistant, assistant, assistant, user, assistant, assistant
+      // Without user-turn alignment, the kept tail could start on an assistant
+      // entry, leaving a dangling continuation when the SDK restores.
+      const file = join(tmpDir, 'session.jsonl');
+      const entries: object[] = [
+        sessionHeader(),
+        messageEntry('a1', null, 'assistant'),
+        messageEntry('a2', 'a1', 'assistant'),
+        messageEntry('a3', 'a2', 'assistant'),
+        messageEntry('u1', 'a3', 'user'),
+        messageEntry('a4', 'u1', 'assistant'),
+        messageEntry('a5', 'a4', 'assistant'),
+      ];
+      writeJsonl(file, entries);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+      expect(rotated).toBe(true);
+
+      const newFile = findMostRecentSession(tmpDir);
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+
+      // First entry is the new session header, second must be the user turn 'u1'.
+      expect(newEntries[0].type).toBe('session');
+      expect(newEntries[1].id).toBe('u1');
+      expect(newEntries[1].message.role).toBe('user');
+      warnSpy.mockRestore();
+    });
+
+    it('returns header-only when the newest entry alone exceeds the tail cap', () => {
+      // Single entry larger than HARD_FALLBACK_TAIL_BYTES (1 MB). Strict cap means
+      // we drop it rather than writing a rotated file still > 1 MB.
+      const file = join(tmpDir, 'session.jsonl');
+      const huge = 'x'.repeat(2 * 1024 * 1024); // 2 MB string
+      writeJsonl(file, [
+        sessionHeader(),
+        {
+          type: 'message',
+          id: 'huge1',
+          parentId: null,
+          timestamp: new Date().toISOString(),
+          message: { role: 'user', content: [{ type: 'text', text: huge }] },
+        },
+      ]);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+      expect(rotated).toBe(true);
+
+      const newFile = findMostRecentSession(tmpDir);
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+
+      // Only the new session header should remain.
+      expect(newEntries.length).toBe(1);
+      expect(newEntries[0].type).toBe('session');
+      warnSpy.mockRestore();
+    });
+
+    it('returns header-only when kept range has no user turn (no safe restart anchor)', () => {
+      // All entries are assistant — no user turn exists to anchor the resume on.
+      // selectTailEntries walks past everything; rotation writes only the new header.
+      const file = join(tmpDir, 'session.jsonl');
+      const entries: object[] = [
+        sessionHeader(),
+        messageEntry('a1', null, 'assistant'),
+        messageEntry('a2', 'a1', 'assistant'),
+        messageEntry('a3', 'a2', 'assistant'),
+      ];
+      writeJsonl(file, entries);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+      expect(rotated).toBe(true);
+
+      const newFile = findMostRecentSession(tmpDir);
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+
+      // Only the new session header should remain.
+      expect(newEntries.length).toBe(1);
+      expect(newEntries[0].type).toBe('session');
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('malformed-anchor fallback paths', () => {
+    it('falls back to bare-bytes-tail when compaction is missing firstKeptEntryId', () => {
+      const file = join(tmpDir, 'session.jsonl');
+      writeJsonl(file, [
+        sessionHeader(),
+        messageEntry('e1', null, 'user'),
+        messageEntry('e2', 'e1', 'assistant'),
+        // Compaction entry without firstKeptEntryId
+        { type: 'compaction', id: 'c1', parentId: 'e2', timestamp: new Date().toISOString() },
+      ]);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+
+      expect(rotated).toBe(true);
+      // Old file archived
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(`${file}.archived`)).toBe(true);
+      const warnText = warnSpy.mock.calls.flat().map(String).join(' ');
+      expect(warnText).toContain('firstKeptEntryId');
+      expect(warnText).toContain('bare-bytes-tail');
+      expect(warnText).toContain(file);
+      expect(warnText).toMatch(/\d+\.\d+ MB/);
+      warnSpy.mockRestore();
+    });
+
+    it('falls back to bare-bytes-tail when firstKeptEntryId points to a missing entry', () => {
+      const file = join(tmpDir, 'session.jsonl');
+      writeJsonl(file, [
+        sessionHeader(),
+        messageEntry('e1', null, 'user'),
+        compactionEntry('c1', 'e1', 'missing-id'),
+      ]);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+
+      expect(rotated).toBe(true);
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(`${file}.archived`)).toBe(true);
+      const warnText = warnSpy.mock.calls.flat().map(String).join(' ');
+      expect(warnText).toContain('missing-id');
+      expect(warnText).toContain('bare-bytes-tail');
+      expect(warnText).toContain(file);
+      expect(warnText).toMatch(/\d+\.\d+ MB/);
+      warnSpy.mockRestore();
+    });
+
+    it('falls back to header-only rotation when file parses to 0 entries', () => {
+      const file = join(tmpDir, 'session.jsonl');
+      // Write only malformed lines so parseSessionEntries returns 0 entries.
+      writeFileSync(file, 'not-json\nstill-not-json\nbroken{lines\n');
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+
+      expect(rotated).toBe(true);
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(`${file}.archived`)).toBe(true);
+
+      const newFile = findMostRecentSession(tmpDir);
+      const newEntries = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      // Only the new session header
+      expect(newEntries.length).toBe(1);
+      expect(newEntries[0].type).toBe('session');
+
+      const warnText = warnSpy.mock.calls.flat().map(String).join(' ');
+      expect(warnText).toContain('parsed to 0 entries');
+      expect(warnText).toContain('header-only');
+      expect(warnText).toContain(file);
+      expect(warnText).toMatch(/\d+\.\d+ MB/);
+      warnSpy.mockRestore();
+    });
   });
 });

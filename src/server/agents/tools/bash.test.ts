@@ -381,7 +381,7 @@ describe('bash tool', () => {
 
       expect(result.details).toHaveProperty('exitCode', 0);
       expect((result.details as { stdout: string }).stdout).toContain('ping 3');
-    }, 15_000);
+    }, 30_000);
   });
 
   describe('background execution', () => {

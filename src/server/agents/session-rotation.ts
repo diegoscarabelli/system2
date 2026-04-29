@@ -8,9 +8,20 @@
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { DEFAULT_SESSION_ROTATION_SIZE_BYTES } from '../../shared/types/config.js';
 import { log } from '../utils/logger.js';
 
-const SESSION_FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
+/** Default rotation threshold. Imported from shared so CLI config defaults and server-side
+ *  defaults cannot drift. Above this size, the JSONL is rotated. The decision between the
+ *  two inner paths (anchored vs bare-bytes-tail) is made based on whether a compaction anchor
+ *  exists in the file, not on size. */
+const SESSION_FILE_SIZE_LIMIT = DEFAULT_SESSION_ROTATION_SIZE_BYTES;
+
+/** Tail-keep cap for the bare-bytes-tail path (no compaction anchor present). Intentionally small:
+ *  if the agent has grown the JSONL past `rotation_size_bytes` with no compactions, recent context
+ *  is almost certainly polluted by error retries. Keeping more than ~1 MB defeats the purpose; the
+ *  goal is to unblock cold start, not preserve the failure trail. */
+const HARD_FALLBACK_TAIL_BYTES = 1 * 1024 * 1024; // 1MB
 
 export interface SessionEntry {
   type: string;
@@ -106,6 +117,128 @@ function createSessionHeader(cwd: string): SessionEntry {
 }
 
 /**
+ * Format a byte count as megabytes with 2 decimal places.
+ */
+function formatMB(bytes: number): string {
+  return (bytes / 1024 / 1024).toFixed(2);
+}
+
+/**
+ * Check if an entry represents the start of a user turn — a safe restart anchor
+ * for a truncated session. Resuming from a user turn avoids dangling tool calls
+ * or assistant continuations that would expect prior context the SDK no longer has.
+ */
+function isUserTurnStart(entry: SessionEntry): boolean {
+  if (entry.type !== 'message') return false;
+  const message = entry.message as { role?: string } | undefined;
+  return message?.role === 'user';
+}
+
+/**
+ * Select the suffix of `entries` that fits strictly within `tailBytes` total UTF-8
+ * bytes AND starts on a safe conversation boundary (a user turn).
+ *
+ * Step 1: walk backward from the end summing entry sizes; stop before any entry
+ * (including the newest) would push the total past `tailBytes`. If the newest
+ * entry alone exceeds `tailBytes`, returns empty — the bare-bytes-tail path
+ * exists to unblock cold start, and keeping a single oversized entry would
+ * defeat that purpose.
+ *
+ * Step 2: from that byte-budget cut, walk forward (toward the newest entries) to
+ * the first user-turn entry. That becomes the actual cut point. If no user turn
+ * exists in the kept range, returns an empty array — better to cold-start clean
+ * than to resume on a dangling tool_result or assistant continuation.
+ *
+ * Returned bytes are always <= `tailBytes`, and the result is always either
+ * empty or starts with a user message. Entries are kept whole — never truncated
+ * mid-entry.
+ */
+function selectTailEntries(entries: SessionEntry[], tailBytes: number): SessionEntry[] {
+  if (entries.length === 0) return [];
+
+  // Step 1: byte-budget cut. Strictly enforce tailBytes — never include an entry
+  // whose addition would push the total past the cap, even on the first iteration.
+  let totalBytes = 0;
+  let firstIndex = entries.length;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entryBytes = Buffer.byteLength(JSON.stringify(entries[i]), 'utf8');
+    if (totalBytes + entryBytes > tailBytes) {
+      break;
+    }
+    totalBytes += entryBytes;
+    firstIndex = i;
+  }
+
+  // Step 2: advance forward to the first user-turn boundary in the kept range.
+  // If we walk past the end, the kept range had no user turn — return empty.
+  while (firstIndex < entries.length && !isUserTurnStart(entries[firstIndex])) {
+    firstIndex++;
+  }
+
+  return entries.slice(firstIndex);
+}
+
+/**
+ * Write rotated entries to a new JSONL and archive the old file.
+ */
+function writeRotatedFile(
+  sessionDir: string,
+  oldFilePath: string,
+  newEntries: SessionEntry[]
+): string {
+  const newFilename = generateSessionFilename();
+  const newFilePath = join(sessionDir, newFilename);
+  const content = `${newEntries.map((e) => JSON.stringify(e)).join('\n')}\n`;
+  writeFileSync(newFilePath, content);
+
+  const archivedPath = `${oldFilePath}.archived`;
+  renameSync(oldFilePath, archivedPath);
+
+  return newFilename;
+}
+
+/**
+ * Bare-bytes-tail fallback: write a fresh session header + a bounded recent tail
+ * (selected via selectTailEntries, anchored to a user turn) and archive the old file.
+ * Used when no compaction anchor exists or the anchor is malformed.
+ */
+function forceBareBytesTailRotation(
+  sessionDir: string,
+  cwd: string,
+  currentFile: string,
+  entries: SessionEntry[],
+  reason: string
+): true {
+  const tailEntries = selectTailEntries(entries, HARD_FALLBACK_TAIL_BYTES);
+  const newEntries: SessionEntry[] = [createSessionHeader(cwd), ...tailEntries];
+  const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
+  log.info(
+    `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries (bare-bytes-tail fallback: ${reason})`
+  );
+  log.info(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
+  return true;
+}
+
+/**
+ * Header-only fallback: write a fresh session header (no tail) and archive the old file.
+ * Used when the file has no recoverable entries (e.g., 0 parsed lines).
+ */
+function forceHeaderOnlyRotation(
+  sessionDir: string,
+  cwd: string,
+  currentFile: string,
+  reason: string
+): true {
+  const newEntries: SessionEntry[] = [createSessionHeader(cwd)];
+  const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
+  log.info(
+    `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entry (header-only fallback: ${reason})`
+  );
+  log.info(`[SessionRotation] Old file archived: ${basename(currentFile)}.archived`);
+  return true;
+}
+
+/**
  * Rotate session file if it exceeds the size threshold.
  *
  * Only call this during initialization, before a SessionManager is created.
@@ -113,18 +246,24 @@ function createSessionHeader(cwd: string): SessionEntry {
  * reference to the current file and will recreate it (without a header) on
  * the next append if it disappears.
  *
- * When rotation occurs:
- * 1. Creates new JSONL file with:
- *    - New session header
- *    - Entries from firstKeptEntryId up to compaction entry
- *    - The compaction entry
- *    - All entries after the compaction entry
- * 2. Old file is renamed to <filename>.jsonl.archived
- * 3. New file is picked up by findMostRecentSession() on next initialize()
+ * Decision tree (file size = `stat.size`):
+ *
+ *   stat.size < thresholdBytes              → return false (no-op)
+ *   parsed 0 entries (malformed file)       → header-only rotation: write fresh header,
+ *                                             archive bad file. Bounds disk; unblocks cold start.
+ *   compaction anchor + valid firstKeptEntryId → anchored rotation: header + entries from
+ *                                                firstKeptEntryId onward.
+ *   no compaction anchor                    → bare-bytes-tail rotation: header + tail
+ *                                             (selectTailEntries, ~1 MB cap, user-turn aligned).
+ *   compaction missing/broken firstKeptEntryId → fall back to bare-bytes-tail rotation
+ *                                                (anchor can't be trusted).
+ *
+ * Every path that reaches the threshold rotates the file — no path leaves an oversized JSONL on
+ * disk. Fallback paths emit `warn` logs so operators see them.
  *
  * @param sessionDir - Directory containing session JSONL files
  * @param cwd - Current working directory for session header
- * @param thresholdBytes - Size threshold (default 10MB)
+ * @param thresholdBytes - Rotation threshold (default 10 MB)
  * @returns true if rotation occurred, false otherwise
  */
 export function rotateSessionIfNeeded(
@@ -144,39 +283,71 @@ export function rotateSessionIfNeeded(
     return false;
   }
 
-  log.info(
-    `[SessionRotation] File size ${(stat.size / 1024 / 1024).toFixed(2)}MB exceeds threshold, rotating...`
-  );
+  log.info(`[SessionRotation] File size ${formatMB(stat.size)} MB exceeds threshold, rotating...`);
 
-  // Parse entries
+  // Parse entries. If parsing yields zero usable entries (every line malformed, or whitespace-only
+  // file), the file has no recoverable state — write a fresh header-only session and archive the
+  // bad one. Leaving the oversized file on disk would re-trigger this branch on every cold start.
   const entries = parseSessionEntries(currentFile);
   if (entries.length === 0) {
-    log.info('[SessionRotation] No entries found, skipping rotation');
-    return false;
+    log.warn(
+      `[SessionRotation] File exceeded threshold but parsed to 0 entries: ${currentFile} (size ${formatMB(stat.size)} MB). All lines may be malformed JSON. Forcing header-only rotation so cold start is unblocked and disk usage remains bounded.`
+    );
+    return forceHeaderOnlyRotation(sessionDir, cwd, currentFile, 'parsed to 0 entries');
   }
 
   // Find compaction entry
   const compaction = findLastCompaction(entries);
   if (!compaction) {
-    log.info(
-      '[SessionRotation] No compaction found, SDK will compact naturally. Skipping rotation.'
+    // No compaction anchor: bare-bytes-tail rotation. Reaching the threshold without a
+    // compaction means the agent has been failing turns long enough that the SDK never
+    // wrote one — preserve only the session header + a small recent tail to unblock
+    // cold start. The warn lets operators detect this failure-loop signal.
+    log.warn(
+      `[SessionRotation] No compaction found in ${currentFile} (size ${formatMB(stat.size)} MB). Forcing bare-bytes-tail rotation: keeping the header plus up to the last ${formatMB(HARD_FALLBACK_TAIL_BYTES)} MB of entries. If no safe user-turn anchor exists within that window, or if a single entry exceeds the cap, rotation may fall back to header-only. Older state will be archived. Repeated occurrences signal the agent has been in a failure loop.`
     );
-    return false;
+    return forceBareBytesTailRotation(
+      sessionDir,
+      cwd,
+      currentFile,
+      entries,
+      'no compaction anchor'
+    );
   }
 
   const { entry: compactionEntry, index: compactionIndex } = compaction;
   const firstKeptEntryId = compactionEntry.firstKeptEntryId;
 
   if (!firstKeptEntryId) {
-    log.info('[SessionRotation] Compaction has no firstKeptEntryId, skipping rotation');
-    return false;
+    // Compaction is malformed — its firstKeptEntryId is null/undefined. We can't trust the anchor
+    // to define the kept range, so treat it as if no compaction existed and fall back.
+    log.warn(
+      `[SessionRotation] Compaction has no firstKeptEntryId in ${currentFile} (size ${formatMB(stat.size)} MB). Falling back to bare-bytes-tail rotation.`
+    );
+    return forceBareBytesTailRotation(
+      sessionDir,
+      cwd,
+      currentFile,
+      entries,
+      'compaction missing firstKeptEntryId'
+    );
   }
 
   // Find index of firstKeptEntryId
   const firstKeptIndex = entries.findIndex((e) => e.id === firstKeptEntryId);
   if (firstKeptIndex === -1) {
-    log.info(`[SessionRotation] firstKeptEntryId ${firstKeptEntryId} not found, skipping rotation`);
-    return false;
+    // firstKeptEntryId doesn't match any kept entry — anchor is broken (corruption, partial
+    // truncation, or rotation boundary mismatch). Same fallback as above.
+    log.warn(
+      `[SessionRotation] firstKeptEntryId ${firstKeptEntryId} not found in ${currentFile} (size ${formatMB(stat.size)} MB). Falling back to bare-bytes-tail rotation.`
+    );
+    return forceBareBytesTailRotation(
+      sessionDir,
+      cwd,
+      currentFile,
+      entries,
+      `firstKeptEntryId ${firstKeptEntryId} not found`
+    );
   }
 
   // Build new entries in chronological order:
@@ -202,15 +373,8 @@ export function rotateSessionIfNeeded(
     newEntries.push(entries[i]);
   }
 
-  // Write new file
-  const newFilename = generateSessionFilename();
-  const newFilePath = join(sessionDir, newFilename);
-  const content = `${newEntries.map((e) => JSON.stringify(e)).join('\n')}\n`;
-  writeFileSync(newFilePath, content);
-
-  // Rename old file so it is no longer picked up as a candidate session
-  const archivedPath = `${currentFile}.archived`;
-  renameSync(currentFile, archivedPath);
+  // Write new file (and archive old)
+  const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
 
   log.info(
     `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries`
