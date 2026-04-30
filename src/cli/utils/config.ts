@@ -674,11 +674,10 @@ export function loadConfig(): System2Config {
 
   if (tomlConfig.agents) {
     config.agents = convertTomlAgents(tomlConfig.agents);
-    // Fail fast on typos in [agents.<role>.models] — surface unknown
-    // provider/model errors at config load instead of waiting for the host
-    // to load the offending agent. Frontmatter typos are still caught later
-    // in AgentHost.loadAgent (validateAgentModels runs there too, on the
-    // post-merge map).
+    // Catch model-id typos at config load. Unknown provider IDs in TOML are
+    // already filtered with a warning by convertTomlAgents above; this throws
+    // only on unknown model IDs (within known providers). Frontmatter typos
+    // for either provider or model are caught later in AgentHost.loadAgent.
     validateAgentModels(config.agents);
   }
 

@@ -103,7 +103,7 @@ export function addProviderToOAuthTier(
   // Append to fallback array. Reconstruct the section in-place via regex on the existing section.
   // Anchor at line start (multiline) so `[llm.oauth]` mentions in comments don't
   // get matched and rewritten. See removeProviderFromOAuthTier for the same fix.
-  const sectionPattern = /^\[llm\.oauth\]([\s\S]*?)(?=\n^\[|$(?![\r\n]))/m;
+  const sectionPattern = /^\[llm\.oauth\]([\s\S]*?)(?=\r?\n\[|$(?![\r\n]))/m;
   const match = raw.match(sectionPattern);
   if (!match) {
     // Shouldn't happen because oauth is non-null, but guard anyway
@@ -166,7 +166,7 @@ export function removeProviderFromOAuthTier(
   // get matched and rewritten. The new buildConfigToml emits comments that include
   // the literal text `[llm.oauth]` in prose; without the anchor, raw.replace would
   // overwrite from the comment line onward and corrupt the file.
-  const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\n^\[|$(?![\r\n]))/m;
+  const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\r?\n\[|$(?![\r\n]))/m;
   if (!sectionPattern.test(raw)) {
     // TOML parse found [llm.oauth] but the regex doesn't match — likely an
     // unusual on-disk format (leading whitespace before the header, etc.).
@@ -226,7 +226,7 @@ export function setProviderAsPrimary(
   // get matched and rewritten. The new buildConfigToml emits comments that include
   // the literal text `[llm.oauth]` in prose; without the anchor, raw.replace would
   // overwrite from the comment line onward and corrupt the file.
-  const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\n^\[|$(?![\r\n]))/m;
+  const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\r?\n\[|$(?![\r\n]))/m;
   if (!sectionPattern.test(raw)) {
     // TOML parse found [llm.oauth] (readOAuthTier returned non-null) but the
     // regex doesn't match — likely an unusual on-disk format (leading whitespace

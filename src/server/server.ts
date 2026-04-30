@@ -161,8 +161,8 @@ export class Server {
     if (!this.authResolver.getActiveCredential()) {
       throw new Error(
         'No usable LLM credentials available. Either:\n' +
-          '  - Run `system2 login <provider>` to authenticate via OAuth, or\n' +
-          '  - Add API keys to ~/.system2/config.toml under [llm.<provider>].keys'
+          '  - Run `system2 login` to authenticate via OAuth (interactive), or\n' +
+          '  - Add API keys to ~/.system2/config.toml under [llm.api_keys.<provider>].keys'
       );
     }
 
