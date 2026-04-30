@@ -8,10 +8,14 @@ reset_session_after_scheduled_task: true
 models:
   anthropic: claude-haiku-4-5-20251001
   cerebras: gpt-oss-120b
+  github-copilot: claude-haiku-4.5
   google: gemini-3.1-flash-lite-preview
+  google-antigravity: gemini-3-flash
+  google-gemini-cli: gemini-2.5-flash
   groq: llama-3.1-8b-instant
   mistral: mistral-small-latest
   openai: gpt-4o-mini
+  openai-codex: gpt-5.4-mini
   openrouter: google/gemini-3.1-flash-lite-preview
   xai: grok-2-latest
 ---

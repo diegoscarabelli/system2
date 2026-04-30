@@ -36,6 +36,7 @@ import {
   type ServicesConfig,
   type ThinkingLevel,
   type ToolsConfig,
+  validateAgentModels,
 } from '../../shared/index.js';
 import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';
@@ -46,7 +47,7 @@ import { filterByRole } from '../skills/loader.js';
 import { log } from '../utils/logger.js';
 import type { AuthTier } from './auth-resolver.js';
 import { AuthResolver } from './auth-resolver.js';
-import { refreshAnthropic } from './oauth.js';
+import { refreshOAuthToken } from './oauth.js';
 import type { AgentRegistry } from './registry.js';
 import {
   calculateDelay,
@@ -198,7 +199,7 @@ export class AgentHost {
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
   private currentProvider: LlmProvider;
   private currentKeyIndex = 0;
-  private currentTier: AuthTier = 'keys';
+  private currentTier: AuthTier = 'api_keys';
   private retryAttempts: Map<string, number> = new Map(); // Track retries per error type
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
@@ -288,7 +289,7 @@ export class AgentHost {
     const activeCred = this.authResolver.getActiveCredential();
     this.currentProvider = activeCred?.provider ?? this.authResolver.primaryProvider;
     this.currentKeyIndex = activeCred?.keyIndex ?? 0;
-    this.currentTier = activeCred?.tier ?? 'keys';
+    this.currentTier = activeCred?.tier ?? 'api_keys';
 
     log.info('[AgentHost] Auth status:', this.authResolver.getStatus());
   }
@@ -390,6 +391,10 @@ export class AgentHost {
     }
 
     this.agentModels = agentConfig.models ?? {};
+    // Validate the merged (provider, modelId) pairs against pi-ai's catalog.
+    // Fails fast on typos in agent frontmatter or [agents.<role>.models] overrides
+    // so the user gets a clear error at startup rather than a runtime API failure.
+    validateAgentModels({ [agentRecord.role]: { models: this.agentModels } });
     // Source the session-reset flag from the agent library frontmatter unless the constructor
     // caller passed an explicit value. Precedence: explicit caller value (true OR false) wins;
     // otherwise the frontmatter value (default false for unset) governs reset behavior. Gating on
@@ -542,12 +547,11 @@ export class AgentHost {
     // silently replace with a new empty session. Fall back to continueRecent() only
     // when no .jsonl file exists at all (first-time setup).
     // Refresh near-expiry OAuth tokens before snapshotting auth state into the SDK.
-    // `refreshAnthropic` is currently the only OAuth refresh implementation. server.ts
-    // validates that [llm.oauth] only contains supported providers; if support for
-    // additional OAuth providers is added, this should be extended into a refresh map
-    // keyed by provider.
+    // refreshOAuthToken dispatches to the correct provider-specific handler via pi-ai's
+    // registry; server.ts validates that [llm.oauth] only contains providers pi-ai
+    // supports.
     try {
-      await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
+      await this.authResolver.ensureFresh({ refresh: refreshOAuthToken });
     } catch (err) {
       log.warn('[AgentHost] OAuth refresh failed during initialize:', err);
       // Fall through with possibly-stale token; SDK will return 401 → handlePotentialError refreshes again.
@@ -794,7 +798,7 @@ export class AgentHost {
       this.oauthRefreshAttempted = true;
       try {
         const refreshed = await this.authResolver.ensureFresh({
-          refresh: refreshAnthropic,
+          refresh: refreshOAuthToken,
           force: [this.currentProvider],
         });
         if (refreshed.has(this.currentProvider)) {
@@ -1110,7 +1114,7 @@ export class AgentHost {
       // Update current provider and key index
       this.currentProvider = provider;
       this.currentKeyIndex = this.authResolver.getActiveKey(provider)?.keyIndex ?? 0;
-      this.currentTier = this.authResolver.getActiveKey(provider)?.tier ?? 'keys';
+      this.currentTier = this.authResolver.getActiveKey(provider)?.tier ?? 'api_keys';
 
       // Push chat message before init so the user sees the reason even if
       // initialization fails. Only for actual failovers, not compaction recovery.
@@ -1119,7 +1123,7 @@ export class AgentHost {
       }
 
       try {
-        await this.authResolver.ensureFresh({ refresh: refreshAnthropic });
+        await this.authResolver.ensureFresh({ refresh: refreshOAuthToken });
       } catch (err) {
         log.warn('[AgentHost] OAuth refresh failed during reinitialize:', err);
       }

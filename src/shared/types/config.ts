@@ -8,10 +8,14 @@
 export type LlmProvider =
   | 'anthropic'
   | 'cerebras'
+  | 'github-copilot'
   | 'google'
+  | 'google-antigravity'
+  | 'google-gemini-cli'
   | 'groq'
   | 'mistral'
   | 'openai'
+  | 'openai-codex'
   | 'openai-compatible'
   | 'openrouter'
   | 'xai';

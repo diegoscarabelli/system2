@@ -2,7 +2,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { addProviderToOAuthTier } from './login.js';
+import {
+  addProviderToOAuthTier,
+  removeProviderFromOAuthTier,
+  setProviderAsPrimary,
+} from './login.js';
 
 describe('addProviderToOAuthTier', () => {
   let dir: string;
@@ -66,5 +70,122 @@ describe('addProviderToOAuthTier', () => {
     const content = readFileSync(configPath, 'utf-8');
     expect(content).toMatch(/primary\s*=\s*"google"/);
     expect(content).toMatch(/fallback\s*=\s*\[\s*"anthropic"\s*\]/);
+  });
+});
+
+describe('removeProviderFromOAuthTier', () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'system2-login-remove-test-'));
+    configPath = join(dir, 'config.toml');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('removes provider when it is the only entry: drops [llm.oauth] section', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "anthropic"\nfallback = []\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const result = removeProviderFromOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).not.toMatch(/\[llm\.oauth\]/);
+  });
+
+  it('removes provider from fallback', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "google"\nfallback = ["anthropic"]\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const result = removeProviderFromOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toMatch(/primary\s*=\s*"google"/);
+    expect(content).toMatch(/fallback\s*=\s*\[\]/);
+  });
+
+  it('promotes first fallback when removing primary', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "anthropic"\nfallback = ["google"]\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const result = removeProviderFromOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toMatch(/primary\s*=\s*"google"/);
+    expect(content).toMatch(/fallback\s*=\s*\[\]/);
+  });
+
+  it('is a no-op when provider not in oauth tier', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "google"\nfallback = []\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const before = readFileSync(configPath, 'utf-8');
+    const result = removeProviderFromOAuthTier(configPath, 'anthropic');
+    expect(result.changed).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+});
+
+describe('setProviderAsPrimary', () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'system2-promote-test-'));
+    configPath = join(dir, 'config.toml');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('promotes a fallback to primary, demoting the previous primary to head of fallback', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "anthropic"\nfallback = ["openai-codex"]\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const result = setProviderAsPrimary(configPath, 'openai-codex');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toMatch(/primary\s*=\s*"openai-codex"/);
+    expect(content).toMatch(/fallback\s*=\s*\[\s*"anthropic"\s*\]/);
+  });
+
+  it('preserves the order of remaining fallbacks when promoting', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "anthropic"\nfallback = ["openai-codex", "google-gemini-cli", "github-copilot"]\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const result = setProviderAsPrimary(configPath, 'google-gemini-cli');
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toMatch(/primary\s*=\s*"google-gemini-cli"/);
+    // Old primary (anthropic) at head; promoted provider stripped from fallback.
+    expect(content).toMatch(
+      /fallback\s*=\s*\[\s*"anthropic"\s*,\s*"openai-codex"\s*,\s*"github-copilot"\s*\]/
+    );
+  });
+
+  it('is a no-op when provider is already primary', () => {
+    writeFileSync(
+      configPath,
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "anthropic"\nfallback = ["openai-codex"]\n\n[llm.anthropic]\nkeys = []\n`
+    );
+    const before = readFileSync(configPath, 'utf-8');
+    const result = setProviderAsPrimary(configPath, 'anthropic');
+    expect(result.changed).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+
+  it('throws when [llm.oauth] section is missing', () => {
+    writeFileSync(configPath, `[llm]\nprimary = "anthropic"\nfallback = []\n`);
+    expect(() => setProviderAsPrimary(configPath, 'openai-codex')).toThrow(/not found/);
   });
 });

@@ -1,8 +1,31 @@
+import { getOAuthProvider } from '@mariozechner/pi-ai/oauth';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LlmConfig } from '../../shared/index.js';
+import type { LlmConfig, LlmProvider } from '../../shared/index.js';
 import { AuthResolver } from './auth-resolver.js';
-import type { RefreshedTokens } from './oauth.js';
 import type { OAuthCredentials } from './oauth-credentials.js';
+
+vi.mock('@mariozechner/pi-ai/oauth', () => ({
+  getOAuthProvider: vi.fn(),
+}));
+
+const mockedGetOAuthProvider = vi.mocked(getOAuthProvider);
+
+// Mirror pi-ai's per-provider getApiKey wire format so tests cover both shapes
+// without depending on the live registry.
+function fakeOAuthProvider(id: string) {
+  return {
+    id,
+    name: id,
+    login: vi.fn(),
+    refreshToken: vi.fn(),
+    getApiKey: (creds: { access: string; projectId?: string }) => {
+      if (id === 'google-gemini-cli' || id === 'google-antigravity') {
+        return JSON.stringify({ token: creds.access, projectId: creds.projectId });
+      }
+      return creds.access;
+    },
+  } as unknown as ReturnType<typeof getOAuthProvider>;
+}
 
 function makeConfig(overrides?: Partial<LlmConfig>): LlmConfig {
   return {
@@ -49,7 +72,7 @@ describe('AuthResolver', () => {
   it('returns first key as active by default', () => {
     const resolver = new AuthResolver(makeConfig());
     const active = resolver.getActiveKey('anthropic');
-    expect(active).toEqual({ tier: 'keys', provider: 'anthropic', keyIndex: 0, label: 'main' });
+    expect(active).toEqual({ tier: 'api_keys', provider: 'anthropic', keyIndex: 0, label: 'main' });
   });
 
   it('returns undefined for unconfigured provider', () => {
@@ -270,7 +293,7 @@ describe('AuthResolver', () => {
       );
       expect(resolver.primaryProvider).toBe('mistral');
       expect(resolver.getActiveKey('mistral')).toEqual({
-        tier: 'keys',
+        tier: 'api_keys',
         provider: 'mistral',
         keyIndex: 0,
         label: 'default',
@@ -309,7 +332,7 @@ describe('AuthResolver', () => {
       );
       expect(resolver.primaryProvider).toBe('openai-compatible');
       expect(resolver.getActiveKey('openai-compatible')).toEqual({
-        tier: 'keys',
+        tier: 'api_keys',
         provider: 'openai-compatible',
         keyIndex: 0,
         label: 'local',
@@ -368,7 +391,7 @@ describe('AuthResolver — two-tier model', () => {
     delete cfg.oauth;
     const resolver = new AuthResolver(cfg);
     const active = resolver.getActiveCredential();
-    expect(active?.tier).toBe('keys');
+    expect(active?.tier).toBe('api_keys');
     expect(active?.provider).toBe('anthropic');
     expect(active?.label).toBe('main');
   });
@@ -376,7 +399,7 @@ describe('AuthResolver — two-tier model', () => {
   it('falls back to keys tier when oauth credentials are missing', () => {
     const resolver = new AuthResolver(makeTwoTierConfig());
     const active = resolver.getActiveCredential();
-    expect(active?.tier).toBe('keys');
+    expect(active?.tier).toBe('api_keys');
   });
 
   it('exhausts oauth tier before dropping to keys tier', () => {
@@ -385,7 +408,7 @@ describe('AuthResolver — two-tier model', () => {
     });
     resolver.markKeyFailed('anthropic', 'auth', 'invalid_grant', 0, 'oauth');
     const active = resolver.getActiveCredential();
-    expect(active?.tier).toBe('keys');
+    expect(active?.tier).toBe('api_keys');
     expect(active?.provider).toBe('anthropic');
     expect(active?.label).toBe('main');
   });
@@ -396,7 +419,7 @@ describe('AuthResolver — two-tier model', () => {
     });
     resolver.markKeyFailed('anthropic', 'auth', 'oauth fail', 0, 'oauth');
     expect(resolver.isKeyInCooldown('anthropic', 0, 'oauth')).toBe(true);
-    expect(resolver.isKeyInCooldown('anthropic', 0, 'keys')).toBe(false);
+    expect(resolver.isKeyInCooldown('anthropic', 0, 'api_keys')).toBe(false);
   });
 
   it('walks oauth fallback before dropping to keys tier', () => {
@@ -424,6 +447,97 @@ describe('AuthResolver — two-tier model', () => {
   });
 });
 
+describe('AuthResolver.createAuthStorage', () => {
+  beforeEach(() => {
+    mockedGetOAuthProvider.mockReset();
+    mockedGetOAuthProvider.mockImplementation((id) => fakeOAuthProvider(id));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('formats anthropic OAuth as raw access token', async () => {
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    const resolver = new AuthResolver(cfg, undefined, {
+      anthropic: { ...makeOAuthCreds(), access: 'sk-ant-oat-abc' },
+    });
+    const storage = resolver.createAuthStorage();
+    expect(await storage.getApiKey('anthropic')).toBe('sk-ant-oat-abc');
+  });
+
+  it('wraps google-gemini-cli OAuth as JSON with token and projectId', async () => {
+    const cfg: LlmConfig = {
+      primary: 'google-gemini-cli',
+      fallback: [],
+      providers: { 'google-gemini-cli': { keys: [] } },
+      oauth: { primary: 'google-gemini-cli', fallback: [] },
+    };
+    const resolver = new AuthResolver(cfg, undefined, {
+      'google-gemini-cli': {
+        access: 'gca-access',
+        refresh: 'rt',
+        expires: Date.now() + 3600_000,
+        label: 'gemini',
+        projectId: 'proj-42',
+      },
+    });
+    const storage = resolver.createAuthStorage();
+    const key = await storage.getApiKey('google-gemini-cli');
+    expect(key).toBeDefined();
+    expect(JSON.parse(key as string)).toEqual({ token: 'gca-access', projectId: 'proj-42' });
+  });
+
+  it('wraps google-antigravity OAuth as JSON with token and projectId', async () => {
+    const cfg: LlmConfig = {
+      primary: 'google-antigravity',
+      fallback: [],
+      providers: { 'google-antigravity': { keys: [] } },
+      oauth: { primary: 'google-antigravity', fallback: [] },
+    };
+    const resolver = new AuthResolver(cfg, undefined, {
+      'google-antigravity': {
+        access: 'antigrav-access',
+        refresh: 'rt',
+        expires: Date.now() + 3600_000,
+        label: 'antigravity',
+        projectId: 'proj-99',
+      },
+    });
+    const storage = resolver.createAuthStorage();
+    const key = await storage.getApiKey('google-antigravity');
+    expect(JSON.parse(key as string)).toEqual({
+      token: 'antigrav-access',
+      projectId: 'proj-99',
+    });
+  });
+
+  it('falls back to raw access token when pi-ai has no provider for the id', async () => {
+    mockedGetOAuthProvider.mockReturnValue(undefined);
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: [] },
+    };
+    const resolver = new AuthResolver(cfg, undefined, {
+      anthropic: { ...makeOAuthCreds(), access: 'fallback-access' },
+    });
+    const storage = resolver.createAuthStorage();
+    expect(await storage.getApiKey('anthropic')).toBe('fallback-access');
+  });
+
+  it('uses raw API key for providers in the api_keys tier', async () => {
+    const resolver = new AuthResolver(makeConfig());
+    const storage = resolver.createAuthStorage();
+    expect(await storage.getApiKey('anthropic')).toBe('ant-key-1');
+    expect(await storage.getApiKey('openai')).toBe('oai-key-1');
+    expect(mockedGetOAuthProvider).not.toHaveBeenCalled();
+  });
+});
+
 describe('AuthResolver.ensureFresh', () => {
   it('refreshes OAuth credential within expiry buffer and persists', async () => {
     const persisted: OAuthCredentials[] = [];
@@ -438,10 +552,11 @@ describe('AuthResolver.ensureFresh', () => {
       persisted.push(creds);
     });
     const refreshed = await resolver.ensureFresh({
-      refresh: async (): Promise<RefreshedTokens> => ({
+      refresh: async (_provider, _cred): Promise<OAuthCredentials> => ({
         access: 'new-access',
         refresh: 'rt-2',
         expires: Date.now() + 60 * 60_000,
+        label: 'claude-pro',
       }),
     });
     expect(refreshed.has('anthropic')).toBe(true);
@@ -473,7 +588,7 @@ describe('AuthResolver.ensureFresh', () => {
     await resolver.ensureFresh({
       refresh: async () => {
         calls++;
-        return { access: 'x', refresh: 'y', expires: 1 };
+        return { access: 'x', refresh: 'y', expires: 1, label: 'l' };
       },
     });
     expect(calls).toBe(0);
@@ -486,10 +601,15 @@ describe('AuthResolver.ensureFresh', () => {
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
     let count = 0;
-    const slow = async (): Promise<RefreshedTokens> => {
+    const slow = async (): Promise<OAuthCredentials> => {
       count++;
       await new Promise((r) => setTimeout(r, 20));
-      return { access: 'new', refresh: 'rt-2', expires: Date.now() + 60 * 60_000 };
+      return {
+        access: 'new',
+        refresh: 'rt-2',
+        expires: Date.now() + 60 * 60_000,
+        label: 'claude-pro',
+      };
     };
     await Promise.all([
       resolver.ensureFresh({ refresh: slow }),
@@ -536,6 +656,7 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'recovered',
         refresh: 'rt-2',
         expires: Date.now() + 60 * 60_000,
+        label: 'claude-pro',
       }),
     });
     expect(refreshed.has('anthropic')).toBe(true);
@@ -555,7 +676,12 @@ describe('AuthResolver.ensureFresh', () => {
     const refreshed = await resolver.ensureFresh({
       refresh: async () => {
         called = true;
-        return { access: 'forced-new', refresh: 'rt-new', expires: Date.now() + 60 * 60_000 };
+        return {
+          access: 'forced-new',
+          refresh: 'rt-new',
+          expires: Date.now() + 60 * 60_000,
+          label: 'claude-pro',
+        };
       },
       force: ['anthropic'],
     });
@@ -576,11 +702,15 @@ describe('AuthResolver.ensureFresh', () => {
       openai: { ...makeOAuthCreds(60 * 60_000), label: 'openai-oauth' }, // fresh
     });
     await resolver.ensureFresh({
-      refresh: async (refreshToken) => {
-        // Identify which provider is being refreshed by the refresh token
-        if (refreshToken === 'rt-xyz') anthropicCalled = true;
+      refresh: async (provider, _cred) => {
+        if (provider === 'anthropic') anthropicCalled = true;
         else openaiCalled = true;
-        return { access: 'new', refresh: 'rt-new', expires: Date.now() + 60 * 60_000 };
+        return {
+          access: 'new',
+          refresh: 'rt-new',
+          expires: Date.now() + 60 * 60_000,
+          label: provider,
+        };
       },
       force: ['anthropic'], // only force anthropic
     });
@@ -601,16 +731,32 @@ describe('AuthResolver.ensureFresh', () => {
     const seen: string[] = [];
 
     // First refresh: slow, rotates refresh token (but result still expiring soon for second refresh)
-    const slow = async (refreshToken: string): Promise<RefreshedTokens> => {
-      seen.push(refreshToken);
+    const slow = async (
+      _provider: LlmProvider,
+      cred: OAuthCredentials
+    ): Promise<OAuthCredentials> => {
+      seen.push(cred.refresh);
       await new Promise((r) => setTimeout(r, 30));
-      return { access: 'a1', refresh: 'rt-rotated', expires: Date.now() + 1000 }; // still expiring
+      return {
+        access: 'a1',
+        refresh: 'rt-rotated',
+        expires: Date.now() + 1000,
+        label: cred.label,
+      }; // still expiring
     };
 
     // Second refresh: fast, uses the rotated token from the first refresh
-    const fast = async (refreshToken: string): Promise<RefreshedTokens> => {
-      seen.push(refreshToken);
-      return { access: 'a2', refresh: 'rt-final', expires: Date.now() + 60 * 60_000 };
+    const fast = async (
+      _provider: LlmProvider,
+      cred: OAuthCredentials
+    ): Promise<OAuthCredentials> => {
+      seen.push(cred.refresh);
+      return {
+        access: 'a2',
+        refresh: 'rt-final',
+        expires: Date.now() + 60 * 60_000,
+        label: cred.label,
+      };
     };
 
     // Kick off both with force so the second caller hits the post-await path
@@ -626,5 +772,47 @@ describe('AuthResolver.ensureFresh', () => {
     expect(seen[1]).toBe('rt-rotated');
     // Final state should reflect the second refresh
     expect(resolver.getActiveOAuthCredential('anthropic')?.refresh).toBe('rt-final');
+  });
+
+  it('passes full credential to refresh callback and persists extras', async () => {
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'google-antigravity', fallback: [] },
+    };
+    const expiredCred: OAuthCredentials = {
+      access: 'old-access',
+      refresh: 'r1',
+      expires: Date.now() - 1000,
+      label: 'google-antigravity',
+      projectId: 'proj-1',
+      email: 'a@b.com',
+    };
+    const resolver = new AuthResolver(cfg, undefined, {
+      'google-antigravity': expiredCred,
+    });
+
+    const persisted: OAuthCredentials[] = [];
+    resolver.setPersistOAuth('google-antigravity', async (c) => {
+      persisted.push(c);
+    });
+
+    const refresh = vi.fn(
+      async (_provider: LlmProvider, cred: OAuthCredentials): Promise<OAuthCredentials> => ({
+        access: 'new-access',
+        refresh: 'r2',
+        expires: Date.now() + 3600_000,
+        label: cred.label,
+        projectId: cred.projectId, // pi-ai's antigravity refresh round-trips this
+        email: cred.email,
+      })
+    );
+
+    const refreshed = await resolver.ensureFresh({ refresh });
+    expect(refresh).toHaveBeenCalledWith('google-antigravity', expiredCred);
+    expect(refreshed.has('google-antigravity')).toBe(true);
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].projectId).toBe('proj-1');
+    expect(persisted[0].email).toBe('a@b.com');
+    expect(persisted[0].access).toBe('new-access');
   });
 });

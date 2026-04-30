@@ -10,8 +10,9 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdir as mkdirAsync } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
+import open from 'open';
 import pc from 'picocolors';
-import { loginAnthropic } from '../../server/agents/oauth.js';
+import { loginProvider } from '../../server/agents/oauth.js';
 import { saveOAuthCredentials } from '../../server/agents/oauth-credentials.js';
 import type {
   LlmConfig,
@@ -40,7 +41,27 @@ const OAUTH_PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
   {
     value: 'anthropic',
     label: 'Anthropic (Claude Pro/Max)',
-    hint: 'Uses your Claude.ai subscription. No API key needed.',
+    hint: 'Uses your Claude.ai subscription.',
+  },
+  {
+    value: 'openai-codex',
+    label: 'OpenAI Codex (ChatGPT Plus/Pro)',
+    hint: 'Uses your ChatGPT subscription. Codex models only.',
+  },
+  {
+    value: 'google-gemini-cli',
+    label: 'Google Gemini CLI (Gemini subscription)',
+    hint: 'Uses your Google account / Gemini subscription.',
+  },
+  {
+    value: 'google-antigravity',
+    label: 'Google Antigravity',
+    hint: 'Uses your Google account via Antigravity. Access to Gemini 3, Claude, GPT-OSS.',
+  },
+  {
+    value: 'github-copilot',
+    label: 'GitHub Copilot',
+    hint: 'Uses your GitHub Copilot subscription.',
   },
 ];
 
@@ -239,15 +260,12 @@ async function collectWebSearchConfig(): Promise<{
  * Returns { label } on success, null on failure.
  */
 async function runOAuthLogin(provider: LlmProvider): Promise<{ label: string } | null> {
-  if (provider !== 'anthropic') {
-    p.log.error(`OAuth login for ${provider} is not implemented yet`);
-    return null;
-  }
+  const defaultLabel = provider; // default label = provider id
 
   const label = (await p.text({
     message: 'Label for this OAuth credential:',
-    placeholder: 'claude-pro',
-    defaultValue: 'claude-pro',
+    placeholder: defaultLabel,
+    defaultValue: defaultLabel,
   })) as string;
 
   if (p.isCancel(label)) {
@@ -262,9 +280,19 @@ async function runOAuthLogin(provider: LlmProvider): Promise<{ label: string } |
   const s = p.spinner();
   s.start('Waiting for browser authentication...');
   try {
-    const creds = await loginAnthropic({
+    const creds = await loginProvider(provider, {
       onAuth: ({ url }) => {
-        s.message(`Open this URL to authenticate:\n${url}`);
+        // Stop, print the URL persistently, attempt to open the browser, then
+        // restart the spinner. s.message() would be overwritten on the next
+        // onProgress; p.log.info() under an active spinner is suppressed.
+        // Stop+log+restart guarantees the URL stays visible. open() is
+        // best-effort.
+        s.stop('Browser authentication required:');
+        p.log.info(`Open this URL to authenticate (browser should open automatically):\n${url}`);
+        void open(url).catch(() => {
+          // Browser open failed — URL is already printed; user copies manually.
+        });
+        s.start('Waiting for OAuth callback...');
       },
       onPrompt: async ({ message, placeholder }) => {
         s.stop('Browser callback timed out');
@@ -278,14 +306,13 @@ async function runOAuthLogin(provider: LlmProvider): Promise<{ label: string } |
       },
       onProgress: (m) => s.message(m),
     });
+    // Spread preserves provider-specific extras (projectId, email, enterpriseDomain).
     saveOAuthCredentials(SYSTEM2_DIR, provider, {
-      access: creds.access,
-      refresh: creds.refresh,
-      expires: creds.expires,
-      label: label || 'claude-pro',
+      ...creds,
+      label: label || defaultLabel,
     });
     s.stop('✓ OAuth login successful');
-    return { label: label || 'claude-pro' };
+    return { label: label || defaultLabel };
   } catch (err) {
     s.stop('✗ OAuth login failed');
     p.log.error(err instanceof Error ? err.message : String(err));
@@ -299,7 +326,7 @@ async function runOAuthLogin(provider: LlmProvider): Promise<{ label: string } |
  */
 async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
   const wantsOAuth = await p.confirm({
-    message: 'Configure OAuth providers? (recommended if you have a Claude Pro/Max subscription)',
+    message: 'Configure OAuth providers? (use existing AI subscriptions instead of API keys)',
     initialValue: true,
   });
   if (p.isCancel(wantsOAuth)) {
@@ -308,31 +335,58 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
   }
   if (!wantsOAuth) return null;
 
-  const primary = (await p.select({
-    message: 'Select your primary OAuth provider:',
-    options: OAUTH_PROVIDERS,
-  })) as LlmProvider;
-  if (p.isCancel(primary)) {
-    p.cancel('Onboarding cancelled');
-    process.exit(0);
-  }
+  let availableOAuth = [...OAUTH_PROVIDERS];
+  let primary: LlmProvider | undefined;
 
-  const result = await runOAuthLogin(primary);
-  if (!result) {
-    const retry = await p.confirm({
-      message: 'OAuth login failed. Skip OAuth tier and continue with API keys only?',
-      initialValue: true,
-    });
-    if (p.isCancel(retry) || !retry) {
+  // Outer loop: keep trying primary candidates until one succeeds or the user gives up.
+  while (!primary && availableOAuth.length > 0) {
+    const candidate = (await p.select({
+      message: 'Select your primary OAuth provider:',
+      options: availableOAuth,
+    })) as LlmProvider;
+    if (p.isCancel(candidate)) {
       p.cancel('Onboarding cancelled');
       process.exit(0);
     }
+
+    const result = await runOAuthLogin(candidate);
+    if (result) {
+      primary = candidate;
+      availableOAuth = availableOAuth.filter((o) => o.value !== candidate);
+      break;
+    }
+
+    // Login failed: 3-way choice. Retrying re-shows the candidate; "different" removes it.
+    const next = (await p.select({
+      message: 'OAuth login failed. What now?',
+      options: [
+        { value: 'retry', label: `Retry ${candidate}` },
+        { value: 'different', label: 'Try a different OAuth provider' },
+        { value: 'skip', label: 'Skip OAuth tier (continue with API keys only)' },
+      ],
+    })) as 'retry' | 'different' | 'skip';
+    if (p.isCancel(next)) {
+      p.cancel('Onboarding cancelled');
+      process.exit(0);
+    }
+    if (next === 'retry') continue;
+    if (next === 'skip') return null;
+    // 'different': drop the failed candidate so the next select doesn't re-offer it.
+    availableOAuth = availableOAuth.filter((o) => o.value !== candidate);
+  }
+
+  if (!primary) {
+    p.log.warn('No OAuth providers succeeded; skipping OAuth tier.');
     return null;
   }
 
+  // Rebuild fallback options from the full provider list (minus the chosen primary).
+  // Don't reuse availableOAuth: it has been pruned of providers the user gave up on as
+  // primary candidates, but a transient primary failure shouldn't permanently disqualify
+  // them from being tried as fallback.
   const fallback: LlmProvider[] = [];
-  let availableOAuth = OAUTH_PROVIDERS.filter((o) => o.value !== primary);
-  while (availableOAuth.length > 0) {
+  let availableFallback = OAUTH_PROVIDERS.filter((o) => o.value !== primary);
+  while (availableFallback.length > 0) {
     const addMore = await p.confirm({
       message: 'Add another OAuth provider as fallback?',
       initialValue: false,
@@ -345,7 +399,7 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
 
     const next = (await p.select({
       message: 'Select fallback OAuth provider:',
-      options: availableOAuth,
+      options: availableFallback,
     })) as LlmProvider;
     if (p.isCancel(next)) {
       p.cancel('Onboarding cancelled');
@@ -355,7 +409,7 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
     if (r) {
       fallback.push(next);
     }
-    availableOAuth = availableOAuth.filter((o) => o.value !== next);
+    availableFallback = availableFallback.filter((o) => o.value !== next);
   }
 
   return { primary, fallback };

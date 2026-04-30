@@ -71,4 +71,22 @@ describe('oauth-credentials', () => {
     writeFileSync(join(dir, 'oauth', 'anthropic.json'), JSON.stringify({ access: 'a' }));
     expect(loadOAuthCredentials(dir, 'anthropic')).toBeNull();
   });
+
+  it('round-trips provider-specific extras (projectId, email)', () => {
+    saveOAuthCredentials(dir, 'google-antigravity', {
+      access: 'access-token',
+      refresh: 'refresh-token',
+      expires: Date.now() + 3600_000,
+      label: 'google-antigravity',
+      projectId: 'proj-123',
+      email: 'user@example.com',
+    });
+    const loaded = loadOAuthCredentials(dir, 'google-antigravity');
+    expect(loaded).not.toBeNull();
+    expect(loaded?.projectId).toBe('proj-123');
+    expect(loaded?.email).toBe('user@example.com');
+    // Required fields still present
+    expect(loaded?.access).toBe('access-token');
+    expect(loaded?.label).toBe('google-antigravity');
+  });
 });

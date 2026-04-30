@@ -6,22 +6,23 @@
  *
  * Failover logic:
  * 1. Walk OAuth tier first (primary + fallback OAuth providers that have credentials)
- * 2. Only when every OAuth credential is in cooldown, drop to the keys tier
- * 3. Within the keys tier, try primary provider keys, then fallback providers in order
+ * 2. Only when every OAuth credential is in cooldown, drop to the API-keys tier
+ * 3. Within the API-keys tier, try primary provider keys, then fallback providers in order
  * 4. Keys in cooldown recover after the cooldown period expires
  */
 
+import { getOAuthProvider } from '@mariozechner/pi-ai/oauth';
 import { AuthStorage } from '@mariozechner/pi-coding-agent';
 import type { LlmConfig, LlmProvider } from '../../shared/index.js';
 import { log } from '../utils/logger.js';
-import { isExpiringSoon, type RefreshedTokens } from './oauth.js';
-import type { OAuthCredentials } from './oauth-credentials.js';
+import { isExpiringSoon } from './oauth.js';
+import type { OAuthCredentials, PiAiOAuthCredentials } from './oauth-credentials.js';
 
 /** Default cooldown durations */
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 90 * 1000;
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
 
-export type AuthTier = 'oauth' | 'keys';
+export type AuthTier = 'oauth' | 'api_keys';
 
 export interface CooldownConfig {
   rateLimitMs: number;
@@ -163,9 +164,9 @@ export class AuthResolver {
       if (!providerConfig) continue;
       for (let i = 0; i < providerConfig.keys.length; i++) {
         const key = providerConfig.keys[i];
-        if (key.key && !this.isKeyUnavailable(this.cooldownKey('keys', provider, i))) {
+        if (key.key && !this.isKeyUnavailable(this.cooldownKey('api_keys', provider, i))) {
           this.activeKeys.set(provider, i);
-          return { tier: 'keys', provider, keyIndex: i, label: key.label };
+          return { tier: 'api_keys', provider, keyIndex: i, label: key.label };
         }
       }
     }
@@ -192,27 +193,27 @@ export class AuthResolver {
       if (!providerConfig) return undefined;
       const index = this.activeKeys.get(provider) ?? 0;
       // Check current index first
-      const currentKeyId = this.cooldownKey('keys', provider, index);
+      const currentKeyId = this.cooldownKey('api_keys', provider, index);
       if (!this.isKeyUnavailable(currentKeyId)) {
         const key = providerConfig.keys[index];
         if (key?.key) {
-          return { tier: 'keys', provider, keyIndex: index, label: key.label };
+          return { tier: 'api_keys', provider, keyIndex: index, label: key.label };
         }
       }
       // Current index unavailable, find next valid
       for (let i = 0; i < providerConfig.keys.length; i++) {
         const key = providerConfig.keys[i];
-        const keyId = this.cooldownKey('keys', provider, i);
+        const keyId = this.cooldownKey('api_keys', provider, i);
         if (key.key && !this.isKeyUnavailable(keyId)) {
           this.activeKeys.set(provider, i);
-          return { tier: 'keys', provider, keyIndex: i, label: key.label };
+          return { tier: 'api_keys', provider, keyIndex: i, label: key.label };
         }
       }
       return undefined;
     };
 
     if (tier === 'oauth') return tryOAuth();
-    if (tier === 'keys') return tryKeys();
+    if (tier === 'api_keys') return tryKeys();
     return tryOAuth() ?? tryKeys();
   }
 
@@ -220,9 +221,9 @@ export class AuthResolver {
    * Check if a specific key is currently in cooldown.
    * Used by AgentHost to detect when another agent has already put its key in cooldown.
    *
-   * @param tier - defaults to 'keys' for backward compatibility
+   * @param tier - defaults to 'api_keys' for backward compatibility
    */
-  isKeyInCooldown(provider: LlmProvider, keyIndex: number, tier: AuthTier = 'keys'): boolean {
+  isKeyInCooldown(provider: LlmProvider, keyIndex: number, tier: AuthTier = 'api_keys'): boolean {
     return this.isKeyUnavailable(this.cooldownKey(tier, provider, keyIndex));
   }
 
@@ -234,7 +235,7 @@ export class AuthResolver {
    * @param reason - Why it failed (determines cooldown duration for rate_limit)
    * @param errorMessage - Original API error message for logging
    * @param keyIndex - The specific key index that failed (avoids stale global state when multiple agents share the resolver)
-   * @param tier - Which tier the key belongs to (defaults to 'keys' for backward compatibility)
+   * @param tier - Which tier the key belongs to (defaults to 'api_keys' for backward compatibility)
    * @returns true if there's a fallback available (next key or next provider)
    */
   markKeyFailed(
@@ -242,7 +243,7 @@ export class AuthResolver {
     reason: 'auth' | 'rate_limit' | 'transient' = 'transient',
     errorMessage?: string,
     keyIndex?: number,
-    tier: AuthTier = 'keys'
+    tier: AuthTier = 'api_keys'
   ): boolean {
     const currentIndex = keyIndex ?? this.activeKeys.get(provider) ?? 0;
     const keyId = this.cooldownKey(tier, provider, currentIndex);
@@ -333,7 +334,14 @@ export class AuthResolver {
       if (!active) continue;
       let keyValue: string | undefined;
       if (active.tier === 'oauth') {
-        keyValue = this.oauthCredentials[provider]?.access;
+        const creds = this.oauthCredentials[provider];
+        if (creds) {
+          // Delegate to pi-ai's OAuth provider so per-provider wire formats are
+          // honored (anthropic/copilot/codex pass `access` through; gemini-cli and
+          // antigravity wrap as JSON {token, projectId}).
+          const piProvider = getOAuthProvider(provider);
+          keyValue = piProvider ? piProvider.getApiKey(creds) : creds.access;
+        }
       } else {
         keyValue = this.config.providers[provider]?.keys[active.keyIndex]?.key;
       }
@@ -366,7 +374,10 @@ export class AuthResolver {
    *   revoked-but-not-expired token). Defaults to empty — only expiry-based refresh occurs.
    */
   async ensureFresh(deps: {
-    refresh: (refreshToken: string) => Promise<RefreshedTokens>;
+    refresh: (
+      provider: LlmProvider,
+      credentials: OAuthCredentials
+    ) => Promise<PiAiOAuthCredentials>;
     /** Providers to refresh regardless of expiry (e.g., on 401 from a revoked-but-not-expired token). */
     force?: LlmProvider[];
   }): Promise<Set<LlmProvider>> {
@@ -414,22 +425,21 @@ export class AuthResolver {
   private async doRefresh(
     provider: LlmProvider,
     cred: OAuthCredentials,
-    refresh: (refreshToken: string) => Promise<RefreshedTokens>
+    refresh: (provider: LlmProvider, credentials: OAuthCredentials) => Promise<PiAiOAuthCredentials>
   ): Promise<void> {
-    const tokens = await refresh(cred.refresh);
-    const updated: OAuthCredentials = {
-      access: tokens.access,
-      refresh: tokens.refresh,
-      expires: tokens.expires,
-      label: cred.label,
-    };
-    this.oauthCredentials[provider] = updated;
+    const updated = await refresh(provider, cred);
+    // Defensive merge: start with the old credential (preserves provider-specific extras
+    // like projectId/email/enterpriseDomain), overlay the refreshed fields (typically
+    // access/refresh/expires plus any extras pi-ai chose to return), then explicitly
+    // preserve label (set during login, not by pi-ai's refresh).
+    const merged: OAuthCredentials = { ...cred, ...updated, label: cred.label };
+    this.oauthCredentials[provider] = merged;
     log.info(`[AuthResolver] OAuth token refreshed for ${provider}:${cred.label}`);
 
     const persist = this.persistCallbacks[provider];
     if (persist) {
       try {
-        await persist(updated);
+        await persist(merged);
       } catch (err) {
         log.warn(`[AuthResolver] Failed to persist refreshed OAuth for ${provider}:`, err);
       }

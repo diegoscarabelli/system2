@@ -7,10 +7,14 @@ compaction_depth: 8
 models:
   anthropic: claude-sonnet-4-6
   cerebras: zai-glm-4.7
+  github-copilot: claude-sonnet-4.6
   google: gemini-3.1-pro-preview
+  google-antigravity: gemini-3.1-pro-high
+  google-gemini-cli: gemini-3-pro-preview
   groq: llama-3.3-70b-versatile
   mistral: mistral-large-latest
   openai: gpt-4o
+  openai-codex: gpt-5.4
   openrouter: google/gemini-3.1-pro-preview
   xai: grok-2-latest
 ---
