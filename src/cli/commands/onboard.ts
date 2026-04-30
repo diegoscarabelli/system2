@@ -369,8 +369,13 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
     return null;
   }
 
+  // Rebuild fallback options from the full provider list (minus the chosen primary).
+  // Don't reuse availableOAuth: it has been pruned of providers the user gave up on as
+  // primary candidates, but a transient primary failure shouldn't permanently disqualify
+  // them from being tried as fallback.
   const fallback: LlmProvider[] = [];
-  while (availableOAuth.length > 0) {
+  let availableFallback = OAUTH_PROVIDERS.filter((o) => o.value !== primary);
+  while (availableFallback.length > 0) {
     const addMore = await p.confirm({
       message: 'Add another OAuth provider as fallback?',
       initialValue: false,
@@ -383,7 +388,7 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
 
     const next = (await p.select({
       message: 'Select fallback OAuth provider:',
-      options: availableOAuth,
+      options: availableFallback,
     })) as LlmProvider;
     if (p.isCancel(next)) {
       p.cancel('Onboarding cancelled');
@@ -393,7 +398,7 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
     if (r) {
       fallback.push(next);
     }
-    availableOAuth = availableOAuth.filter((o) => o.value !== next);
+    availableFallback = availableFallback.filter((o) => o.value !== next);
   }
 
   return { primary, fallback };
