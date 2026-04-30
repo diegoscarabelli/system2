@@ -325,4 +325,10 @@ export async function login(): Promise<void> {
   p.outro(
     `✨ Done. If system2 is running, restart to apply: ${pc.bold('system2 stop && system2 start')}`
   );
+
+  // Pi-ai's gemini-cli/antigravity OAuth flows leave the local callback server's
+  // idle keep-alive connections open after server.close(). Node ≥18 keeps the event
+  // loop alive until those connections time out (~5 min), so the CLI appears to hang
+  // after a successful login. Explicit exit since this is a one-shot command.
+  process.exit(0);
 }
