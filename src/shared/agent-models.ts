@@ -71,21 +71,41 @@ function nearestModelId(provider: string, attempted: string): string | undefined
 }
 
 /**
+ * Providers that intentionally aren't in pi-ai's MODELS catalog — they register
+ * their model dynamically at runtime (the user supplies model + base_url in
+ * config). Listed explicitly so a typo like `anthopic` doesn't silently slip
+ * through under the "skip non-catalog providers" branch below.
+ */
+const DYNAMIC_PROVIDERS: ReadonlySet<string> = new Set(['openai-compatible']);
+
+/**
  * Validate every (provider, modelId) pair declared in an agents config against
- * pi-ai's model catalog. Throws on first mismatch with provider, model, and a
- * Levenshtein-nearest "did you mean" suggestion.
+ * pi-ai's model catalog. Throws on first mismatch:
  *
- * Skips providers absent from pi-ai's catalog (e.g., openai-compatible) since
- * those register their model dynamically at runtime.
+ * - Unknown provider id → throws with the list of valid providers.
+ * - Provider known but modelId unknown → throws with a Levenshtein-nearest
+ *   "did you mean" suggestion.
+ *
+ * Skips known dynamic providers (DYNAMIC_PROVIDERS) since their model isn't
+ * in pi-ai's catalog by design (the user supplies it in config).
  */
 export function validateAgentModels(agents: AgentsConfig): void {
+  const knownProviders = getKnownProviderSet();
   for (const [role, override] of Object.entries(agents)) {
     if (!override.models) continue;
     for (const [provider, modelId] of Object.entries(override.models)) {
       if (!modelId) continue;
+      if (DYNAMIC_PROVIDERS.has(provider)) continue;
+      if (!knownProviders.has(provider)) {
+        const validProviders = [...knownProviders, ...DYNAMIC_PROVIDERS].sort().join(', ');
+        throw new Error(
+          `Agent "${role}" references unknown provider "${provider}" in models override. ` +
+            `Valid providers: ${validProviders}.`
+        );
+      }
       const ids = getCatalogIds(provider);
-      if (!ids) continue; // provider not in pi-ai catalog (e.g., openai-compatible)
-      if (!ids.includes(modelId)) {
+      // ids is guaranteed defined here because provider is in knownProviders.
+      if (ids && !ids.includes(modelId)) {
         const nearest = nearestModelId(provider, modelId);
         const suggestion = nearest ? ` Did you mean "${nearest}"?` : '';
         throw new Error(

@@ -1013,11 +1013,27 @@ describe('validateAgentModels', () => {
     expect(() => validateAgentModels(agents)).toThrow(/not in pi-ai's catalog/);
   });
 
-  it('skips providers absent from pi-ai catalog (e.g., openai-compatible)', () => {
+  it('skips known dynamic providers like openai-compatible', () => {
     const agents = {
       narrator: { models: { 'openai-compatible': 'whatever-local-model' } },
     } as unknown as AgentsConfig;
     expect(() => validateAgentModels(agents)).not.toThrow();
+  });
+
+  it('throws on unknown provider id (e.g., a typo) instead of silently skipping', () => {
+    const agents = {
+      narrator: { models: { anthopic: 'claude-sonnet-4-6' } },
+    } as unknown as AgentsConfig;
+    expect(() => validateAgentModels(agents)).toThrow(/unknown provider "anthopic"/);
+  });
+
+  it('throws on unknown provider with the list of valid providers in the message', () => {
+    const agents = {
+      narrator: { models: { 'imaginary-provider': 'foo' } },
+    } as unknown as AgentsConfig;
+    expect(() => validateAgentModels(agents)).toThrow(
+      /Valid providers:.*anthropic.*openai-compatible/
+    );
   });
 
   it('treats agents without models as no-op', () => {
