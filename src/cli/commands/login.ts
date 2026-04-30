@@ -262,13 +262,17 @@ async function performLoginIteration(): Promise<'continue' | 'done'> {
   const isAlreadyLoggedIn = existsSync(join(oauthDir, `${target}.json`));
   if (isAlreadyLoggedIn) {
     const tierBefore = readOAuthTier(CONFIG_FILE);
-    const isAlreadyPrimary = tierBefore?.primary === target;
+    // Only offer "promote" when [llm.oauth] exists and target isn't already primary.
+    // setProviderAsPrimary throws when the section is absent (legitimate edge case if
+    // the user deleted [llm.oauth] manually but kept the JSON credential file), so
+    // hiding the option prevents an unrecoverable error from the menu.
+    const canPromote = tierBefore !== null && tierBefore.primary !== target;
 
     const action = (await p.select({
       message: `Already logged in to ${target}. What now?`,
       options: [
         { value: 'relogin', label: 'Re-login (replace credentials)' },
-        ...(isAlreadyPrimary ? [] : [{ value: 'promote', label: 'Set as primary OAuth provider' }]),
+        ...(canPromote ? [{ value: 'promote', label: 'Set as primary OAuth provider' }] : []),
         { value: 'remove', label: 'Remove (delete credentials and remove from [llm.oauth])' },
         { value: 'cancel', label: 'Cancel' },
       ],

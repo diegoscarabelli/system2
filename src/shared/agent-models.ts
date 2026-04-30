@@ -71,12 +71,15 @@ function nearestModelId(provider: string, attempted: string): string | undefined
 }
 
 /**
- * Providers that intentionally aren't in pi-ai's MODELS catalog — they register
- * their model dynamically at runtime (the user supplies model + base_url in
- * config). Listed explicitly so a typo like `anthopic` doesn't silently slip
- * through under the "skip non-catalog providers" branch below.
+ * Providers that intentionally aren't in pi-ai's MODELS catalog and are still
+ * acceptable as per-agent overrides — they would be skipped by the "unknown
+ * provider" check rather than throwing. Currently empty: `openai-compatible`
+ * is NOT a valid per-agent override (its model is set globally via
+ * `[llm.openai-compatible].model`), and `convertTomlAgents` already rejects it
+ * at TOML-parse time. Kept as an explicit Set so future non-catalog providers
+ * can be added without changing the validator's structure.
  */
-const DYNAMIC_PROVIDERS: ReadonlySet<string> = new Set(['openai-compatible']);
+const DYNAMIC_PROVIDERS: ReadonlySet<string> = new Set();
 
 /**
  * Validate every (provider, modelId) pair declared in an agents config against

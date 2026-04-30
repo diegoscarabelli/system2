@@ -1013,11 +1013,14 @@ describe('validateAgentModels', () => {
     expect(() => validateAgentModels(agents)).toThrow(/not in pi-ai's catalog/);
   });
 
-  it('skips known dynamic providers like openai-compatible', () => {
+  it('throws for openai-compatible (not allowed as a per-agent override)', () => {
+    // openai-compatible registers its model dynamically at runtime via
+    // [llm.openai-compatible].model; per-agent overrides for it are rejected
+    // by convertTomlAgents and treated as unknown by validateAgentModels.
     const agents = {
       narrator: { models: { 'openai-compatible': 'whatever-local-model' } },
     } as unknown as AgentsConfig;
-    expect(() => validateAgentModels(agents)).not.toThrow();
+    expect(() => validateAgentModels(agents)).toThrow(/unknown provider "openai-compatible"/);
   });
 
   it('throws on unknown provider id (e.g., a typo) instead of silently skipping', () => {
@@ -1031,9 +1034,7 @@ describe('validateAgentModels', () => {
     const agents = {
       narrator: { models: { 'imaginary-provider': 'foo' } },
     } as unknown as AgentsConfig;
-    expect(() => validateAgentModels(agents)).toThrow(
-      /Valid providers:.*anthropic.*openai-compatible/
-    );
+    expect(() => validateAgentModels(agents)).toThrow(/Valid providers:.*anthropic.*openai-codex/);
   });
 
   it('treats agents without models as no-op', () => {

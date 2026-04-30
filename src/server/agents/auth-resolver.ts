@@ -417,8 +417,11 @@ export class AuthResolver {
     refresh: (provider: LlmProvider, credentials: OAuthCredentials) => Promise<OAuthCredentials>
   ): Promise<void> {
     const updated = await refresh(provider, cred);
-    // Preserve label (set during login, not by pi-ai's refresh) but accept any extras pi-ai returned.
-    const merged: OAuthCredentials = { ...updated, label: cred.label };
+    // Defensive merge: start with the old credential (preserves provider-specific extras
+    // like projectId/email/enterpriseDomain), overlay the refreshed fields (typically
+    // access/refresh/expires plus any extras pi-ai chose to return), then explicitly
+    // preserve label (set during login, not by pi-ai's refresh).
+    const merged: OAuthCredentials = { ...cred, ...updated, label: cred.label };
     this.oauthCredentials[provider] = merged;
     log.info(`[AuthResolver] OAuth token refreshed for ${provider}:${cred.label}`);
 

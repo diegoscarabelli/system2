@@ -579,48 +579,57 @@ export function loadConfig(): System2Config {
     return { ...DEFAULT_OPERATIONAL };
   }
 
+  // Parse TOML. Only this step's failures fall back to defaults — validation
+  // errors below must propagate so the user sees a clear startup error rather
+  // than the system silently running with operational defaults.
+  let tomlConfig: TomlConfig;
   try {
-    const content = readFileSync(CONFIG_FILE, 'utf-8');
-    const tomlConfig = TOML.parse(content) as TomlConfig;
-
-    const config: System2Config = deepMerge(
-      { ...DEFAULT_OPERATIONAL },
-      convertTomlOperational(tomlConfig)
-    );
-
-    if (tomlConfig.llm) {
-      config.llm = convertTomlLlm(tomlConfig.llm);
-    }
-
-    if (tomlConfig.agents) {
-      config.agents = convertTomlAgents(tomlConfig.agents);
-    }
-
-    if (tomlConfig.services) {
-      config.services = convertTomlServices(tomlConfig.services);
-    }
-
-    if (tomlConfig.tools) {
-      config.tools = convertTomlTools(tomlConfig.tools);
-    }
-
-    if (tomlConfig.databases) {
-      config.databases = convertTomlDatabases(tomlConfig.databases);
-    }
-
-    if (tomlConfig.delivery) {
-      config.delivery = convertTomlDelivery(tomlConfig.delivery);
-    }
-
-    if (tomlConfig.session) {
-      config.session = convertTomlSession(tomlConfig.session);
-    }
-
-    return config;
+    tomlConfig = TOML.parse(readFileSync(CONFIG_FILE, 'utf-8')) as TomlConfig;
   } catch (_error) {
     console.warn('[Config] Failed to parse config.toml, using defaults');
     return { ...DEFAULT_OPERATIONAL };
   }
+
+  const config: System2Config = deepMerge(
+    { ...DEFAULT_OPERATIONAL },
+    convertTomlOperational(tomlConfig)
+  );
+
+  if (tomlConfig.llm) {
+    config.llm = convertTomlLlm(tomlConfig.llm);
+  }
+
+  if (tomlConfig.agents) {
+    config.agents = convertTomlAgents(tomlConfig.agents);
+    // Fail fast on typos in [agents.<role>.models] — surface unknown
+    // provider/model errors at config load instead of waiting for the host
+    // to load the offending agent. Frontmatter typos are still caught later
+    // in AgentHost.loadAgent (validateAgentModels runs there too, on the
+    // post-merge map).
+    validateAgentModels(config.agents);
+  }
+
+  if (tomlConfig.services) {
+    config.services = convertTomlServices(tomlConfig.services);
+  }
+
+  if (tomlConfig.tools) {
+    config.tools = convertTomlTools(tomlConfig.tools);
+  }
+
+  if (tomlConfig.databases) {
+    config.databases = convertTomlDatabases(tomlConfig.databases);
+  }
+
+  if (tomlConfig.delivery) {
+    config.delivery = convertTomlDelivery(tomlConfig.delivery);
+  }
+
+  if (tomlConfig.session) {
+    config.session = convertTomlSession(tomlConfig.session);
+  }
+
+  return config;
 }
 
 /**
