@@ -12,7 +12,7 @@ For installation and usage, see the [project README](../README.md).
 
 - [Shared types](shared.md): The TypeScript types and interfaces used across the codebase.
 - [Server](server.md): The main runtime, hosting agents, serving the UI over HTTP and WebSocket, and running scheduled jobs.
-- [CLI](cli.md): Command-line tool for managing the server (initial setup, OAuth login/logout, starting, stopping, checking status).
+- [CLI](cli.md): Command-line tool for managing the server (initial setup, OAuth provider management, starting, stopping, checking status).
 - [UI](ui.md): The browser-based chat interface where you interact with the Guide agent and view artifacts.
 
 ## Core Systems
