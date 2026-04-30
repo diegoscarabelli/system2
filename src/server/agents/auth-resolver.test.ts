@@ -48,7 +48,7 @@ describe('AuthResolver', () => {
   it('returns first key as active by default', () => {
     const resolver = new AuthResolver(makeConfig());
     const active = resolver.getActiveKey('anthropic');
-    expect(active).toEqual({ tier: 'keys', provider: 'anthropic', keyIndex: 0, label: 'main' });
+    expect(active).toEqual({ tier: 'api_keys', provider: 'anthropic', keyIndex: 0, label: 'main' });
   });
 
   it('returns undefined for unconfigured provider', () => {
@@ -269,7 +269,7 @@ describe('AuthResolver', () => {
       );
       expect(resolver.primaryProvider).toBe('mistral');
       expect(resolver.getActiveKey('mistral')).toEqual({
-        tier: 'keys',
+        tier: 'api_keys',
         provider: 'mistral',
         keyIndex: 0,
         label: 'default',
@@ -308,7 +308,7 @@ describe('AuthResolver', () => {
       );
       expect(resolver.primaryProvider).toBe('openai-compatible');
       expect(resolver.getActiveKey('openai-compatible')).toEqual({
-        tier: 'keys',
+        tier: 'api_keys',
         provider: 'openai-compatible',
         keyIndex: 0,
         label: 'local',
@@ -367,7 +367,7 @@ describe('AuthResolver — two-tier model', () => {
     delete cfg.oauth;
     const resolver = new AuthResolver(cfg);
     const active = resolver.getActiveCredential();
-    expect(active?.tier).toBe('keys');
+    expect(active?.tier).toBe('api_keys');
     expect(active?.provider).toBe('anthropic');
     expect(active?.label).toBe('main');
   });
@@ -375,7 +375,7 @@ describe('AuthResolver — two-tier model', () => {
   it('falls back to keys tier when oauth credentials are missing', () => {
     const resolver = new AuthResolver(makeTwoTierConfig());
     const active = resolver.getActiveCredential();
-    expect(active?.tier).toBe('keys');
+    expect(active?.tier).toBe('api_keys');
   });
 
   it('exhausts oauth tier before dropping to keys tier', () => {
@@ -384,7 +384,7 @@ describe('AuthResolver — two-tier model', () => {
     });
     resolver.markKeyFailed('anthropic', 'auth', 'invalid_grant', 0, 'oauth');
     const active = resolver.getActiveCredential();
-    expect(active?.tier).toBe('keys');
+    expect(active?.tier).toBe('api_keys');
     expect(active?.provider).toBe('anthropic');
     expect(active?.label).toBe('main');
   });
@@ -395,7 +395,7 @@ describe('AuthResolver — two-tier model', () => {
     });
     resolver.markKeyFailed('anthropic', 'auth', 'oauth fail', 0, 'oauth');
     expect(resolver.isKeyInCooldown('anthropic', 0, 'oauth')).toBe(true);
-    expect(resolver.isKeyInCooldown('anthropic', 0, 'keys')).toBe(false);
+    expect(resolver.isKeyInCooldown('anthropic', 0, 'api_keys')).toBe(false);
   });
 
   it('walks oauth fallback before dropping to keys tier', () => {

@@ -16,45 +16,45 @@ primary = "anthropic"
 fallback = []   # any of: anthropic, openai-codex, google-gemini-cli, google-antigravity, github-copilot
 
 # API key tier — billed per token, used after OAuth tier exhausted
-[llm]
+[llm.api_keys]
 primary = "anthropic"
 fallback = ["google", "openai"]
 
-[llm.anthropic]
+[llm.api_keys.anthropic]
 keys = [
   { key = "sk-ant-...", label = "personal" },
   { key = "sk-ant-...", label = "work" },
 ]
 
-[llm.cerebras]
+[llm.api_keys.cerebras]
 keys = [{ key = "csk-...", label = "default" }]
 
-[llm.google]
+[llm.api_keys.google]
 keys = [{ key = "AIza...", label = "default" }]
 
-[llm.groq]
+[llm.api_keys.groq]
 keys = [{ key = "gsk_...", label = "default" }]
 
-[llm.mistral]
+[llm.api_keys.mistral]
 keys = [{ key = "...", label = "default" }]
 
-[llm.openai]
+[llm.api_keys.openai]
 keys = [{ key = "sk-...", label = "default" }]
 
-[llm.openrouter]
+[llm.api_keys.openrouter]
 keys = [{ key = "sk-or-...", label = "default" }]
 
 # Upstream provider routing for OpenRouter models (optional).
 # Keys are model ID prefixes; quote them when they contain special characters (e.g. "/").
 # Values are provider order arrays.
-[llm.openrouter.routing]
+[llm.api_keys.openrouter.routing]
 google = ["google-vertex/global", "google-vertex", "google-ai-studio"]
 
-[llm.xai]
+[llm.api_keys.xai]
 keys = [{ key = "xai-...", label = "default" }]
 
 # OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura, etc.)
-[llm.openai-compatible]
+[llm.api_keys.openai-compatible]
 keys = [{ key = "sk-...", label = "default" }]
 base_url = "http://localhost:4000/v1"
 model = "my-model"
@@ -120,7 +120,8 @@ narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Nar
 
 | Section | Description | TypeScript Type |
 |---------|-------------|-----------------|
-| `[llm]` | Primary provider, fallback order, per-provider keys | `LlmConfig` |
+| `[llm.api_keys]` | API-key tier: primary provider, fallback order, per-provider keys | `LlmConfig` |
+| `[llm.oauth]` | OAuth tier: primary + fallback subscription providers (tried first) | `LlmOAuthConfig` |
 | `[agents.*]` | Per-role agent overrides (models, thinking, compaction) | `AgentsConfig` |
 | `[services.*]` | External service credentials | `ServicesConfig` |
 | `[tools.*]` | Tool feature flags | `ToolsConfig` |
@@ -185,7 +186,7 @@ Each agent appends turns to a JSONL session file under `~/.system2/sessions/<rol
 
 Rotation only runs on cold start, before any `SessionManager` is created. During in-process growth, the SDK holds an open reference to the active JSONL file; renaming it mid-run would cause the SDK to recreate the file without a header on the next append.
 
-The `openrouter` provider supports an optional `[llm.openrouter.routing]` section that controls upstream provider routing. Keys are model ID prefixes matched against the resolved model (longest prefix wins), values are arrays of OpenRouter provider slugs tried in order. Prefixes containing special characters like `/` must be quoted in TOML (e.g. `"google/" = [...]`). For example, `google = ["google-vertex/global", "google-vertex", "google-ai-studio"]` routes all `google/*` models through Vertex AI first. If no prefix matches, no routing preference is set and OpenRouter uses its default load balancing.
+The `openrouter` provider supports an optional `[llm.api_keys.openrouter.routing]` section that controls upstream provider routing. Keys are model ID prefixes matched against the resolved model (longest prefix wins), values are arrays of OpenRouter provider slugs tried in order. Prefixes containing special characters like `/` must be quoted in TOML (e.g. `"google/" = [...]`). For example, `google = ["google-vertex/global", "google-vertex", "google-ai-studio"]` routes all `google/*` models through Vertex AI first. If no prefix matches, no routing preference is set and OpenRouter uses its default load balancing.
 
 The `openai-compatible` provider requires `base_url` and `model` fields in addition to keys. Use it for self-hosted proxies or providers not listed above. The optional `compat_reasoning` field (default `true`) declares whether the model supports extended thinking. For built-in providers (anthropic, openai, etc.), the SDK already knows which models support reasoning; `compat_reasoning` only applies to `openai-compatible` since the SDK has no way to know the capabilities of an arbitrary endpoint. Setting it to `true` for a model that doesn't support reasoning is safe: the SDK only sends `reasoning_effort` when the provider's compatibility layer confirms support, and most backends ignore unknown parameters.
 
@@ -214,7 +215,7 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 System2 has two auth tiers:
 
 - **OAuth tier**: subscription credentials (`[llm.oauth]`). Tried first. Five providers are supported as first-class OAuth IDs: `anthropic` (Claude Pro/Max), `openai-codex` (ChatGPT subscription via the Codex CLI flow), `google-gemini-cli` (Google account / Gemini subscription), `google-antigravity` (Google account via Antigravity, exposing Gemini 3, Claude thinking variants, and GPT-OSS), and `github-copilot` (Copilot subscription). Any of the five may be used as `primary` or in `fallback`, in any order.
-- **API key tier** — `[llm].primary` + `fallback`. Same shape as today. Used after the OAuth tier is fully exhausted (every OAuth credential in cooldown).
+- **API key tier** — `[llm.api_keys].primary` + `fallback`, with per-provider keys nested at `[llm.api_keys.<provider>].keys`. Used after the OAuth tier is fully exhausted (every OAuth credential in cooldown). The legacy 0.2.x layout (`[llm].primary` + sibling `[llm.<provider>]`) is still parsed with a one-time deprecation warning; migrate by moving fields under `[llm.api_keys]`.
 
 The OAuth tier is fully exhausted before the system drops into the API key tier — never interleaving. If `[llm.oauth]` is absent, system2 behaves exactly like an API-key-only setup.
 

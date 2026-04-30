@@ -199,7 +199,7 @@ export class AgentHost {
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
   private currentProvider: LlmProvider;
   private currentKeyIndex = 0;
-  private currentTier: AuthTier = 'keys';
+  private currentTier: AuthTier = 'api_keys';
   private retryAttempts: Map<string, number> = new Map(); // Track retries per error type
   private isReinitializing = false;
   private pendingPrompt: string | null = null;
@@ -289,7 +289,7 @@ export class AgentHost {
     const activeCred = this.authResolver.getActiveCredential();
     this.currentProvider = activeCred?.provider ?? this.authResolver.primaryProvider;
     this.currentKeyIndex = activeCred?.keyIndex ?? 0;
-    this.currentTier = activeCred?.tier ?? 'keys';
+    this.currentTier = activeCred?.tier ?? 'api_keys';
 
     log.info('[AgentHost] Auth status:', this.authResolver.getStatus());
   }
@@ -1114,7 +1114,7 @@ export class AgentHost {
       // Update current provider and key index
       this.currentProvider = provider;
       this.currentKeyIndex = this.authResolver.getActiveKey(provider)?.keyIndex ?? 0;
-      this.currentTier = this.authResolver.getActiveKey(provider)?.tier ?? 'keys';
+      this.currentTier = this.authResolver.getActiveKey(provider)?.tier ?? 'api_keys';
 
       // Push chat message before init so the user sees the reason even if
       // initialization fails. Only for actual failovers, not compaction recovery.

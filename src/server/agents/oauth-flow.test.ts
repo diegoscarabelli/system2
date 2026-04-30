@@ -90,7 +90,7 @@ describe('OAuth end-to-end flow', () => {
     resolver.markKeyFailed('anthropic', 'auth', 'invalid_grant', 0, 'oauth');
 
     const active = resolver.getActiveCredential();
-    expect(active?.tier).toBe('keys');
+    expect(active?.tier).toBe('api_keys');
     expect(active?.provider).toBe('anthropic');
     expect(active?.label).toBe('api-fallback');
   });
@@ -129,6 +129,9 @@ describe('OAuth end-to-end flow', () => {
     expect(resolver.getActiveCredential()).toMatchObject({ tier: 'oauth', provider: 'openai' });
 
     resolver.markKeyFailed('openai', 'auth', 'fail', 0, 'oauth');
-    expect(resolver.getActiveCredential()).toMatchObject({ tier: 'keys', provider: 'anthropic' });
+    expect(resolver.getActiveCredential()).toMatchObject({
+      tier: 'api_keys',
+      provider: 'anthropic',
+    });
   });
 });

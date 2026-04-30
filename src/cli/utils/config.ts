@@ -78,31 +78,46 @@ export interface System2Config {
 /**
  * TOML config structure (snake_case keys as they appear in the file).
  */
+interface ProviderKeysToml {
+  keys?: Array<{ key: string; label: string }>;
+  routing?: Record<string, string[]>;
+  base_url?: string;
+  model?: string;
+  compat_reasoning?: boolean;
+}
+
 interface TomlConfig {
   llm?: {
-    primary?: string;
-    fallback?: string[];
-    anthropic?: { keys?: Array<{ key: string; label: string }> };
-    cerebras?: { keys?: Array<{ key: string; label: string }> };
-    google?: { keys?: Array<{ key: string; label: string }> };
-    groq?: { keys?: Array<{ key: string; label: string }> };
-    mistral?: { keys?: Array<{ key: string; label: string }> };
-    openai?: { keys?: Array<{ key: string; label: string }> };
-    openrouter?: {
-      keys?: Array<{ key: string; label: string }>;
-      routing?: Record<string, string[]>;
-    };
-    xai?: { keys?: Array<{ key: string; label: string }> };
-    'openai-compatible'?: {
-      keys?: Array<{ key: string; label: string }>;
-      base_url?: string;
-      model?: string;
-      compat_reasoning?: boolean;
+    api_keys?: {
+      primary?: string;
+      fallback?: string[];
+      anthropic?: ProviderKeysToml;
+      cerebras?: ProviderKeysToml;
+      google?: ProviderKeysToml;
+      groq?: ProviderKeysToml;
+      mistral?: ProviderKeysToml;
+      openai?: ProviderKeysToml;
+      openrouter?: ProviderKeysToml;
+      xai?: ProviderKeysToml;
+      'openai-compatible'?: ProviderKeysToml;
     };
     oauth?: {
       primary?: string;
       fallback?: string[];
     };
+    /** Legacy 0.2.x fields under [llm] root. Replaced by [llm.api_keys] in 0.3.0;
+     *  still parsed by convertTomlLlm with a deprecation warning. */
+    primary?: string;
+    fallback?: string[];
+    anthropic?: ProviderKeysToml;
+    cerebras?: ProviderKeysToml;
+    google?: ProviderKeysToml;
+    groq?: ProviderKeysToml;
+    mistral?: ProviderKeysToml;
+    openai?: ProviderKeysToml;
+    openrouter?: ProviderKeysToml;
+    xai?: ProviderKeysToml;
+    'openai-compatible'?: ProviderKeysToml;
   };
   agents?: Record<
     string,
@@ -207,10 +222,24 @@ const DEFAULT_OPERATIONAL: Pick<
   },
 };
 
-/**
- * Convert TOML LLM section to LlmConfig.
- */
-export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
+/** Either the new [llm.api_keys] table or the legacy [llm] root — same field shape. */
+type ApiKeysTomlSource = {
+  primary?: string;
+  fallback?: string[];
+  anthropic?: ProviderKeysToml;
+  cerebras?: ProviderKeysToml;
+  google?: ProviderKeysToml;
+  groq?: ProviderKeysToml;
+  mistral?: ProviderKeysToml;
+  openai?: ProviderKeysToml;
+  openrouter?: ProviderKeysToml;
+  xai?: ProviderKeysToml;
+  'openai-compatible'?: ProviderKeysToml;
+};
+
+function buildProvidersFromSource(
+  source: ApiKeysTomlSource
+): Partial<Record<LlmProvider, LlmProviderConfig>> {
   const providers: Partial<Record<LlmProvider, LlmProviderConfig>> = {};
 
   for (const name of [
@@ -222,7 +251,7 @@ export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig 
     'openai',
     'xai',
   ] as const) {
-    const providerToml = toml[name];
+    const providerToml = source[name];
     if (providerToml?.keys && providerToml.keys.length > 0) {
       const validKeys = providerToml.keys.filter((k) => k.key);
       if (validKeys.length > 0) {
@@ -232,7 +261,7 @@ export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig 
   }
 
   // openrouter has an extra field (routing)
-  const openrouterToml = toml.openrouter;
+  const openrouterToml = source.openrouter;
   if (openrouterToml?.keys && openrouterToml.keys.length > 0) {
     const validKeys = openrouterToml.keys.filter((k) => k.key);
     if (validKeys.length > 0) {
@@ -257,7 +286,7 @@ export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig 
   }
 
   // openai-compatible has extra fields (base_url, model)
-  const compatToml = toml['openai-compatible'];
+  const compatToml = source['openai-compatible'];
   if (compatToml?.keys && compatToml.keys.length > 0) {
     const validKeys = compatToml.keys.filter((k) => k.key);
     if (validKeys.length > 0) {
@@ -270,9 +299,53 @@ export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig 
     }
   }
 
+  return providers;
+}
+
+/** True when any legacy 0.2.x [llm] field is set. Independent of api_keys presence. */
+function hasLegacyLlmFields(toml: NonNullable<TomlConfig['llm']>): boolean {
+  if (typeof toml.primary === 'string') return true;
+  for (const name of [
+    'anthropic',
+    'cerebras',
+    'google',
+    'groq',
+    'mistral',
+    'openai',
+    'openrouter',
+    'xai',
+    'openai-compatible',
+  ] as const) {
+    if (toml[name]?.keys && (toml[name]?.keys?.length ?? 0) > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Convert TOML LLM section to LlmConfig. Reads both the new [llm.api_keys] shape
+ * and the legacy 0.2.x flat shape; legacy emits a deprecation warning.
+ */
+export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
+  const hasLegacy = hasLegacyLlmFields(toml);
+  if (hasLegacy && toml.api_keys) {
+    console.warn(
+      '[Config] config.toml mixes legacy [llm] fields with the new [llm.api_keys] table. ' +
+        'The new table wins; legacy primary/fallback/per-provider entries under [llm] are ignored.'
+    );
+  } else if (hasLegacy) {
+    console.warn(
+      '[Config] config.toml uses the legacy [llm] schema (0.2.x). ' +
+        'Migrate to the [llm.api_keys] schema documented in docs/configuration.md. ' +
+        'Legacy parsing will be removed in a future release.'
+    );
+  }
+
+  const apiKeysSource: ApiKeysTomlSource = toml.api_keys ?? toml;
+  const providers = buildProvidersFromSource(apiKeysSource);
+
   const config: LlmConfig = {
-    primary: (toml.primary as LlmProvider) ?? 'anthropic',
-    fallback: (toml.fallback as LlmProvider[]) ?? [],
+    primary: (apiKeysSource.primary as LlmProvider) ?? 'anthropic',
+    fallback: (apiKeysSource.fallback as LlmProvider[]) ?? [],
     providers,
   };
 
@@ -656,21 +729,17 @@ export function buildConfigToml(options: {
     '',
   ];
 
-  // LLM section
   if (options.llm) {
     const { primary, fallback, providers } = options.llm;
     lines.push('# LLM credentials. Two tiers, used in order:');
     lines.push('#   1. [llm.oauth]: subscription credentials. Tried first when present.');
-    lines.push('#   2. [llm]: API key tier. Used after the OAuth tier is exhausted.');
+    lines.push('#   2. [llm.api_keys]: API key tier. Used after the OAuth tier is exhausted.');
     lines.push(
       '# Each tier has a `primary` provider and an ordered `fallback` list. Within the API key tier,'
     );
     lines.push(
-      '# multiple keys per provider (under [llm.<provider>].keys) rotate automatically on failures.'
+      '# multiple keys per provider (under [llm.api_keys.<provider>].keys) rotate automatically on failures.'
     );
-    lines.push('[llm]');
-    lines.push(`primary = "${primary}"`);
-    lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
     lines.push('');
 
     if (options.llm.oauth) {
@@ -689,6 +758,11 @@ export function buildConfigToml(options: {
       lines.push('');
     }
 
+    lines.push('[llm.api_keys]');
+    lines.push(`primary = "${primary}"`);
+    lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
+    lines.push('');
+
     for (const name of [
       'anthropic',
       'cerebras',
@@ -703,8 +777,8 @@ export function buildConfigToml(options: {
       const provider = providers[name];
       if (provider && provider.keys.length > 0) {
         // Per-provider key sections are self-explanatory; the rotation/label
-        // semantics are documented once in the top-level [llm] comment block.
-        lines.push(`[llm.${name}]`);
+        // semantics are documented once in the top-level comment block.
+        lines.push(`[llm.api_keys.${name}]`);
         lines.push('keys = [');
         for (const key of provider.keys) {
           if (key.key) {
@@ -716,7 +790,7 @@ export function buildConfigToml(options: {
         // openrouter has extra fields
         if (name === 'openrouter' && provider.routing) {
           lines.push('');
-          lines.push('[llm.openrouter.routing]');
+          lines.push('[llm.api_keys.openrouter.routing]');
           for (const [prefix, order] of Object.entries(provider.routing)) {
             const key = /^[A-Za-z0-9_-]+$/.test(prefix) ? prefix : `"${prefix}"`;
             lines.push(`${key} = [${order.map((s) => `"${s}"`).join(', ')}]`);
@@ -790,7 +864,7 @@ export function buildConfigToml(options: {
     );
     lines.push('#');
     lines.push('# To control which upstream providers OpenRouter uses for a model prefix:');
-    lines.push('# [llm.openrouter.routing]');
+    lines.push('# [llm.api_keys.openrouter.routing]');
     lines.push('# "google/" = ["google-vertex/global", "google-vertex", "google-ai-studio"]');
     lines.push('');
   }

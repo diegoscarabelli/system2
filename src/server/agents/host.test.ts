@@ -3317,7 +3317,7 @@ describe('AgentHost', () => {
       expect(internal.currentProvider).toBe('anthropic');
     });
 
-    it('initializes currentTier as "keys" when no OAuth credentials are present', () => {
+    it('initializes currentTier as "api_keys" when no OAuth credentials are present', () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -3326,7 +3326,7 @@ describe('AgentHost', () => {
       });
 
       const internal = host as unknown as { currentTier: string };
-      expect(internal.currentTier).toBe('keys');
+      expect(internal.currentTier).toBe('api_keys');
     });
 
     it('markKeyFailed uses oauth cooldown key when currentTier is "oauth"', async () => {
@@ -3385,7 +3385,7 @@ describe('AgentHost', () => {
       // The OAuth credential for anthropic:0 should now be in cooldown under the oauth key
       expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'oauth')).toBe(true);
       // And NOT under the keys key (different namespace)
-      expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'keys')).toBe(false);
+      expect(internal.authResolver.isKeyInCooldown('anthropic', 0, 'api_keys')).toBe(false);
     });
   });
 

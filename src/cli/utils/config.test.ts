@@ -26,10 +26,10 @@ describe('buildConfigToml', () => {
         },
       },
     });
-    expect(result).toContain('[llm]');
+    expect(result).toContain('[llm.api_keys]');
     expect(result).toContain('primary = "anthropic"');
     expect(result).toContain('fallback = ["openai"]');
-    expect(result).toContain('[llm.anthropic]');
+    expect(result).toContain('[llm.api_keys.anthropic]');
     expect(result).toContain('sk-ant-123');
   });
 
@@ -111,11 +111,11 @@ describe('buildConfigToml', () => {
     });
     expect(result).toContain('primary = "mistral"');
     expect(result).toContain('fallback = ["openrouter", "groq"]');
-    expect(result).toContain('[llm.mistral]');
+    expect(result).toContain('[llm.api_keys.mistral]');
     expect(result).toContain('mist-key');
-    expect(result).toContain('[llm.openrouter]');
+    expect(result).toContain('[llm.api_keys.openrouter]');
     expect(result).toContain('sk-or-key');
-    expect(result).toContain('[llm.groq]');
+    expect(result).toContain('[llm.api_keys.groq]');
     expect(result).toContain('gsk-key');
   });
 
@@ -134,8 +134,8 @@ describe('buildConfigToml', () => {
         },
       },
     });
-    expect(result).toContain('[llm.openrouter]');
-    expect(result).toContain('[llm.openrouter.routing]');
+    expect(result).toContain('[llm.api_keys.openrouter]');
+    expect(result).toContain('[llm.api_keys.openrouter.routing]');
     expect(result).toContain(
       'google = ["google-vertex/global", "google-vertex", "google-ai-studio"]'
     );
@@ -184,10 +184,8 @@ describe('buildConfigToml', () => {
         },
       },
     });
-    expect(result).toContain('[llm.openrouter]');
-    // The agents hint may contain a commented example with '[llm.openrouter.routing]',
-    // so only assert the actual (uncommented) section is absent.
-    expect(result).not.toMatch(/^\[llm\.openrouter\.routing\]/m);
+    expect(result).toContain('[llm.api_keys.openrouter]');
+    expect(result).not.toMatch(/^\[llm\.api_keys\.openrouter\.routing\]/m);
   });
 
   it('generates TOML with openai-compatible provider including base_url and model', () => {
@@ -205,7 +203,7 @@ describe('buildConfigToml', () => {
       },
     });
     expect(result).toContain('primary = "openai-compatible"');
-    expect(result).toContain('[llm.openai-compatible]');
+    expect(result).toContain('[llm.api_keys.openai-compatible]');
     expect(result).toContain('proxy-key');
     expect(result).toContain('base_url = "http://localhost:4000/v1"');
     expect(result).toContain('model = "my-model"');
@@ -274,7 +272,7 @@ describe('buildConfigToml', () => {
         },
       },
     });
-    expect(result).toContain('[llm.xai]');
+    expect(result).toContain('[llm.api_keys.xai]');
     expect(result).toContain('xai-key');
     expect(result).not.toContain('base_url');
     expect(result).not.toContain('model =');
@@ -717,6 +715,64 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
     const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
     const reconstructed = convertTomlLlm(llmSection);
     expect(reconstructed.oauth).toEqual({ primary: 'anthropic', fallback: [] });
+    expect(reconstructed.primary).toBe('openai');
+    expect(reconstructed.providers.openai?.keys[0].key).toBe('oai-1');
+  });
+
+  it('parses the legacy 0.2.x [llm] flat schema with a deprecation warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const legacyToml = `
+[llm]
+primary = "anthropic"
+fallback = ["openai"]
+
+[llm.oauth]
+primary = "anthropic"
+fallback = []
+
+[llm.anthropic]
+keys = [{ key = "sk-ant-legacy", label = "main" }]
+
+[llm.openai]
+keys = [{ key = "sk-oai-legacy", label = "main" }]
+`;
+    const parsed = TOML.parse(legacyToml) as Record<string, unknown>;
+    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
+    const result = convertTomlLlm(llmSection);
+    expect(result.primary).toBe('anthropic');
+    expect(result.fallback).toEqual(['openai']);
+    expect(result.providers.anthropic?.keys[0].key).toBe('sk-ant-legacy');
+    expect(result.providers.openai?.keys[0].key).toBe('sk-oai-legacy');
+    expect(result.oauth?.primary).toBe('anthropic');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('legacy [llm] schema'));
+    warnSpy.mockRestore();
+  });
+
+  it('prefers [llm.api_keys] over legacy fields when both are present, with a warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const mixedToml = `
+[llm]
+primary = "ignored"
+fallback = ["also-ignored"]
+
+[llm.api_keys]
+primary = "openai"
+fallback = []
+
+[llm.api_keys.openai]
+keys = [{ key = "wins", label = "main" }]
+
+[llm.anthropic]
+keys = [{ key = "loses", label = "main" }]
+`;
+    const parsed = TOML.parse(mixedToml) as Record<string, unknown>;
+    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
+    const result = convertTomlLlm(llmSection);
+    expect(result.primary).toBe('openai');
+    expect(result.providers.openai?.keys[0].key).toBe('wins');
+    expect(result.providers.anthropic).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mixes legacy [llm]'));
+    warnSpy.mockRestore();
   });
 });
 

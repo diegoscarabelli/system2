@@ -6,8 +6,8 @@
  *
  * Failover logic:
  * 1. Walk OAuth tier first (primary + fallback OAuth providers that have credentials)
- * 2. Only when every OAuth credential is in cooldown, drop to the keys tier
- * 3. Within the keys tier, try primary provider keys, then fallback providers in order
+ * 2. Only when every OAuth credential is in cooldown, drop to the API-keys tier
+ * 3. Within the API-keys tier, try primary provider keys, then fallback providers in order
  * 4. Keys in cooldown recover after the cooldown period expires
  */
 
@@ -21,7 +21,7 @@ import type { OAuthCredentials, PiAiOAuthCredentials } from './oauth-credentials
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 90 * 1000;
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
 
-export type AuthTier = 'oauth' | 'keys';
+export type AuthTier = 'oauth' | 'api_keys';
 
 export interface CooldownConfig {
   rateLimitMs: number;
@@ -163,9 +163,9 @@ export class AuthResolver {
       if (!providerConfig) continue;
       for (let i = 0; i < providerConfig.keys.length; i++) {
         const key = providerConfig.keys[i];
-        if (key.key && !this.isKeyUnavailable(this.cooldownKey('keys', provider, i))) {
+        if (key.key && !this.isKeyUnavailable(this.cooldownKey('api_keys', provider, i))) {
           this.activeKeys.set(provider, i);
-          return { tier: 'keys', provider, keyIndex: i, label: key.label };
+          return { tier: 'api_keys', provider, keyIndex: i, label: key.label };
         }
       }
     }
@@ -192,27 +192,27 @@ export class AuthResolver {
       if (!providerConfig) return undefined;
       const index = this.activeKeys.get(provider) ?? 0;
       // Check current index first
-      const currentKeyId = this.cooldownKey('keys', provider, index);
+      const currentKeyId = this.cooldownKey('api_keys', provider, index);
       if (!this.isKeyUnavailable(currentKeyId)) {
         const key = providerConfig.keys[index];
         if (key?.key) {
-          return { tier: 'keys', provider, keyIndex: index, label: key.label };
+          return { tier: 'api_keys', provider, keyIndex: index, label: key.label };
         }
       }
       // Current index unavailable, find next valid
       for (let i = 0; i < providerConfig.keys.length; i++) {
         const key = providerConfig.keys[i];
-        const keyId = this.cooldownKey('keys', provider, i);
+        const keyId = this.cooldownKey('api_keys', provider, i);
         if (key.key && !this.isKeyUnavailable(keyId)) {
           this.activeKeys.set(provider, i);
-          return { tier: 'keys', provider, keyIndex: i, label: key.label };
+          return { tier: 'api_keys', provider, keyIndex: i, label: key.label };
         }
       }
       return undefined;
     };
 
     if (tier === 'oauth') return tryOAuth();
-    if (tier === 'keys') return tryKeys();
+    if (tier === 'api_keys') return tryKeys();
     return tryOAuth() ?? tryKeys();
   }
 
@@ -220,9 +220,9 @@ export class AuthResolver {
    * Check if a specific key is currently in cooldown.
    * Used by AgentHost to detect when another agent has already put its key in cooldown.
    *
-   * @param tier - defaults to 'keys' for backward compatibility
+   * @param tier - defaults to 'api_keys' for backward compatibility
    */
-  isKeyInCooldown(provider: LlmProvider, keyIndex: number, tier: AuthTier = 'keys'): boolean {
+  isKeyInCooldown(provider: LlmProvider, keyIndex: number, tier: AuthTier = 'api_keys'): boolean {
     return this.isKeyUnavailable(this.cooldownKey(tier, provider, keyIndex));
   }
 
@@ -234,7 +234,7 @@ export class AuthResolver {
    * @param reason - Why it failed (determines cooldown duration for rate_limit)
    * @param errorMessage - Original API error message for logging
    * @param keyIndex - The specific key index that failed (avoids stale global state when multiple agents share the resolver)
-   * @param tier - Which tier the key belongs to (defaults to 'keys' for backward compatibility)
+   * @param tier - Which tier the key belongs to (defaults to 'api_keys' for backward compatibility)
    * @returns true if there's a fallback available (next key or next provider)
    */
   markKeyFailed(
@@ -242,7 +242,7 @@ export class AuthResolver {
     reason: 'auth' | 'rate_limit' | 'transient' = 'transient',
     errorMessage?: string,
     keyIndex?: number,
-    tier: AuthTier = 'keys'
+    tier: AuthTier = 'api_keys'
   ): boolean {
     const currentIndex = keyIndex ?? this.activeKeys.get(provider) ?? 0;
     const keyId = this.cooldownKey(tier, provider, currentIndex);

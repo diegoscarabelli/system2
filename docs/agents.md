@@ -221,7 +221,7 @@ Auto-compaction is also configured to fire earlier (at ~50% of the context windo
 When `[llm.oauth]` is configured, `AuthResolver` walks credentials across two tiers. The OAuth tier supports any of: `anthropic`, `openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`. Each provider hits a different endpoint with its own request shape; pi-ai routes each one through its own streaming provider (e.g., `openai-codex-responses`, `google-gemini-cli`) selected via [getOAuthProvider(id)](../src/server/agents/oauth.ts).
 
 1. **OAuth tier** — providers listed in `[llm.oauth].primary` + `fallback`, each with one credential loaded from `~/.system2/oauth/<provider>.json` at startup.
-2. **API key tier** — providers listed in `[llm].primary` + `fallback`, with one or more API keys each.
+2. **API key tier** — providers listed in `[llm.api_keys].primary` + `fallback`, with keys at `[llm.api_keys.<provider>].keys`.
 
 `getActiveCredential()` returns a `{ tier, provider, keyIndex, label }` tuple. Cooldown keys are namespaced as `${tier}:${provider}:${keyIndex}` so the same provider in both tiers (e.g., Anthropic OAuth and Anthropic API keys) doesn't collide. The OAuth tier is fully exhausted (every credential in cooldown) before the resolver returns a keys-tier credential.
 
