@@ -271,11 +271,16 @@ async function removeProviderCredentials(provider: LlmProvider): Promise<boolean
  */
 async function performLoginIteration(): Promise<'continue' | 'done'> {
   const oauthDir = join(SYSTEM2_DIR, 'oauth');
+  const initialTier = readOAuthTier(CONFIG_FILE);
   const options = OAUTH_PROVIDERS.map((opt) => {
     const existing = existsSync(join(oauthDir, `${opt.value}.json`));
+    const isPrimary = initialTier?.primary === opt.value;
+    let suffix = '';
+    if (existing && isPrimary) suffix = '  ✓ logged in (primary)';
+    else if (existing) suffix = '  ✓ logged in';
     return {
       value: opt.value,
-      label: existing ? `${opt.label}  ✓ already logged in` : opt.label,
+      label: `${opt.label}${suffix}`,
       hint: opt.hint,
     };
   });
