@@ -258,20 +258,33 @@ async function performLoginIteration(): Promise<'continue' | 'done'> {
 
   if (p.isCancel(target)) return 'done';
 
-  // Already-logged-in path: re-login or remove.
+  // Already-logged-in path: re-login, promote to primary, remove, or cancel.
   const isAlreadyLoggedIn = existsSync(join(oauthDir, `${target}.json`));
   if (isAlreadyLoggedIn) {
+    const tierBefore = readOAuthTier(CONFIG_FILE);
+    const isAlreadyPrimary = tierBefore?.primary === target;
+
     const action = (await p.select({
       message: `Already logged in to ${target}. What now?`,
       options: [
         { value: 'relogin', label: 'Re-login (replace credentials)' },
+        ...(isAlreadyPrimary ? [] : [{ value: 'promote', label: 'Set as primary OAuth provider' }]),
         { value: 'remove', label: 'Remove (delete credentials and remove from [llm.oauth])' },
         { value: 'cancel', label: 'Cancel' },
       ],
-    })) as 'relogin' | 'remove' | 'cancel';
+    })) as 'relogin' | 'promote' | 'remove' | 'cancel';
     if (p.isCancel(action) || action === 'cancel') return 'continue';
     if (action === 'remove') {
       await removeProviderCredentials(target);
+      return 'continue';
+    }
+    if (action === 'promote') {
+      const r = setProviderAsPrimary(CONFIG_FILE, target);
+      if (r.changed) {
+        p.log.info(`✓ Set ${target} as primary OAuth provider in ${CONFIG_FILE}`);
+      } else {
+        p.log.info(`${target} was already primary — no changes`);
+      }
       return 'continue';
     }
     // 'relogin' falls through to the standard login path below.
