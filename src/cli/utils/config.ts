@@ -702,10 +702,8 @@ export function buildConfigToml(options: {
     ] as const) {
       const provider = providers[name];
       if (provider && provider.keys.length > 0) {
-        lines.push(`# API keys for ${name}. Multiple keys are rotated on auth/rate-limit errors;`);
-        lines.push(
-          `# the \`label\` field is for log readability. Add or remove keys by editing this list.`
-        );
+        // Per-provider key sections are self-explanatory; the rotation/label
+        // semantics are documented once in the top-level [llm] comment block.
         lines.push(`[llm.${name}]`);
         lines.push('keys = [');
         for (const key of provider.keys) {
