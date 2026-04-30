@@ -3,15 +3,27 @@ import { join } from 'node:path';
 import type { LlmProvider } from '../../shared/index.js';
 import { log } from '../utils/logger.js';
 
-export interface OAuthCredentials {
+/**
+ * Pi-ai's OAuth credential shape. Returned by pi-ai's login() and refreshToken().
+ * Does NOT include `label` — that field is assigned by system2's CLI at save time.
+ */
+export interface PiAiOAuthCredentials {
   access: string;
   refresh: string;
   /** Epoch ms when access token expires (already includes pi-ai's 5 min safety buffer). */
   expires: number;
-  label: string;
   /** Provider-specific extras (projectId, email, enterpriseDomain). Preserved through
    *  save/load and refresh so pi-ai's per-provider refresh handlers can rely on them. */
   [key: string]: unknown;
+}
+
+/**
+ * System2's persisted OAuth credential shape: pi-ai's fields plus a human-readable
+ * label set by the CLI at login time. This is what gets written to
+ * ~/.system2/oauth/<provider>.json.
+ */
+export interface OAuthCredentials extends PiAiOAuthCredentials {
+  label: string;
 }
 
 const OAUTH_DIR = 'oauth';

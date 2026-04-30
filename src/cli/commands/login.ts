@@ -101,7 +101,9 @@ export function addProviderToOAuthTier(
   if (inTier) return { changed: false };
 
   // Append to fallback array. Reconstruct the section in-place via regex on the existing section.
-  const sectionPattern = /\[llm\.oauth\]([\s\S]*?)(?=\n\[|$)/;
+  // Anchor at line start (multiline) so `[llm.oauth]` mentions in comments don't
+  // get matched and rewritten. See removeProviderFromOAuthTier for the same fix.
+  const sectionPattern = /^\[llm\.oauth\]([\s\S]*?)(?=\n^\[|$(?![\r\n]))/m;
   const match = raw.match(sectionPattern);
   if (!match) {
     // Shouldn't happen because oauth is non-null, but guard anyway
@@ -160,7 +162,11 @@ export function removeProviderFromOAuthTier(
     newFallback = newFallback.filter((f) => f !== provider);
   }
 
-  const sectionPattern = /\n?\[llm\.oauth\][\s\S]*?(?=\n\[|$)/;
+  // Anchor at line start (multiline) so `[llm.oauth]` mentions in comments don't
+  // get matched and rewritten. The new buildConfigToml emits comments that include
+  // the literal text `[llm.oauth]` in prose; without the anchor, raw.replace would
+  // overwrite from the comment line onward and corrupt the file.
+  const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\n^\[|$(?![\r\n]))/m;
 
   if (newPrimary === null) {
     writeFileSync(configPath, raw.replace(sectionPattern, ''));
@@ -207,7 +213,11 @@ export function setProviderAsPrimary(
   const newFallback = [current.primary, ...current.fallback.filter((f) => f !== provider)];
 
   const raw = readFileSync(configPath, 'utf-8');
-  const sectionPattern = /\n?\[llm\.oauth\][\s\S]*?(?=\n\[|$)/;
+  // Anchor at line start (multiline) so `[llm.oauth]` mentions in comments don't
+  // get matched and rewritten. The new buildConfigToml emits comments that include
+  // the literal text `[llm.oauth]` in prose; without the anchor, raw.replace would
+  // overwrite from the comment line onward and corrupt the file.
+  const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\n^\[|$(?![\r\n]))/m;
   const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
   const replacement = `\n[llm.oauth]\nprimary = "${provider}"\nfallback = [${fbStr}]\n`;
   writeFileSync(configPath, raw.replace(sectionPattern, replacement));
@@ -327,7 +337,13 @@ async function performLoginIteration(): Promise<'continue' | 'done'> {
       onPrompt: async ({ message, placeholder }) => {
         s.stop('Browser callback timed out');
         const value = (await p.text({ message, placeholder })) as string;
-        if (p.isCancel(value)) return '';
+        if (p.isCancel(value)) {
+          // Throw rather than return ''. Pi-ai would otherwise try to exchange the
+          // empty string as the auth code and produce a confusing error. The throw
+          // is caught by the surrounding try, which logs the failure and returns
+          // 'continue' so the wizard loop advances cleanly.
+          throw new Error('Cancelled by user');
+        }
         s.start('Exchanging code...');
         return value;
       },
