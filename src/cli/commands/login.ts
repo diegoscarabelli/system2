@@ -289,6 +289,16 @@ async function performLoginIteration(): Promise<'continue' | 'done'> {
     })) as 'relogin' | 'promote' | 'remove' | 'cancel';
     if (p.isCancel(action) || action === 'cancel') return 'continue';
     if (action === 'remove') {
+      // Explicit confirmation: a single misclick on the menu shouldn't delete a
+      // valid credential plus mutate config.toml.
+      const confirmed = await p.confirm({
+        message: `Delete credentials for ${target} and remove it from [llm.oauth]?`,
+        initialValue: false,
+      });
+      if (p.isCancel(confirmed) || !confirmed) {
+        p.log.info('Removal cancelled');
+        return 'continue';
+      }
       await removeProviderCredentials(target);
       return 'continue';
     }

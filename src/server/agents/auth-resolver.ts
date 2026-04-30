@@ -15,7 +15,7 @@ import { AuthStorage } from '@mariozechner/pi-coding-agent';
 import type { LlmConfig, LlmProvider } from '../../shared/index.js';
 import { log } from '../utils/logger.js';
 import { isExpiringSoon } from './oauth.js';
-import type { OAuthCredentials } from './oauth-credentials.js';
+import type { OAuthCredentials, PiAiOAuthCredentials } from './oauth-credentials.js';
 
 /** Default cooldown durations */
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 90 * 1000;
@@ -366,7 +366,10 @@ export class AuthResolver {
    *   revoked-but-not-expired token). Defaults to empty — only expiry-based refresh occurs.
    */
   async ensureFresh(deps: {
-    refresh: (provider: LlmProvider, credentials: OAuthCredentials) => Promise<OAuthCredentials>;
+    refresh: (
+      provider: LlmProvider,
+      credentials: OAuthCredentials
+    ) => Promise<PiAiOAuthCredentials>;
     /** Providers to refresh regardless of expiry (e.g., on 401 from a revoked-but-not-expired token). */
     force?: LlmProvider[];
   }): Promise<Set<LlmProvider>> {
@@ -414,7 +417,7 @@ export class AuthResolver {
   private async doRefresh(
     provider: LlmProvider,
     cred: OAuthCredentials,
-    refresh: (provider: LlmProvider, credentials: OAuthCredentials) => Promise<OAuthCredentials>
+    refresh: (provider: LlmProvider, credentials: OAuthCredentials) => Promise<PiAiOAuthCredentials>
   ): Promise<void> {
     const updated = await refresh(provider, cred);
     // Defensive merge: start with the old credential (preserves provider-specific extras

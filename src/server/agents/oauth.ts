@@ -36,15 +36,20 @@ export async function loginProvider(
  * Refresh OAuth credentials for the given provider via pi-ai's registry.
  * Takes the full credential object so provider-specific extras (projectId, etc.)
  * survive the round-trip.
+ *
+ * Returns PiAiOAuthCredentials (label-less) for the same reason as loginProvider:
+ * pi-ai's refreshToken doesn't return the label. AuthResolver.doRefresh restores
+ * the label from the old credential before persisting (see the merge at
+ * auth-resolver.ts), so the on-disk credential keeps its label.
  */
 export async function refreshOAuthToken(
   provider: LlmProvider,
   credentials: OAuthCredentials
-): Promise<OAuthCredentials> {
+): Promise<PiAiOAuthCredentials> {
   const piProvider = getOAuthProvider(provider);
   if (!piProvider) {
     throw new Error(`OAuth provider "${provider}" is not registered with pi-ai`);
   }
   const refreshed = await piProvider.refreshToken(credentials);
-  return refreshed as OAuthCredentials;
+  return refreshed as PiAiOAuthCredentials;
 }
