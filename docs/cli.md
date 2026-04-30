@@ -42,35 +42,26 @@ Interactive setup wizard using [@clack/prompts](https://github.com/bombshell-dev
 
 At least one auth tier (OAuth or API key) must be configured. The OAuth step comes first and is independent: you can configure OAuth only, API keys only, or both.
 
-### `system2 login [provider]`
+### `system2 login`
 
-Runs the OAuth flow for `provider` (default: `anthropic`, the only supported provider in v1), writes the resulting tokens to `~/.system2/oauth/<provider>.json` (mode 0600), and offers to patch `[llm.oauth]` in `config.toml` if the provider is not already there.
+Interactive OAuth provider management. Lists all supported providers (Anthropic, OpenAI Codex, Google Gemini CLI, Google Antigravity, GitHub Copilot); already-logged-in entries are annotated.
+
+- Selecting a provider that is **not** logged in: runs the OAuth flow, writes tokens to `~/.system2/oauth/<provider>.json` (mode 0600), and auto-patches `[llm.oauth]` in `config.toml` (creates the section if missing, otherwise appends to `fallback`).
+- Selecting a provider that **is** logged in: opens a contextual menu with three options: **Re-login** (replace credentials), **Remove** (delete the credentials file and remove the provider from `[llm.oauth]`), or **Cancel**.
 
 Use this command to:
 - Add OAuth credentials after onboarding (if you skipped the OAuth step).
-- Re-authenticate when a refresh token has been invalidated — for example after signing out of Claude.ai, changing your password, revoking the app's grant, or hitting an idle expiry on the refresh token.
+- Add an additional OAuth provider as a fallback.
+- Re-authenticate after a refresh token has been invalidated (e.g., after signing out of the provider, changing your password, revoking the app's grant, or hitting an idle expiry on the refresh token).
+- Remove an OAuth credential entirely.
 
-After running `system2 login`, restart the daemon to pick up the new credential:
+The command takes no arguments. The daemon must be stopped before running it; restart afterward to pick up the change:
 
 ```bash
 system2 stop && system2 start
 ```
 
 See [Auth Tiers](configuration.md#auth-tiers) in the configuration reference for how OAuth credentials interact with API key fallback and refresh behavior.
-
-### `system2 logout [provider]`
-
-Removes the OAuth credential for `provider` (default: `anthropic`). The command:
-1. Asks for confirmation, then deletes `~/.system2/oauth/<provider>.json`.
-2. Offers to remove `provider` from `[llm.oauth]` in `config.toml`.
-
-If `[llm.oauth]` becomes empty (the last provider is removed), the entire section is dropped from `config.toml`, and system2 reverts to API-key-only behavior on next start.
-
-After running `system2 logout`, restart the daemon to apply the change:
-
-```bash
-system2 stop && system2 start
-```
 
 ### `system2 start`
 
