@@ -774,6 +774,65 @@ keys = [{ key = "loses", label = "main" }]
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mixes legacy [llm]'));
     warnSpy.mockRestore();
   });
+
+  it('warns when only legacy [llm].fallback remains alongside [llm.api_keys]', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const mixedToml = `
+[llm]
+fallback = ["openai"]
+
+[llm.api_keys]
+primary = "anthropic"
+
+[llm.api_keys.anthropic]
+keys = [{ key = "sk-ant-1", label = "main" }]
+`;
+    const parsed = TOML.parse(mixedToml) as Record<string, unknown>;
+    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
+    convertTomlLlm(llmSection);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mixes legacy [llm]'));
+    warnSpy.mockRestore();
+  });
+
+  it('warns when a legacy provider sub-table has only routing/base_url (no keys)', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const mixedToml = `
+[llm.api_keys]
+primary = "openai"
+
+[llm.api_keys.openai]
+keys = [{ key = "sk-1", label = "main" }]
+
+[llm.openrouter]
+routing = { order = ["anthropic"] }
+`;
+    const parsed = TOML.parse(mixedToml) as Record<string, unknown>;
+    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
+    convertTomlLlm(llmSection);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mixes legacy [llm]'));
+    warnSpy.mockRestore();
+  });
+
+  it('does not warn when [llm.api_keys] is the only populated section under [llm]', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cleanToml = `
+[llm.api_keys]
+primary = "anthropic"
+fallback = []
+
+[llm.api_keys.anthropic]
+keys = [{ key = "sk-ant-1", label = "main" }]
+
+[llm.oauth]
+primary = "anthropic"
+fallback = []
+`;
+    const parsed = TOML.parse(cleanToml) as Record<string, unknown>;
+    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
+    convertTomlLlm(llmSection);
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('legacy'));
+    warnSpy.mockRestore();
+  });
 });
 
 describe('convertTomlDelivery', () => {

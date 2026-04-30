@@ -302,9 +302,14 @@ function buildProvidersFromSource(
   return providers;
 }
 
-/** True when any legacy 0.2.x [llm] field is set. Independent of api_keys presence. */
+/** True when any legacy 0.2.x [llm] field is set. Independent of api_keys presence.
+ *  Detects `primary`, `fallback`, and any populated provider sub-table field
+ *  (`keys`, `routing`, `base_url`, `model`, `compat_reasoning`) so users get a
+ *  warning even when only stragglers like `[llm].fallback` or `[llm.openrouter.routing]`
+ *  remain after a partial migration to `[llm.api_keys]`. */
 function hasLegacyLlmFields(toml: NonNullable<TomlConfig['llm']>): boolean {
   if (typeof toml.primary === 'string') return true;
+  if (Array.isArray(toml.fallback) && toml.fallback.length > 0) return true;
   for (const name of [
     'anthropic',
     'cerebras',
@@ -316,7 +321,17 @@ function hasLegacyLlmFields(toml: NonNullable<TomlConfig['llm']>): boolean {
     'xai',
     'openai-compatible',
   ] as const) {
-    if (toml[name]?.keys && (toml[name]?.keys?.length ?? 0) > 0) return true;
+    const sub = toml[name];
+    if (!sub) continue;
+    if (
+      (sub.keys?.length ?? 0) > 0 ||
+      sub.routing !== undefined ||
+      sub.base_url !== undefined ||
+      sub.model !== undefined ||
+      sub.compat_reasoning !== undefined
+    ) {
+      return true;
+    }
   }
   return false;
 }
