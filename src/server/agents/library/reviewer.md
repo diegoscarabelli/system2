@@ -14,7 +14,7 @@ models:
   groq: llama-3.3-70b-versatile
   mistral: mistral-large-latest
   openai: gpt-4o
-  openai-codex: gpt-5.3-codex
+  openai-codex: gpt-5.4
   openrouter: google/gemini-3-flash-preview
   xai: grok-2-latest
 ---
