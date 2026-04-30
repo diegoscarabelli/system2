@@ -11,6 +11,7 @@
  * 4. Keys in cooldown recover after the cooldown period expires
  */
 
+import { getOAuthProvider } from '@mariozechner/pi-ai/oauth';
 import { AuthStorage } from '@mariozechner/pi-coding-agent';
 import type { LlmConfig, LlmProvider } from '../../shared/index.js';
 import { log } from '../utils/logger.js';
@@ -333,7 +334,14 @@ export class AuthResolver {
       if (!active) continue;
       let keyValue: string | undefined;
       if (active.tier === 'oauth') {
-        keyValue = this.oauthCredentials[provider]?.access;
+        const creds = this.oauthCredentials[provider];
+        if (creds) {
+          // Delegate to pi-ai's OAuth provider so per-provider wire formats are
+          // honored (anthropic/copilot/codex pass `access` through; gemini-cli and
+          // antigravity wrap as JSON {token, projectId}).
+          const piProvider = getOAuthProvider(provider);
+          keyValue = piProvider ? piProvider.getApiKey(creds) : creds.access;
+        }
       } else {
         keyValue = this.config.providers[provider]?.keys[active.keyIndex]?.key;
       }

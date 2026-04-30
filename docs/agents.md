@@ -225,10 +225,11 @@ When `[llm.oauth]` is configured, `AuthResolver` walks credentials across two ti
 
 `getActiveCredential()` returns a `{ tier, provider, keyIndex, label }` tuple where `tier` is `'oauth' | 'api_keys'`. Cooldown keys are namespaced as `${tier}:${provider}:${keyIndex}` so the same provider in both tiers (e.g., Anthropic OAuth and Anthropic API keys) doesn't collide. The OAuth tier is fully exhausted (every credential in cooldown) before the resolver returns an api_keys-tier credential.
 
-Two extra concerns over plain API keys:
+Three extra concerns over plain API keys:
 
 1. **Refresh.** `AuthResolver.ensureFresh()` is awaited before each session creation in `AgentHost.initialize()` and `reinitializeWithProvider()`. If an OAuth access token is within 5 minutes of expiry, the resolver dispatches to the correct provider-specific refresh handler via pi-ai's `getOAuthProvider(id)` registry ([refreshOAuthToken](../src/server/agents/oauth.ts) in `src/server/agents/oauth.ts`), updates in-memory state, and persists via the callback registered through `setPersistOAuth()`. The persist callback is keyed by `LlmProvider`, so each of the five OAuth providers has its own `~/.system2/oauth/<provider>.json` file written back on refresh. Concurrent refreshes per provider are serialized via a Promise lock.
 2. **401 handling.** Normally `auth` errors trigger immediate failover. For OAuth-tier credentials, `AgentHost` first calls `ensureFresh()` and reinitializes the session before falling over — this catches expiry-related 401s without losing the credential. If refresh itself fails, the credential goes into cooldown via the standard path. The Anthropic path additionally relies on the SDK detecting OAuth tokens by substring match (`sk-ant-oat`) to switch authentication mode; this detection is Anthropic-specific. The other four providers (Codex, Gemini CLI, Antigravity, Copilot) carry no equivalent token-shape signal and are dispatched purely through pi-ai's provider registry.
+3. **Per-provider apiKey wire format.** `createAuthStorage()` does not pass `credentials.access` directly. It calls `getOAuthProvider(id).getApiKey(creds)` so each provider gets the shape pi-ai's streaming code expects: anthropic, openai-codex, and github-copilot return the bare access token, while google-gemini-cli and google-antigravity return `JSON.stringify({ token, projectId })`. Skipping this wrap was the original cause of `Invalid Google Cloud Code Assist credentials` failures even with valid OAuth.
 
 ### Per-agent model declarations across providers
 
