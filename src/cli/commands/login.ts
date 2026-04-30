@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import * as p from '@clack/prompts';
 import TOML from '@iarna/toml';
 import pc from 'picocolors';
-import { loginAnthropic } from '../../server/agents/oauth.js';
+import { loginProvider } from '../../server/agents/oauth.js';
 import { saveOAuthCredentials } from '../../server/agents/oauth-credentials.js';
 import type { LlmProvider } from '../../shared/index.js';
 import { CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
@@ -22,7 +22,33 @@ function isDaemonRunning(): boolean {
   }
 }
 
-const OAUTH_PROVIDERS: LlmProvider[] = ['anthropic'];
+const OAUTH_PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
+  {
+    value: 'anthropic',
+    label: 'Anthropic (Claude Pro/Max)',
+    hint: 'Uses your Claude.ai subscription.',
+  },
+  {
+    value: 'openai-codex',
+    label: 'OpenAI Codex (ChatGPT Plus/Pro)',
+    hint: 'Uses your ChatGPT subscription. Codex models only.',
+  },
+  {
+    value: 'google-gemini-cli',
+    label: 'Google Gemini CLI (Gemini subscription)',
+    hint: 'Uses your Google account / Gemini subscription.',
+  },
+  {
+    value: 'google-antigravity',
+    label: 'Google Antigravity',
+    hint: 'Uses your Google account via Antigravity. Access to Gemini 3, Claude, GPT-OSS.',
+  },
+  {
+    value: 'github-copilot',
+    label: 'GitHub Copilot',
+    hint: 'Uses your GitHub Copilot subscription.',
+  },
+];
 
 /**
  * Patch config.toml to include `provider` in the OAuth tier (`[llm.oauth]`).
@@ -100,7 +126,7 @@ export function addProviderToOAuthTier(
   return { changed: true };
 }
 
-export async function login(provider?: string): Promise<void> {
+export async function login(): Promise<void> {
   console.clear();
 
   if (!existsSync(CONFIG_FILE)) {
@@ -115,38 +141,34 @@ export async function login(provider?: string): Promise<void> {
     process.exit(1);
   }
 
-  let target: LlmProvider;
-  if (provider) {
-    if (!OAUTH_PROVIDERS.includes(provider as LlmProvider)) {
-      p.intro('🧠 System2 OAuth login');
-      p.cancel(
-        `OAuth login for "${provider}" is not supported. Supported: ${OAUTH_PROVIDERS.join(', ')}`
-      );
-      process.exit(1);
-    }
-    target = provider as LlmProvider;
-  } else {
-    if (OAUTH_PROVIDERS.length === 1) {
-      target = OAUTH_PROVIDERS[0];
-    } else {
-      p.intro('🧠 System2 OAuth login');
-      target = (await p.select({
-        message: 'Which OAuth provider?',
-        options: OAUTH_PROVIDERS.map((id) => ({ value: id, label: id })),
-      })) as LlmProvider;
-      if (p.isCancel(target)) {
-        p.cancel('Cancelled');
-        process.exit(0);
-      }
-    }
+  p.intro('🧠 System2 OAuth login');
+
+  // Annotate already-logged-in providers with "(replace)" so the user knows re-login overwrites.
+  const oauthDir = join(SYSTEM2_DIR, 'oauth');
+  const options = OAUTH_PROVIDERS.map((opt) => {
+    const existing = existsSync(join(oauthDir, `${opt.value}.json`));
+    return {
+      value: opt.value,
+      label: existing ? `${opt.label}  ✓ already logged in (replace)` : opt.label,
+      hint: opt.hint,
+    };
+  });
+
+  const target = (await p.select({
+    message: 'Select OAuth provider to log in to:',
+    options,
+  })) as LlmProvider;
+
+  if (p.isCancel(target)) {
+    p.cancel('Cancelled');
+    process.exit(0);
   }
 
-  p.intro(`🧠 System2 OAuth login — ${target}`);
-
+  const defaultLabel = target;
   const label = (await p.text({
     message: 'Label for this OAuth credential:',
-    placeholder: 'claude-pro',
-    defaultValue: 'claude-pro',
+    placeholder: defaultLabel,
+    defaultValue: defaultLabel,
   })) as string;
   if (p.isCancel(label)) {
     p.cancel('Cancelled');
@@ -160,7 +182,7 @@ export async function login(provider?: string): Promise<void> {
   const s = p.spinner();
   s.start('Waiting for browser authentication...');
   try {
-    const creds = await loginAnthropic({
+    const creds = await loginProvider(target, {
       onAuth: ({ url }) => {
         s.message(`Open this URL to authenticate:\n${url}`);
       },
@@ -176,11 +198,10 @@ export async function login(provider?: string): Promise<void> {
       },
       onProgress: (m) => s.message(m),
     });
+    // Spread preserves provider-specific extras (projectId, email, enterpriseDomain).
     saveOAuthCredentials(SYSTEM2_DIR, target, {
-      access: creds.access,
-      refresh: creds.refresh,
-      expires: creds.expires,
-      label: label || 'claude-pro',
+      ...creds,
+      label: label || defaultLabel,
     });
     s.stop('✓ OAuth login successful');
   } catch (err) {
@@ -189,22 +210,13 @@ export async function login(provider?: string): Promise<void> {
     process.exit(1);
   }
 
-  // Offer to patch config.toml
-  const patch = await p.confirm({
-    message: `Add ${target} to [llm.oauth] in config.toml?`,
-    initialValue: true,
-  });
-  if (p.isCancel(patch)) {
-    p.cancel('Cancelled (credentials saved, config not modified)');
-    process.exit(0);
-  }
-  if (patch) {
-    const result = addProviderToOAuthTier(CONFIG_FILE, target);
-    if (result.changed) {
-      p.log.info(`✓ Updated [llm.oauth] in ${CONFIG_FILE}`);
-    } else {
-      p.log.info(`${target} is already in [llm.oauth] — no changes`);
-    }
+  // Auto-patch config.toml. The credential is useless until [llm.oauth] references it,
+  // so there's no scenario where the user would want to skip this.
+  const result = addProviderToOAuthTier(CONFIG_FILE, target);
+  if (result.changed) {
+    p.log.info(`✓ Updated [llm.oauth] in ${CONFIG_FILE}`);
+  } else {
+    p.log.info(`${target} is already in [llm.oauth] — no changes`);
   }
 
   p.outro(

@@ -34,10 +34,10 @@ program
   });
 
 program
-  .command('login [provider]')
-  .description('Authenticate with an OAuth provider (re-auth post-onboarding)')
-  .action(async (provider?: string) => {
-    await login(provider);
+  .command('login')
+  .description('Authenticate with an OAuth provider (interactive)')
+  .action(async () => {
+    await login();
   });
 
 program
