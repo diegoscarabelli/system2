@@ -167,6 +167,15 @@ export function removeProviderFromOAuthTier(
   // the literal text `[llm.oauth]` in prose; without the anchor, raw.replace would
   // overwrite from the comment line onward and corrupt the file.
   const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\n^\[|$(?![\r\n]))/m;
+  if (!sectionPattern.test(raw)) {
+    // TOML parse found [llm.oauth] but the regex doesn't match — likely an
+    // unusual on-disk format (leading whitespace before the header, etc.).
+    // Throw rather than silently no-op while reporting changed=true.
+    throw new Error(
+      `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
+        `Edit the file manually if it has unusual formatting.`
+    );
+  }
 
   if (newPrimary === null) {
     writeFileSync(configPath, raw.replace(sectionPattern, ''));
@@ -218,6 +227,16 @@ export function setProviderAsPrimary(
   // the literal text `[llm.oauth]` in prose; without the anchor, raw.replace would
   // overwrite from the comment line onward and corrupt the file.
   const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\n^\[|$(?![\r\n]))/m;
+  if (!sectionPattern.test(raw)) {
+    // TOML parse found [llm.oauth] (readOAuthTier returned non-null) but the
+    // regex doesn't match — likely an unusual on-disk format (leading whitespace
+    // before the header, etc.). Throw rather than silently no-op while reporting
+    // changed=true.
+    throw new Error(
+      `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
+        `Edit the file manually if it has unusual formatting.`
+    );
+  }
   const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
   const replacement = `\n[llm.oauth]\nprimary = "${provider}"\nfallback = [${fbStr}]\n`;
   writeFileSync(configPath, raw.replace(sectionPattern, replacement));
