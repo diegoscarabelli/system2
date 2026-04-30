@@ -24,10 +24,10 @@ It exists to help people think more clearly about complex questions and empower 
 
 1. **[Node.js 20+](https://nodejs.org/)** and **[pnpm 8+](https://pnpm.io/installation)** (in a terminal, run `node -v` and `pnpm -v` to check)
 2. **An LLM credential** (at least one required). Two tiers, combinable, both configurable during onboarding:
-   - **Claude Pro/Max OAuth** (recommended if you have a Claude subscription): no per-token cost, the agents run against your existing flat-rate subscription. If you already pay for Claude Pro or Max, this is the cheapest way to use System2.
+   - **OAuth subscription support** (recommended if you already pay for one of these): use your existing AI subscription instead of API keys, with no per-token cost. Supported: Anthropic (Claude Pro/Max), OpenAI (ChatGPT Plus/Pro via the Codex CLI flow), Google (Gemini subscription via the Gemini CLI flow), Google Antigravity (free tier with access to Gemini 3, Claude, GPT-OSS), and GitHub Copilot.
    - **API keys**: pay-per-token across providers. [OpenRouter](https://openrouter.ai/) is recommended for access to multiple models with one key; Anthropic, Google, OpenAI, and others also work. You can add multiple keys for rotation and multiple providers for failover.
 
-   Combining both tiers gives you OAuth as the primary path with API keys as fallback when OAuth rate-limits.
+   Combining both tiers gives you OAuth as the primary path with API keys as fallback when an OAuth subscription rate-limits.
 3. **Brave Search API key** (highly recommended). Enables agents to search the web and fetch web pages content. This is useful for researching APIs, documentation, and data sources on the web. [Get one here](https://brave.com/search/api/).
 
 ### Install and run
@@ -39,7 +39,7 @@ pnpm add -g @diegoscarabelli/system2      # install System2 globally
 system2 onboard          # one-time setup (see below)
 ```
 
-`system2 onboard` creates the `~/.system2/` directory and walks you through LLM credential setup (Claude Pro/Max OAuth, API keys, or both, as described in Prerequisites) and optional Brave Search setup. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
+`system2 onboard` creates the `~/.system2/` directory and walks you through LLM credential setup (OAuth from any of the 5 supported subscriptions, API keys, or both, as described in Prerequisites) and optional Brave Search setup. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
 
 ```bash
 system2 start            # starts the server and opens the browser
@@ -75,14 +75,10 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**OAuth credentials.** Use `system2 login` to add Claude Pro/Max OAuth after a key-only onboarding, or to re-authenticate after a refresh-token expiry. `system2 logout` removes the credential. Stop the daemon before running either, and restart afterward to pick up the change.
+**OAuth credentials.** Use `system2 login` to manage OAuth subscriptions: it lists all 5 supported providers (already-logged-in ones are annotated) and you pick one. Selecting a fresh provider runs the auth flow; selecting an already-logged-in provider opens a contextual menu to re-login, remove, or cancel. Stop the daemon before running it, and restart afterward to pick up the change.
 
 ```bash
-system2 login            # add or refresh a Claude Pro/Max OAuth credential
-```
-
-```bash
-system2 logout           # remove an OAuth credential
+system2 login            # interactive: add, re-login, or remove an OAuth credential
 ```
 
 **Upgrading.** Pull the latest release from npm:
@@ -113,7 +109,7 @@ pnpm update -g @diegoscarabelli/system2
 
 All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
 
-- **`[llm.oauth]`**: OAuth tier — subscription credentials (Claude Pro/Max). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
+- **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, Google Gemini CLI, Google Antigravity, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
 - **`[llm]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation
 - **`[databases.*]`**: analytical database connections (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite) that agents and dashboard artifacts can query
 - **`[agents.*]`**: per-role overrides for thinking level, context compaction depth, and model selection per provider
@@ -151,7 +147,7 @@ System2's home directory is `~/.system2/`. It holds all system state: configurat
 ├── app.db                           SQLite database (gitignored)
 ├── config.toml                      Settings and API keys (0600, gitignored)
 ├── oauth/                           OAuth credentials (0600, gitignored)
-│   └── anthropic.json               Claude Pro/Max tokens
+│   └── {provider}.json              OAuth tokens (one file per logged-in provider, e.g. anthropic.json, google-antigravity.json)
 ├── knowledge/                       Persistent knowledge (git-tracked)
 │   ├── conductor.md                 Conductor role-specific knowledge
 │   ├── daily_summaries/             Daily activity logs

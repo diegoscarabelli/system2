@@ -13,7 +13,7 @@ All System2 settings live in `~/.system2/config.toml`, created by `system2 onboa
 # OAuth tier — subscription credentials, tried first
 [llm.oauth]
 primary = "anthropic"
-fallback = []   # only anthropic OAuth supported in v1
+fallback = []   # any of: anthropic, openai-codex, google-gemini-cli, google-antigravity, github-copilot
 
 # API key tier — billed per token, used after OAuth tier exhausted
 [llm]
@@ -146,6 +146,10 @@ narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Nar
 | `openai-compatible` | Any OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura) |
 | `openrouter` | Any model via OpenRouter (uses `provider/model` IDs) |
 | `xai` | Grok |
+| `openai-codex` | OAuth-only: ChatGPT subscription via OpenAI Codex CLI flow. Codex models only (gpt-5.x-codex variants). |
+| `google-gemini-cli` | OAuth-only: Google account / Gemini subscription via Google Gemini CLI flow. Gemini 2.x and 3 variants. |
+| `google-antigravity` | OAuth-only: Google account via Antigravity. Access to Gemini 3, Claude (Sonnet/Opus thinking variants), and GPT-OSS. |
+| `github-copilot` | OAuth-only: GitHub Copilot subscription. Mixed lineup including Claude Sonnet/Haiku and GPT-5 variants. |
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
 
@@ -209,18 +213,22 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 
 System2 has two auth tiers:
 
-- **OAuth tier** — subscription credentials (`[llm.oauth]`). Tried first. v1 supports Anthropic Claude Pro/Max OAuth. Pi-ai supports Google Gemini CLI, GitHub Copilot, and OpenAI Codex OAuth as well; those will be added in future iterations.
+- **OAuth tier**: subscription credentials (`[llm.oauth]`). Tried first. Five providers are supported as first-class OAuth IDs: `anthropic` (Claude Pro/Max), `openai-codex` (ChatGPT subscription via the Codex CLI flow), `google-gemini-cli` (Google account / Gemini subscription), `google-antigravity` (Google account via Antigravity, exposing Gemini 3, Claude thinking variants, and GPT-OSS), and `github-copilot` (Copilot subscription). Any of the five may be used as `primary` or in `fallback`, in any order.
 - **API key tier** — `[llm].primary` + `fallback`. Same shape as today. Used after the OAuth tier is fully exhausted (every OAuth credential in cooldown).
 
 The OAuth tier is fully exhausted before the system drops into the API key tier — never interleaving. If `[llm.oauth]` is absent, system2 behaves exactly like an API-key-only setup.
 
-### Anthropic OAuth (Claude Pro/Max)
+### OAuth subscription support
 
-The pi-ai SDK detects OAuth tokens (substring match `sk-ant-oat`) and switches the Anthropic client to Bearer auth + Claude Code identity headers. The agent loop, custom tools, and multi-agent orchestration are unchanged.
+System2 delegates OAuth provider behavior to pi-ai's provider registry. `getOAuthProvider(id)` returns a small adapter that knows how to run the browser login flow, refresh access tokens, and surface a usable bearer for each of the five providers (`anthropic`, `openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`). The agent loop, custom tools, and multi-agent orchestration are unchanged across providers; only the auth path varies. The `[llm.oauth]` shape (`primary` + `fallback`) accepts any of the five provider IDs, in any order.
 
-**Setup:** During `system2 onboard`, the first step asks whether to configure OAuth. Selecting "yes" + "Anthropic" opens a browser for Claude.ai authentication. The resulting tokens are saved to `~/.system2/oauth/anthropic.json` (mode 0600).
+**Credential shape.** Credentials are written to `~/.system2/oauth/<provider>.json` (mode 0600). The `OAuthCredentials` type has an open shape: providers that need extra context store it alongside the access/refresh tokens. Antigravity records `projectId` and the user's `email`; Gemini CLI records its own `projectId`; Copilot may record an `enterpriseDomain`. These extras are preserved across refreshes.
 
-**Refresh:** OAuth access tokens expire roughly hourly. The daemon refreshes them automatically before each agent session creation and on 401 errors. Refreshed tokens are persisted back to `~/.system2/oauth/anthropic.json`.
+**Setup:** During `system2 onboard`, the first step asks whether to configure OAuth and lets you pick a provider. The chosen provider's browser flow runs; the resulting tokens are saved to `~/.system2/oauth/<provider>.json`.
+
+**Refresh:** OAuth access tokens expire on each provider's own schedule (Anthropic roughly hourly; the others vary). The daemon refreshes them automatically before each agent session creation and on 401 errors. Refreshed tokens are persisted back to the same file.
+
+**Anthropic-specific behavior.** The pi-ai SDK detects Anthropic OAuth tokens (substring match `sk-ant-oat`) and switches the Anthropic client to Bearer auth plus the Claude Code identity headers required by the Pro/Max subscription path. The other providers do not share that path: `openai-codex` posts to the OpenAI Responses API with Codex-CLI-shaped requests, `google-gemini-cli` and `google-antigravity` go through Google's Cloud Code Assist surface, and `github-copilot` hits Copilot's chat completions endpoint, each with its own request shape, headers, and project/enterprise scoping.
 
 **Failover:** A 401 on an OAuth credential triggers one refresh-and-retry. If refresh succeeds, the session reinitializes with the new token and the prompt retries. If refresh fails (or any other error), the OAuth credential enters cooldown and the next OAuth fallback is tried; once the OAuth tier is exhausted, the system drops into the API key tier.
 
@@ -231,15 +239,20 @@ The pi-ai SDK detects OAuth tokens (substring match `sk-ant-oat`) and switches t
 
 ### Re-authenticating and managing credentials post-onboarding
 
-Use `system2 login <provider>` to add an OAuth credential after onboarding (or to re-authenticate when a refresh token has been invalidated — for example, after signing out of Claude.ai, changing your password, revoking the app's grant, or hitting an idle-expiry on the refresh token). The command runs the OAuth flow, writes `~/.system2/oauth/<provider>.json`, and (if `[llm.oauth]` is missing or doesn't include the provider) offers to patch `config.toml` to enable the OAuth tier. If the daemon is running, restart it to pick up the new credential: `system2 stop && system2 start`.
+Use `system2 login` to manage OAuth credentials after onboarding. The command takes no positional arguments and is fully interactive: it presents a select of all five OAuth providers, with already-logged-in entries annotated. Behavior depends on the selection:
 
-Use `system2 logout <provider>` to remove an OAuth credential. The command deletes the credentials file and offers to remove the provider from `[llm.oauth]` in `config.toml`.
+- **Not yet logged in.** The command runs the provider's browser OAuth flow, writes `~/.system2/oauth/<provider>.json`, and (if `[llm.oauth]` is missing or doesn't include the provider) auto-patches `config.toml` to enable the OAuth tier.
+- **Already logged in.** A 3-way menu opens: **re-login** (re-runs the OAuth flow, useful when a refresh token has been invalidated by signing out, password change, revoked grant, or idle-expiry), **remove** (deletes `~/.system2/oauth/<provider>.json` and removes the provider from `[llm.oauth]` in `config.toml`), or **cancel**.
+
+If the daemon is running, restart it to pick up the change: `system2 stop && system2 start`.
+
+The `system2 logout` command no longer exists. To remove a credential, run `system2 login`, select the already-logged-in provider, and choose **Remove**.
 
 ### Changing primary provider or switching auth method
 
 System2 reads `~/.system2/config.toml` only at startup. To change the primary provider, swap which tier is preferred, add or remove a fallback provider, or edit any other LLM configuration:
 
-1. Edit `~/.system2/config.toml` directly (or use `system2 login` / `system2 logout` for OAuth credential changes).
+1. Edit `~/.system2/config.toml` directly (or use `system2 login` for OAuth credential changes).
 2. Restart the daemon: `system2 stop && system2 start`.
 
 You do not need to switch auth methods manually for cost or rate-limit reasons — the two-tier failover handles that automatically. OAuth is tried first; once exhausted, the system drops to the API key tier without any user action. If a transient failure has put a credential into cooldown and you want to force the system to retry it sooner than the cooldown expiry, restart the daemon (which clears in-memory cooldowns).
@@ -273,6 +286,8 @@ anthropic = "claude-opus-4-6"
 [agents.conductor.models]
 google = "gemini-3.1-pro-preview"
 ```
+
+`[agents.<role>.models]` accepts every provider ID listed in the [providers table](#llm-providers), including the four OAuth-only additions (`openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`). At startup, every `(provider, modelId)` pair is cross-checked against pi-ai's `MODELS` catalog; unknown model IDs trigger a validation error with did-you-mean suggestions on near-miss typos.
 
 ### How it works
 
