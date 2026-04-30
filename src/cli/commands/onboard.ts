@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdir as mkdirAsync } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
+import open from 'open';
 import pc from 'picocolors';
 import { loginProvider } from '../../server/agents/oauth.js';
 import { saveOAuthCredentials } from '../../server/agents/oauth-credentials.js';
@@ -281,11 +282,17 @@ async function runOAuthLogin(provider: LlmProvider): Promise<{ label: string } |
   try {
     const creds = await loginProvider(provider, {
       onAuth: ({ url }) => {
-        // Use p.log.info (writes a persistent line above the spinner) instead of
-        // s.message (overwrites the spinner line). Some providers — gemini-cli,
-        // antigravity — fire onProgress immediately after onAuth, which would
-        // otherwise erase the URL before the user could read it.
-        p.log.info(`Open this URL to authenticate:\n${url}`);
+        // Stop, print the URL persistently, attempt to open the browser, then
+        // restart the spinner. s.message() would be overwritten on the next
+        // onProgress; p.log.info() under an active spinner is suppressed.
+        // Stop+log+restart guarantees the URL stays visible. open() is
+        // best-effort.
+        s.stop('Browser authentication required:');
+        p.log.info(`Open this URL to authenticate (browser should open automatically):\n${url}`);
+        void open(url).catch(() => {
+          // Browser open failed — URL is already printed; user copies manually.
+        });
+        s.start('Waiting for OAuth callback...');
       },
       onPrompt: async ({ message, placeholder }) => {
         s.stop('Browser callback timed out');
