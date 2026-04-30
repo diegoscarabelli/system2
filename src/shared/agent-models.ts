@@ -75,7 +75,7 @@ function nearestModelId(provider: string, attempted: string): string | undefined
  * acceptable as per-agent overrides — they would be skipped by the "unknown
  * provider" check rather than throwing. Currently empty: `openai-compatible`
  * is NOT a valid per-agent override (its model is set globally via
- * `[llm.openai-compatible].model`), and `convertTomlAgents` already rejects it
+ * `[llm.api_keys.openai-compatible].model`), and `convertTomlAgents` already rejects it
  * at TOML-parse time. Kept as an explicit Set so future non-catalog providers
  * can be added without changing the validator's structure.
  */
