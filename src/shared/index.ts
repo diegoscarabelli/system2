@@ -4,6 +4,7 @@
  * Type definitions shared across all System2 packages.
  */
 
+export * from './agent-models.js';
 export * from './types/chat.js';
 export * from './types/config.js';
 export * from './types/database.js';

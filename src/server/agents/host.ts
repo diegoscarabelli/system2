@@ -28,7 +28,6 @@ import {
   SettingsManager,
 } from '@mariozechner/pi-coding-agent';
 import matter from 'gray-matter';
-import { validateAgentModels } from '../../cli/utils/config.js';
 import {
   type AgentsConfig,
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
@@ -37,6 +36,7 @@ import {
   type ServicesConfig,
   type ThinkingLevel,
   type ToolsConfig,
+  validateAgentModels,
 } from '../../shared/index.js';
 import { MessageHistory } from '../chat/history.js';
 import type { DatabaseClient } from '../db/client.js';

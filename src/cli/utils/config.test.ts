@@ -698,7 +698,8 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
       providers: { anthropic: { keys: [{ key: 'k', label: 'l' }] } },
     };
     const toml = buildConfigToml({ llm });
-    expect(toml).not.toMatch(/\[llm\.oauth\]/);
+    // Match the section header at line start, not any mention of the bracketed string in comments.
+    expect(toml).not.toMatch(/^\[llm\.oauth\]/m);
   });
 
   it('round-trips through TOML.parse and convertTomlLlm', () => {

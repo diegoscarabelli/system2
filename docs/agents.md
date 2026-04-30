@@ -218,7 +218,7 @@ Auto-compaction is also configured to fire earlier (at ~50% of the context windo
 
 ### Two-Tier Credentials (OAuth + API Keys)
 
-When `[llm.oauth]` is configured, `AuthResolver` walks credentials across two tiers. The OAuth tier supports any of: `anthropic`, `openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`. Each provider hits a different endpoint with its own request shape; pi-ai routes each one through its own streaming provider (e.g., `openai-codex-responses`, `google-gemini-cli`) selected via [getOAuthProvider(id)](src/server/agents/oauth.ts).
+When `[llm.oauth]` is configured, `AuthResolver` walks credentials across two tiers. The OAuth tier supports any of: `anthropic`, `openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`. Each provider hits a different endpoint with its own request shape; pi-ai routes each one through its own streaming provider (e.g., `openai-codex-responses`, `google-gemini-cli`) selected via [getOAuthProvider(id)](../src/server/agents/oauth.ts).
 
 1. **OAuth tier** — providers listed in `[llm.oauth].primary` + `fallback`, each with one credential loaded from `~/.system2/oauth/<provider>.json` at startup.
 2. **API key tier** — providers listed in `[llm].primary` + `fallback`, with one or more API keys each.
@@ -227,7 +227,7 @@ When `[llm.oauth]` is configured, `AuthResolver` walks credentials across two ti
 
 Two extra concerns over plain API keys:
 
-1. **Refresh.** `AuthResolver.ensureFresh()` is awaited before each session creation in `AgentHost.initialize()` and `reinitializeWithProvider()`. If an OAuth access token is within 5 minutes of expiry, the resolver dispatches to the correct provider-specific refresh handler via pi-ai's `getOAuthProvider(id)` registry ([refreshOAuthToken](src/server/agents/oauth.ts) in `src/server/agents/oauth.ts`), updates in-memory state, and persists via the callback registered through `setPersistOAuth()`. The persist callback is keyed by `LlmProvider`, so each of the five OAuth providers has its own `~/.system2/oauth/<provider>.json` file written back on refresh. Concurrent refreshes per provider are serialized via a Promise lock.
+1. **Refresh.** `AuthResolver.ensureFresh()` is awaited before each session creation in `AgentHost.initialize()` and `reinitializeWithProvider()`. If an OAuth access token is within 5 minutes of expiry, the resolver dispatches to the correct provider-specific refresh handler via pi-ai's `getOAuthProvider(id)` registry ([refreshOAuthToken](../src/server/agents/oauth.ts) in `src/server/agents/oauth.ts`), updates in-memory state, and persists via the callback registered through `setPersistOAuth()`. The persist callback is keyed by `LlmProvider`, so each of the five OAuth providers has its own `~/.system2/oauth/<provider>.json` file written back on refresh. Concurrent refreshes per provider are serialized via a Promise lock.
 2. **401 handling.** Normally `auth` errors trigger immediate failover. For OAuth-tier credentials, `AgentHost` first calls `ensureFresh()` and reinitializes the session before falling over — this catches expiry-related 401s without losing the credential. If refresh itself fails, the credential goes into cooldown via the standard path. The Anthropic path additionally relies on the SDK detecting OAuth tokens by substring match (`sk-ant-oat`) to switch authentication mode; this detection is Anthropic-specific. The other four providers (Codex, Gemini CLI, Antigravity, Copilot) carry no equivalent token-shape signal and are dispatched purely through pi-ai's provider registry.
 
 ### Per-agent model declarations across providers
@@ -245,7 +245,7 @@ models:
   github-copilot: claude-sonnet-4.6
 ```
 
-At startup, [validateAgentModels](src/cli/utils/config.ts) in `src/cli/utils/config.ts` cross-checks every entry against pi-ai's `MODELS` catalog. Unknown model ids fail validation with did-you-mean suggestions computed by Levenshtein distance against the catalog, so a typo like `claude-sonet-4-6` surfaces as a startup error pointing at the intended `claude-sonnet-4-6` rather than a runtime 404. The same map drives both the OAuth-tier and API-key-tier sessions: the resolver picks the credential, the agent picks the model id for the resolved provider, and pi-ai assembles the request.
+At startup, [validateAgentModels](../src/shared/agent-models.ts) in `src/cli/utils/config.ts` cross-checks every entry against pi-ai's `MODELS` catalog. Unknown model ids fail validation with did-you-mean suggestions computed by Levenshtein distance against the catalog, so a typo like `claude-sonet-4-6` surfaces as a startup error pointing at the intended `claude-sonnet-4-6` rather than a runtime 404. The same map drives both the OAuth-tier and API-key-tier sessions: the resolver picks the credential, the agent picks the model id for the resolved provider, and pi-ai assembles the request.
 
 ## Session Persistence
 

@@ -12,7 +12,6 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import TOML from '@iarna/toml';
-import { getModels, getProviders } from '@mariozechner/pi-ai';
 import type {
   AgentOverrideConfig,
   AgentsConfig,
@@ -30,7 +29,11 @@ import type {
 import {
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
   DEFAULT_SESSION_ROTATION_SIZE_BYTES,
+  validateAgentModels,
 } from '../../shared/index.js';
+
+// Re-export so existing CLI consumers (and tests) can import from this module.
+export { validateAgentModels };
 
 export const SYSTEM2_DIR = join(homedir(), '.system2');
 export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
@@ -497,75 +500,6 @@ export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): Agen
 }
 
 /**
- * Compute Levenshtein edit distance for did-you-mean suggestions on model id typos.
- */
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  const dp: number[] = new Array(n + 1);
-  for (let j = 0; j <= n; j++) dp[j] = j;
-  for (let i = 1; i <= m; i++) {
-    let prev = dp[0];
-    dp[0] = i;
-    for (let j = 1; j <= n; j++) {
-      const tmp = dp[j];
-      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
-      prev = tmp;
-    }
-  }
-  return dp[n];
-}
-
-function getCatalogIds(provider: string): string[] | undefined {
-  // pi-ai's getModels accepts a KnownProvider; use unknown cast since we may pass any string.
-  // Returns undefined if the provider isn't in pi-ai's catalog (e.g., openai-compatible).
-  const knownProviders = getProviders() as readonly string[];
-  if (!knownProviders.includes(provider)) return undefined;
-  const models = getModels(provider as Parameters<typeof getModels>[0]);
-  return models.map((m) => m.id);
-}
-
-function nearestModelId(provider: string, attempted: string): string | undefined {
-  const ids = getCatalogIds(provider);
-  if (!ids) return undefined;
-  let best: { id: string; dist: number } | undefined;
-  for (const id of ids) {
-    const dist = levenshtein(attempted, id);
-    if (best === undefined || dist < best.dist) best = { id, dist };
-  }
-  return best && best.dist <= 3 ? best.id : undefined;
-}
-
-/**
- * Validate every (provider, modelId) pair declared in an agents config against
- * pi-ai's MODELS catalog. Throws on first mismatch with provider, model, and a
- * Levenshtein-nearest "did you mean" suggestion.
- *
- * Skips providers absent from pi-ai's catalog (e.g., openai-compatible, which
- * registers its own model dynamically at runtime).
- */
-export function validateAgentModels(agents: AgentsConfig): void {
-  for (const [role, override] of Object.entries(agents)) {
-    if (!override.models) continue;
-    for (const [provider, modelId] of Object.entries(override.models)) {
-      if (!modelId) continue;
-      const ids = getCatalogIds(provider);
-      if (!ids) continue; // provider not in pi-ai catalog (e.g., openai-compatible)
-      if (!ids.includes(modelId)) {
-        const nearest = nearestModelId(provider, modelId);
-        const suggestion = nearest ? ` Did you mean "${nearest}"?` : '';
-        throw new Error(
-          `Agent "${role}" references model "${modelId}" for provider "${provider}", ` +
-            `which is not in pi-ai's catalog.${suggestion}`
-        );
-      }
-    }
-  }
-}
-
-/**
  * Convert TOML operational sections (snake_case) to camelCase.
  */
 function convertTomlOperational(
@@ -716,12 +650,29 @@ export function buildConfigToml(options: {
   // LLM section
   if (options.llm) {
     const { primary, fallback, providers } = options.llm;
+    lines.push('# LLM credentials. Two tiers, used in order:');
+    lines.push('#   1. [llm.oauth]: subscription credentials. Tried first when present.');
+    lines.push('#   2. [llm]: API key tier. Used after the OAuth tier is exhausted.');
+    lines.push(
+      '# Each tier has a `primary` provider and an ordered `fallback` list. Within the API key tier,'
+    );
+    lines.push(
+      '# multiple keys per provider (under [llm.<provider>].keys) rotate automatically on failures.'
+    );
     lines.push('[llm]');
     lines.push(`primary = "${primary}"`);
     lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
     lines.push('');
 
     if (options.llm.oauth) {
+      lines.push('# OAuth tier. Supported providers: anthropic, openai-codex, google-gemini-cli,');
+      lines.push(
+        '# google-antigravity, github-copilot. Tokens live in ~/.system2/oauth/<provider>.json'
+      );
+      lines.push(
+        '# (mode 0600), managed by `system2 login`. Edit primary/fallback to reorder; remove a'
+      );
+      lines.push('# provider here AND its JSON file to fully deregister it.');
       lines.push('[llm.oauth]');
       lines.push(`primary = "${options.llm.oauth.primary}"`);
       const fb = options.llm.oauth.fallback.map((f) => `"${f}"`).join(', ');
@@ -742,6 +693,10 @@ export function buildConfigToml(options: {
     ] as const) {
       const provider = providers[name];
       if (provider && provider.keys.length > 0) {
+        lines.push(`# API keys for ${name}. Multiple keys are rotated on auth/rate-limit errors;`);
+        lines.push(
+          `# the \`label\` field is for log readability. Add or remove keys by editing this list.`
+        );
         lines.push(`[llm.${name}]`);
         lines.push('keys = [');
         for (const key of provider.keys) {

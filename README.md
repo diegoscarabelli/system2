@@ -24,7 +24,7 @@ It exists to help people think more clearly about complex questions and empower 
 
 1. **[Node.js 20+](https://nodejs.org/)** and **[pnpm 8+](https://pnpm.io/installation)** (in a terminal, run `node -v` and `pnpm -v` to check)
 2. **An LLM credential** (at least one required). Two tiers, combinable, both configurable during onboarding:
-   - **OAuth subscription support** (recommended if you already pay for one of these): use your existing AI subscription instead of API keys, with no per-token cost. Supported: Anthropic (Claude Pro/Max), OpenAI (ChatGPT Plus/Pro via the Codex CLI flow), Google (Gemini subscription via the Gemini CLI flow), Google Antigravity (free tier with access to Gemini 3, Claude, GPT-OSS), and GitHub Copilot.
+   - **OAuth subscription support** (recommended if you already pay for one of these): use your existing AI account instead of API keys, with no per-token cost. Supported: Anthropic (Claude Pro/Max), OpenAI (ChatGPT Plus/Pro via the Codex CLI flow), Google (Gemini subscription via the Gemini CLI flow), Google Antigravity (via your Google account), and GitHub Copilot.
    - **API keys**: pay-per-token across providers. [OpenRouter](https://openrouter.ai/) is recommended for access to multiple models with one key; Anthropic, Google, OpenAI, and others also work. You can add multiple keys for rotation and multiple providers for failover.
 
    Combining both tiers gives you OAuth as the primary path with API keys as fallback when an OAuth subscription rate-limits.
