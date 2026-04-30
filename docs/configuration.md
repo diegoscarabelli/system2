@@ -288,7 +288,7 @@ anthropic = "claude-opus-4-6"
 google = "gemini-3.1-pro-preview"
 ```
 
-`[agents.<role>.models]` accepts every provider ID listed in the [providers table](#llm-providers) **except** `openai-compatible`, including the four OAuth-only additions (`openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`). `openai-compatible` is not supported as a per-agent model override (the model for that provider is set globally via `[llm.openai-compatible].model`). At startup, every supported `(provider, modelId)` pair is cross-checked against pi-ai's `MODELS` catalog; unknown provider IDs throw with the list of valid providers, and unknown model IDs throw with did-you-mean suggestions on near-miss typos.
+`[agents.<role>.models]` accepts every provider ID listed in the [providers table](#llm-providers) **except** `openai-compatible`, including the four OAuth-only additions (`openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`). `openai-compatible` is not supported as a per-agent model override (the model for that provider is set globally via `[llm.api_keys.openai-compatible].model`). At startup, every supported `(provider, modelId)` pair is cross-checked against pi-ai's `MODELS` catalog; unknown provider IDs throw with the list of valid providers, and unknown model IDs throw with did-you-mean suggestions on near-miss typos.
 
 ### How it works
 

@@ -223,7 +223,7 @@ When `[llm.oauth]` is configured, `AuthResolver` walks credentials across two ti
 1. **OAuth tier** — providers listed in `[llm.oauth].primary` + `fallback`, each with one credential loaded from `~/.system2/oauth/<provider>.json` at startup.
 2. **API key tier** — providers listed in `[llm.api_keys].primary` + `fallback`, with keys at `[llm.api_keys.<provider>].keys`.
 
-`getActiveCredential()` returns a `{ tier, provider, keyIndex, label }` tuple. Cooldown keys are namespaced as `${tier}:${provider}:${keyIndex}` so the same provider in both tiers (e.g., Anthropic OAuth and Anthropic API keys) doesn't collide. The OAuth tier is fully exhausted (every credential in cooldown) before the resolver returns a keys-tier credential.
+`getActiveCredential()` returns a `{ tier, provider, keyIndex, label }` tuple where `tier` is `'oauth' | 'api_keys'`. Cooldown keys are namespaced as `${tier}:${provider}:${keyIndex}` so the same provider in both tiers (e.g., Anthropic OAuth and Anthropic API keys) doesn't collide. The OAuth tier is fully exhausted (every credential in cooldown) before the resolver returns an api_keys-tier credential.
 
 Two extra concerns over plain API keys:
 
