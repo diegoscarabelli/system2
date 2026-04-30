@@ -174,6 +174,47 @@ export function removeProviderFromOAuthTier(
 }
 
 /**
+ * Read the current `[llm.oauth]` tier from config.toml.
+ * Returns null if the section is absent.
+ */
+function readOAuthTier(configPath: string): { primary: string; fallback: string[] } | null {
+  if (!existsSync(configPath)) return null;
+  const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
+    llm?: { oauth?: { primary?: string; fallback?: string[] } };
+  };
+  const oauth = parsed.llm?.oauth;
+  if (!oauth?.primary) return null;
+  return { primary: oauth.primary, fallback: oauth.fallback ?? [] };
+}
+
+/**
+ * Promote `provider` to primary in `[llm.oauth]`. The current primary becomes the
+ * head of fallback (preserving the rest of fallback's order). If `provider` is
+ * already primary, no-op.
+ */
+export function setProviderAsPrimary(
+  configPath: string,
+  provider: LlmProvider
+): { changed: boolean } {
+  const current = readOAuthTier(configPath);
+  if (!current) {
+    throw new Error(`[llm.oauth] section not found in ${configPath}`);
+  }
+  if (current.primary === provider) return { changed: false };
+
+  // Move current primary to head of fallback. Strip provider from fallback if
+  // it was there, then prepend the old primary.
+  const newFallback = [current.primary, ...current.fallback.filter((f) => f !== provider)];
+
+  const raw = readFileSync(configPath, 'utf-8');
+  const sectionPattern = /\n?\[llm\.oauth\][\s\S]*?(?=\n\[|$)/;
+  const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
+  const replacement = `\n[llm.oauth]\nprimary = "${provider}"\nfallback = [${fbStr}]\n`;
+  writeFileSync(configPath, raw.replace(sectionPattern, replacement));
+  return { changed: true };
+}
+
+/**
  * Remove a provider's OAuth credentials and deregister it from [llm.oauth].
  * Returns true on success.
  */
@@ -194,23 +235,12 @@ async function removeProviderCredentials(provider: LlmProvider): Promise<boolean
   return true;
 }
 
-export async function login(): Promise<void> {
-  console.clear();
-
-  if (!existsSync(CONFIG_FILE)) {
-    p.intro('🧠 System2 OAuth login');
-    p.cancel(`No System2 installation found at ${SYSTEM2_DIR}. Run "system2 onboard" first.`);
-    process.exit(1);
-  }
-
-  if (isDaemonRunning()) {
-    p.intro('🧠 System2 OAuth login');
-    p.cancel('System2 daemon is running. Stop it first with: system2 stop');
-    process.exit(1);
-  }
-
-  p.intro('🧠 System2 OAuth login');
-
+/**
+ * One iteration of the login wizard: pick a provider, log in / re-login / remove,
+ * optionally promote to primary. Returns 'continue' to keep looping, 'done' to
+ * exit (user cancelled).
+ */
+async function performLoginIteration(): Promise<'continue' | 'done'> {
   const oauthDir = join(SYSTEM2_DIR, 'oauth');
   const options = OAUTH_PROVIDERS.map((opt) => {
     const existing = existsSync(join(oauthDir, `${opt.value}.json`));
@@ -226,12 +256,9 @@ export async function login(): Promise<void> {
     options,
   })) as LlmProvider;
 
-  if (p.isCancel(target)) {
-    p.cancel('Cancelled');
-    process.exit(0);
-  }
+  if (p.isCancel(target)) return 'done';
 
-  // Already-logged-in path: offer relogin or removal instead of just overwriting.
+  // Already-logged-in path: re-login or remove.
   const isAlreadyLoggedIn = existsSync(join(oauthDir, `${target}.json`));
   if (isAlreadyLoggedIn) {
     const action = (await p.select({
@@ -242,16 +269,10 @@ export async function login(): Promise<void> {
         { value: 'cancel', label: 'Cancel' },
       ],
     })) as 'relogin' | 'remove' | 'cancel';
-    if (p.isCancel(action) || action === 'cancel') {
-      p.cancel('Cancelled');
-      process.exit(0);
-    }
+    if (p.isCancel(action) || action === 'cancel') return 'continue';
     if (action === 'remove') {
       await removeProviderCredentials(target);
-      p.outro(
-        `✨ Done. If system2 is running, restart to apply: ${pc.bold('system2 stop && system2 start')}`
-      );
-      return;
+      return 'continue';
     }
     // 'relogin' falls through to the standard login path below.
   }
@@ -262,10 +283,7 @@ export async function login(): Promise<void> {
     placeholder: defaultLabel,
     defaultValue: defaultLabel,
   })) as string;
-  if (p.isCancel(label)) {
-    p.cancel('Cancelled');
-    process.exit(0);
-  }
+  if (p.isCancel(label)) return 'continue';
 
   if (!existsSync(SYSTEM2_DIR)) {
     await mkdirAsync(SYSTEM2_DIR, { recursive: true });
@@ -292,10 +310,7 @@ export async function login(): Promise<void> {
       onPrompt: async ({ message, placeholder }) => {
         s.stop('Browser callback timed out');
         const value = (await p.text({ message, placeholder })) as string;
-        if (p.isCancel(value)) {
-          p.cancel('Cancelled');
-          process.exit(0);
-        }
+        if (p.isCancel(value)) return '';
         s.start('Exchanging code...');
         return value;
       },
@@ -310,16 +325,70 @@ export async function login(): Promise<void> {
   } catch (err) {
     s.stop('✗ OAuth login failed');
     p.log.error(err instanceof Error ? err.message : String(err));
+    return 'continue';
+  }
+
+  // Auto-patch config.toml. The credential is useless until [llm.oauth] references it.
+  const patchResult = addProviderToOAuthTier(CONFIG_FILE, target);
+  if (patchResult.changed) {
+    p.log.info(`✓ Updated [llm.oauth] in ${CONFIG_FILE}`);
+  }
+
+  // Offer to promote to primary, but only when there's an existing different primary.
+  // (If the patch just made target the primary, or it was already primary, skip.)
+  const tier = readOAuthTier(CONFIG_FILE);
+  if (tier && tier.primary !== target) {
+    const promote = (await p.select({
+      message: 'OAuth tier order:',
+      options: [
+        {
+          value: 'keep',
+          label: `Keep ${tier.primary} as primary, ${target} as fallback`,
+        },
+        {
+          value: 'promote',
+          label: `Make ${target} primary, move ${tier.primary} to fallback`,
+        },
+      ],
+      initialValue: 'keep',
+    })) as 'keep' | 'promote';
+    if (!p.isCancel(promote) && promote === 'promote') {
+      const r = setProviderAsPrimary(CONFIG_FILE, target);
+      if (r.changed) p.log.info(`✓ Set ${target} as primary OAuth provider`);
+    }
+  }
+
+  return 'continue';
+}
+
+export async function login(): Promise<void> {
+  console.clear();
+
+  if (!existsSync(CONFIG_FILE)) {
+    p.intro('🧠 System2 OAuth login');
+    p.cancel(`No System2 installation found at ${SYSTEM2_DIR}. Run "system2 onboard" first.`);
     process.exit(1);
   }
 
-  // Auto-patch config.toml. The credential is useless until [llm.oauth] references it,
-  // so there's no scenario where the user would want to skip this.
-  const result = addProviderToOAuthTier(CONFIG_FILE, target);
-  if (result.changed) {
-    p.log.info(`✓ Updated [llm.oauth] in ${CONFIG_FILE}`);
-  } else {
-    p.log.info(`${target} is already in [llm.oauth] — no changes`);
+  if (isDaemonRunning()) {
+    p.intro('🧠 System2 OAuth login');
+    p.cancel('System2 daemon is running. Stop it first with: system2 stop');
+    process.exit(1);
+  }
+
+  p.intro('🧠 System2 OAuth login');
+
+  // Wizard loop: each iteration manages one provider; user chooses whether to
+  // continue managing more.
+  while (true) {
+    const result = await performLoginIteration();
+    if (result === 'done') break;
+
+    const another = await p.confirm({
+      message: 'Manage another OAuth provider?',
+      initialValue: false,
+    });
+    if (p.isCancel(another) || !another) break;
   }
 
   p.outro(
