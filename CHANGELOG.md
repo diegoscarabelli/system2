@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-29
+
+### Added
+
+- OAuth subscription support for OpenAI Codex (ChatGPT Plus/Pro), Google Gemini CLI (Gemini subscription), Google Antigravity (Gemini 3 + Claude + GPT-OSS), and GitHub Copilot, alongside the existing Anthropic Claude.ai flow. Pi-ai's `getOAuthProvider(id)` registry drives login and refresh dispatch for all providers.
+- Per-agent model declarations for the four new OAuth providers in every agent frontmatter (`narrator`, `conductor`, `guide`, `worker`, `reviewer`).
+- Startup validation of agent model ids against pi-ai's `MODELS` catalog with Levenshtein-nearest "did you mean" suggestions on typos. Catches agent-frontmatter and `[agents.<role>.models]` typos before a runtime API failure.
+
+### Changed
+
+- `system2 login` is now interactive with no positional argument. It lists all 5 OAuth providers (already-logged-in entries annotated). Selecting a fresh provider runs the OAuth flow and auto-patches `[llm.oauth]`. Selecting an already-logged-in provider opens a contextual menu: re-login, remove, or cancel.
+- Onboarding offers a 3-way choice (retry / try a different provider / skip OAuth) when an initial OAuth login fails, instead of binary skip-or-cancel.
+- Default OAuth credential label is now the provider id (was hardcoded `claude-pro` for Anthropic). Existing credentials retain their stored labels.
+- `oauth.ts` exports `loginProvider(provider, callbacks)` and `refreshOAuthToken(provider, credentials)` (replacing `loginAnthropic` / `refreshAnthropic`). Refresh now operates on the full credential object, preserving provider-specific extras (`projectId`, `email`, `enterpriseDomain`) through the round-trip.
+- `OAuthCredentials` shape is open: the validator still requires `access`, `refresh`, `expires`, `label`, but pass-through extras survive save/load.
+- `AuthResolver.ensureFresh`'s `refresh` callback signature changed from `(refreshToken: string) => Promise<RefreshedTokens>` to `(provider: LlmProvider, credentials: OAuthCredentials) => Promise<OAuthCredentials>`, removing the `RefreshedTokens` type.
+
+### Removed
+
+- `system2 logout` command. The remove flow is now reached via `system2 login` and selecting the already-logged-in provider, then "Remove". Scripted use of `system2 logout <provider>` no longer works; users in that situation can edit `~/.system2/config.toml` and `rm ~/.system2/oauth/<provider>.json` directly.
+
+### Dependencies
+
+- Pin `@mariozechner/pi-ai >= 0.63.2`.
+
 ## [0.2.2] - 2026-04-29
 
 ### Added
