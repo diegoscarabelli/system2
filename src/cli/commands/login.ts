@@ -275,7 +275,11 @@ export async function login(): Promise<void> {
   try {
     const creds = await loginProvider(target, {
       onAuth: ({ url }) => {
-        s.message(`Open this URL to authenticate:\n${url}`);
+        // Use p.log.info (writes a persistent line above the spinner) instead of
+        // s.message (overwrites the spinner line). Some providers — gemini-cli,
+        // antigravity — fire onProgress immediately after onAuth, which would
+        // otherwise erase the URL before the user could read it.
+        p.log.info(`Open this URL to authenticate:\n${url}`);
       },
       onPrompt: async ({ message, placeholder }) => {
         s.stop('Browser callback timed out');
