@@ -1,7 +1,6 @@
 import TOML from '@iarna/toml';
 import { describe, expect, it, vi } from 'vitest';
-import type { LlmConfig } from '../../shared/index.js';
-import type { AgentsConfig } from '../../shared/index.js';
+import type { AgentsConfig, LlmConfig } from '../../shared/index.js';
 import {
   buildConfigToml,
   convertTomlAgents,

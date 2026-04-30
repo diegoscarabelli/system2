@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir as mkdirAsync } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
@@ -126,6 +126,73 @@ export function addProviderToOAuthTier(
   return { changed: true };
 }
 
+/**
+ * Patch config.toml to remove `provider` from `[llm.oauth]`.
+ * - If `provider` is the primary and there's a fallback: promote the first fallback to primary.
+ * - If `provider` is the primary and no fallback: drop the `[llm.oauth]` section entirely.
+ * - If `provider` is in fallback: remove it from the fallback list.
+ * - If `provider` not in the tier: no-op.
+ */
+export function removeProviderFromOAuthTier(
+  configPath: string,
+  provider: LlmProvider
+): { changed: boolean } {
+  if (!existsSync(configPath)) {
+    throw new Error(`config.toml not found at ${configPath}`);
+  }
+  const raw = readFileSync(configPath, 'utf-8');
+  const parsed = TOML.parse(raw) as { llm?: { oauth?: { primary?: string; fallback?: string[] } } };
+  const oauth = parsed.llm?.oauth;
+  if (!oauth) return { changed: false };
+
+  const fallback = oauth.fallback ?? [];
+  const isPrimary = oauth.primary === provider;
+  const inFallback = fallback.includes(provider);
+  if (!isPrimary && !inFallback) return { changed: false };
+
+  let newPrimary: string | null = oauth.primary ?? null;
+  let newFallback = fallback.slice();
+
+  if (isPrimary) {
+    newPrimary = newFallback.length > 0 ? (newFallback.shift() ?? null) : null;
+  } else {
+    newFallback = newFallback.filter((f) => f !== provider);
+  }
+
+  const sectionPattern = /\n?\[llm\.oauth\][\s\S]*?(?=\n\[|$)/;
+
+  if (newPrimary === null) {
+    writeFileSync(configPath, raw.replace(sectionPattern, ''));
+    return { changed: true };
+  }
+
+  const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
+  const replacement = `\n[llm.oauth]\nprimary = "${newPrimary}"\nfallback = [${fbStr}]\n`;
+  writeFileSync(configPath, raw.replace(sectionPattern, replacement));
+  return { changed: true };
+}
+
+/**
+ * Remove a provider's OAuth credentials and deregister it from [llm.oauth].
+ * Returns true on success.
+ */
+async function removeProviderCredentials(provider: LlmProvider): Promise<boolean> {
+  const credPath = join(SYSTEM2_DIR, 'oauth', `${provider}.json`);
+  if (existsSync(credPath)) {
+    rmSync(credPath);
+    p.log.info(`✓ Deleted ${credPath}`);
+  } else {
+    p.log.info(`No credentials file at ${credPath}`);
+  }
+  const result = removeProviderFromOAuthTier(CONFIG_FILE, provider);
+  if (result.changed) {
+    p.log.info(`✓ Removed ${provider} from [llm.oauth] in ${CONFIG_FILE}`);
+  } else {
+    p.log.info(`${provider} was not in [llm.oauth] — no config change`);
+  }
+  return true;
+}
+
 export async function login(): Promise<void> {
   console.clear();
 
@@ -143,25 +210,49 @@ export async function login(): Promise<void> {
 
   p.intro('🧠 System2 OAuth login');
 
-  // Annotate already-logged-in providers with "(replace)" so the user knows re-login overwrites.
   const oauthDir = join(SYSTEM2_DIR, 'oauth');
   const options = OAUTH_PROVIDERS.map((opt) => {
     const existing = existsSync(join(oauthDir, `${opt.value}.json`));
     return {
       value: opt.value,
-      label: existing ? `${opt.label}  ✓ already logged in (replace)` : opt.label,
+      label: existing ? `${opt.label}  ✓ already logged in` : opt.label,
       hint: opt.hint,
     };
   });
 
   const target = (await p.select({
-    message: 'Select OAuth provider to log in to:',
+    message: 'Select OAuth provider:',
     options,
   })) as LlmProvider;
 
   if (p.isCancel(target)) {
     p.cancel('Cancelled');
     process.exit(0);
+  }
+
+  // Already-logged-in path: offer relogin or removal instead of just overwriting.
+  const isAlreadyLoggedIn = existsSync(join(oauthDir, `${target}.json`));
+  if (isAlreadyLoggedIn) {
+    const action = (await p.select({
+      message: `Already logged in to ${target}. What now?`,
+      options: [
+        { value: 'relogin', label: 'Re-login (replace credentials)' },
+        { value: 'remove', label: 'Remove (delete credentials and remove from [llm.oauth])' },
+        { value: 'cancel', label: 'Cancel' },
+      ],
+    })) as 'relogin' | 'remove' | 'cancel';
+    if (p.isCancel(action) || action === 'cancel') {
+      p.cancel('Cancelled');
+      process.exit(0);
+    }
+    if (action === 'remove') {
+      await removeProviderCredentials(target);
+      p.outro(
+        `✨ Done. If system2 is running, restart to apply: ${pc.bold('system2 stop && system2 start')}`
+      );
+      return;
+    }
+    // 'relogin' falls through to the standard login path below.
   }
 
   const defaultLabel = target;

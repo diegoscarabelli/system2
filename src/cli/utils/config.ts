@@ -11,8 +11,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { getModels, getProviders } from '@mariozechner/pi-ai';
 import TOML from '@iarna/toml';
+import { getModels, getProviders } from '@mariozechner/pi-ai';
 import type {
   AgentOverrideConfig,
   AgentsConfig,

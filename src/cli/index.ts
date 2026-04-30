@@ -8,7 +8,6 @@
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { login } from './commands/login.js';
-import { logout } from './commands/logout.js';
 import { onboard } from './commands/onboard.js';
 import { start } from './commands/start.js';
 import { status } from './commands/status.js';
@@ -35,16 +34,9 @@ program
 
 program
   .command('login')
-  .description('Authenticate with an OAuth provider (interactive)')
+  .description('Manage OAuth providers (log in, re-login, or remove)')
   .action(async () => {
     await login();
-  });
-
-program
-  .command('logout [provider]')
-  .description('Remove OAuth credentials and deregister provider from config')
-  .action(async (provider?: string) => {
-    await logout(provider);
   });
 
 program
