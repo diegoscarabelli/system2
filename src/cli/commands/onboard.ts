@@ -46,7 +46,7 @@ const OAUTH_PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
   {
     value: 'openai-codex',
     label: 'OpenAI Codex (ChatGPT)',
-    hint: 'Uses your ChatGPT account (Free, Plus, Pro, Business, Enterprise). Free has tighter rate limits.',
+    hint: 'Uses your ChatGPT account.',
   },
   {
     value: 'github-copilot',
