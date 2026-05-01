@@ -10,9 +10,39 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import open from 'open';
+import type { LlmConfig } from '../../shared/index.js';
 import { backupIfNeeded } from '../utils/backup.js';
 import { loadConfig, SYSTEM2_DIR } from '../utils/config.js';
 import { rotateLogIfNeeded } from '../utils/log-rotation.js';
+
+/**
+ * Build the auth-tier lines for the startup banner. Returns one line per
+ * configured tier (OAuth and/or API keys), each showing the full
+ * primary→fallback chain so the user sees what failover order will run.
+ *
+ * Rules:
+ *   - OAuth line shown only when `[llm.oauth]` is set in config.
+ *   - API-keys line shown only when at least one provider in
+ *     `llm.providers` has a non-empty keys array. The synthesized
+ *     `LlmConfig.primary` default (which exists even when the user
+ *     skipped api-keys at onboarding — see onboard.ts:594-605) is
+ *     intentionally NOT enough to show the line; we mirror the
+ *     buildConfigToml emit-template-when-empty rule so the banner
+ *     reflects what's actually usable.
+ */
+export function formatTierBanner(llm: LlmConfig): string[] {
+  const lines: string[] = [];
+  if (llm.oauth) {
+    const chain = [llm.oauth.primary, ...llm.oauth.fallback].join(' → ');
+    lines.push(`  OAuth tier:   ${chain}`);
+  }
+  const apiKeysConfigured = Object.values(llm.providers).some((p) => p && p.keys.length > 0);
+  if (apiKeysConfigured) {
+    const chain = [llm.primary, ...llm.fallback].join(' → ');
+    lines.push(`  API key tier: ${chain}`);
+  }
+  return lines;
+}
 
 const LOGS_DIR = join(SYSTEM2_DIR, 'logs');
 const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
@@ -50,14 +80,6 @@ export async function start(options: {
     }
   }
 
-  const primaryProvider = config.llm.primary;
-  const oauthPrimary = config.llm.oauth?.primary;
-
-  if (!primaryProvider) {
-    console.error('Error: No primary provider configured in config.toml');
-    process.exit(1);
-  }
-
   const port = options.port || 4242;
 
   // Automatic backup (only in normal start mode, not foreground spawned by background)
@@ -65,12 +87,20 @@ export async function start(options: {
     backupIfNeeded();
   }
 
+  const tierLines = formatTierBanner(config.llm);
+  if (tierLines.length === 0) {
+    // Onboarding enforces "at least one auth tier configured"; reaching
+    // here means config.toml was edited to remove all credentials.
+    console.error(
+      'Error: No auth tier configured. Add OAuth credentials via `system2 login` ' +
+        'or API keys to `[llm.api_keys.<provider>].keys` in config.toml.'
+    );
+    process.exit(1);
+  }
+
   console.log('Starting System2 Gateway...');
-  if (oauthPrimary) {
-    console.log(`  OAuth tier:   ${oauthPrimary}`);
-    console.log(`  API key tier: ${primaryProvider}`);
-  } else {
-    console.log(`  Provider: ${primaryProvider}`);
+  for (const line of tierLines) {
+    console.log(line);
   }
   console.log(`  Port: ${port}`);
   console.log('');
