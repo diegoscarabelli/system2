@@ -12,8 +12,9 @@ export interface PiAiOAuthCredentials {
   refresh: string;
   /** Epoch ms when access token expires (already includes pi-ai's 5 min safety buffer). */
   expires: number;
-  /** Provider-specific extras (projectId, email, enterpriseDomain). Preserved through
-   *  save/load and refresh so pi-ai's per-provider refresh handlers can rely on them. */
+  /** Provider-specific extras (e.g. Copilot's enterpriseDomain). Preserved
+   *  through save/load and refresh so pi-ai's per-provider refresh handlers
+   *  can rely on them. */
   [key: string]: unknown;
 }
 

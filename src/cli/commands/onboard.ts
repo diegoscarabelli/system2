@@ -296,7 +296,7 @@ async function runOAuthLogin(provider: LlmProvider): Promise<{ label: string } |
       },
       onProgress: (m) => s.message(m),
     });
-    // Spread preserves provider-specific extras (projectId, email, enterpriseDomain).
+    // Spread preserves provider-specific extras (e.g. Copilot's enterpriseDomain).
     saveOAuthCredentials(SYSTEM2_DIR, provider, {
       ...creds,
       label: label || defaultLabel,

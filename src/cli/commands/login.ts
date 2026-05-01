@@ -373,7 +373,7 @@ async function performLoginIteration(): Promise<'continue' | 'done'> {
       },
       onProgress: (m) => s.message(m),
     });
-    // Spread preserves provider-specific extras (projectId, email, enterpriseDomain).
+    // Spread preserves provider-specific extras (e.g. Copilot's enterpriseDomain).
     saveOAuthCredentials(SYSTEM2_DIR, target, {
       ...creds,
       label: label || defaultLabel,

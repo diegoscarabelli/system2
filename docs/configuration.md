@@ -259,7 +259,7 @@ Model selection differs between tiers, reflecting their cost models:
 
 ### Re-authenticating and managing credentials post-onboarding
 
-Use `system2 login` to manage OAuth credentials after onboarding. The command takes no positional arguments and is fully interactive: it presents a select of all five OAuth providers, with already-logged-in entries annotated. Behavior depends on the selection:
+Use `system2 login` to manage OAuth credentials after onboarding. The command takes no positional arguments and is fully interactive: it presents a select of all three OAuth providers, with already-logged-in entries annotated. Behavior depends on the selection:
 
 - **Not yet logged in.** The command runs the provider's browser OAuth flow, writes `~/.system2/oauth/<provider>.json`, and (if `[llm.oauth]` is missing or doesn't include the provider) auto-patches `config.toml` to enable the OAuth tier.
 - **Already logged in.** A 3-way menu opens: **re-login** (re-runs the OAuth flow, useful when a refresh token has been invalidated by signing out, password change, revoked grant, or idle-expiry), **remove** (deletes `~/.system2/oauth/<provider>.json` and removes the provider from `[llm.oauth]` in `config.toml`), or **cancel**.
