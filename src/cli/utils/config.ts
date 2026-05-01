@@ -30,10 +30,11 @@ import {
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
   DEFAULT_SESSION_ROTATION_SIZE_BYTES,
   validateAgentModels,
+  validateLlmModels,
 } from '../../shared/index.js';
 
 // Re-export so existing CLI consumers (and tests) can import from this module.
-export { validateAgentModels };
+export { validateAgentModels, validateLlmModels };
 
 export const SYSTEM2_DIR = join(homedir(), '.system2');
 export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
@@ -601,6 +602,7 @@ export function loadConfig(): System2Config {
 
   if (tomlConfig.llm) {
     config.llm = convertTomlLlm(tomlConfig.llm);
+    validateLlmModels(config.llm);
   }
 
   if (tomlConfig.agents) {

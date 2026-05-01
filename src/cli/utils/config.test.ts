@@ -11,6 +11,7 @@ import {
   DEFAULT_DELIVERY,
   DEFAULT_SESSION,
   validateAgentModels,
+  validateLlmModels,
 } from './config.js';
 
 describe('buildConfigToml', () => {
@@ -647,6 +648,80 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
     expect(reconstructed.oauth?.fallback).toEqual([]);
     expect(reconstructed.primary).toBe('openai');
     expect(reconstructed.providers.openai?.keys[0].key).toBe('oai-1');
+  });
+});
+
+describe('validateLlmModels', () => {
+  it('passes when OAuth pin and api-keys per-role pins are in catalog', () => {
+    expect(() =>
+      validateLlmModels({
+        primary: 'anthropic',
+        fallback: [],
+        providers: {
+          anthropic: {
+            keys: [],
+            models: { narrator: 'claude-haiku-4-5-20251001' },
+          },
+        },
+        oauth: {
+          primary: 'anthropic',
+          fallback: [],
+          providers: { anthropic: { model: 'claude-opus-4-7' } },
+        },
+      })
+    ).not.toThrow();
+  });
+
+  it('throws on unknown OAuth model with did-you-mean hint', () => {
+    expect(() =>
+      validateLlmModels({
+        primary: 'anthropic',
+        fallback: [],
+        providers: {},
+        oauth: {
+          primary: 'anthropic',
+          fallback: [],
+          providers: { anthropic: { model: 'claude-opus-4-99' } },
+        },
+      })
+    ).toThrow(/\[llm\.oauth\.anthropic\]\.model.*Did you mean/);
+  });
+
+  it('throws on unknown api-keys per-role model with did-you-mean hint', () => {
+    expect(() =>
+      validateLlmModels({
+        primary: 'anthropic',
+        fallback: [],
+        providers: {
+          anthropic: { keys: [], models: { narrator: 'claude-opus-4-99' } },
+        },
+      })
+    ).toThrow(/\[llm\.api_keys\.anthropic\.models\]\.narrator.*Did you mean/);
+  });
+
+  it('throws on unknown provider in OAuth pin', () => {
+    expect(() =>
+      validateLlmModels({
+        primary: 'anthropic',
+        fallback: [],
+        providers: {},
+        oauth: {
+          primary: 'anthropic',
+          fallback: [],
+          providers: { anthopic: { model: 'claude-opus-4-7' } } as never,
+        },
+      })
+    ).toThrow(/unknown provider "anthopic"/);
+  });
+
+  it('is a no-op when neither OAuth nor api-keys carry model pins', () => {
+    expect(() =>
+      validateLlmModels({
+        primary: 'anthropic',
+        fallback: [],
+        providers: { anthropic: { keys: [{ key: 'sk-x', label: 'main' }] } },
+      })
+    ).not.toThrow();
   });
 });
 

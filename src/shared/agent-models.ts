@@ -105,8 +105,49 @@ export function validateAgentModels(models: Record<string, Partial<Record<string
 }
 
 /**
- * Reset the memoized catalogs. Test-only helper; do not call in production code.
- * Useful when tests stub pi-ai's getProviders/getModels and need a fresh read.
+ * Validate model pins from `[llm.*]` against pi-ai's catalog.
+ * Walks `oauth.providers[*].model` and `providers[*].models[*]`. Throws with
+ * a Levenshtein "did you mean" hint on typos.
+ */
+export function validateLlmModels(llm: import('./types/config.js').LlmConfig): void {
+  const knownProviders = getKnownProviderSet();
+
+  function check(label: string, provider: string, modelId: string): void {
+    if (DYNAMIC_PROVIDERS.has(provider)) return;
+    if (!knownProviders.has(provider)) {
+      const valid = [...knownProviders, ...DYNAMIC_PROVIDERS].sort().join(', ');
+      throw new Error(
+        `${label} references unknown provider "${provider}". Valid providers: ${valid}.`
+      );
+    }
+    const ids = getCatalogIds(provider);
+    if (ids && !ids.includes(modelId)) {
+      const nearest = nearestModelId(provider, modelId);
+      const suggestion = nearest ? ` Did you mean "${nearest}"?` : '';
+      throw new Error(
+        `${label} references model "${modelId}" for provider "${provider}", ` +
+          `which is not in pi-ai's catalog.${suggestion}`
+      );
+    }
+  }
+
+  if (llm.oauth) {
+    for (const [provider, sub] of Object.entries(llm.oauth.providers)) {
+      if (!sub?.model) continue;
+      check(`[llm.oauth.${provider}].model`, provider, sub.model);
+    }
+  }
+
+  for (const [provider, sub] of Object.entries(llm.providers)) {
+    if (!sub?.models) continue;
+    for (const [role, modelId] of Object.entries(sub.models)) {
+      check(`[llm.api_keys.${provider}.models].${role}`, provider, modelId);
+    }
+  }
+}
+
+/**
+ * Reset memoized catalogs. Test-only helper; not for production code.
  */
 export function _resetAgentModelsCacheForTests(): void {
   knownProviderSet = undefined;
