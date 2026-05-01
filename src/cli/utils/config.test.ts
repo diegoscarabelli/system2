@@ -650,6 +650,58 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
   });
 });
 
+describe('convertTomlLlm — new shape', () => {
+  it('parses [llm.oauth.<provider>].model overrides', () => {
+    const llm = convertTomlLlm({
+      oauth: {
+        primary: 'anthropic',
+        fallback: [],
+        anthropic: { model: 'claude-opus-4-7' },
+      },
+      api_keys: { primary: 'anthropic', fallback: [] },
+    });
+    expect(llm.oauth?.providers.anthropic?.model).toBe('claude-opus-4-7');
+  });
+
+  it('skips OAuth provider entries without a model field', () => {
+    const llm = convertTomlLlm({
+      oauth: {
+        primary: 'anthropic',
+        fallback: [],
+        anthropic: { model: 'claude-opus-4-7' },
+        'openai-codex': {},
+      },
+      api_keys: { primary: 'anthropic', fallback: [] },
+    });
+    expect(llm.oauth?.providers).toEqual({ anthropic: { model: 'claude-opus-4-7' } });
+  });
+
+  it('parses [llm.api_keys.<provider>.models][<role>] per-role pins', () => {
+    const llm = convertTomlLlm({
+      api_keys: {
+        primary: 'anthropic',
+        fallback: [],
+        anthropic: {
+          keys: [{ key: 'sk-x', label: 'main' }],
+          models: { narrator: 'claude-haiku-4-5-20251001' },
+        },
+      },
+    });
+    expect(llm.providers.anthropic?.models?.narrator).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('omits api-keys models field when not set', () => {
+    const llm = convertTomlLlm({
+      api_keys: {
+        primary: 'anthropic',
+        fallback: [],
+        anthropic: { keys: [{ key: 'sk-x', label: 'main' }] },
+      },
+    });
+    expect(llm.providers.anthropic?.models).toBeUndefined();
+  });
+});
+
 describe('convertTomlDelivery', () => {
   it('reads valid config correctly with all fields present', () => {
     const result = convertTomlDelivery({

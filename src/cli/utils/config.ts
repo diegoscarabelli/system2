@@ -84,6 +84,13 @@ interface ProviderKeysToml {
   base_url?: string;
   model?: string;
   compat_reasoning?: boolean;
+  /** Per-role model pins (api-keys tier). Keys are role names. */
+  models?: Record<string, string>;
+}
+
+interface OAuthProviderToml {
+  /** Optional model pin for this OAuth provider; empty falls through to the resolver. */
+  model?: string;
 }
 
 interface TomlConfig {
@@ -104,27 +111,16 @@ interface TomlConfig {
     oauth?: {
       primary?: string;
       fallback?: string[];
+      anthropic?: OAuthProviderToml;
+      'openai-codex'?: OAuthProviderToml;
+      'github-copilot'?: OAuthProviderToml;
     };
-    /** Legacy 0.2.x fields under [llm] root. Replaced by [llm.api_keys] in 0.3.0;
-     *  still parsed by convertTomlLlm with a deprecation warning. */
-    primary?: string;
-    fallback?: string[];
-    anthropic?: ProviderKeysToml;
-    cerebras?: ProviderKeysToml;
-    google?: ProviderKeysToml;
-    groq?: ProviderKeysToml;
-    mistral?: ProviderKeysToml;
-    openai?: ProviderKeysToml;
-    openrouter?: ProviderKeysToml;
-    xai?: ProviderKeysToml;
-    'openai-compatible'?: ProviderKeysToml;
   };
   agents?: Record<
     string,
     {
       thinking_level?: string;
       compaction_depth?: number;
-      models?: Record<string, string>;
     }
   >;
   services?: {
@@ -222,25 +218,18 @@ const DEFAULT_OPERATIONAL: Pick<
   },
 };
 
-/** Either the new [llm.api_keys] table or the legacy [llm] root — same field shape. */
-type ApiKeysTomlSource = {
-  primary?: string;
-  fallback?: string[];
-  anthropic?: ProviderKeysToml;
-  cerebras?: ProviderKeysToml;
-  google?: ProviderKeysToml;
-  groq?: ProviderKeysToml;
-  mistral?: ProviderKeysToml;
-  openai?: ProviderKeysToml;
-  openrouter?: ProviderKeysToml;
-  xai?: ProviderKeysToml;
-  'openai-compatible'?: ProviderKeysToml;
-};
+type ApiKeysTomlSource = NonNullable<NonNullable<TomlConfig['llm']>['api_keys']>;
 
 function buildProvidersFromSource(
   source: ApiKeysTomlSource
 ): Partial<Record<LlmProvider, LlmProviderConfig>> {
   const providers: Partial<Record<LlmProvider, LlmProviderConfig>> = {};
+
+  function attachModels(cfg: LlmProviderConfig, sub: ProviderKeysToml | undefined) {
+    if (sub?.models && Object.keys(sub.models).length > 0) {
+      cfg.models = { ...sub.models };
+    }
+  }
 
   for (const name of [
     'anthropic',
@@ -251,11 +240,13 @@ function buildProvidersFromSource(
     'openai',
     'xai',
   ] as const) {
-    const providerToml = source[name];
-    if (providerToml?.keys && providerToml.keys.length > 0) {
-      const validKeys = providerToml.keys.filter((k) => k.key);
+    const sub = source[name];
+    if (sub?.keys && sub.keys.length > 0) {
+      const validKeys = sub.keys.filter((k) => k.key);
       if (validKeys.length > 0) {
-        providers[name] = { keys: validKeys };
+        const cfg: LlmProviderConfig = { keys: validKeys };
+        attachModels(cfg, sub);
+        providers[name] = cfg;
       }
     }
   }
@@ -281,11 +272,13 @@ function buildProvidersFromSource(
           config.routing = validRouting;
         }
       }
+      attachModels(config, openrouterToml);
       providers.openrouter = config;
     }
   }
 
-  // openai-compatible has extra fields (base_url, model)
+  // openai-compatible has extra fields (base_url, model). No `models` per-role
+  // map — the model is set globally for this provider.
   const compatToml = source['openai-compatible'];
   if (compatToml?.keys && compatToml.keys.length > 0) {
     const validKeys = compatToml.keys.filter((k) => k.key);
@@ -302,60 +295,12 @@ function buildProvidersFromSource(
   return providers;
 }
 
-/** True when any legacy 0.2.x [llm] field is set. Independent of api_keys presence.
- *  Detects `primary`, `fallback`, and any populated provider sub-table field
- *  (`keys`, `routing`, `base_url`, `model`, `compat_reasoning`) so users get a
- *  warning even when only stragglers like `[llm].fallback` or `[llm.openrouter.routing]`
- *  remain after a partial migration to `[llm.api_keys]`. */
-function hasLegacyLlmFields(toml: NonNullable<TomlConfig['llm']>): boolean {
-  if (typeof toml.primary === 'string') return true;
-  if (Array.isArray(toml.fallback) && toml.fallback.length > 0) return true;
-  for (const name of [
-    'anthropic',
-    'cerebras',
-    'google',
-    'groq',
-    'mistral',
-    'openai',
-    'openrouter',
-    'xai',
-    'openai-compatible',
-  ] as const) {
-    const sub = toml[name];
-    if (!sub) continue;
-    if (
-      (sub.keys?.length ?? 0) > 0 ||
-      sub.routing !== undefined ||
-      sub.base_url !== undefined ||
-      sub.model !== undefined ||
-      sub.compat_reasoning !== undefined
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /**
- * Convert TOML LLM section to LlmConfig. Reads both the new [llm.api_keys] shape
- * and the legacy 0.2.x flat shape; legacy emits a deprecation warning.
+ * Convert TOML [llm] section to LlmConfig. Reads only the [llm.api_keys] and
+ * [llm.oauth] shape; the previous flat [llm] layout is no longer parsed.
  */
 export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
-  const hasLegacy = hasLegacyLlmFields(toml);
-  if (hasLegacy && toml.api_keys) {
-    console.warn(
-      '[Config] config.toml mixes legacy [llm] fields with the new [llm.api_keys] table. ' +
-        'The new table wins; legacy primary/fallback/per-provider entries under [llm] are ignored.'
-    );
-  } else if (hasLegacy) {
-    console.warn(
-      '[Config] config.toml uses the legacy [llm] schema (0.2.x). ' +
-        'Migrate to the [llm.api_keys] schema documented in docs/configuration.md. ' +
-        'Legacy parsing will be removed in a future release.'
-    );
-  }
-
-  const apiKeysSource: ApiKeysTomlSource = toml.api_keys ?? toml;
+  const apiKeysSource: ApiKeysTomlSource = toml.api_keys ?? {};
   const providers = buildProvidersFromSource(apiKeysSource);
 
   const config: LlmConfig = {
@@ -365,10 +310,17 @@ export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig 
   };
 
   if (toml.oauth?.primary) {
+    const oauthProviders: Partial<Record<LlmProvider, { model?: string }>> = {};
+    for (const name of ['anthropic', 'openai-codex', 'github-copilot'] as const) {
+      const sub = toml.oauth[name];
+      if (sub?.model) {
+        oauthProviders[name] = { model: sub.model };
+      }
+    }
     config.oauth = {
       primary: toml.oauth.primary as LlmProvider,
       fallback: (toml.oauth.fallback as LlmProvider[]) ?? [],
-      providers: {},
+      providers: oauthProviders,
     };
   }
 
