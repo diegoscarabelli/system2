@@ -649,6 +649,39 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
     expect(reconstructed.primary).toBe('openai');
     expect(reconstructed.providers.openai?.keys[0].key).toBe('oai-1');
   });
+
+  it('emits [llm.oauth.<provider>] block when an OAuth model pin is set', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
+      oauth: {
+        primary: 'anthropic',
+        fallback: [],
+        providers: { anthropic: { model: 'claude-opus-4-7' } },
+      },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toContain('[llm.oauth.anthropic]');
+    expect(toml).toContain('model = "claude-opus-4-7"');
+  });
+
+  it('emits [llm.api_keys.<provider>.models] block for per-role pins', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: {
+        anthropic: {
+          keys: [{ key: 'sk-ant', label: 'main' }],
+          models: { narrator: 'claude-haiku-4-5-20251001', conductor: 'claude-sonnet-4-6' },
+        },
+      },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toContain('[llm.api_keys.anthropic.models]');
+    expect(toml).toContain('narrator = "claude-haiku-4-5-20251001"');
+    expect(toml).toContain('conductor = "claude-sonnet-4-6"');
+  });
 });
 
 describe('validateLlmModels', () => {

@@ -682,6 +682,15 @@ export function buildConfigToml(options: {
       const fb = options.llm.oauth.fallback.map((f) => `"${f}"`).join(', ');
       lines.push(`fallback = [${fb}]`);
       lines.push('');
+
+      // Per-provider OAuth model pins (optional). When omitted, resolveOAuthModel
+      // picks the family flagship from pi-ai's catalog.
+      for (const [provider, sub] of Object.entries(options.llm.oauth.providers)) {
+        if (!sub?.model) continue;
+        lines.push(`[llm.oauth.${provider}]`);
+        lines.push(`model = "${sub.model}"`);
+        lines.push('');
+      }
     }
 
     lines.push('[llm.api_keys]');
@@ -733,6 +742,15 @@ export function buildConfigToml(options: {
           }
           if (provider.compat_reasoning !== undefined) {
             lines.push(`compat_reasoning = ${provider.compat_reasoning}`);
+          }
+        }
+
+        // Per-role model pins for this provider (api-keys tier).
+        if (provider.models && Object.keys(provider.models).length > 0) {
+          lines.push('');
+          lines.push(`[llm.api_keys.${name}.models]`);
+          for (const [role, modelId] of Object.entries(provider.models)) {
+            lines.push(`${role} = "${modelId}"`);
           }
         }
 
