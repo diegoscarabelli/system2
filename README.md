@@ -39,7 +39,7 @@ pnpm add -g @diegoscarabelli/system2      # install System2 globally
 system2 onboard          # one-time setup (see below)
 ```
 
-`system2 onboard` creates the `~/.system2/` directory and walks you through LLM credential setup (OAuth from any of the 5 supported subscriptions, API keys, or both, as described in Prerequisites) and optional Brave Search setup. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
+`system2 onboard` creates the `~/.system2/` directory and walks you through LLM credential setup (OAuth from any of the 3 supported subscriptions, API keys, or both, as described in Prerequisites) and optional Brave Search setup. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
 
 ```bash
 system2 start            # starts the server and opens the browser
@@ -75,7 +75,7 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**OAuth credentials.** Use `system2 login` to manage OAuth subscriptions: it lists all 5 supported providers (already-logged-in ones are annotated) and you pick one. Selecting a fresh provider runs the auth flow; selecting an already-logged-in provider opens a contextual menu to re-login, remove, or cancel. Stop the daemon before running it, and restart afterward to pick up the change.
+**OAuth credentials.** Use `system2 login` to manage OAuth subscriptions: it lists all 3 supported providers (already-logged-in ones are annotated) and you pick one. Selecting a fresh provider runs the auth flow; selecting an already-logged-in provider opens a contextual menu to re-login, remove, or cancel. Stop the daemon before running it, and restart afterward to pick up the change.
 
 ```bash
 system2 login            # interactive: add, re-login, or remove an OAuth credential
