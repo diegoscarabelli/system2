@@ -344,15 +344,18 @@ async function performLoginIteration(): Promise<'continue' | 'done'> {
   s.start('Waiting for browser authentication...');
   try {
     const creds = await loginProvider(target, {
-      onAuth: ({ url }) => {
+      onAuth: ({ url, instructions }) => {
         // Stop, print the URL persistently, attempt to open the browser, then
         // restart the spinner. s.message() would be overwritten on the next
         // onProgress; p.log.info() under an active spinner is suppressed.
-        // Stop+log+restart guarantees the URL stays visible. open() is
+        // Stop+log+restart guarantees the URL/code stay visible. open() is
         // best-effort: if it fails (no browser, headless env, etc.), the user
         // can still copy the URL above the spinner.
         s.stop('Browser authentication required:');
-        p.log.info(`Open this URL to authenticate (browser should open automatically):\n${url}`);
+        const detail = instructions ? `\n${instructions}` : '';
+        p.log.info(
+          `Open this URL to authenticate (browser should open automatically):\n${url}${detail}`
+        );
         void open(url).catch(() => {
           // Browser open failed — URL is already printed; user copies manually.
         });
