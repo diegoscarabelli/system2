@@ -33,6 +33,8 @@ import {
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
   type LlmConfig,
   type LlmProvider,
+  OAUTH_FALLBACKS,
+  resolveOAuthModel,
   type ServicesConfig,
   type ThinkingLevel,
   type ToolsConfig,
@@ -223,6 +225,14 @@ export class AgentHost {
   private busy = false;
   private lastTurnErrored = false;
   private oauthRefreshAttempted = false;
+  /** Set when the active OAuth model came from resolveOAuthModel (no user pin
+   *  in [llm.oauth.<provider>].model). Gates the 403/404 → fallback hook so
+   *  explicit user pins fail loudly instead of silently downgrading. */
+  private oauthAutoResolved = false;
+  /** Per-provider record of which OAuth credentials have already stepped down
+   *  to OAUTH_FALLBACKS this session. One step-down per provider; restart
+   *  re-tries the family flagship. */
+  private oauthFallbackUsedFor: Set<LlmProvider> = new Set();
   private deliverySendCount = 0;
   private compactionCount = 0;
   private compactionDepth = 0;
@@ -439,15 +449,35 @@ export class AgentHost {
         ],
       });
     } else {
-      // Try active provider first, then fallback providers in order
+      // Try active provider first, then fallback providers in order.
+      // Branch by tier: OAuth picks one model per provider via resolveOAuthModel
+      // (overridable by [llm.oauth.<p>].model); api-keys reads per-role pins
+      // from [llm.api_keys.<p>.models][<role>] then frontmatter.
       const providersToTry = [
         llmProvider,
         ...this.authResolver.providerOrder.filter((p) => p !== llmProvider),
       ];
 
       let resolvedProvider: LlmProvider | undefined;
+      let autoResolved = false;
       for (const provider of providersToTry) {
-        const id = agentConfig.models[provider as keyof typeof agentConfig.models];
+        let id: string | undefined;
+        if (this.currentTier === 'oauth') {
+          const userPin = this.llmConfig.oauth?.providers[provider]?.model;
+          if (userPin) {
+            id = userPin;
+          } else if (this.oauthFallbackUsedFor.has(provider)) {
+            id = OAUTH_FALLBACKS[provider];
+            autoResolved = true;
+          } else {
+            id = resolveOAuthModel(provider);
+            autoResolved = true;
+          }
+        } else {
+          id =
+            this.llmConfig.providers[provider]?.models?.[agentRecord.role] ??
+            agentConfig.models[provider as keyof typeof agentConfig.models];
+        }
         if (id) {
           modelId = id;
           resolvedProvider = provider;
@@ -467,6 +497,7 @@ export class AgentHost {
       llmProvider = resolvedProvider;
       this.currentProvider = resolvedProvider;
       this.currentKeyIndex = this.authResolver.getActiveKey(resolvedProvider)?.keyIndex ?? 0;
+      this.oauthAutoResolved = this.currentTier === 'oauth' && autoResolved;
     }
 
     log.info('[AgentHost] Selected model:', modelId, 'for provider:', llmProvider);
@@ -780,6 +811,35 @@ export class AgentHost {
     // Reset the send counter: the failed turn's sends are abandoned.
     // The retry/failover path will re-send and re-increment as needed.
     this.deliverySendCount = 0;
+
+    // OAuth model fallback: when the auto-resolved family flagship returns
+    // 403/404 (provider-specific entitlement / "model not found" signals),
+    // step down to OAUTH_FALLBACKS[provider] for the rest of the session.
+    // Skipped if the user explicitly pinned a model (oauthAutoResolved=false)
+    // — explicit pins fail loudly so the user fixes the pin.
+    if (
+      this.currentTier === 'oauth' &&
+      this.oauthAutoResolved &&
+      !this.oauthFallbackUsedFor.has(this.currentProvider) &&
+      (statusCode === 403 || statusCode === 404)
+    ) {
+      const fallback = OAUTH_FALLBACKS[this.currentProvider];
+      if (fallback) {
+        this.oauthFallbackUsedFor.add(this.currentProvider);
+        log.warn(
+          `[AgentHost] OAuth ${this.currentProvider} returned ${statusCode}; ` +
+            `stepping to fallback ${fallback}`
+        );
+        await this.reinitializeWithProvider(
+          this.currentProvider,
+          promptToRetry,
+          deliveriesToRetry,
+          'OAuth model fallback',
+          `${statusCode} on ${this.currentProvider} OAuth credential, retrying with ${fallback}`
+        );
+        return;
+      }
+    }
 
     // OAuth refresh-and-retry: 401 from an OAuth-tier credential should refresh once
     // before failing over. Refresh updates in-memory tokens; reinitialize the session
