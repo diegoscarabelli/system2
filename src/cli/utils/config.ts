@@ -467,7 +467,7 @@ const VALID_THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', '
 
 /**
  * Convert TOML agents section to AgentsConfig.
- * Each entry is a role name with optional overrides for thinking_level, compaction_depth, and models.
+ * Each entry is a role name with optional overrides for thinking_level and compaction_depth.
  */
 export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): AgentsConfig {
   const agents: AgentsConfig = {};

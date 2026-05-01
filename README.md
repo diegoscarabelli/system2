@@ -112,7 +112,7 @@ All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
 - **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
 - **`[llm.api_keys]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation.
 - **`[databases.*]`**: analytical database connections (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite) that agents and dashboard artifacts can query
-- **`[agents.*]`**: per-role overrides for thinking level, context compaction depth, and model selection per provider
+- **`[agents.*]`**: per-role behavior overrides for thinking level and context compaction depth. Per-role model pins live with their tier credentials: `[llm.api_keys.<provider>.models][<role>]` for the API-keys tier; `[llm.oauth.<provider>] model = "..."` for the OAuth tier (one model per provider, all roles).
 - **`[services.brave_search]`**: web search via Brave Search API (highly recommended)
 - **`[scheduler]`**: Narrator frequency (default: every 30 minutes)
 - **`[backup]`**: backup cooldown and retention (default: every 24 hours, keep 3)

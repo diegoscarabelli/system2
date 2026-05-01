@@ -87,9 +87,9 @@ describe('resolveOAuthModel', () => {
     expect(resolveOAuthModel('github-copilot')).toBe('gpt-5.4');
   });
 
-  it('returns hardcoded fallback for unsupported provider', async () => {
+  it('returns undefined for a provider with no family or fallback entry', async () => {
     const { resolveOAuthModel } = await import('./oauth-models.js');
-    // groq has no family entry; resolver should return undefined.
+    // groq has no entry in OAUTH_FAMILIES nor OAUTH_FALLBACKS.
     expect(resolveOAuthModel('groq')).toBeUndefined();
   });
 
