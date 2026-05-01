@@ -19,8 +19,32 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LlmConfig } from '../../shared/index.js';
-import { AgentHost, MAX_DELIVERY_BYTES } from './host.js';
+import { AgentHost, MAX_DELIVERY_BYTES, pickModelForTier } from './host.js';
 import type { AgentRegistry } from './registry.js';
+
+// Mock pi-ai's catalog for pickModelForTier tests so the OAuth resolver
+// returns deterministic IDs regardless of what's installed.
+vi.mock('@mariozechner/pi-ai', () => ({
+  getProviders: () => ['anthropic', 'openai-codex', 'github-copilot'],
+  getModels: (provider: string) => {
+    const catalogs: Record<string, Array<{ id: string; contextWindow: number }>> = {
+      anthropic: [
+        { id: 'claude-opus-4-6', contextWindow: 200000 },
+        { id: 'claude-opus-4-7', contextWindow: 200000 },
+        { id: 'claude-sonnet-4-6', contextWindow: 200000 },
+      ],
+      'openai-codex': [
+        { id: 'gpt-5.4', contextWindow: 272000 },
+        { id: 'gpt-5.5', contextWindow: 272000 },
+      ],
+      'github-copilot': [
+        { id: 'gpt-4.1', contextWindow: 128000 },
+        { id: 'gpt-5.4', contextWindow: 272000 },
+      ],
+    };
+    return catalogs[provider] ?? [];
+  },
+}));
 
 // Minimal stubs — we're testing internal state management, not the full agent lifecycle
 function makeLlmConfig(): LlmConfig {
@@ -4153,6 +4177,128 @@ describe('AgentHost', () => {
       expect(internal.pendingDeliveries).toHaveLength(2);
       expect(internal.pendingDeliveries[0].scheduledTask).toBe(true);
       expect(internal.pendingDeliveries[1].scheduledTask).toBe(false);
+    });
+  });
+});
+
+describe('pickModelForTier', () => {
+  const baseLlm = (): LlmConfig => ({
+    primary: 'anthropic',
+    fallback: [],
+    providers: { anthropic: { keys: [] } },
+  });
+  const fm = { anthropic: 'claude-sonnet-4-6', 'openai-codex': 'gpt-5.4' } as Partial<
+    Record<import('../../shared/index.js').LlmProvider, string>
+  >;
+
+  describe('OAuth tier', () => {
+    it('returns user pin from [llm.oauth.<p>].model with autoResolved=false', () => {
+      const llmConfig = baseLlm();
+      llmConfig.oauth = {
+        primary: 'anthropic',
+        fallback: [],
+        providers: { anthropic: { model: 'claude-opus-4-6' } },
+      };
+      const result = pickModelForTier({
+        tier: 'oauth',
+        provider: 'anthropic',
+        role: 'guide',
+        llmConfig,
+        frontmatterModels: fm,
+        fallbackUsedFor: new Set(),
+      });
+      expect(result).toEqual({ id: 'claude-opus-4-6', autoResolved: false });
+    });
+
+    it('returns resolveOAuthModel result with autoResolved=true when no pin and not stepped down', () => {
+      const llmConfig = baseLlm();
+      llmConfig.oauth = { primary: 'anthropic', fallback: [], providers: {} };
+      const result = pickModelForTier({
+        tier: 'oauth',
+        provider: 'anthropic',
+        role: 'guide',
+        llmConfig,
+        frontmatterModels: fm,
+        fallbackUsedFor: new Set(),
+      });
+      // Family /^claude-opus-/ in mocked catalog: latest is claude-opus-4-7.
+      expect(result).toEqual({ id: 'claude-opus-4-7', autoResolved: true });
+    });
+
+    it('returns OAUTH_FALLBACKS[provider] with autoResolved=true after step-down', () => {
+      const llmConfig = baseLlm();
+      llmConfig.oauth = { primary: 'anthropic', fallback: [], providers: {} };
+      const result = pickModelForTier({
+        tier: 'oauth',
+        provider: 'anthropic',
+        role: 'guide',
+        llmConfig,
+        frontmatterModels: fm,
+        fallbackUsedFor: new Set(['anthropic']),
+      });
+      // OAUTH_FALLBACKS.anthropic is 'claude-sonnet-4-6'.
+      expect(result).toEqual({ id: 'claude-sonnet-4-6', autoResolved: true });
+    });
+
+    it('isolates step-down per provider — sibling provider still uses resolver', () => {
+      const llmConfig = baseLlm();
+      llmConfig.oauth = { primary: 'anthropic', fallback: ['openai-codex'], providers: {} };
+      const result = pickModelForTier({
+        tier: 'oauth',
+        provider: 'openai-codex',
+        role: 'guide',
+        llmConfig,
+        frontmatterModels: fm,
+        // Anthropic stepped down, but openai-codex still gets the resolver.
+        fallbackUsedFor: new Set(['anthropic']),
+      });
+      expect(result).toEqual({ id: 'gpt-5.5', autoResolved: true });
+    });
+  });
+
+  describe('API-keys tier', () => {
+    it('returns [llm.api_keys.<p>.models][role] when set, autoResolved=false', () => {
+      const llmConfig = baseLlm();
+      llmConfig.providers.anthropic = {
+        keys: [{ key: 'sk-x', label: 'main' }],
+        models: { narrator: 'claude-haiku-4-5-20251001' },
+      };
+      const result = pickModelForTier({
+        tier: 'api_keys',
+        provider: 'anthropic',
+        role: 'narrator',
+        llmConfig,
+        frontmatterModels: fm,
+        fallbackUsedFor: new Set(),
+      });
+      expect(result).toEqual({ id: 'claude-haiku-4-5-20251001', autoResolved: false });
+    });
+
+    it('falls through to frontmatter when no per-role pin', () => {
+      const llmConfig = baseLlm();
+      const result = pickModelForTier({
+        tier: 'api_keys',
+        provider: 'anthropic',
+        role: 'guide',
+        llmConfig,
+        frontmatterModels: fm,
+        fallbackUsedFor: new Set(),
+      });
+      expect(result).toEqual({ id: 'claude-sonnet-4-6', autoResolved: false });
+    });
+
+    it('returns undefined when neither api-keys pin nor frontmatter has the provider', () => {
+      const llmConfig = baseLlm();
+      const result = pickModelForTier({
+        tier: 'api_keys',
+        provider: 'github-copilot',
+        role: 'guide',
+        llmConfig,
+        frontmatterModels: fm,
+        fallbackUsedFor: new Set(),
+      });
+      expect(result.id).toBeUndefined();
+      expect(result.autoResolved).toBe(false);
     });
   });
 });

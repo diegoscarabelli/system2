@@ -186,6 +186,40 @@ export interface AgentHostConfig {
   onAgentTerminate?: () => void;
 }
 
+/**
+ * Pure helper: pick the model ID for `provider` under the active credential
+ * tier. Returns `{ id, autoResolved }` where `autoResolved` is true only when
+ * the model came from the OAuth resolver / hardcoded fallback path (no
+ * explicit `[llm.oauth.<provider>].model` pin) — gates the 403/404 → fallback
+ * hook in handlePotentialError.
+ *
+ * Resolution order:
+ *   - OAuth: user pin → OAUTH_FALLBACKS (if already stepped down) → resolveOAuthModel
+ *   - API-keys: [llm.api_keys.<provider>.models][role] → frontmatter models[provider]
+ */
+export function pickModelForTier(args: {
+  tier: AuthTier;
+  provider: LlmProvider;
+  role: string;
+  llmConfig: LlmConfig;
+  frontmatterModels: Partial<Record<LlmProvider, string>>;
+  fallbackUsedFor: ReadonlySet<LlmProvider>;
+}): { id: string | undefined; autoResolved: boolean } {
+  const { tier, provider, role, llmConfig, frontmatterModels, fallbackUsedFor } = args;
+  if (tier === 'oauth') {
+    const userPin = llmConfig.oauth?.providers[provider]?.model;
+    if (userPin) return { id: userPin, autoResolved: false };
+    if (fallbackUsedFor.has(provider)) {
+      return { id: OAUTH_FALLBACKS[provider], autoResolved: true };
+    }
+    return { id: resolveOAuthModel(provider), autoResolved: true };
+  }
+  const id =
+    llmConfig.providers[provider]?.models?.[role] ??
+    frontmatterModels[provider as keyof typeof frontmatterModels];
+  return { id, autoResolved: false };
+}
+
 export class AgentHost {
   private session: AgentSession | null = null;
   private db: DatabaseClient;
@@ -451,9 +485,6 @@ export class AgentHost {
       });
     } else {
       // Try active provider first, then fallback providers in order.
-      // Branch by tier: OAuth picks one model per provider via resolveOAuthModel
-      // (overridable by [llm.oauth.<p>].model); api-keys reads per-role pins
-      // from [llm.api_keys.<p>.models][<role>] then frontmatter.
       const providersToTry = [
         llmProvider,
         ...this.authResolver.providerOrder.filter((p) => p !== llmProvider),
@@ -462,26 +493,18 @@ export class AgentHost {
       let resolvedProvider: LlmProvider | undefined;
       let autoResolved = false;
       for (const provider of providersToTry) {
-        let id: string | undefined;
-        if (this.currentTier === 'oauth') {
-          const userPin = this.llmConfig.oauth?.providers[provider]?.model;
-          if (userPin) {
-            id = userPin;
-          } else if (this.oauthFallbackUsedFor.has(provider)) {
-            id = OAUTH_FALLBACKS[provider];
-            autoResolved = true;
-          } else {
-            id = resolveOAuthModel(provider);
-            autoResolved = true;
-          }
-        } else {
-          id =
-            this.llmConfig.providers[provider]?.models?.[agentRecord.role] ??
-            agentConfig.models[provider as keyof typeof agentConfig.models];
-        }
-        if (id) {
-          modelId = id;
+        const result = pickModelForTier({
+          tier: this.currentTier,
+          provider,
+          role: agentRecord.role,
+          llmConfig: this.llmConfig,
+          frontmatterModels: agentConfig.models,
+          fallbackUsedFor: this.oauthFallbackUsedFor,
+        });
+        if (result.id) {
+          modelId = result.id;
           resolvedProvider = provider;
+          autoResolved = result.autoResolved;
           if (provider !== llmProvider) {
             log.info(
               `[AgentHost] No model for ${llmProvider} in ${agentConfig.name}, falling back to ${provider}`
