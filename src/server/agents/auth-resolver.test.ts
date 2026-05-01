@@ -18,12 +18,7 @@ function fakeOAuthProvider(id: string) {
     name: id,
     login: vi.fn(),
     refreshToken: vi.fn(),
-    getApiKey: (creds: { access: string; projectId?: string }) => {
-      if (id === 'google-gemini-cli' || id === 'google-antigravity') {
-        return JSON.stringify({ token: creds.access, projectId: creds.projectId });
-      }
-      return creds.access;
-    },
+    getApiKey: (creds: { access: string; projectId?: string }) => creds.access,
   } as unknown as ReturnType<typeof getOAuthProvider>;
 }
 
@@ -470,52 +465,6 @@ describe('AuthResolver.createAuthStorage', () => {
     expect(await storage.getApiKey('anthropic')).toBe('sk-ant-oat-abc');
   });
 
-  it('wraps google-gemini-cli OAuth as JSON with token and projectId', async () => {
-    const cfg: LlmConfig = {
-      primary: 'google-gemini-cli',
-      fallback: [],
-      providers: { 'google-gemini-cli': { keys: [] } },
-      oauth: { primary: 'google-gemini-cli', fallback: [] },
-    };
-    const resolver = new AuthResolver(cfg, undefined, {
-      'google-gemini-cli': {
-        access: 'gca-access',
-        refresh: 'rt',
-        expires: Date.now() + 3600_000,
-        label: 'gemini',
-        projectId: 'proj-42',
-      },
-    });
-    const storage = resolver.createAuthStorage();
-    const key = await storage.getApiKey('google-gemini-cli');
-    expect(key).toBeDefined();
-    expect(JSON.parse(key as string)).toEqual({ token: 'gca-access', projectId: 'proj-42' });
-  });
-
-  it('wraps google-antigravity OAuth as JSON with token and projectId', async () => {
-    const cfg: LlmConfig = {
-      primary: 'google-antigravity',
-      fallback: [],
-      providers: { 'google-antigravity': { keys: [] } },
-      oauth: { primary: 'google-antigravity', fallback: [] },
-    };
-    const resolver = new AuthResolver(cfg, undefined, {
-      'google-antigravity': {
-        access: 'antigrav-access',
-        refresh: 'rt',
-        expires: Date.now() + 3600_000,
-        label: 'antigravity',
-        projectId: 'proj-99',
-      },
-    });
-    const storage = resolver.createAuthStorage();
-    const key = await storage.getApiKey('google-antigravity');
-    expect(JSON.parse(key as string)).toEqual({
-      token: 'antigrav-access',
-      projectId: 'proj-99',
-    });
-  });
-
   it('falls back to raw access token when pi-ai has no provider for the id', async () => {
     mockedGetOAuthProvider.mockReturnValue(undefined);
     const cfg: LlmConfig = {
@@ -772,47 +721,5 @@ describe('AuthResolver.ensureFresh', () => {
     expect(seen[1]).toBe('rt-rotated');
     // Final state should reflect the second refresh
     expect(resolver.getActiveOAuthCredential('anthropic')?.refresh).toBe('rt-final');
-  });
-
-  it('passes full credential to refresh callback and persists extras', async () => {
-    const cfg: LlmConfig = {
-      ...makeTwoTierConfig(),
-      oauth: { primary: 'google-antigravity', fallback: [] },
-    };
-    const expiredCred: OAuthCredentials = {
-      access: 'old-access',
-      refresh: 'r1',
-      expires: Date.now() - 1000,
-      label: 'google-antigravity',
-      projectId: 'proj-1',
-      email: 'a@b.com',
-    };
-    const resolver = new AuthResolver(cfg, undefined, {
-      'google-antigravity': expiredCred,
-    });
-
-    const persisted: OAuthCredentials[] = [];
-    resolver.setPersistOAuth('google-antigravity', async (c) => {
-      persisted.push(c);
-    });
-
-    const refresh = vi.fn(
-      async (_provider: LlmProvider, cred: OAuthCredentials): Promise<OAuthCredentials> => ({
-        access: 'new-access',
-        refresh: 'r2',
-        expires: Date.now() + 3600_000,
-        label: cred.label,
-        projectId: cred.projectId, // pi-ai's antigravity refresh round-trips this
-        email: cred.email,
-      })
-    );
-
-    const refreshed = await resolver.ensureFresh({ refresh });
-    expect(refresh).toHaveBeenCalledWith('google-antigravity', expiredCred);
-    expect(refreshed.has('google-antigravity')).toBe(true);
-    expect(persisted).toHaveLength(1);
-    expect(persisted[0].projectId).toBe('proj-1');
-    expect(persisted[0].email).toBe('a@b.com');
-    expect(persisted[0].access).toBe('new-access');
   });
 });

@@ -35,16 +35,6 @@ const OAUTH_PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
     hint: 'Uses your ChatGPT subscription. Codex models only.',
   },
   {
-    value: 'google-gemini-cli',
-    label: 'Google Gemini CLI (Gemini subscription)',
-    hint: 'Uses your Google account / Gemini subscription.',
-  },
-  {
-    value: 'google-antigravity',
-    label: 'Google Antigravity',
-    hint: 'Uses your Google account via Antigravity. Access to Gemini 3, Claude, GPT-OSS.',
-  },
-  {
     value: 'github-copilot',
     label: 'GitHub Copilot',
     hint: 'Uses your GitHub Copilot subscription.',

@@ -10,8 +10,6 @@ export type LlmProvider =
   | 'cerebras'
   | 'github-copilot'
   | 'google'
-  | 'google-antigravity'
-  | 'google-gemini-cli'
   | 'groq'
   | 'mistral'
   | 'openai'

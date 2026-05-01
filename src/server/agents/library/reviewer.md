@@ -9,8 +9,6 @@ models:
   cerebras: zai-glm-4.7
   github-copilot: claude-sonnet-4.6
   google: gemini-3-flash-preview
-  google-antigravity: claude-sonnet-4-6
-  google-gemini-cli: gemini-3-pro-preview
   groq: llama-3.3-70b-versatile
   mistral: mistral-large-latest
   openai: gpt-4o

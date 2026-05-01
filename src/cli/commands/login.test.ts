@@ -161,16 +161,14 @@ describe('setProviderAsPrimary', () => {
   it('preserves the order of remaining fallbacks when promoting', () => {
     writeFileSync(
       configPath,
-      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "anthropic"\nfallback = ["openai-codex", "google-gemini-cli", "github-copilot"]\n\n[llm.anthropic]\nkeys = []\n`
+      `[llm]\nprimary = "anthropic"\nfallback = []\n\n[llm.oauth]\nprimary = "anthropic"\nfallback = ["openai-codex", "github-copilot"]\n\n[llm.anthropic]\nkeys = []\n`
     );
-    const result = setProviderAsPrimary(configPath, 'google-gemini-cli');
+    const result = setProviderAsPrimary(configPath, 'github-copilot');
     expect(result.changed).toBe(true);
     const content = readFileSync(configPath, 'utf-8');
-    expect(content).toMatch(/primary\s*=\s*"google-gemini-cli"/);
+    expect(content).toMatch(/primary\s*=\s*"github-copilot"/);
     // Old primary (anthropic) at head; promoted provider stripped from fallback.
-    expect(content).toMatch(
-      /fallback\s*=\s*\[\s*"anthropic"\s*,\s*"openai-codex"\s*,\s*"github-copilot"\s*\]/
-    );
+    expect(content).toMatch(/fallback\s*=\s*\[\s*"anthropic"\s*,\s*"openai-codex"\s*\]/);
   });
 
   it('is a no-op when provider is already primary', () => {

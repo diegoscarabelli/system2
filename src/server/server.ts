@@ -121,8 +121,6 @@ export class Server {
     const SUPPORTED_OAUTH_PROVIDERS: ReadonlySet<LlmProvider> = new Set([
       'anthropic',
       'github-copilot',
-      'google-antigravity',
-      'google-gemini-cli',
       'openai-codex',
     ]);
 

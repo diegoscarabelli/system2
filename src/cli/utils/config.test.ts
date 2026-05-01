@@ -1105,8 +1105,6 @@ describe('validateAgentModels', () => {
       conductor: {
         models: {
           'openai-codex': 'gpt-5.3-codex',
-          'google-gemini-cli': 'gemini-3-pro-preview',
-          'google-antigravity': 'gemini-3.1-pro-high',
           'github-copilot': 'claude-sonnet-4.6',
         },
       },

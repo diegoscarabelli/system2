@@ -516,8 +516,6 @@ const VALID_MODEL_PROVIDERS = new Set<string>([
   'cerebras',
   'github-copilot',
   'google',
-  'google-antigravity',
-  'google-gemini-cli',
   'groq',
   'mistral',
   'openai',
@@ -757,14 +755,13 @@ export function buildConfigToml(options: {
     lines.push('');
 
     if (options.llm.oauth) {
-      lines.push('# OAuth tier. Supported providers: anthropic, openai-codex, google-gemini-cli,');
+      lines.push('# OAuth tier. Supported providers: anthropic, openai-codex, github-copilot.');
       lines.push(
-        '# google-antigravity, github-copilot. Tokens live in ~/.system2/oauth/<provider>.json'
+        '# Tokens live in ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.'
       );
       lines.push(
-        '# (mode 0600), managed by `system2 login`. Edit primary/fallback to reorder; remove a'
+        '# Edit primary/fallback to reorder; remove a provider here AND its JSON file to fully deregister it.'
       );
-      lines.push('# provider here AND its JSON file to fully deregister it.');
       lines.push('[llm.oauth]');
       lines.push(`primary = "${options.llm.oauth.primary}"`);
       const fb = options.llm.oauth.fallback.map((f) => `"${f}"`).join(', ');

@@ -13,7 +13,7 @@ All System2 settings live in `~/.system2/config.toml`, created by `system2 onboa
 # OAuth tier — subscription credentials, tried first
 [llm.oauth]
 primary = "anthropic"
-fallback = []   # any of: anthropic, openai-codex, google-gemini-cli, google-antigravity, github-copilot
+fallback = []   # any of: anthropic, openai-codex, github-copilot
 
 # API key tier — billed per token, used after OAuth tier exhausted
 [llm.api_keys]
@@ -148,8 +148,6 @@ narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Nar
 | `openrouter` | Any model via OpenRouter (uses `provider/model` IDs) |
 | `xai` | Grok |
 | `openai-codex` | OAuth-only: ChatGPT subscription via OpenAI Codex CLI flow. Codex models only (gpt-5.x-codex variants). |
-| `google-gemini-cli` | OAuth-only: Google account / Gemini subscription via Google Gemini CLI flow. Gemini 2.x and 3 variants. |
-| `google-antigravity` | OAuth-only: Google account via Antigravity. Access to Gemini 3, Claude (Sonnet/Opus thinking variants), and GPT-OSS. |
 | `github-copilot` | OAuth-only: GitHub Copilot subscription. Mixed lineup including Claude Sonnet/Haiku and GPT-5 variants. |
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
@@ -214,22 +212,24 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 
 System2 has two auth tiers:
 
-- **OAuth tier**: subscription credentials (`[llm.oauth]`). Tried first. Five providers are supported as first-class OAuth IDs: `anthropic` (Claude Pro/Max), `openai-codex` (ChatGPT subscription via the Codex CLI flow), `google-gemini-cli` (Google account / Gemini subscription), `google-antigravity` (Google account via Antigravity, exposing Gemini 3, Claude thinking variants, and GPT-OSS), and `github-copilot` (Copilot subscription). Any of the five may be used as `primary` or in `fallback`, in any order.
+- **OAuth tier**: subscription credentials (`[llm.oauth]`). Tried first. Three providers are supported as first-class OAuth IDs: `anthropic` (Claude Pro/Max), `openai-codex` (ChatGPT subscription via the Codex CLI flow), and `github-copilot` (Copilot subscription). Any of the three may be used as `primary` or in `fallback`, in any order.
 - **API key tier** — `[llm.api_keys].primary` + `fallback`, with per-provider keys nested at `[llm.api_keys.<provider>].keys`. Used after the OAuth tier is fully exhausted (every OAuth credential in cooldown). The legacy 0.2.x layout (`[llm].primary` + sibling `[llm.<provider>]`) is still parsed with a one-time deprecation warning; migrate by moving fields under `[llm.api_keys]`.
 
 The OAuth tier is fully exhausted before the system drops into the API key tier — never interleaving. If `[llm.oauth]` is absent, system2 behaves exactly like an API-key-only setup.
 
 ### OAuth subscription support
 
-System2 delegates OAuth provider behavior to pi-ai's provider registry. `getOAuthProvider(id)` returns a small adapter that knows how to run the browser login flow, refresh access tokens, and surface a usable bearer for each of the five providers (`anthropic`, `openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`). The agent loop, custom tools, and multi-agent orchestration are unchanged across providers; only the auth path varies. The `[llm.oauth]` shape (`primary` + `fallback`) accepts any of the five provider IDs, in any order.
+System2 delegates OAuth provider behavior to pi-ai's provider registry. `getOAuthProvider(id)` returns a small adapter that knows how to run the browser login flow, refresh access tokens, and surface a usable bearer for each of the three providers (`anthropic`, `openai-codex`, `github-copilot`). The agent loop, custom tools, and multi-agent orchestration are unchanged across providers; only the auth path varies. The `[llm.oauth]` shape (`primary` + `fallback`) accepts any of the three provider IDs, in any order.
 
-**Credential shape.** Credentials are written to `~/.system2/oauth/<provider>.json` (mode 0600). The `OAuthCredentials` type has an open shape: providers that need extra context store it alongside the access/refresh tokens. Antigravity records `projectId` and the user's `email`; Gemini CLI records its own `projectId`; Copilot may record an `enterpriseDomain`. These extras are preserved across refreshes.
+> **Note:** pi-ai 0.71.0 (2026-04-30) removed `google-gemini-cli` and `google-antigravity` because Google has been disabling user accounts that authenticate via these flows from third-party tools (pi-mono#4017, pi-mono#3999). System2 aligns. If you have legacy `~/.system2/oauth/google-{gemini-cli,antigravity}.json` credential files, they are silently ignored at startup; safe to delete.
+
+**Credential shape.** Credentials are written to `~/.system2/oauth/<provider>.json` (mode 0600). The `OAuthCredentials` type has an open shape: providers that need extra context store it alongside the access/refresh tokens. Copilot may record an `enterpriseDomain`. These extras are preserved across refreshes.
 
 **Setup:** During `system2 onboard`, the first step asks whether to configure OAuth and lets you pick a provider. The chosen provider's browser flow runs; the resulting tokens are saved to `~/.system2/oauth/<provider>.json`.
 
 **Refresh:** OAuth access tokens expire on each provider's own schedule (Anthropic roughly hourly; the others vary). The daemon refreshes them automatically before each agent session creation and on 401 errors. Refreshed tokens are persisted back to the same file.
 
-**Anthropic-specific behavior.** The pi-ai SDK detects Anthropic OAuth tokens (substring match `sk-ant-oat`) and switches the Anthropic client to Bearer auth plus the Claude Code identity headers required by the Pro/Max subscription path. The other providers do not share that path: `openai-codex` posts to the OpenAI Responses API with Codex-CLI-shaped requests, `google-gemini-cli` and `google-antigravity` go through Google's Cloud Code Assist surface, and `github-copilot` hits Copilot's chat completions endpoint, each with its own request shape, headers, and project/enterprise scoping.
+**Anthropic-specific behavior.** The pi-ai SDK detects Anthropic OAuth tokens (substring match `sk-ant-oat`) and switches the Anthropic client to Bearer auth plus the Claude Code identity headers required by the Pro/Max subscription path. The other providers do not share that path: `openai-codex` posts to the OpenAI Responses API with Codex-CLI-shaped requests, and `github-copilot` hits Copilot's chat completions endpoint, each with its own request shape, headers, and project/enterprise scoping.
 
 **Failover:** A 401 on an OAuth credential triggers one refresh-and-retry. If refresh succeeds, the session reinitializes with the new token and the prompt retries. If refresh fails (or any other error), the OAuth credential enters cooldown and the next OAuth fallback is tried; once the OAuth tier is exhausted, the system drops into the API key tier.
 
@@ -288,7 +288,7 @@ anthropic = "claude-opus-4-6"
 google = "gemini-3.1-pro-preview"
 ```
 
-`[agents.<role>.models]` accepts every provider ID listed in the [providers table](#llm-providers) **except** `openai-compatible`, including the four OAuth-only additions (`openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`). `openai-compatible` is not supported as a per-agent model override (the model for that provider is set globally via `[llm.api_keys.openai-compatible].model`). At startup, every supported `(provider, modelId)` pair is cross-checked against pi-ai's `MODELS` catalog; unknown provider IDs throw with the list of valid providers, and unknown model IDs throw with did-you-mean suggestions on near-miss typos.
+`[agents.<role>.models]` accepts every provider ID listed in the [providers table](#llm-providers) **except** `openai-compatible`, including the OAuth-only additions (`openai-codex`, `github-copilot`). `openai-compatible` is not supported as a per-agent model override (the model for that provider is set globally via `[llm.api_keys.openai-compatible].model`). At startup, every supported `(provider, modelId)` pair is cross-checked against pi-ai's `MODELS` catalog; unknown provider IDs throw with the list of valid providers, and unknown model IDs throw with did-you-mean suggestions on near-miss typos.
 
 ### How it works
 

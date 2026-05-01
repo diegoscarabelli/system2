@@ -44,7 +44,7 @@ At least one auth tier (OAuth or API key) must be configured. The OAuth step com
 
 ### `system2 login`
 
-Interactive OAuth provider management. Lists all supported providers (Anthropic, OpenAI Codex, Google Gemini CLI, Google Antigravity, GitHub Copilot); already-logged-in entries are annotated.
+Interactive OAuth provider management. Lists all supported providers (Anthropic, OpenAI Codex, GitHub Copilot); already-logged-in entries are annotated.
 
 - Selecting a provider that is **not** logged in: runs the OAuth flow, writes tokens to `~/.system2/oauth/<provider>.json` (mode 0600), and auto-patches `[llm.oauth]` in `config.toml` (creates the section if missing, otherwise appends to `fallback`).
 - Selecting a provider that **is** logged in: opens a contextual menu with three options: **Re-login** (replace credentials), **Remove** (delete the credentials file and remove the provider from `[llm.oauth]`), or **Cancel**.

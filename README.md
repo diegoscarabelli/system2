@@ -24,7 +24,7 @@ It exists to help people think more clearly about complex questions and empower 
 
 1. **[Node.js 20+](https://nodejs.org/)** and **[pnpm 8+](https://pnpm.io/installation)** (in a terminal, run `node -v` and `pnpm -v` to check)
 2. **An LLM credential** (at least one required). Two tiers, combinable, both configurable during onboarding:
-   - **OAuth subscription support** (recommended if you already pay for one of these): use your existing AI account instead of API keys, with no per-token cost. Supported: Anthropic (Claude Pro/Max), OpenAI (ChatGPT Plus/Pro via the Codex CLI flow), Google (Gemini subscription via the Gemini CLI flow), Google Antigravity (via your Google account), and GitHub Copilot.
+   - **OAuth subscription support** (recommended if you already pay for one of these): use your existing AI account instead of API keys, with no per-token cost. Supported: Anthropic (Claude Pro/Max), OpenAI (ChatGPT Plus/Pro via the Codex CLI flow), and GitHub Copilot.
    - **API keys**: pay-per-token across providers. [OpenRouter](https://openrouter.ai/) is recommended for access to multiple models with one key; Anthropic, Google, OpenAI, and others also work. You can add multiple keys for rotation and multiple providers for failover.
 
    Combining both tiers gives you OAuth as the primary path with API keys as fallback when an OAuth subscription rate-limits.
@@ -109,7 +109,7 @@ pnpm update -g @diegoscarabelli/system2
 
 All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
 
-- **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, Google Gemini CLI, Google Antigravity, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
+- **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
 - **`[llm.api_keys]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation. (Legacy 0.2.x `[llm]` shape still parsed with a deprecation warning.)
 - **`[databases.*]`**: analytical database connections (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite) that agents and dashboard artifacts can query
 - **`[agents.*]`**: per-role overrides for thinking level, context compaction depth, and model selection per provider
@@ -147,7 +147,7 @@ System2's home directory is `~/.system2/`. It holds all system state: configurat
 ├── app.db                           SQLite database (gitignored)
 ├── config.toml                      Settings and API keys (0600, gitignored)
 ├── oauth/                           OAuth credentials (0600, gitignored)
-│   └── {provider}.json              OAuth tokens (one file per logged-in provider, e.g. anthropic.json, google-antigravity.json)
+│   └── {provider}.json              OAuth tokens (one file per logged-in provider, e.g. anthropic.json, openai-codex.json)
 ├── knowledge/                       Persistent knowledge (git-tracked)
 │   ├── conductor.md                 Conductor role-specific knowledge
 │   ├── daily_summaries/             Daily activity logs
