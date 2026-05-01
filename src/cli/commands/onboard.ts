@@ -568,8 +568,10 @@ export async function onboard(): Promise<void> {
 
   p.log.info(
     'Before we can get to work, we need at least one LLM provider configured. ' +
-      'You can use OAuth (Claude Pro/Max subscription) and/or API keys. ' +
-      "Don't worry, you can always change or add providers later by editing ~/.system2/config.toml directly."
+      'You can use an OAuth subscription (Anthropic, OpenAI Codex, or GitHub Copilot) ' +
+      'and/or API keys for any of the supported providers. ' +
+      'You can change this later: run `system2 login` to manage OAuth providers, ' +
+      'or edit `~/.system2/config.toml` directly to update API keys and per-role pins.'
   );
 
   try {
