@@ -24,6 +24,7 @@ import type {
   ToolsConfig,
 } from '../../shared/index.js';
 import { buildConfigToml, CONFIG_FILE, SYSTEM2_DIR, writeConfigFile } from '../utils/config.js';
+import { formatOAuthAuthMessage } from './login.js';
 
 const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
@@ -278,10 +279,7 @@ async function runOAuthLogin(provider: LlmProvider): Promise<{ label: string } |
         // Stop+log+restart guarantees the URL/code stay visible. open() is
         // best-effort.
         s.stop('Browser authentication required:');
-        const detail = instructions ? `\n${instructions}` : '';
-        p.log.info(
-          `Open this URL to authenticate (browser should open automatically):\n${url}${detail}`
-        );
+        p.log.info(formatOAuthAuthMessage(url, instructions));
         void open(url).catch(() => {
           // Browser open failed — URL is already printed; user copies manually.
         });

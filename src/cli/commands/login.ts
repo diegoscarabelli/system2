@@ -10,6 +10,19 @@ import { saveOAuthCredentials } from '../../server/agents/oauth-credentials.js';
 import type { LlmProvider } from '../../shared/index.js';
 import { CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
 
+/**
+ * Format the message shown when an OAuth provider needs browser auth.
+ * Some providers (Anthropic, Codex) use a localhost callback flow and only
+ * supply `url`; others (GitHub Copilot) use the device flow and supply an
+ * `instructions` string with the user code that must be entered manually.
+ * Returning a single formatted string lets login/onboard share the wording
+ * and gives us a small testable surface for "don't drop the device code".
+ */
+export function formatOAuthAuthMessage(url: string, instructions?: string): string {
+  const detail = instructions ? `\n${instructions}` : '';
+  return `Open this URL to authenticate (browser should open automatically):\n${url}${detail}`;
+}
+
 function isDaemonRunning(): boolean {
   const pidFile = join(SYSTEM2_DIR, 'server.pid');
   if (!existsSync(pidFile)) return false;
@@ -352,10 +365,7 @@ async function performLoginIteration(): Promise<'continue' | 'done'> {
         // best-effort: if it fails (no browser, headless env, etc.), the user
         // can still copy the URL above the spinner.
         s.stop('Browser authentication required:');
-        const detail = instructions ? `\n${instructions}` : '';
-        p.log.info(
-          `Open this URL to authenticate (browser should open automatically):\n${url}${detail}`
-        );
+        p.log.info(formatOAuthAuthMessage(url, instructions));
         void open(url).catch(() => {
           // Browser open failed — URL is already printed; user copies manually.
         });
