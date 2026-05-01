@@ -213,7 +213,13 @@ export function pickModelForTier(args: {
 }): { id: string | undefined; autoResolved: boolean } {
   const { tier, provider, role, llmConfig, frontmatterModels, fallbackUsedFor } = args;
   if (tier === 'oauth') {
-    const userPin = llmConfig.oauth?.providers[provider]?.model;
+    // `oauth.providers` is keyed by OAuthProvider (the narrowed subset);
+    // `provider` here is LlmProvider. Index via a typed cast: if the active
+    // provider isn't in OAUTH_PROVIDER_IDS the lookup just returns undefined,
+    // which is the correct fall-through (no user pin → resolver path below).
+    const userPin =
+      llmConfig.oauth?.providers[provider as keyof NonNullable<typeof llmConfig.oauth>['providers']]
+        ?.model;
     if (userPin) return { id: userPin, autoResolved: false };
     if (fallbackUsedFor.has(provider)) {
       return { id: OAUTH_FALLBACKS[provider], autoResolved: true };

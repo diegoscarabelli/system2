@@ -20,6 +20,7 @@ import type {
   LlmOAuthConfig,
   LlmProvider,
   LlmProviderConfig,
+  OAuthProvider,
   ServicesConfig,
   ToolsConfig,
 } from '../../shared/index.js';
@@ -38,7 +39,7 @@ const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: 'xai', label: 'xAI (Grok)' },
 ];
 
-const OAUTH_PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
+const OAUTH_PROVIDERS: { value: OAuthProvider; label: string; hint: string }[] = [
   {
     value: 'anthropic',
     label: 'Anthropic (Claude Pro/Max)',
@@ -327,14 +328,14 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
   if (!wantsOAuth) return null;
 
   let availableOAuth = [...OAUTH_PROVIDERS];
-  let primary: LlmProvider | undefined;
+  let primary: OAuthProvider | undefined;
 
   // Outer loop: keep trying primary candidates until one succeeds or the user gives up.
   while (!primary && availableOAuth.length > 0) {
     const candidate = (await p.select({
       message: 'Select your primary OAuth provider:',
       options: availableOAuth,
-    })) as LlmProvider;
+    })) as OAuthProvider;
     if (p.isCancel(candidate)) {
       p.cancel('Onboarding cancelled');
       process.exit(0);
@@ -375,7 +376,7 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
   // Don't reuse availableOAuth: it has been pruned of providers the user gave up on as
   // primary candidates, but a transient primary failure shouldn't permanently disqualify
   // them from being tried as fallback.
-  const fallback: LlmProvider[] = [];
+  const fallback: OAuthProvider[] = [];
   let availableFallback = OAUTH_PROVIDERS.filter((o) => o.value !== primary);
   while (availableFallback.length > 0) {
     const addMore = await p.confirm({
@@ -391,7 +392,7 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
     const next = (await p.select({
       message: 'Select fallback OAuth provider:',
       options: availableFallback,
-    })) as LlmProvider;
+    })) as OAuthProvider;
     if (p.isCancel(next)) {
       p.cancel('Onboarding cancelled');
       process.exit(0);

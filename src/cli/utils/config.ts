@@ -15,6 +15,7 @@ import TOML from '@iarna/toml';
 import type {
   AgentOverrideConfig,
   AgentsConfig,
+  ApiKeysProvider,
   DatabaseConnectionConfig,
   DatabasesConfig,
   DeliveryConfig,
@@ -28,9 +29,9 @@ import type {
   ToolsConfig,
 } from '../../shared/index.js';
 import {
+  API_KEYS_PROVIDER_IDS,
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
   DEFAULT_SESSION_ROTATION_SIZE_BYTES,
-  LLM_PROVIDER_IDS,
   OAUTH_PROVIDER_IDS,
   validateAgentModels,
   validateLlmModels,
@@ -355,18 +356,18 @@ export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig 
   const apiKeysSource: ApiKeysTomlSource = toml.api_keys ?? {};
   const providers = buildProvidersFromSource(apiKeysSource);
 
-  const primary: LlmProvider =
+  const primary: ApiKeysProvider =
     apiKeysSource.primary === undefined
       ? 'anthropic'
       : validateProviderId(
           apiKeysSource.primary,
-          LLM_PROVIDER_IDS,
+          API_KEYS_PROVIDER_IDS,
           'API keys',
           '[llm.api_keys].primary'
         );
-  const fallback: LlmProvider[] = validateProviderArray(
+  const fallback: ApiKeysProvider[] = validateProviderArray(
     apiKeysSource.fallback,
-    LLM_PROVIDER_IDS,
+    API_KEYS_PROVIDER_IDS,
     'API keys',
     '[llm.api_keys].fallback'
   );

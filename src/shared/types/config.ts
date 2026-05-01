@@ -29,6 +29,25 @@ export const OAUTH_PROVIDER_IDS = ['anthropic', 'github-copilot', 'openai-codex'
 
 export type OAuthProvider = (typeof OAUTH_PROVIDER_IDS)[number];
 
+/** Providers usable in the API-keys tier. Excludes the OAuth-only providers
+ *  (`openai-codex`, `github-copilot`), since `buildProvidersFromSource` does
+ *  not iterate them and supplying keys for them in `[llm.api_keys]` would be
+ *  silently ignored. Used to validate `[llm.api_keys].primary` and
+ *  `[llm.api_keys].fallback` at parse time. */
+export const API_KEYS_PROVIDER_IDS = [
+  'anthropic',
+  'cerebras',
+  'google',
+  'groq',
+  'mistral',
+  'openai',
+  'openai-compatible',
+  'openrouter',
+  'xai',
+] as const;
+
+export type ApiKeysProvider = (typeof API_KEYS_PROVIDER_IDS)[number];
+
 export interface LlmKey {
   key: string;
   label: string;
@@ -52,10 +71,10 @@ export interface LlmOAuthProviderConfig {
 }
 
 export interface LlmOAuthConfig {
-  primary: LlmProvider;
-  fallback: LlmProvider[];
+  primary: OAuthProvider;
+  fallback: OAuthProvider[];
   /** Per-provider OAuth-tier overrides (currently just `model`). */
-  providers: Partial<Record<LlmProvider, LlmOAuthProviderConfig>>;
+  providers: Partial<Record<OAuthProvider, LlmOAuthProviderConfig>>;
 }
 
 export interface LlmConfig {
