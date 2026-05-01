@@ -225,9 +225,10 @@ export class AgentHost {
   private busy = false;
   private lastTurnErrored = false;
   private oauthRefreshAttempted = false;
-  /** Set when the active OAuth model came from resolveOAuthModel (no user pin
-   *  in [llm.oauth.<provider>].model). Gates the 403/404 → fallback hook so
-   *  explicit user pins fail loudly instead of silently downgrading. */
+  /** True when the active OAuth model was NOT explicitly user-pinned in
+   *  [llm.oauth.<provider>].model — i.e., it came from resolveOAuthModel or
+   *  from OAUTH_FALLBACKS after a prior 403/404 step-down. Gates the 403/404
+   *  → fallback hook so explicit user pins fail loudly. */
   private oauthAutoResolved = false;
   /** Per-provider record of which OAuth credentials have already stepped down
    *  to OAUTH_FALLBACKS this session. One step-down per provider; restart

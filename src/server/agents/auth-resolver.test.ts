@@ -420,16 +420,16 @@ describe('AuthResolver — two-tier model', () => {
   it('walks oauth fallback before dropping to keys tier', () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: ['openai'], providers: {} },
+      oauth: { primary: 'anthropic', fallback: ['openai-codex'], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(),
-      openai: { ...makeOAuthCreds(), label: 'codex' },
+      'openai-codex': { ...makeOAuthCreds(), label: 'codex' },
     });
     resolver.markKeyFailed('anthropic', 'auth', 'fail', 0, 'oauth');
     const active = resolver.getActiveCredential();
     expect(active?.tier).toBe('oauth');
-    expect(active?.provider).toBe('openai');
+    expect(active?.provider).toBe('openai-codex');
   });
 
   it('providerOrder includes both tiers, deduplicated', () => {
@@ -642,18 +642,18 @@ describe('AuthResolver.ensureFresh', () => {
   it('does not force-refresh providers not in the force list', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: ['openai'], providers: {} },
+      oauth: { primary: 'anthropic', fallback: ['openai-codex'], providers: {} },
     };
     let anthropicCalled = false;
-    let openaiCalled = false;
+    let codexCalled = false;
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(60 * 60_000), // fresh
-      openai: { ...makeOAuthCreds(60 * 60_000), label: 'openai-oauth' }, // fresh
+      'openai-codex': { ...makeOAuthCreds(60 * 60_000), label: 'codex-oauth' }, // fresh
     });
     await resolver.ensureFresh({
       refresh: async (provider, _cred) => {
         if (provider === 'anthropic') anthropicCalled = true;
-        else openaiCalled = true;
+        else codexCalled = true;
         return {
           access: 'new',
           refresh: 'rt-new',
@@ -664,7 +664,7 @@ describe('AuthResolver.ensureFresh', () => {
       force: ['anthropic'], // only force anthropic
     });
     expect(anthropicCalled).toBe(true);
-    expect(openaiCalled).toBe(false);
+    expect(codexCalled).toBe(false);
   });
 
   // Bug B regression: use latest credential after awaiting an existing refresh lock
