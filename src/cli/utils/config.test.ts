@@ -424,6 +424,8 @@ describe('buildConfigToml', () => {
     const result = buildConfigToml({});
     expect(result).toContain('# [agents.');
     expect(result).not.toMatch(/^\[agents\./m);
+    // Model-pin hints live in their tier sections now, not under agents.
+    expect(result).not.toMatch(/# Per-role model pins.*live under/);
   });
 });
 
@@ -681,6 +683,114 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
     expect(toml).toContain('[llm.api_keys.anthropic.models]');
     expect(toml).toContain('narrator = "claude-haiku-4-5-20251001"');
     expect(toml).toContain('conductor = "claude-sonnet-4-6"');
+  });
+
+  // Regression guard: when onboard skips the api-keys tier, it synthesizes
+  // a placeholder LlmConfig with primary set but no provider keys. The TOML
+  // should NOT emit a live [llm.api_keys] block — that would lie about the
+  // configuration. Instead emit a commented template the user can uncomment.
+  it('emits commented api-keys template (no live block) when no provider has keys', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [] } },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
+    };
+    const toml = buildConfigToml({ llm });
+    // No live [llm.api_keys] block at line start.
+    expect(toml).not.toMatch(/^\[llm\.api_keys\]/m);
+    expect(toml).not.toMatch(/^\[llm\.api_keys\.anthropic\]/m);
+    // But the section header divider is present, plus a commented template
+    // showing primary/fallback and per-provider keys shape.
+    expect(toml).toContain('LLM credentials — API keys tier');
+    expect(toml).toContain('# [llm.api_keys]');
+    expect(toml).toContain('# [llm.api_keys.anthropic]');
+    expect(toml).toMatch(/#\s+keys\s*=\s*\[/);
+  });
+
+  // OAuth section symmetry: when the user opts out of OAuth, emit the
+  // divider header + a commented hint instead of silently dropping the
+  // section. Discoverable affordance for "how do I enable OAuth later?".
+  it('emits OAuth section header + commented template when oauth is undefined', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toContain('LLM credentials — OAuth tier');
+    expect(toml).not.toMatch(/^\[llm\.oauth\]/m);
+    expect(toml).toContain('# [llm.oauth]');
+    expect(toml).toContain('system2 login');
+  });
+
+  // Inline hints: per-role pins (api-keys) and per-provider model pins (OAuth)
+  // should be hinted next to their respective live blocks, not buried under
+  // [agents.<role>]. Reasoning: when a user wants to pin an OAuth model they
+  // look in the OAuth section, not the agents section.
+  it('emits commented api-keys per-role models hint inline when no pins exist', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toContain('# [llm.api_keys.anthropic.models]');
+    // Hint must live in the api-keys section (above the agents divider).
+    const apiKeysIdx = toml.indexOf('# [llm.api_keys.anthropic.models]');
+    const agentsDividerIdx = toml.indexOf('Per-agent behavior overrides');
+    expect(apiKeysIdx).toBeGreaterThan(-1);
+    expect(agentsDividerIdx).toBeGreaterThan(apiKeysIdx);
+  });
+
+  it('emits commented OAuth model-pin hint inline when no pins exist', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toContain('# [llm.oauth.anthropic]');
+    expect(toml).toContain('# model = "claude-opus-4-7"');
+    const oauthHintIdx = toml.indexOf('# [llm.oauth.anthropic]');
+    const apiKeysHeaderIdx = toml.indexOf('LLM credentials — API keys tier');
+    expect(oauthHintIdx).toBeGreaterThan(-1);
+    expect(apiKeysHeaderIdx).toBeGreaterThan(oauthHintIdx);
+  });
+
+  it('omits the inline api-keys models hint when at least one role is pinned', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: {
+        anthropic: {
+          keys: [{ key: 'sk-ant', label: 'main' }],
+          models: { narrator: 'claude-haiku-4-5-20251001' },
+        },
+      },
+    };
+    const toml = buildConfigToml({ llm });
+    // Live block is present; no commented stand-in hint to avoid duplication.
+    expect(toml).toContain('[llm.api_keys.anthropic.models]');
+    expect(toml).not.toContain('# [llm.api_keys.anthropic.models]');
+  });
+
+  it('round-trips an api-keys-skipped (oauth-only) config through TOML.parse', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [] } },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
+    };
+    const toml = buildConfigToml({ llm });
+    const parsed = TOML.parse(toml) as Record<string, unknown>;
+    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
+    const reconstructed = convertTomlLlm(llmSection);
+    expect(reconstructed.oauth?.primary).toBe('anthropic');
+    // No live [llm.api_keys] in the toml → primary defaults to 'anthropic',
+    // providers map is empty (no provider had keys).
+    expect(reconstructed.providers).toEqual({});
   });
 });
 

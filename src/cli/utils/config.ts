@@ -733,100 +733,156 @@ export function buildConfigToml(options: {
   ];
 
   if (options.llm) {
-    const { primary, fallback, providers } = options.llm;
+    const { fallback, providers } = options.llm;
 
+    // OAuth tier: emit divider + (live block | commented template) so users
+    // who skipped OAuth at onboarding still see how to enable it later.
+    lines.push(...sectionHeader('LLM credentials — OAuth tier'));
+    lines.push('# Subscription credentials. Tried first when present; the API-keys tier');
+    lines.push('# below is only used after every OAuth credential is in cooldown.');
+    lines.push('# Supported providers: anthropic, openai-codex, github-copilot.');
+    lines.push(
+      '# Tokens live in ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.'
+    );
+    lines.push('');
     if (options.llm.oauth) {
-      lines.push(...sectionHeader('LLM credentials — OAuth tier'));
-      lines.push('# Subscription credentials. Tried first when present; the API-keys tier');
-      lines.push('# below is only used after every OAuth credential is in cooldown.');
-      lines.push('# Supported providers: anthropic, openai-codex, github-copilot.');
-      lines.push(
-        '# Tokens live in ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.'
-      );
-      lines.push('');
       lines.push('[llm.oauth]');
       lines.push(`primary = "${options.llm.oauth.primary}"`);
       const fb = options.llm.oauth.fallback.map((f) => `"${f}"`).join(', ');
       lines.push(`fallback = [${fb}]`);
       lines.push('');
 
-      // Per-provider OAuth model pins (optional). When omitted, resolveOAuthModel
-      // picks the family flagship from pi-ai's catalog.
+      // Per-provider OAuth model pins. Live entries first, then a commented
+      // hint so users see the override syntax inline with the section.
+      const liveOAuthPins: string[] = [];
       for (const [provider, sub] of Object.entries(options.llm.oauth.providers)) {
         if (!sub?.model) continue;
+        liveOAuthPins.push(provider);
         lines.push(`[llm.oauth.${provider}]`);
         lines.push(`model = "${sub.model}"`);
         lines.push('');
       }
+      if (liveOAuthPins.length === 0) {
+        lines.push('# Optional per-OAuth-provider model pin. When omitted, the resolver');
+        lines.push("# picks the family flagship from pi-ai's catalog (claude-opus-* for");
+        lines.push('# anthropic, gpt-X.Y[-codex] for openai-codex, gpt-X.Y for github-copilot).');
+        lines.push('# [llm.oauth.anthropic]');
+        lines.push('# model = "claude-opus-4-7"');
+        lines.push('');
+      }
+    } else {
+      lines.push('# Run `system2 login` to enable OAuth, or uncomment the block below and');
+      lines.push('# add credentials manually.');
+      lines.push('# [llm.oauth]');
+      lines.push('# primary = "anthropic"');
+      lines.push('# fallback = []');
+      lines.push('');
     }
+
+    // API-keys tier. "Configured" means at least one provider has keys; a
+    // bare primary/fallback with no provider entries is not configured (the
+    // shape onboard synthesizes when the user opts out — see onboard.ts).
+    const apiKeysConfigured = Object.values(providers).some((p) => p && p.keys.length > 0);
 
     lines.push(...sectionHeader('LLM credentials — API keys tier'));
     lines.push('# Pay-per-token. Each provider can hold multiple keys; rotation across keys');
     lines.push('# and providers happens automatically on failures.');
     lines.push('');
-    lines.push('[llm.api_keys]');
-    lines.push(`primary = "${primary}"`);
-    lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
-    lines.push('');
 
-    for (const name of [
-      'anthropic',
-      'cerebras',
-      'google',
-      'groq',
-      'mistral',
-      'openai',
-      'openai-compatible',
-      'openrouter',
-      'xai',
-    ] as const) {
-      const provider = providers[name];
-      if (provider && provider.keys.length > 0) {
-        // Per-provider key sections are self-explanatory; the rotation/label
-        // semantics are documented once in the top-level comment block.
-        lines.push(`[llm.api_keys.${name}]`);
-        lines.push('keys = [');
-        for (const key of provider.keys) {
-          if (key.key) {
-            lines.push(`  { key = "${key.key}", label = "${key.label}" },`);
+    if (apiKeysConfigured) {
+      lines.push('[llm.api_keys]');
+      lines.push(`primary = "${options.llm.primary}"`);
+      lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
+      lines.push('');
+
+      let anyModelsPinned = false;
+      for (const name of [
+        'anthropic',
+        'cerebras',
+        'google',
+        'groq',
+        'mistral',
+        'openai',
+        'openai-compatible',
+        'openrouter',
+        'xai',
+      ] as const) {
+        const provider = providers[name];
+        if (provider && provider.keys.length > 0) {
+          // Per-provider key sections are self-explanatory; the rotation/label
+          // semantics are documented once in the top-level comment block.
+          lines.push(`[llm.api_keys.${name}]`);
+          lines.push('keys = [');
+          for (const key of provider.keys) {
+            if (key.key) {
+              lines.push(`  { key = "${key.key}", label = "${key.label}" },`);
+            }
           }
-        }
-        lines.push(']');
+          lines.push(']');
 
-        // openrouter has extra fields
-        if (name === 'openrouter' && provider.routing) {
+          // openrouter has extra fields
+          if (name === 'openrouter' && provider.routing) {
+            lines.push('');
+            lines.push('[llm.api_keys.openrouter.routing]');
+            for (const [prefix, order] of Object.entries(provider.routing)) {
+              const key = /^[A-Za-z0-9_-]+$/.test(prefix) ? prefix : `"${prefix}"`;
+              lines.push(`${key} = [${order.map((s) => `"${s}"`).join(', ')}]`);
+            }
+          }
+
+          // openai-compatible has extra fields
+          if (name === 'openai-compatible') {
+            if (provider.base_url) {
+              lines.push(`base_url = "${provider.base_url}"`);
+            }
+            if (provider.model) {
+              lines.push(`model = "${provider.model}"`);
+            }
+            if (provider.compat_reasoning !== undefined) {
+              lines.push(`compat_reasoning = ${provider.compat_reasoning}`);
+            }
+          }
+
+          // Per-role model pins for this provider (api-keys tier).
+          if (provider.models && Object.keys(provider.models).length > 0) {
+            anyModelsPinned = true;
+            lines.push('');
+            lines.push(`[llm.api_keys.${name}.models]`);
+            for (const [role, modelId] of Object.entries(provider.models)) {
+              lines.push(`${role} = "${modelId}"`);
+            }
+          }
+
           lines.push('');
-          lines.push('[llm.api_keys.openrouter.routing]');
-          for (const [prefix, order] of Object.entries(provider.routing)) {
-            const key = /^[A-Za-z0-9_-]+$/.test(prefix) ? prefix : `"${prefix}"`;
-            lines.push(`${key} = [${order.map((s) => `"${s}"`).join(', ')}]`);
-          }
         }
+      }
 
-        // openai-compatible has extra fields
-        if (name === 'openai-compatible') {
-          if (provider.base_url) {
-            lines.push(`base_url = "${provider.base_url}"`);
-          }
-          if (provider.model) {
-            lines.push(`model = "${provider.model}"`);
-          }
-          if (provider.compat_reasoning !== undefined) {
-            lines.push(`compat_reasoning = ${provider.compat_reasoning}`);
-          }
-        }
-
-        // Per-role model pins for this provider (api-keys tier).
-        if (provider.models && Object.keys(provider.models).length > 0) {
-          lines.push('');
-          lines.push(`[llm.api_keys.${name}.models]`);
-          for (const [role, modelId] of Object.entries(provider.models)) {
-            lines.push(`${role} = "${modelId}"`);
-          }
-        }
-
+      // Inline hint for per-role model pins, when the user hasn't pinned any.
+      if (!anyModelsPinned) {
+        lines.push('# Optional per-role model pins for the API-keys tier. Keys are role names');
+        lines.push("# (guide, conductor, reviewer, narrator, worker). Overrides the role's");
+        lines.push('# library frontmatter default for the matched provider.');
+        lines.push('# [llm.api_keys.anthropic.models]');
+        lines.push('# narrator = "claude-haiku-4-5-20251001"');
+        lines.push('# conductor = "claude-sonnet-4-6"');
         lines.push('');
       }
+    } else {
+      lines.push('# Add API keys to enable as failover when the OAuth tier is exhausted.');
+      lines.push('# Uncomment and edit:');
+      lines.push('# [llm.api_keys]');
+      lines.push('# primary = "anthropic"');
+      lines.push('# fallback = ["google", "openai"]');
+      lines.push('#');
+      lines.push('# [llm.api_keys.anthropic]');
+      lines.push('# keys = [');
+      lines.push('#   { key = "sk-ant-...", label = "default" },');
+      lines.push('# ]');
+      lines.push('#');
+      lines.push("# Optional per-role model pins (overrides each role's library default):");
+      lines.push('# [llm.api_keys.anthropic.models]');
+      lines.push('# narrator = "claude-haiku-4-5-20251001"');
+      lines.push('');
     }
   }
 
@@ -849,20 +905,14 @@ export function buildConfigToml(options: {
   } else {
     lines.push('# Per-agent behavior overrides. Uncomment and edit to customize.');
     lines.push('# Supported roles: guide, conductor, reviewer, narrator, worker');
+    lines.push('# Model pins live with their tier: see [llm.oauth.<provider>] /');
+    lines.push('# [llm.api_keys.<provider>.models] above.');
     lines.push('#');
     lines.push('# [agents.conductor]');
     lines.push('# thinking_level = "high"              # off | minimal | low | medium | high');
     lines.push(
       '# compaction_depth = 8                 # keep N auto-compactions in sliding window'
     );
-    lines.push('#');
-    lines.push('# Per-role model pins (API-keys tier) live under:');
-    lines.push('# [llm.api_keys.<provider>.models]');
-    lines.push('# conductor = "claude-opus-4-6"');
-    lines.push('#');
-    lines.push('# OAuth-tier model pin (one model per provider, all roles):');
-    lines.push('# [llm.oauth.<provider>]');
-    lines.push('# model = "claude-opus-4-7"');
     lines.push('');
   }
 
