@@ -31,6 +31,23 @@ describe('oauth-credentials', () => {
     expect(loadOAuthCredentials(dir, 'openai')).toBeNull();
   });
 
+  // Guard: PiAiOAuthCredentials documents an open shape ([key: string]: unknown)
+  // so pi-ai's per-provider refresh handlers can stash provider-specific extras
+  // (e.g. Copilot's enterpriseDomain). If save/load ever tightens to a closed
+  // shape, those extras would be silently dropped on the next refresh cycle.
+  it('preserves provider-specific extras through save/load', () => {
+    const creds = {
+      access: 'gho_abc',
+      refresh: 'ghr_xyz',
+      expires: 1714680000000,
+      label: 'copilot',
+      enterpriseDomain: 'acme.ghe.com',
+      apiKey: { token: 'tk_123', expiresAt: 1714680000000 },
+    };
+    saveOAuthCredentials(dir, 'github-copilot', creds);
+    expect(loadOAuthCredentials(dir, 'github-copilot')).toEqual(creds);
+  });
+
   it('writes file with mode 0600', () => {
     saveOAuthCredentials(dir, 'anthropic', { access: 'a', refresh: 'b', expires: 1, label: 'l' });
     const stats = statSync(join(dir, 'oauth', 'anthropic.json'));

@@ -5,18 +5,29 @@
  * Used by both CLI (config loading) and server (AuthResolver, AgentHost).
  */
 
-export type LlmProvider =
-  | 'anthropic'
-  | 'cerebras'
-  | 'github-copilot'
-  | 'google'
-  | 'groq'
-  | 'mistral'
-  | 'openai'
-  | 'openai-codex'
-  | 'openai-compatible'
-  | 'openrouter'
-  | 'xai';
+/** All providers system2 understands across both tiers. The OAuth tier is
+ *  restricted to a subset: see OAUTH_PROVIDER_IDS. */
+export const LLM_PROVIDER_IDS = [
+  'anthropic',
+  'cerebras',
+  'github-copilot',
+  'google',
+  'groq',
+  'mistral',
+  'openai',
+  'openai-codex',
+  'openai-compatible',
+  'openrouter',
+  'xai',
+] as const;
+
+export type LlmProvider = (typeof LLM_PROVIDER_IDS)[number];
+
+/** Providers that support OAuth login (subset of LLM_PROVIDER_IDS). The other
+ *  providers are API-keys-only. */
+export const OAUTH_PROVIDER_IDS = ['anthropic', 'github-copilot', 'openai-codex'] as const;
+
+export type OAuthProvider = (typeof OAUTH_PROVIDER_IDS)[number];
 
 export interface LlmKey {
   key: string;

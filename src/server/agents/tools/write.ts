@@ -77,7 +77,7 @@ export function createWriteTool() {
                   type: 'text',
                   text:
                     `Cannot write: file already exists with content (${stats.size} bytes). ` +
-                    `Use the \`edit\` tool to modify it, or delete it first (\`bash\`: \`rm "${params.path}"\`) ` +
+                    `Use the \`edit\` tool to modify it, or delete it first (\`bash\`: \`rm "${path}"\`) ` +
                     `then retry this write.\n\nExisting content starts with:\n${preview}${suffix}`,
                 },
               ],
@@ -102,7 +102,7 @@ export function createWriteTool() {
           content: [
             {
               type: 'text',
-              text: `Successfully wrote ${content.length} bytes to ${params.path}`,
+              text: `Successfully wrote ${content.length} bytes to ${path}`,
             },
           ],
           details: { path: filePath, size: content.length },
@@ -112,7 +112,7 @@ export function createWriteTool() {
 
         return {
           content: [{ type: 'text', text: `Error writing file: ${errorMsg}` }],
-          details: { error: errorMsg, path: params.path },
+          details: { error: errorMsg, path },
         };
       }
     },

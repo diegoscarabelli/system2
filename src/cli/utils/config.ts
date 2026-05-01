@@ -21,6 +21,7 @@ import type {
   LlmConfig,
   LlmProvider,
   LlmProviderConfig,
+  OAuthProvider,
   ServicesConfig,
   SessionConfig,
   ThinkingLevel,
@@ -29,6 +30,8 @@ import type {
 import {
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
   DEFAULT_SESSION_ROTATION_SIZE_BYTES,
+  LLM_PROVIDER_IDS,
+  OAUTH_PROVIDER_IDS,
   validateAgentModels,
   validateLlmModels,
 } from '../../shared/index.js';
@@ -312,6 +315,39 @@ function buildProvidersFromSource(
 }
 
 /**
+ * Validate a provider ID against an allow-list. Throws with a helpful list
+ * on miss. `tier` is "API keys" or "OAuth" for the error message; `field`
+ * is e.g. `[llm.api_keys].primary` for context.
+ */
+function validateProviderId<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  tier: string,
+  field: string
+): T {
+  if (typeof value !== 'string' || !(allowed as readonly string[]).includes(value)) {
+    throw new Error(
+      `${field} = "${String(value)}" is not a supported ${tier} provider. ` +
+        `Valid: ${allowed.join(', ')}.`
+    );
+  }
+  return value as T;
+}
+
+function validateProviderArray<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  tier: string,
+  field: string
+): T[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array of ${tier} provider IDs.`);
+  }
+  return value.map((entry, idx) => validateProviderId(entry, allowed, tier, `${field}[${idx}]`));
+}
+
+/**
  * Convert TOML [llm] section to LlmConfig. Reads only the [llm.api_keys] and
  * [llm.oauth] shape; the previous flat [llm] layout is no longer parsed.
  */
@@ -319,23 +355,45 @@ export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig 
   const apiKeysSource: ApiKeysTomlSource = toml.api_keys ?? {};
   const providers = buildProvidersFromSource(apiKeysSource);
 
-  const config: LlmConfig = {
-    primary: (apiKeysSource.primary as LlmProvider) ?? 'anthropic',
-    fallback: (apiKeysSource.fallback as LlmProvider[]) ?? [],
-    providers,
-  };
+  const primary: LlmProvider =
+    apiKeysSource.primary === undefined
+      ? 'anthropic'
+      : validateProviderId(
+          apiKeysSource.primary,
+          LLM_PROVIDER_IDS,
+          'API keys',
+          '[llm.api_keys].primary'
+        );
+  const fallback: LlmProvider[] = validateProviderArray(
+    apiKeysSource.fallback,
+    LLM_PROVIDER_IDS,
+    'API keys',
+    '[llm.api_keys].fallback'
+  );
+
+  const config: LlmConfig = { primary, fallback, providers };
 
   if (toml.oauth?.primary) {
-    const oauthProviders: Partial<Record<LlmProvider, { model?: string }>> = {};
-    for (const name of ['anthropic', 'openai-codex', 'github-copilot'] as const) {
+    const oauthProviders: Partial<Record<OAuthProvider, { model?: string }>> = {};
+    for (const name of OAUTH_PROVIDER_IDS) {
       const sub = toml.oauth[name];
       if (sub?.model) {
         oauthProviders[name] = { model: sub.model };
       }
     }
     config.oauth = {
-      primary: toml.oauth.primary as LlmProvider,
-      fallback: (toml.oauth.fallback as LlmProvider[]) ?? [],
+      primary: validateProviderId(
+        toml.oauth.primary,
+        OAUTH_PROVIDER_IDS,
+        'OAuth',
+        '[llm.oauth].primary'
+      ),
+      fallback: validateProviderArray(
+        toml.oauth.fallback,
+        OAUTH_PROVIDER_IDS,
+        'OAuth',
+        '[llm.oauth].fallback'
+      ),
       providers: oauthProviders,
     };
   }

@@ -808,6 +808,37 @@ describe('convertTomlLlm — new shape', () => {
     });
     expect(llm.providers.anthropic?.models).toBeUndefined();
   });
+
+  it('throws on unknown [llm.api_keys].primary provider', () => {
+    expect(() => convertTomlLlm({ api_keys: { primary: 'anthrpic', fallback: [] } })).toThrow(
+      /\[llm\.api_keys\]\.primary.*not a supported API keys provider/
+    );
+  });
+
+  it('throws on unknown entry in [llm.api_keys].fallback', () => {
+    expect(() =>
+      convertTomlLlm({ api_keys: { primary: 'anthropic', fallback: ['oops'] } })
+    ).toThrow(/\[llm\.api_keys\]\.fallback\[0\].*not a supported API keys provider/);
+  });
+
+  it('throws on unknown [llm.oauth].primary provider', () => {
+    expect(() =>
+      convertTomlLlm({
+        oauth: { primary: 'gemini-cli', fallback: [] },
+        api_keys: { primary: 'anthropic', fallback: [] },
+      })
+    ).toThrow(/\[llm\.oauth\]\.primary.*not a supported OAuth provider/);
+  });
+
+  it('rejects an api-keys-only provider in [llm.oauth].fallback', () => {
+    // openai is api-keys-only; OAuth tier supports openai-codex instead.
+    expect(() =>
+      convertTomlLlm({
+        oauth: { primary: 'anthropic', fallback: ['openai'] },
+        api_keys: { primary: 'anthropic', fallback: [] },
+      })
+    ).toThrow(/\[llm\.oauth\]\.fallback\[0\].*not a supported OAuth provider/);
+  });
 });
 
 describe('convertTomlDelivery', () => {
