@@ -157,7 +157,7 @@ narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Nar
 | `openai-compatible` | Any OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura) |
 | `openrouter` | Any model via OpenRouter (uses `provider/model` IDs) |
 | `xai` | Grok |
-| `openai-codex` | OAuth-only: ChatGPT subscription via OpenAI Codex CLI flow. Codex models only (gpt-5.x-codex variants). |
+| `openai-codex` | OAuth-only: ChatGPT account (Free, Plus, Pro, Business, Enterprise) via the OpenAI Codex CLI flow. Reaches the gpt-5.x line plus codex-specialized variants. Free has tighter rate limits. |
 | `github-copilot` | OAuth-only: GitHub Copilot subscription. Mixed lineup including Claude Sonnet/Haiku and GPT-5 variants. |
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
