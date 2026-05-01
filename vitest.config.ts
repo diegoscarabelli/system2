@@ -5,6 +5,12 @@ export default defineConfig({
     projects: [
       {
         test: {
+          name: 'shared',
+          include: ['src/shared/**/*.test.ts'],
+        },
+      },
+      {
+        test: {
           name: 'server',
           include: ['src/server/**/*.test.ts'],
         },
