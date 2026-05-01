@@ -110,7 +110,7 @@ pnpm update -g @diegoscarabelli/system2
 All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
 
 - **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
-- **`[llm.api_keys]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation. (Legacy 0.2.x `[llm]` shape still parsed with a deprecation warning.)
+- **`[llm.api_keys]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation.
 - **`[databases.*]`**: analytical database connections (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite) that agents and dashboard artifacts can query
 - **`[agents.*]`**: per-role overrides for thinking level, context compaction depth, and model selection per provider
 - **`[services.brave_search]`**: web search via Brave Search API (highly recommended)

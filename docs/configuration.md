@@ -15,6 +15,12 @@ All System2 settings live in `~/.system2/config.toml`, created by `system2 onboa
 primary = "anthropic"
 fallback = []   # any of: anthropic, openai-codex, github-copilot
 
+# Optional per-provider OAuth model pin. When omitted, the resolver picks
+# the family flagship from pi-ai's catalog (claude-opus-* for anthropic,
+# gpt-5.x[-codex] for openai-codex, gpt-X.Y for github-copilot).
+[llm.oauth.anthropic]
+model = "claude-opus-4-7"
+
 # API key tier — billed per token, used after OAuth tier exhausted
 [llm.api_keys]
 primary = "anthropic"
@@ -25,6 +31,13 @@ keys = [
   { key = "sk-ant-...", label = "personal" },
   { key = "sk-ant-...", label = "work" },
 ]
+
+# Optional per-role model pins for the API-keys tier. Keys are role names
+# (guide, conductor, reviewer, narrator, worker). Overrides the default
+# from the role's frontmatter for the matched provider.
+[llm.api_keys.anthropic.models]
+narrator = "claude-haiku-4-5-20251001"
+conductor = "claude-sonnet-4-6"
 
 [llm.api_keys.cerebras]
 keys = [{ key = "csk-...", label = "default" }]
@@ -60,18 +73,13 @@ base_url = "http://localhost:4000/v1"
 model = "my-model"
 compat_reasoning = true  # optional, default true
 
-# Per-role agent overrides (optional)
-# Override thinking_level, compaction_depth, or models for any agent role.
-# Only specified fields override the library defaults.
+# Per-role agent behavior overrides (optional). Tier-agnostic — applied
+# whether the OAuth or API-keys tier is active.
+# For per-role MODEL pins, use [llm.api_keys.<provider>.models] (above).
+# For OAuth model pins, use [llm.oauth.<provider>] (above).
 [agents.guide]
 thinking_level = "medium"
 compaction_depth = 5
-
-[agents.guide.models]
-anthropic = "claude-opus-4-6"
-
-[agents.conductor.models]
-google = "gemini-3.1-pro-preview"
 
 # Service credentials
 [services.brave_search]
@@ -121,8 +129,10 @@ narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Nar
 | Section | Description | TypeScript Type |
 |---------|-------------|-----------------|
 | `[llm.api_keys]` | API-key tier: primary provider, fallback order, per-provider keys | `LlmConfig` |
+| `[llm.api_keys.<provider>.models]` | Per-role model pins for the API-keys tier (keys are role names) | `LlmProviderConfig.models` |
 | `[llm.oauth]` | OAuth tier: primary + fallback subscription providers (tried first) | `LlmOAuthConfig` |
-| `[agents.*]` | Per-role agent overrides (models, thinking, compaction) | `AgentsConfig` |
+| `[llm.oauth.<provider>]` | Optional per-OAuth-provider model pin (`model = "..."`) | `LlmOAuthProviderConfig` |
+| `[agents.*]` | Per-role behavior overrides (`thinking_level`, `compaction_depth`) | `AgentsConfig` |
 | `[services.*]` | External service credentials | `ServicesConfig` |
 | `[tools.*]` | Tool feature flags | `ToolsConfig` |
 | `[databases.*]` | External database connections | `DatabasesConfig` |
@@ -213,7 +223,7 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 System2 has two auth tiers:
 
 - **OAuth tier**: subscription credentials (`[llm.oauth]`). Tried first. Three providers are supported as first-class OAuth IDs: `anthropic` (Claude Pro/Max), `openai-codex` (ChatGPT subscription via the Codex CLI flow), and `github-copilot` (Copilot subscription). Any of the three may be used as `primary` or in `fallback`, in any order.
-- **API key tier** — `[llm.api_keys].primary` + `fallback`, with per-provider keys nested at `[llm.api_keys.<provider>].keys`. Used after the OAuth tier is fully exhausted (every OAuth credential in cooldown). The legacy 0.2.x layout (`[llm].primary` + sibling `[llm.<provider>]`) is still parsed with a one-time deprecation warning; migrate by moving fields under `[llm.api_keys]`.
+- **API key tier** — `[llm.api_keys].primary` + `fallback`, with per-provider keys nested at `[llm.api_keys.<provider>].keys`. Used after the OAuth tier is fully exhausted (every OAuth credential in cooldown).
 
 The OAuth tier is fully exhausted before the system drops into the API key tier — never interleaving. If `[llm.oauth]` is absent, system2 behaves exactly like an API-key-only setup.
 
@@ -232,6 +242,15 @@ System2 delegates OAuth provider behavior to pi-ai's provider registry. `getOAut
 **Anthropic-specific behavior.** The pi-ai SDK detects Anthropic OAuth tokens (substring match `sk-ant-oat`) and switches the Anthropic client to Bearer auth plus the Claude Code identity headers required by the Pro/Max subscription path. The other providers do not share that path: `openai-codex` posts to the OpenAI Responses API with Codex-CLI-shaped requests, and `github-copilot` hits Copilot's chat completions endpoint, each with its own request shape, headers, and project/enterprise scoping.
 
 **Failover:** A 401 on an OAuth credential triggers one refresh-and-retry. If refresh succeeds, the session reinitializes with the new token and the prompt retries. If refresh fails (or any other error), the OAuth credential enters cooldown and the next OAuth fallback is tried; once the OAuth tier is exhausted, the system drops into the API key tier.
+
+### Model selection
+
+Model selection differs between tiers, reflecting their cost models:
+
+- **OAuth tier (flat-fee subscription)**: one model per provider, used by every agent role. The model is picked from pi-ai's catalog by a family-prefix regex per provider (`claude-opus-*` for Anthropic, `gpt-X.Y[-codex]` for openai-codex, `gpt-X.Y` for github-copilot), so newer flagships propagate automatically when pi-ai bumps. Override with `[llm.oauth.<provider>] model = "..."` to pin a specific model — strictly validated against the catalog at startup.
+- **API-keys tier (pay-per-token)**: per-role × per-provider matrix. Defaults come from each agent's frontmatter `models:` block. Override per role with `[llm.api_keys.<provider>.models][<role>] = "..."` — also validated at startup.
+
+**Auto-fallback on entitlement errors (OAuth tier only).** When a model picked by the family-prefix resolver returns 403 or 404 (typical signals for "model not available on this plan" / "model not found"), the host steps the credential to a hardcoded fallback for the rest of the session and retries once. Defaults today: `claude-sonnet-4-6` for anthropic, `gpt-5.4` for openai-codex, `gpt-4.1` for github-copilot. The fallback fires only when the model came from the resolver — explicit user pins (`[llm.oauth.<provider>] model = "..."`) bubble the error up so misconfiguration surfaces loudly.
 
 **Caveats:**
 - Claude Pro/Max usage limits are sized for one human in Claude Code. A multi-agent system2 workload (Guide + Conductor + Reviewer + Workers + Narrator running concurrently) can hit the 5-hour message cap quickly. Configure the API key tier as fallback for sustained workloads.
@@ -260,41 +279,44 @@ You do not need to switch auth methods manually for cost or rate-limit reasons �
 
 ## Agent Overrides
 
-Each agent role (guide, conductor, narrator, reviewer, worker) has default settings defined in its library file (`src/server/agents/library/{role}.md`). You can override these defaults per role in config.toml under `[agents.<role>]` sections without modifying the source code.
+Each agent role (guide, conductor, narrator, reviewer, worker) has default settings defined in its library file (`src/server/agents/library/{role}.md`). The `[agents.<role>]` section in config.toml overrides the role's behavior knobs. Model pins live with their tier credentials, not under `[agents.<role>]`.
 
-### Overridable fields
+### Overridable fields under `[agents.<role>]`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `thinking_level` | `off`, `minimal`, `low`, `medium`, `high` | Controls extended thinking depth for the agent's LLM calls |
-| `compaction_depth` | integer >= 0 | Number of auto-compactions before pruning old context (0 disables) |
-| `models.<provider>` | string | Model ID to use when running on a specific provider |
+| `thinking_level` | `off`, `minimal`, `low`, `medium`, `high` | Extended-thinking depth for the agent's LLM calls. Tier-agnostic. |
+| `compaction_depth` | integer >= 0 | Number of auto-compactions before pruning old context (0 disables). Tier-agnostic. |
 
-All fields are optional. Only specified fields override the library defaults; unspecified fields keep their defaults.
+All fields are optional. Only specified fields override the library defaults.
+
+Per-role model pins live elsewhere:
+
+- **API-keys tier**: `[llm.api_keys.<provider>.models][<role>]` — see [Model selection](#model-selection).
+- **OAuth tier**: one model per provider via `[llm.oauth.<provider>] model = "..."`. The same model applies to every role on that provider.
 
 ### Example
 
 ```toml
-# Use Opus instead of Sonnet for the Guide on Anthropic
 [agents.guide]
 thinking_level = "medium"
 compaction_depth = 5
 
-[agents.guide.models]
-anthropic = "claude-opus-4-6"
+# Per-role model pins (API-keys tier) — keys are role names.
+[llm.api_keys.anthropic.models]
+narrator = "claude-haiku-4-5-20251001"
+guide = "claude-sonnet-4-6"
 
-# Use Gemini 3.1 Pro for the Conductor on Google
-[agents.conductor.models]
-google = "gemini-3.1-pro-preview"
+# OAuth tier — one model for all roles on this provider.
+[llm.oauth.anthropic]
+model = "claude-opus-4-7"
 ```
 
-`[agents.<role>.models]` accepts every provider ID listed in the [providers table](#llm-providers) **except** `openai-compatible`, including the OAuth-only additions (`openai-codex`, `github-copilot`). `openai-compatible` is not supported as a per-agent model override (the model for that provider is set globally via `[llm.api_keys.openai-compatible].model`). At startup, every supported `(provider, modelId)` pair is cross-checked against pi-ai's `MODELS` catalog; unknown provider IDs throw with the list of valid providers, and unknown model IDs throw with did-you-mean suggestions on near-miss typos.
+Unknown provider IDs and model IDs are cross-checked against pi-ai's catalog at startup; unknown values throw with did-you-mean suggestions on near-miss typos.
 
 ### How it works
 
-During agent initialization, `AgentHost` reads the library frontmatter first, then applies any matching `[agents.<role>]` overrides from config.toml. For models, the merge is per-provider: `{ ...libraryModels, ...configModels }`. For scalar fields (`thinking_level`, `compaction_depth`), the config value replaces the library default.
-
-This means you can override a single provider's model without affecting the others, or change the thinking level for one role without touching the rest.
+During agent initialization, `AgentHost` reads the library frontmatter first, then applies any matching `[agents.<role>]` overrides from config.toml. Model resolution branches by the active tier: OAuth picks one model per provider via the resolver (or `[llm.oauth.<p>].model`); API-keys reads `[llm.api_keys.<p>.models][<role>]` first, then frontmatter.
 
 ## Databases
 

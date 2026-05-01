@@ -30,8 +30,7 @@ export interface LlmProviderConfig {
   compat_reasoning?: boolean;
   routing?: Record<string, string[]>;
   /** Per-role model pins for the API-keys tier. Keys are role names (guide,
-   *  conductor, reviewer, narrator, worker). Replaces the legacy
-   *  [agents.<role>.models] location, which is no longer parsed. */
+   *  conductor, reviewer, narrator, worker). */
   models?: Record<string, string>;
 }
 
