@@ -330,7 +330,7 @@ export class AgentHost {
     // Use shared AuthResolver if provided, otherwise create a local one
     this.authResolver = config.authResolver ?? new AuthResolver(config.llmConfig);
     const authStorage = this.authResolver.createAuthStorage();
-    this.modelRegistry = new ModelRegistry(authStorage);
+    this.modelRegistry = ModelRegistry.create(authStorage);
     const activeCred = this.authResolver.getActiveCredential();
     this.currentProvider = activeCred?.provider ?? this.authResolver.primaryProvider;
     this.currentKeyIndex = activeCred?.keyIndex ?? 0;
@@ -1209,7 +1209,7 @@ export class AgentHost {
 
       // Recreate model registry with updated auth
       const authStorage = this.authResolver.createAuthStorage();
-      this.modelRegistry = new ModelRegistry(authStorage);
+      this.modelRegistry = ModelRegistry.create(authStorage);
 
       // Reinitialize the session
       await this.initialize();

@@ -45,8 +45,13 @@ export function createWriteTool() {
       'For bulk find-and-replace, use `bash` with `sed` or `awk`.',
     parameters: params,
     execute: async (_toolCallId, params, _signal, _onUpdate) => {
+      // Schema marks `path` and `content` as required (non-Optional Type.String),
+      // so pi-agent-core validates them before invoking execute. Narrow once
+      // here for typebox-1's looser type inference at the AgentTool boundary.
+      const path = params.path as string;
+      const content = params.content as string;
       try {
-        const filePath = resolvePath(params.path);
+        const filePath = resolvePath(path);
 
         // Block overwriting existing files that contain data
         try {
@@ -87,7 +92,7 @@ export function createWriteTool() {
         const dir = dirname(filePath);
         await mkdir(dir, { recursive: true });
 
-        await writeFile(filePath, params.content, 'utf-8');
+        await writeFile(filePath, content, 'utf-8');
 
         if (params.commit_message) {
           commitIfStateDir(filePath, params.commit_message);
@@ -97,10 +102,10 @@ export function createWriteTool() {
           content: [
             {
               type: 'text',
-              text: `Successfully wrote ${params.content.length} bytes to ${params.path}`,
+              text: `Successfully wrote ${content.length} bytes to ${params.path}`,
             },
           ],
-          details: { path: filePath, size: params.content.length },
+          details: { path: filePath, size: content.length },
         };
       } catch (error: unknown) {
         const errorMsg = (error as Error).message || String(error);

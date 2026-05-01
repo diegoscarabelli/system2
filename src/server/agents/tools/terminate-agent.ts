@@ -12,7 +12,7 @@
  */
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
 import type { AgentRegistry } from '../registry.js';
 
@@ -22,20 +22,24 @@ export function createTerminateAgentTool(
   registry: AgentRegistry,
   onTerminate?: () => void
 ) {
-  const params = Type.Object({
+  const terminateAgentParams = Type.Object({
     agent_id: Type.Number({
       description:
         'Database ID of the agent to terminate. The agent will be archived, its current session aborted, and it will be removed from the active registry.',
     }),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof terminateAgentParams> = {
     name: 'terminate_agent',
     label: 'Terminate Agent',
     description:
       'Archive an active agent: abort its session, unregister it, and set status to "archived". Use this when a spawned agent has completed its work and is no longer needed. Guide may terminate any non-singleton agent. Conductors may only terminate agents within their own project. Singleton agents (guide, narrator) cannot be terminated.',
-    parameters: params,
-    execute: async (_toolCallId, params, _signal, _onUpdate) => {
+    parameters: terminateAgentParams,
+    execute: async (_toolCallId, rawParams, _signal, _onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof terminateAgentParams>;
       const caller = db.getAgent(agentId);
       if (!caller) {
         return {

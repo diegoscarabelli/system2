@@ -6,14 +6,14 @@
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { Readability } from '@mozilla/readability';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import { parseHTML } from 'linkedom';
 
 const DEFAULT_MAX_LENGTH = 20_000;
 const FETCH_TIMEOUT = 15_000; // 15 seconds
 
 export function createWebFetchTool() {
-  const params = Type.Object({
+  const webFetchParams = Type.Object({
     url: Type.String({
       description: 'The URL to fetch and extract content from',
     }),
@@ -24,13 +24,17 @@ export function createWebFetchTool() {
     ),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof webFetchParams> = {
     name: 'web_fetch',
     label: 'Fetch Web Page',
     description:
       'Fetch a web page and extract its main content as readable text. Strips navigation, ads, and boilerplate. Use web_search first to find URLs, then web_fetch to read specific pages.',
-    parameters: params,
-    execute: async (_toolCallId, params, signal, _onUpdate) => {
+    parameters: webFetchParams,
+    execute: async (_toolCallId, rawParams, signal, _onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof webFetchParams>;
       const maxLength = params.max_length ?? DEFAULT_MAX_LENGTH;
 
       try {

@@ -1,5 +1,5 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import type { ReminderManager } from '../../reminders/manager.js';
 
 const MIN_DELAY_MINUTES = 0.5; // 30 seconds
@@ -7,7 +7,7 @@ const MAX_DELAY_MINUTES = 10_080; // 7 days
 const MAX_REMINDERS_PER_AGENT = 10;
 
 export function createSetReminderTool(agentId: number, reminderManager: ReminderManager) {
-  const params = Type.Object({
+  const setReminderParams = Type.Object({
     delay_minutes: Type.Number({
       description: `How many minutes from now the reminder should fire. Must be between ${MIN_DELAY_MINUTES} (30 seconds) and ${MAX_DELAY_MINUTES} (7 days). Accepts fractional values (e.g. 0.5 for 30s, 1.5 for 90s).`,
     }),
@@ -17,13 +17,17 @@ export function createSetReminderTool(agentId: number, reminderManager: Reminder
     }),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof setReminderParams> = {
     name: 'set_reminder',
     label: 'Set Reminder',
     description:
       'Schedule a delayed reminder for yourself. After the specified delay, you will receive a follow-up message with your reminder text. Use sparingly: only set a reminder when you genuinely need a deferred follow-up (e.g. waiting on another agent). Do not create reminder loops that re-fire indefinitely; if the condition has not resolved after 2-3 re-checks, escalate or stop. Check list_reminders before setting new ones and keep your active count low (1-2 per pending question). Write reminder messages as instructions to your future self, including agent IDs, task IDs, and the action to take. Cancel reminders as soon as the condition is satisfied. Reminders are in-memory only and do not survive server restarts; for longer delays, prefer a task comment and a check-on-startup pattern.',
-    parameters: params,
-    execute: async (_toolCallId, args) => {
+    parameters: setReminderParams,
+    execute: async (_toolCallId, rawParams) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const args = rawParams as Static<typeof setReminderParams>;
       const { delay_minutes, message } = args;
 
       if (delay_minutes < MIN_DELAY_MINUTES || delay_minutes > MAX_DELAY_MINUTES) {

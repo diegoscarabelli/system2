@@ -9,7 +9,7 @@
  */
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import type { Agent } from '../../../shared/index.js';
 import type { DatabaseClient } from '../../db/client.js';
 
@@ -21,7 +21,7 @@ export type AgentSpawner = (
 ) => Promise<number>; // returns new agent's database ID
 
 export function createSpawnAgentTool(db: DatabaseClient, agentId: number, spawner: AgentSpawner) {
-  const params = Type.Object({
+  const spawnAgentParams = Type.Object({
     role: Type.Union(
       [Type.Literal('conductor'), Type.Literal('reviewer'), Type.Literal('worker')],
       {
@@ -39,13 +39,17 @@ export function createSpawnAgentTool(db: DatabaseClient, agentId: number, spawne
     }),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof spawnAgentParams> = {
     name: 'spawn_agent',
     label: 'Spawn Agent',
     description:
       "Spawn a new agent for a project. Guide may spawn conductors, workers, or reviewers for any project. Conductors may spawn conductors, workers, or a reviewer within their own project only. Returns the new agent's database ID — store it to send follow-up messages via message_agent and to set as task assignee.",
-    parameters: params,
-    execute: async (_toolCallId, params, _signal, _onUpdate) => {
+    parameters: spawnAgentParams,
+    execute: async (_toolCallId, rawParams, _signal, _onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof spawnAgentParams>;
       try {
         const caller = db.getAgent(agentId);
         if (!caller) {

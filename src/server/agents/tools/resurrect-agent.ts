@@ -13,7 +13,7 @@
  */
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
 
 export type AgentResurrector = (
@@ -27,7 +27,7 @@ export function createResurrectAgentTool(
   agentId: number,
   resurrector: AgentResurrector
 ) {
-  const params = Type.Object({
+  const resurrectAgentParams = Type.Object({
     agent_id: Type.Number({
       description:
         'Database ID of the archived agent to resurrect. The agent will be set back to active, its session resumed from its persisted JSONL history, and it will be re-registered in the agent registry.',
@@ -38,7 +38,7 @@ export function createResurrectAgentTool(
     }),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof resurrectAgentParams> = {
     name: 'resurrect_agent',
     label: 'Resurrect Agent',
     description:
@@ -47,8 +47,12 @@ export function createResurrectAgentTool(
       'The resurrected agent retains its full conversation history and context, but that context may be stale. ' +
       'Guide may resurrect any archived non-singleton. Conductors may only resurrect agents within their own project. ' +
       'After resurrection, update the project record via write_system2_db: clear end_at and set status to "in progress".',
-    parameters: params,
-    execute: async (_toolCallId, params, _signal, _onUpdate) => {
+    parameters: resurrectAgentParams,
+    execute: async (_toolCallId, rawParams, _signal, _onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof resurrectAgentParams>;
       const caller = db.getAgent(agentId);
       if (!caller) {
         return {

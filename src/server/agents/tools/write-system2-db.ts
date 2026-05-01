@@ -12,7 +12,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
 import { resolveProjectDir } from '../../projects/dir.js';
 
@@ -80,7 +80,7 @@ export function createWriteSystem2DbTool(
   agentId: number,
   onWrite?: OnDatabaseWrite
 ) {
-  const params = Type.Object({
+  const writeSystem2DbParams = Type.Object({
     operation: Type.Union(
       [
         Type.Literal('createProject'),
@@ -190,13 +190,17 @@ export function createWriteSystem2DbTool(
     }
   };
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof writeSystem2DbParams> = {
     name: 'write_system2_db',
     label: 'Write System2 DB',
     description:
       "Create or update records in the System2 app database (~/.system2/app.db). Use named operations to manage projects, tasks, task links, task comments, and artifacts. updated_at is maintained automatically. The author field on task comments is filled automatically from your agent ID. claimTask atomically claims a todo task — only use this when operating in pull mode at the Conductor's direction, not as a substitute for working your assigned tasks. createArtifact/updateArtifact/deleteArtifact manage artifact metadata (file_path must be absolute; deleteArtifact removes the DB record only, not the file). rawSql is a last-resort escape hatch for ad-hoc DML or SELECT queries not covered by the named operations. This tool is only for the System2 management database — not for data pipeline databases (use bash for those).",
-    parameters: params,
-    execute: async (_toolCallId, params, _signal, _onUpdate) => {
+    parameters: writeSystem2DbParams,
+    execute: async (_toolCallId, rawParams, _signal, _onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof writeSystem2DbParams>;
       const err = (msg: string) => ({
         content: [{ type: 'text' as const, text: `Error: ${msg}` }],
         details: { error: msg },

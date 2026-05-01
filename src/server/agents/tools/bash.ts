@@ -14,7 +14,7 @@ import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { homedir, platform } from 'node:os';
 import type { AgentTool, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 
 const LEGACY_TIMEOUT = 120_000; // 120s fixed timeout (backward compat when no timeout params given)
 const DEFAULT_INACTIVITY_TIMEOUT = 60_000; // 60 seconds
@@ -279,7 +279,7 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
   // Track background processes for cleanup
   const backgroundProcesses = new Map<string, ChildProcess>();
 
-  const params = Type.Object({
+  const bashParams = Type.Object({
     command: Type.String({
       description: 'The shell command to execute',
     }),
@@ -312,13 +312,17 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
     ),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof bashParams> = {
     name: 'bash',
     label: 'Execute Shell Command',
     description:
       'Execute a shell command and return stdout/stderr. 120-second timeout by default. Uses PowerShell on Windows, bash on macOS/Linux. Set run_in_background to true for long-running commands — you will be notified when they complete. Output is streamed as the command runs. For long-running foreground commands, set inactivity_timeout_seconds and/or total_timeout_seconds to use dual timeouts (inactivity resets on output, total is a hard cap). Scripts can emit "::system2:: <message>" on stdout as heartbeats to reset the inactivity timer and show progress in the UI.',
-    parameters: params,
-    execute: async (_toolCallId, params, signal, onUpdate) => {
+    parameters: bashParams,
+    execute: async (_toolCallId, rawParams, signal, onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof bashParams>;
       // Block catastrophic commands before execution
       for (const { pattern, reason } of BLOCKED_BASH_PATTERNS) {
         if (pattern.test(params.command)) {

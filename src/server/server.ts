@@ -796,7 +796,7 @@ export class Server {
     const models = meta.models as Record<string, string> | undefined;
     if (!models) return null;
 
-    const modelRegistry = new ModelRegistry(this.authResolver.createAuthStorage());
+    const modelRegistry = ModelRegistry.create(this.authResolver.createAuthStorage());
 
     for (const provider of this.authResolver.providerOrder) {
       const modelId = models[provider];
