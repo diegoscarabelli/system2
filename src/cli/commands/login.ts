@@ -103,11 +103,12 @@ export function addProviderToOAuthTier(
   const inTier = oauth.primary === provider || (oauth.fallback ?? []).includes(provider);
   if (inTier) return { changed: false };
 
-  // Append to fallback array. Reconstruct the section in-place via regex on the existing section.
-  // Anchor at line start (multiline) so `[llm.oauth]` mentions in comments don't
-  // get matched and rewritten. See removeProviderFromOAuthTier for the same fix.
-  const sectionPattern = /^\[llm\.oauth\]([\s\S]*?)(?=\r?\n\[|$(?![\r\n]))/m;
-  const match = raw.match(sectionPattern);
+  // Append to fallback array. Capture ONLY the [llm.oauth] header + its
+  // immediate key=value lines, stopping at the first blank line, comment,
+  // or next `[`-section. A wider span would include intervening commented
+  // templates and section dividers (which buildConfigToml emits between
+  // tiers); replacing that span destroys structure. See OAUTH_BLOCK_PATTERN.
+  const match = raw.match(OAUTH_BLOCK_PATTERN);
   if (!match) {
     // Shouldn't happen because oauth is non-null, but guard anyway
     return { changed: false };
@@ -124,13 +125,28 @@ export function addProviderToOAuthTier(
       // Could not even find a primary= line — bail.
       return { changed: false };
     }
-    writeFileSync(configPath, raw.replace(sectionPattern, withFallback));
+    writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, withFallback));
     return { changed: true };
   }
 
-  writeFileSync(configPath, raw.replace(sectionPattern, replacedSection));
+  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacedSection));
   return { changed: true };
 }
+
+/**
+ * Pattern matching the [llm.oauth] block: header line + immediate key=value
+ * lines (typically primary + fallback), stopping at the first blank line,
+ * comment line, or next `[`-section header.
+ *
+ * Prior versions used a wide pattern that ran to the next live `[`-section,
+ * which silently consumed everything in between — fine when adjacent
+ * sections were always live, but corrupting once buildConfigToml started
+ * emitting commented templates and dividers between live sections. The
+ * narrow pattern preserves those structural elements (and any
+ * `[llm.oauth.<provider>]` sub-section model pins, which sit below a blank
+ * line and so are now also preserved).
+ */
+const OAUTH_BLOCK_PATTERN = /^\[llm\.oauth\][^\n]*\n(?:[^[#\s][^\n]*\n)+/m;
 
 /**
  * Patch config.toml to remove `provider` from `[llm.oauth]`.
@@ -165,15 +181,11 @@ export function removeProviderFromOAuthTier(
     newFallback = newFallback.filter((f) => f !== provider);
   }
 
-  // Anchor at line start (multiline) so `[llm.oauth]` mentions in comments don't
-  // get matched and rewritten. The new buildConfigToml emits comments that include
-  // the literal text `[llm.oauth]` in prose; without the anchor, raw.replace would
-  // overwrite from the comment line onward and corrupt the file.
-  const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\r?\n\[|$(?![\r\n]))/m;
-  if (!sectionPattern.test(raw)) {
+  if (!OAUTH_BLOCK_PATTERN.test(raw)) {
     // TOML parse found [llm.oauth] but the regex doesn't match — likely an
-    // unusual on-disk format (leading whitespace before the header, etc.).
-    // Throw rather than silently no-op while reporting changed=true.
+    // unusual on-disk format (leading whitespace before the header, key on
+    // same line as header, etc.). Throw rather than silently no-op while
+    // reporting changed=true.
     throw new Error(
       `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
         `Edit the file manually if it has unusual formatting.`
@@ -181,13 +193,13 @@ export function removeProviderFromOAuthTier(
   }
 
   if (newPrimary === null) {
-    writeFileSync(configPath, raw.replace(sectionPattern, ''));
+    writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, ''));
     return { changed: true };
   }
 
   const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-  const replacement = `\n[llm.oauth]\nprimary = "${newPrimary}"\nfallback = [${fbStr}]\n`;
-  writeFileSync(configPath, raw.replace(sectionPattern, replacement));
+  const replacement = `[llm.oauth]\nprimary = "${newPrimary}"\nfallback = [${fbStr}]\n`;
+  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacement));
   return { changed: true };
 }
 
@@ -225,24 +237,18 @@ export function setProviderAsPrimary(
   const newFallback = [current.primary, ...current.fallback.filter((f) => f !== provider)];
 
   const raw = readFileSync(configPath, 'utf-8');
-  // Anchor at line start (multiline) so `[llm.oauth]` mentions in comments don't
-  // get matched and rewritten. The new buildConfigToml emits comments that include
-  // the literal text `[llm.oauth]` in prose; without the anchor, raw.replace would
-  // overwrite from the comment line onward and corrupt the file.
-  const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\r?\n\[|$(?![\r\n]))/m;
-  if (!sectionPattern.test(raw)) {
+  if (!OAUTH_BLOCK_PATTERN.test(raw)) {
     // TOML parse found [llm.oauth] (readOAuthTier returned non-null) but the
-    // regex doesn't match — likely an unusual on-disk format (leading whitespace
-    // before the header, etc.). Throw rather than silently no-op while reporting
-    // changed=true.
+    // regex doesn't match — likely an unusual on-disk format. Throw rather
+    // than silently no-op while reporting changed=true.
     throw new Error(
       `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
         `Edit the file manually if it has unusual formatting.`
     );
   }
   const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-  const replacement = `\n[llm.oauth]\nprimary = "${provider}"\nfallback = [${fbStr}]\n`;
-  writeFileSync(configPath, raw.replace(sectionPattern, replacement));
+  const replacement = `[llm.oauth]\nprimary = "${provider}"\nfallback = [${fbStr}]\n`;
+  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacement));
   return { changed: true };
 }
 
