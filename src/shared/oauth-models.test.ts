@@ -6,8 +6,7 @@
  * snapshot in node_modules.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { _resetAgentModelsCacheForTests } from './agent-models.js';
+import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@mariozechner/pi-ai', () => ({
   getProviders: () => ['anthropic', 'openai-codex', 'github-copilot'],
@@ -56,7 +55,7 @@ describe('compareNatural', () => {
   it('treats numeric > string when types differ at the same position', async () => {
     const { compareNatural } = await import('./oauth-models.js');
     // gemini-3.1-pro → [gemini, 3, 1, pro];   gemini-3-pro → [gemini, 3, pro]
-    // Position 1: 1 (number) vs 'pro' (string) → numeric wins.
+    // Position 2: 1 (number) vs 'pro' (string) → numeric wins.
     expect(compareNatural('gemini-3.1-pro', 'gemini-3-pro')).toBeGreaterThan(0);
   });
 
@@ -67,9 +66,6 @@ describe('compareNatural', () => {
 });
 
 describe('resolveOAuthModel', () => {
-  beforeEach(() => _resetAgentModelsCacheForTests());
-  afterEach(() => _resetAgentModelsCacheForTests());
-
   it('picks the latest opus alias for anthropic (snapshot filtered)', async () => {
     const { resolveOAuthModel } = await import('./oauth-models.js');
     // Aliases present: claude-opus-4-5, claude-opus-4-6, claude-opus-4-7.
@@ -100,7 +96,6 @@ describe('resolveOAuthModel', () => {
       getModels: () => [{ id: 'claude-sonnet-4-6', contextWindow: 200000 }],
     }));
     vi.resetModules();
-    _resetAgentModelsCacheForTests();
     const { resolveOAuthModel, OAUTH_FALLBACKS } = await import('./oauth-models.js');
     expect(resolveOAuthModel('anthropic')).toBe(OAUTH_FALLBACKS.anthropic);
     vi.doUnmock('@mariozechner/pi-ai');

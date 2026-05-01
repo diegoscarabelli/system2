@@ -226,9 +226,24 @@ function buildProvidersFromSource(
 ): Partial<Record<LlmProvider, LlmProviderConfig>> {
   const providers: Partial<Record<LlmProvider, LlmProviderConfig>> = {};
 
-  function attachModels(cfg: LlmProviderConfig, sub: ProviderKeysToml | undefined) {
-    if (sub?.models && Object.keys(sub.models).length > 0) {
-      cfg.models = { ...sub.models };
+  function attachModels(
+    cfg: LlmProviderConfig,
+    providerName: string,
+    sub: ProviderKeysToml | undefined
+  ) {
+    if (!sub?.models) return;
+    const validModels: Record<string, string> = {};
+    for (const [role, modelId] of Object.entries(sub.models)) {
+      if (typeof modelId === 'string' && modelId.length > 0) {
+        validModels[role] = modelId;
+      } else {
+        console.warn(
+          `[Config] Ignoring invalid [llm.api_keys.${providerName}.models].${role}: expected a non-empty string.`
+        );
+      }
+    }
+    if (Object.keys(validModels).length > 0) {
+      cfg.models = validModels;
     }
   }
 
@@ -246,7 +261,7 @@ function buildProvidersFromSource(
       const validKeys = sub.keys.filter((k) => k.key);
       if (validKeys.length > 0) {
         const cfg: LlmProviderConfig = { keys: validKeys };
-        attachModels(cfg, sub);
+        attachModels(cfg, name, sub);
         providers[name] = cfg;
       }
     }
@@ -273,7 +288,7 @@ function buildProvidersFromSource(
           config.routing = validRouting;
         }
       }
-      attachModels(config, openrouterToml);
+      attachModels(config, 'openrouter', openrouterToml);
       providers.openrouter = config;
     }
   }
