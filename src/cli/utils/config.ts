@@ -368,6 +368,7 @@ export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig 
     config.oauth = {
       primary: toml.oauth.primary as LlmProvider,
       fallback: (toml.oauth.fallback as LlmProvider[]) ?? [],
+      providers: {},
     };
   }
 
@@ -511,19 +512,6 @@ export function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>)
 
 const VALID_THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high']);
 
-const VALID_MODEL_PROVIDERS = new Set<string>([
-  'anthropic',
-  'cerebras',
-  'github-copilot',
-  'google',
-  'groq',
-  'mistral',
-  'openai',
-  'openai-codex',
-  'openrouter',
-  'xai',
-]);
-
 /**
  * Convert TOML agents section to AgentsConfig.
  * Each entry is a role name with optional overrides for thinking_level, compaction_depth, and models.
@@ -552,28 +540,6 @@ export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): Agen
         console.warn(
           `[Config] Ignoring invalid compaction_depth "${entry.compaction_depth}" for agent "${role}". Expected an integer >= 0.`
         );
-      }
-    }
-
-    if (entry.models && Object.keys(entry.models).length > 0) {
-      const validModels: Record<string, string> = {};
-      for (const [provider, model] of Object.entries(entry.models as Record<string, unknown>)) {
-        if (!VALID_MODEL_PROVIDERS.has(provider)) {
-          console.warn(
-            `[Config] Ignoring unknown model provider "${provider}" for agent "${role}". Valid providers: ${[...VALID_MODEL_PROVIDERS].join(', ')}`
-          );
-          continue;
-        }
-        if (typeof model === 'string' && model.length > 0) {
-          validModels[provider] = model;
-        } else {
-          console.warn(
-            `[Config] Ignoring invalid model "${String(model)}" for provider "${provider}" on agent "${role}". Expected a non-empty string.`
-          );
-        }
-      }
-      if (Object.keys(validModels).length > 0) {
-        override.models = validModels as AgentOverrideConfig['models'];
       }
     }
 
@@ -687,11 +653,6 @@ export function loadConfig(): System2Config {
 
   if (tomlConfig.agents) {
     config.agents = convertTomlAgents(tomlConfig.agents);
-    // Catch model-id typos at config load. Unknown provider IDs in TOML are
-    // already filtered with a warning by convertTomlAgents above; this throws
-    // only on unknown model IDs (within known providers). Frontmatter typos
-    // for either provider or model are caught later in AgentHost.loadAgent.
-    validateAgentModels(config.agents);
   }
 
   if (tomlConfig.services) {
@@ -826,57 +787,38 @@ export function buildConfigToml(options: {
     }
   }
 
-  // Agents section (per-role overrides)
+  // Agents section: per-role behavior overrides (thinking, compaction).
   if (options.agents && Object.keys(options.agents).length > 0) {
     for (const [role, override] of Object.entries(options.agents)) {
-      const hasScalarFields =
-        override.thinking_level !== undefined || override.compaction_depth !== undefined;
-      const hasModels = override.models && Object.keys(override.models).length > 0;
-
-      if (hasScalarFields) {
-        lines.push(`[agents.${role}]`);
-        if (override.thinking_level !== undefined) {
-          lines.push(`thinking_level = "${override.thinking_level}"`);
-        }
-        if (override.compaction_depth !== undefined) {
-          lines.push(`compaction_depth = ${override.compaction_depth}`);
-        }
-        lines.push('');
+      if (override.thinking_level === undefined && override.compaction_depth === undefined) {
+        continue;
       }
-
-      if (hasModels && override.models) {
-        lines.push(`[agents.${role}.models]`);
-        for (const [provider, model] of Object.entries(override.models)) {
-          lines.push(`${provider} = "${model}"`);
-        }
-        lines.push('');
+      lines.push(`[agents.${role}]`);
+      if (override.thinking_level !== undefined) {
+        lines.push(`thinking_level = "${override.thinking_level}"`);
       }
+      if (override.compaction_depth !== undefined) {
+        lines.push(`compaction_depth = ${override.compaction_depth}`);
+      }
+      lines.push('');
     }
   } else {
-    lines.push('# Per-agent model and behavior overrides. Uncomment and edit to customize.');
+    lines.push('# Per-agent behavior overrides. Uncomment and edit to customize.');
     lines.push('# Supported roles: guide, conductor, reviewer, narrator, worker');
     lines.push('#');
-    lines.push('# Example 1: override thinking level and pin a specific model');
     lines.push('# [agents.conductor]');
     lines.push('# thinking_level = "high"              # off | minimal | low | medium | high');
     lines.push(
       '# compaction_depth = 8                 # keep N auto-compactions in sliding window'
     );
     lines.push('#');
-    lines.push('# [agents.conductor.models]');
-    lines.push('# anthropic = "claude-opus-4-6"        # pin a model for a specific provider');
+    lines.push('# Per-role model pins (API-keys tier) live under:');
+    lines.push('# [llm.api_keys.<provider>.models]');
+    lines.push('# conductor = "claude-opus-4-6"');
     lines.push('#');
-    lines.push(
-      '# Example 2: route a role through OpenRouter to a specific upstream (e.g. Vertex AI)'
-    );
-    lines.push('# [agents.conductor.models]');
-    lines.push(
-      '# openrouter = "google/gemini-3.1-pro-preview" # model ID as listed on openrouter.ai'
-    );
-    lines.push('#');
-    lines.push('# To control which upstream providers OpenRouter uses for a model prefix:');
-    lines.push('# [llm.api_keys.openrouter.routing]');
-    lines.push('# "google/" = ["google-vertex/global", "google-vertex", "google-ai-studio"]');
+    lines.push('# OAuth-tier model pin (one model per provider, all roles):');
+    lines.push('# [llm.oauth.<provider>]');
+    lines.push('# model = "claude-opus-4-7"');
     lines.push('');
   }
 

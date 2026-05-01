@@ -349,7 +349,7 @@ function makeTwoTierConfig(): LlmConfig {
       },
       openai: { keys: [{ key: 'oai-key-1', label: 'main' }] },
     },
-    oauth: { primary: 'anthropic', fallback: [] },
+    oauth: { primary: 'anthropic', fallback: [], providers: {} },
   };
 }
 
@@ -420,7 +420,7 @@ describe('AuthResolver — two-tier model', () => {
   it('walks oauth fallback before dropping to keys tier', () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: ['openai'] },
+      oauth: { primary: 'anthropic', fallback: ['openai'], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(),
@@ -435,7 +435,7 @@ describe('AuthResolver — two-tier model', () => {
   it('providerOrder includes both tiers, deduplicated', () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds() });
     expect(resolver.providerOrder).toEqual(['anthropic', 'openai']);
@@ -456,7 +456,7 @@ describe('AuthResolver.createAuthStorage', () => {
   it('formats anthropic OAuth as raw access token', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: { ...makeOAuthCreds(), access: 'sk-ant-oat-abc' },
@@ -469,7 +469,7 @@ describe('AuthResolver.createAuthStorage', () => {
     mockedGetOAuthProvider.mockReturnValue(undefined);
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: { ...makeOAuthCreds(), access: 'fallback-access' },
@@ -492,7 +492,7 @@ describe('AuthResolver.ensureFresh', () => {
     const persisted: OAuthCredentials[] = [];
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(60_000), // 1 min — within buffer
@@ -528,7 +528,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('does nothing when OAuth tokens are fresh', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     let calls = 0;
     const resolver = new AuthResolver(cfg, undefined, {
@@ -546,7 +546,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('serializes concurrent ensureFresh calls per provider', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
     let count = 0;
@@ -571,7 +571,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('throws when refresh fails', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
     await expect(
@@ -586,7 +586,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('releases the refresh lock after failure so subsequent calls can succeed', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
 
@@ -616,7 +616,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('forces refresh for providers in the force list even if not near expiry', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(60 * 60_000), // 1 hour — well within fresh window
@@ -642,7 +642,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('does not force-refresh providers not in the force list', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: ['openai'] },
+      oauth: { primary: 'anthropic', fallback: ['openai'], providers: {} },
     };
     let anthropicCalled = false;
     let openaiCalled = false;
@@ -671,7 +671,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('uses the latest credential after awaiting an existing refresh lock', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(1000), // expiring soon

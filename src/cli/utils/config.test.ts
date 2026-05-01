@@ -1,6 +1,6 @@
 import TOML from '@iarna/toml';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentsConfig, LlmConfig } from '../../shared/index.js';
+import type { LlmConfig } from '../../shared/index.js';
 import {
   buildConfigToml,
   convertTomlAgents,
@@ -275,7 +275,10 @@ describe('buildConfigToml', () => {
     expect(result).toContain('[llm.api_keys.xai]');
     expect(result).toContain('xai-key');
     expect(result).not.toContain('base_url');
-    expect(result).not.toContain('model =');
+    // model line shouldn't be emitted as actual TOML for non openai-compatible
+    // providers (only openai-compatible's [llm.api_keys.openai-compatible]
+    // section uses one). Comment-block examples are fine.
+    expect(result).not.toMatch(/^model = /m);
   });
 
   it('includes databases section when configured', () => {
@@ -392,52 +395,28 @@ describe('buildConfigToml', () => {
     expect(result).toContain('compaction_depth = 5');
   });
 
-  it('includes agents section with per-provider model overrides', () => {
+  it('emits [agents.<role>] block with scalar fields', () => {
     const result = buildConfigToml({
       agents: {
-        conductor: {
-          models: {
-            anthropic: 'claude-opus-4-6',
-            google: 'gemini-2.5-pro',
-          },
-        },
-      },
-    });
-    expect(result).toContain('[agents.conductor.models]');
-    expect(result).toContain('anthropic = "claude-opus-4-6"');
-    expect(result).toContain('google = "gemini-2.5-pro"');
-  });
-
-  it('outputs agents with both scalar fields and models', () => {
-    const result = buildConfigToml({
-      agents: {
-        guide: {
-          thinking_level: 'high',
-          compaction_depth: 3,
-          models: {
-            anthropic: 'claude-opus-4-6',
-          },
-        },
+        guide: { thinking_level: 'high', compaction_depth: 3 },
       },
     });
     expect(result).toContain('[agents.guide]');
     expect(result).toContain('thinking_level = "high"');
     expect(result).toContain('compaction_depth = 3');
-    expect(result).toContain('[agents.guide.models]');
-    expect(result).toContain('anthropic = "claude-opus-4-6"');
   });
 
-  it('outputs multiple agent role overrides', () => {
+  it('emits multiple agent role overrides', () => {
     const result = buildConfigToml({
       agents: {
         guide: { thinking_level: 'medium' },
-        conductor: { models: { google: 'gemini-2.5-pro' } },
+        conductor: { compaction_depth: 8 },
       },
     });
     expect(result).toContain('[agents.guide]');
     expect(result).toContain('thinking_level = "medium"');
-    expect(result).toContain('[agents.conductor.models]');
-    expect(result).toContain('google = "gemini-2.5-pro"');
+    expect(result).toContain('[agents.conductor]');
+    expect(result).toContain('compaction_depth = 8');
   });
 
   it('shows commented agents hint when not configured', () => {
@@ -554,21 +533,11 @@ describe('convertTomlDatabases', () => {
 });
 
 describe('convertTomlAgents', () => {
-  it('converts valid overrides with all fields', () => {
+  it('converts valid overrides with both fields', () => {
     const result = convertTomlAgents({
-      guide: {
-        thinking_level: 'high',
-        compaction_depth: 3,
-        models: { anthropic: 'claude-opus-4-6', google: 'gemini-2.5-pro' },
-      },
+      guide: { thinking_level: 'high', compaction_depth: 3 },
     });
-    expect(result).toEqual({
-      guide: {
-        thinking_level: 'high',
-        compaction_depth: 3,
-        models: { anthropic: 'claude-opus-4-6', google: 'gemini-2.5-pro' },
-      },
-    });
+    expect(result).toEqual({ guide: { thinking_level: 'high', compaction_depth: 3 } });
   });
 
   it('converts partial overrides (only thinking_level)', () => {
@@ -576,13 +545,6 @@ describe('convertTomlAgents', () => {
       conductor: { thinking_level: 'low' },
     });
     expect(result).toEqual({ conductor: { thinking_level: 'low' } });
-  });
-
-  it('converts partial overrides (only models)', () => {
-    const result = convertTomlAgents({
-      reviewer: { models: { openai: 'gpt-4o' } },
-    });
-    expect(result).toEqual({ reviewer: { models: { openai: 'gpt-4o' } } });
   });
 
   it('ignores invalid thinking_level with warning', () => {
@@ -621,38 +583,6 @@ describe('convertTomlAgents', () => {
     warnSpy.mockRestore();
   });
 
-  it('filters out unknown model providers with warning', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = convertTomlAgents({
-      guide: { models: { anthropic: 'claude-opus-4-6', 'openai-compatible': 'local-model' } },
-    });
-    expect(result).toEqual({ guide: { models: { anthropic: 'claude-opus-4-6' } } });
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Ignoring unknown model provider')
-    );
-    warnSpy.mockRestore();
-  });
-
-  it('rejects non-string model values with warning', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = convertTomlAgents({
-      guide: { models: { anthropic: 42 as never } },
-    });
-    expect(result).toEqual({});
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid model'));
-    warnSpy.mockRestore();
-  });
-
-  it('rejects empty-string model values with warning', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = convertTomlAgents({
-      guide: { models: { anthropic: '' } },
-    });
-    expect(result).toEqual({});
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid model'));
-    warnSpy.mockRestore();
-  });
-
   it('skips roles with no valid overrides', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = convertTomlAgents({
@@ -666,12 +596,12 @@ describe('convertTomlAgents', () => {
   it('handles multiple roles', () => {
     const result = convertTomlAgents({
       guide: { thinking_level: 'high', compaction_depth: 5 },
-      conductor: { models: { google: 'gemini-2.5-pro' } },
+      conductor: { compaction_depth: 8 },
       narrator: { thinking_level: 'off' },
     });
     expect(result).toEqual({
       guide: { thinking_level: 'high', compaction_depth: 5 },
-      conductor: { models: { google: 'gemini-2.5-pro' } },
+      conductor: { compaction_depth: 8 },
       narrator: { thinking_level: 'off' },
     });
   });
@@ -683,7 +613,7 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
       primary: 'anthropic',
       fallback: [],
       providers: { anthropic: { keys: [] } },
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const toml = buildConfigToml({ llm });
     expect(toml).toMatch(/\[llm\.oauth\]\s*\nprimary\s*=\s*"anthropic"\s*\nfallback\s*=\s*\[\]/);
@@ -696,7 +626,6 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
       providers: { anthropic: { keys: [{ key: 'k', label: 'l' }] } },
     };
     const toml = buildConfigToml({ llm });
-    // Match the section header at line start, not any mention of the bracketed string in comments.
     expect(toml).not.toMatch(/^\[llm\.oauth\]/m);
   });
 
@@ -708,130 +637,16 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
         anthropic: { keys: [] },
         openai: { keys: [{ key: 'oai-1', label: 'main' }] },
       },
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const toml = buildConfigToml({ llm });
     const parsed = TOML.parse(toml) as Record<string, unknown>;
     const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
     const reconstructed = convertTomlLlm(llmSection);
-    expect(reconstructed.oauth).toEqual({ primary: 'anthropic', fallback: [] });
+    expect(reconstructed.oauth?.primary).toBe('anthropic');
+    expect(reconstructed.oauth?.fallback).toEqual([]);
     expect(reconstructed.primary).toBe('openai');
     expect(reconstructed.providers.openai?.keys[0].key).toBe('oai-1');
-  });
-
-  it('parses the legacy 0.2.x [llm] flat schema with a deprecation warning', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const legacyToml = `
-[llm]
-primary = "anthropic"
-fallback = ["openai"]
-
-[llm.oauth]
-primary = "anthropic"
-fallback = []
-
-[llm.anthropic]
-keys = [{ key = "sk-ant-legacy", label = "main" }]
-
-[llm.openai]
-keys = [{ key = "sk-oai-legacy", label = "main" }]
-`;
-    const parsed = TOML.parse(legacyToml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    const result = convertTomlLlm(llmSection);
-    expect(result.primary).toBe('anthropic');
-    expect(result.fallback).toEqual(['openai']);
-    expect(result.providers.anthropic?.keys[0].key).toBe('sk-ant-legacy');
-    expect(result.providers.openai?.keys[0].key).toBe('sk-oai-legacy');
-    expect(result.oauth?.primary).toBe('anthropic');
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('legacy [llm] schema'));
-    warnSpy.mockRestore();
-  });
-
-  it('prefers [llm.api_keys] over legacy fields when both are present, with a warning', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const mixedToml = `
-[llm]
-primary = "ignored"
-fallback = ["also-ignored"]
-
-[llm.api_keys]
-primary = "openai"
-fallback = []
-
-[llm.api_keys.openai]
-keys = [{ key = "wins", label = "main" }]
-
-[llm.anthropic]
-keys = [{ key = "loses", label = "main" }]
-`;
-    const parsed = TOML.parse(mixedToml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    const result = convertTomlLlm(llmSection);
-    expect(result.primary).toBe('openai');
-    expect(result.providers.openai?.keys[0].key).toBe('wins');
-    expect(result.providers.anthropic).toBeUndefined();
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mixes legacy [llm]'));
-    warnSpy.mockRestore();
-  });
-
-  it('warns when only legacy [llm].fallback remains alongside [llm.api_keys]', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const mixedToml = `
-[llm]
-fallback = ["openai"]
-
-[llm.api_keys]
-primary = "anthropic"
-
-[llm.api_keys.anthropic]
-keys = [{ key = "sk-ant-1", label = "main" }]
-`;
-    const parsed = TOML.parse(mixedToml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    convertTomlLlm(llmSection);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mixes legacy [llm]'));
-    warnSpy.mockRestore();
-  });
-
-  it('warns when a legacy provider sub-table has only routing/base_url (no keys)', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const mixedToml = `
-[llm.api_keys]
-primary = "openai"
-
-[llm.api_keys.openai]
-keys = [{ key = "sk-1", label = "main" }]
-
-[llm.openrouter]
-routing = { order = ["anthropic"] }
-`;
-    const parsed = TOML.parse(mixedToml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    convertTomlLlm(llmSection);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mixes legacy [llm]'));
-    warnSpy.mockRestore();
-  });
-
-  it('does not warn when [llm.api_keys] is the only populated section under [llm]', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const cleanToml = `
-[llm.api_keys]
-primary = "anthropic"
-fallback = []
-
-[llm.api_keys.anthropic]
-keys = [{ key = "sk-ant-1", label = "main" }]
-
-[llm.oauth]
-primary = "anthropic"
-fallback = []
-`;
-    const parsed = TOML.parse(cleanToml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    convertTomlLlm(llmSection);
-    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('legacy'));
-    warnSpy.mockRestore();
   });
 });
 
@@ -1092,68 +907,55 @@ describe('buildConfigToml — [delivery] section', () => {
 
 describe('validateAgentModels', () => {
   it('passes when all models are in pi-ai catalog', () => {
-    const agents: AgentsConfig = {
-      narrator: {
-        models: { anthropic: 'claude-haiku-4-5-20251001', openai: 'gpt-4o-mini' },
-      },
-    };
-    expect(() => validateAgentModels(agents)).not.toThrow();
+    expect(() =>
+      validateAgentModels({
+        narrator: { anthropic: 'claude-haiku-4-5-20251001', openai: 'gpt-4o-mini' },
+      })
+    ).not.toThrow();
   });
 
   it('passes for the new OAuth providers when models exist in their catalogs', () => {
-    const agents: AgentsConfig = {
-      conductor: {
-        models: {
+    expect(() =>
+      validateAgentModels({
+        conductor: {
           'openai-codex': 'gpt-5.3-codex',
           'github-copilot': 'claude-sonnet-4.6',
         },
-      },
-    };
-    expect(() => validateAgentModels(agents)).not.toThrow();
+      })
+    ).not.toThrow();
   });
 
   it('throws with did-you-mean suggestion on a model typo', () => {
-    const agents: AgentsConfig = {
-      narrator: { models: { anthropic: 'claude-sonet-4-6' } },
-    };
-    expect(() => validateAgentModels(agents)).toThrow(/Did you mean ".*claude.*"/i);
+    expect(() => validateAgentModels({ narrator: { anthropic: 'claude-sonet-4-6' } })).toThrow(
+      /Did you mean ".*claude.*"/i
+    );
   });
 
   it('throws when model is not in catalog and no close match exists', () => {
-    const agents: AgentsConfig = {
-      narrator: { models: { anthropic: 'totally-fake-model-xyz' } },
-    };
-    expect(() => validateAgentModels(agents)).toThrow(/not in pi-ai's catalog/);
+    expect(() =>
+      validateAgentModels({ narrator: { anthropic: 'totally-fake-model-xyz' } })
+    ).toThrow(/not in pi-ai's catalog/);
   });
 
   it('throws for openai-compatible (not allowed as a per-agent override)', () => {
-    // openai-compatible registers its model dynamically at runtime via
-    // [llm.openai-compatible].model; per-agent overrides for it are rejected
-    // by convertTomlAgents and treated as unknown by validateAgentModels.
-    const agents = {
-      narrator: { models: { 'openai-compatible': 'whatever-local-model' } },
-    } as unknown as AgentsConfig;
-    expect(() => validateAgentModels(agents)).toThrow(/unknown provider "openai-compatible"/);
+    expect(() =>
+      validateAgentModels({ narrator: { 'openai-compatible': 'whatever-local-model' } })
+    ).toThrow(/unknown provider "openai-compatible"/);
   });
 
   it('throws on unknown provider id (e.g., a typo) instead of silently skipping', () => {
-    const agents = {
-      narrator: { models: { anthopic: 'claude-sonnet-4-6' } },
-    } as unknown as AgentsConfig;
-    expect(() => validateAgentModels(agents)).toThrow(/unknown provider "anthopic"/);
+    expect(() => validateAgentModels({ narrator: { anthopic: 'claude-sonnet-4-6' } })).toThrow(
+      /unknown provider "anthopic"/
+    );
   });
 
   it('throws on unknown provider with the list of valid providers in the message', () => {
-    const agents = {
-      narrator: { models: { 'imaginary-provider': 'foo' } },
-    } as unknown as AgentsConfig;
-    expect(() => validateAgentModels(agents)).toThrow(/Valid providers:.*anthropic.*openai-codex/);
+    expect(() => validateAgentModels({ narrator: { 'imaginary-provider': 'foo' } })).toThrow(
+      /Valid providers:.*anthropic.*openai-codex/
+    );
   });
 
-  it('treats agents without models as no-op', () => {
-    const agents: AgentsConfig = {
-      narrator: { thinking_level: 'medium' },
-    };
-    expect(() => validateAgentModels(agents)).not.toThrow();
+  it('treats empty models map as no-op', () => {
+    expect(() => validateAgentModels({ narrator: {} })).not.toThrow();
   });
 });

@@ -3288,7 +3288,7 @@ describe('AgentHost', () => {
         providers: {
           cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
         },
-        oauth: { primary: 'anthropic' as const, fallback: [] },
+        oauth: { primary: 'anthropic' as const, fallback: [], providers: {} },
       };
 
       // Provide a non-expiring OAuth credential so the OAuth tier is active
@@ -3338,7 +3338,7 @@ describe('AgentHost', () => {
         providers: {
           cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
         },
-        oauth: { primary: 'anthropic' as const, fallback: [] },
+        oauth: { primary: 'anthropic' as const, fallback: [], providers: {} },
       };
 
       const oauthCred = {
@@ -3399,7 +3399,7 @@ describe('AgentHost', () => {
         providers: {
           cerebras: { keys: [{ key: 'cer-key-1', label: 'main' }] },
         },
-        oauth: { primary: 'anthropic' as const, fallback: [] },
+        oauth: { primary: 'anthropic' as const, fallback: [], providers: {} },
       };
 
       const oauthCred = {

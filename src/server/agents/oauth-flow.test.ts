@@ -14,7 +14,7 @@ function makeTwoTierConfig(): LlmConfig {
       anthropic: { keys: [{ key: 'sk-ant-api03-fallback', label: 'api-fallback' }] },
       openai: { keys: [{ key: 'oai-1', label: 'main' }] },
     },
-    oauth: { primary: 'anthropic', fallback: [] },
+    oauth: { primary: 'anthropic', fallback: [], providers: {} },
   };
 }
 
@@ -98,7 +98,7 @@ describe('OAuth end-to-end flow', () => {
   it('cycles through entire OAuth tier before dropping to keys tier', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: ['openai'] },
+      oauth: { primary: 'anthropic', fallback: ['openai'], providers: {} },
     };
     saveOAuthCredentials(tmpDir, 'anthropic', {
       access: 'a',

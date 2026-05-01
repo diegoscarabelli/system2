@@ -402,7 +402,7 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
     availableFallback = availableFallback.filter((o) => o.value !== next);
   }
 
-  return { primary, fallback };
+  return { primary, fallback, providers: {} };
 }
 
 /**
