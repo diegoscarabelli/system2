@@ -5,15 +5,18 @@ version: 3.0.0
 thinking_level: medium
 compaction_depth: 3
 reset_session_after_scheduled_task: true
-models:
+# Default model per provider for the API-keys tier. The OAuth tier ignores
+# these — it auto-picks one model per provider via resolveOAuthModel for all
+# roles. Override per-role with [llm.api_keys.<provider>.models][<role>] in
+# config.toml. Only api-keys-tier providers are listed; github-copilot and
+# openai-codex are OAuth-only and intentionally absent.
+api_keys_models:
   anthropic: claude-haiku-4-5-20251001
   cerebras: gpt-oss-120b
-  github-copilot: claude-haiku-4.5
   google: gemini-3.1-flash-lite-preview
   groq: llama-3.1-8b-instant
   mistral: mistral-small-latest
   openai: gpt-4o-mini
-  openai-codex: gpt-5.4-mini
   openrouter: google/gemini-3.1-flash-lite-preview
   xai: grok-2-latest
 ---

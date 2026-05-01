@@ -233,18 +233,18 @@ Three extra concerns over plain API keys:
 
 ### Per-agent model declarations across providers
 
-Each agent's frontmatter `models:` block declares a model id per provider, including the OAuth-only providers added alongside Anthropic:
+Each agent's frontmatter `api_keys_models:` block declares a default model id per provider for the **API-keys tier only**. The OAuth tier ignores frontmatter and runs `resolveOAuthModel` instead — one model per provider for all roles. Only api-keys-tier providers appear here; `github-copilot` and `openai-codex` are OAuth-only and intentionally absent.
 
 ```yaml
-models:
+api_keys_models:
   anthropic: claude-sonnet-4-6
   openai: gpt-4o
   google: gemini-3.1-pro-preview
-  openai-codex: gpt-5.3-codex
-  github-copilot: claude-sonnet-4.6
+  cerebras: zai-glm-4.7
+  groq: llama-3.3-70b-versatile
 ```
 
-At startup, [validateAgentModels](../src/shared/agent-models.ts) in `src/cli/utils/config.ts` cross-checks every entry against pi-ai's `MODELS` catalog. Unknown model ids fail validation with did-you-mean suggestions computed by Levenshtein distance against the catalog, so a typo like `claude-sonet-4-6` surfaces as a startup error pointing at the intended `claude-sonnet-4-6` rather than a runtime 404. The same map drives both the OAuth-tier and API-key-tier sessions: the resolver picks the credential, the agent picks the model id for the resolved provider, and pi-ai assembles the request.
+Users override per-role with `[llm.api_keys.<provider>.models][<role>]` in `config.toml` (see [Configuration](configuration.md#model-selection)). At startup, [validateAgentModels](../src/shared/agent-models.ts) cross-checks every frontmatter entry against pi-ai's `MODELS` catalog. Unknown model ids fail validation with did-you-mean suggestions computed by Levenshtein distance, so a typo like `claude-sonet-4-6` surfaces as a startup error pointing at the intended `claude-sonnet-4-6` rather than a runtime 404.
 
 ## Session Persistence
 

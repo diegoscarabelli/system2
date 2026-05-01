@@ -274,7 +274,7 @@ System2 delegates OAuth provider behavior to pi-ai's provider registry. `getOAut
 Model selection differs between tiers, reflecting their cost models:
 
 - **OAuth tier (flat-fee subscription)**: one model per provider, used by every agent role. The model is picked from pi-ai's catalog by a family-prefix regex per provider (`claude-opus-*` for Anthropic, `gpt-X.Y[-codex]` for openai-codex, `gpt-X.Y` for github-copilot), so newer flagships propagate automatically when pi-ai bumps. Override with `[llm.oauth.<provider>] model = "..."` to pin a specific model — strictly validated against the catalog at startup.
-- **API-keys tier (pay-per-token)**: per-role × per-provider matrix. Defaults come from each agent's frontmatter `models:` block. Override per role with `[llm.api_keys.<provider>.models][<role>] = "..."` — also validated at startup.
+- **API-keys tier (pay-per-token)**: per-role × per-provider matrix. Defaults come from each agent's frontmatter `api_keys_models:` block (only api-keys-tier providers; OAuth-only providers are intentionally absent). Override per role with `[llm.api_keys.<provider>.models][<role>] = "..."` — also validated at startup.
 
 **Auto-fallback on entitlement errors (OAuth tier only).** When a model picked by the family-prefix resolver returns 403 or 404 (typical signals for "model not available on this plan" / "model not found"), the host steps the credential to a hardcoded fallback for the rest of the session and retries once. Defaults today: `claude-sonnet-4-6` for anthropic, `gpt-5.4` for openai-codex, `gpt-4.1` for github-copilot. The fallback fires only when the model came from the resolver — explicit user pins (`[llm.oauth.<provider>] model = "..."`) bubble the error up so misconfiguration surfaces loudly.
 
@@ -342,7 +342,7 @@ Unknown provider IDs and model IDs are cross-checked against pi-ai's catalog at 
 
 ### How it works
 
-During agent initialization, `AgentHost` reads the library frontmatter first, then applies any matching `[agents.<role>]` overrides from config.toml. Model resolution branches by the active tier: OAuth picks one model per provider via the resolver (or `[llm.oauth.<p>].model`); API-keys reads `[llm.api_keys.<p>.models][<role>]` first, then frontmatter.
+During agent initialization, `AgentHost` reads the library frontmatter first, then applies any matching `[agents.<role>]` overrides from config.toml. Model resolution branches by the active tier: OAuth picks one model per provider via the resolver (or `[llm.oauth.<p>].model`); API-keys reads `[llm.api_keys.<p>.models][<role>]` first, then frontmatter `api_keys_models[<provider>]`.
 
 ## Databases
 

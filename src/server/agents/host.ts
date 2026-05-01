@@ -136,7 +136,13 @@ interface AgentDefinition {
    *  (`daily_summaries/*.md`, `memory.md`, per-project `log.md`) rather than in their session.
    *  Prevents context-overflow loops where each tick's restored session keeps growing. */
   reset_session_after_scheduled_task?: boolean;
-  models: {
+  /** Default model per provider for the API-keys tier. The OAuth tier
+   *  ignores these — it auto-picks one model per provider via
+   *  resolveOAuthModel for all roles. Users override per-role via
+   *  `[llm.api_keys.<provider>.models][<role>]` in config.toml.
+   *  Only api-keys-tier providers are listed (no github-copilot or
+   *  openai-codex, which are OAuth-only). */
+  api_keys_models: {
     anthropic: string;
     cerebras: string;
     google: string;
@@ -195,7 +201,7 @@ export interface AgentHostConfig {
  *
  * Resolution order:
  *   - OAuth: user pin → OAUTH_FALLBACKS (if already stepped down) → resolveOAuthModel
- *   - API-keys: [llm.api_keys.<provider>.models][role] → frontmatter models[provider]
+ *   - API-keys: [llm.api_keys.<provider>.models][role] → frontmatter api_keys_models[provider]
  */
 export function pickModelForTier(args: {
   tier: AuthTier;
@@ -432,7 +438,7 @@ export class AgentHost {
       }
     }
 
-    this.agentModels = agentConfig.models ?? {};
+    this.agentModels = agentConfig.api_keys_models ?? {};
     // Validate frontmatter (provider, modelId) pairs against pi-ai's catalog.
     validateAgentModels({ [agentRecord.role]: this.agentModels });
     // Source the session-reset flag from the agent library frontmatter unless the constructor
@@ -450,7 +456,7 @@ export class AgentHost {
 
     log.info('[AgentHost] Agent config loaded:', {
       name: agentConfig.name,
-      models: agentConfig.models,
+      api_keys_models: agentConfig.api_keys_models,
       overrides: roleOverride ? Object.keys(roleOverride) : [],
       provider: llmProvider,
     });
@@ -498,7 +504,7 @@ export class AgentHost {
           provider,
           role: agentRecord.role,
           llmConfig: this.llmConfig,
-          frontmatterModels: agentConfig.models,
+          frontmatterModels: agentConfig.api_keys_models,
           fallbackUsedFor: this.oauthFallbackUsedFor,
         });
         if (result.id) {
