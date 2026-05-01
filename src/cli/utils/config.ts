@@ -714,21 +714,22 @@ export function buildConfigToml(options: {
   services?: ServicesConfig;
   tools?: ToolsConfig;
   databases?: DatabasesConfig;
-  delivery?: DeliveryConfig;
-  session?: SessionConfig;
-  backup?: System2Config['backup'];
-  logs?: System2Config['logs'];
-  scheduler?: System2Config['scheduler'];
-  chat?: System2Config['chat'];
-  knowledge?: System2Config['knowledge'];
+  // Operational settings ([backup], [logs], [scheduler], [chat], [knowledge],
+  // [session], [delivery]) are not accepted as input. They are always emitted
+  // as commented templates whose values come from DEFAULT_OPERATIONAL,
+  // DEFAULT_SESSION, and DEFAULT_DELIVERY. Users edit ~/.system2/config.toml
+  // by hand to tune them; the emitter is not the path for customization.
 }): string {
   const HR = '═'.repeat(72);
   const sectionHeader = (label: string): string[] => [`# ${HR}`, `# ${label}`, `# ${HR}`];
 
   const lines: string[] = [
     '# System2 Configuration',
-    '# This file contains all System2 settings including API keys.',
-    '# Permissions: 0600 (owner read/write only).',
+    '# All System2 settings: LLM credentials (OAuth + API keys), per-agent',
+    '# overrides, services, databases, and operational defaults.',
+    '# Edited both programmatically by System2 (e.g. `system2 login` updates',
+    '# `[llm.oauth]`) and manually by you. Changes apply on daemon restart.',
+    '# Permissions: 0600 (owner read/write only — protects credentials).',
     '',
   ];
 
@@ -738,12 +739,11 @@ export function buildConfigToml(options: {
     // OAuth tier: emit divider + (live block | commented template) so users
     // who skipped OAuth at onboarding still see how to enable it later.
     lines.push(...sectionHeader('LLM credentials — OAuth tier'));
-    lines.push('# Subscription credentials. Tried first when present; the API-keys tier');
-    lines.push('# below is only used after every OAuth credential is in cooldown.');
+    lines.push('# OAuth providers and failover order. Subscription tokens live in');
+    lines.push('# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.');
+    lines.push('# This tier is tried first; the API-keys tier below is only used after');
+    lines.push('# every OAuth credential is in cooldown.');
     lines.push('# Supported providers: anthropic, openai-codex, github-copilot.');
-    lines.push(
-      '# Tokens live in ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.'
-    );
     lines.push('');
     if (options.llm.oauth) {
       lines.push('[llm.oauth]');
@@ -763,9 +763,13 @@ export function buildConfigToml(options: {
         lines.push('');
       }
       if (liveOAuthPins.length === 0) {
-        lines.push('# Optional per-OAuth-provider model pin. When omitted, the resolver');
-        lines.push("# picks the family flagship from pi-ai's catalog (claude-opus-* for");
-        lines.push('# anthropic, gpt-X.Y[-codex] for openai-codex, gpt-X.Y for github-copilot).');
+        lines.push('# Optional per-OAuth-provider model pin. When omitted, the resolver picks');
+        lines.push("# the family flagship from pi-ai's catalog. Family rules:");
+        lines.push('# https://github.com/diegoscarabelli/system2/blob/main/docs/configuration.md');
+        lines.push('# Catalog of model IDs (use the exact `id` field when pinning):');
+        lines.push(
+          '# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts'
+        );
         lines.push('# [llm.oauth.anthropic]');
         lines.push('# model = "claude-opus-4-7"');
         lines.push('');
@@ -862,6 +866,10 @@ export function buildConfigToml(options: {
         lines.push('# Optional per-role model pins for the API-keys tier. Keys are role names');
         lines.push("# (guide, conductor, reviewer, narrator, worker). Overrides the role's");
         lines.push('# library frontmatter default for the matched provider.');
+        lines.push('# Catalog of model IDs (use the exact `id` field when pinning):');
+        lines.push(
+          '# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts'
+        );
         lines.push('# [llm.api_keys.anthropic.models]');
         lines.push('# narrator = "claude-haiku-4-5-20251001"');
         lines.push('# conductor = "claude-sonnet-4-6"');
@@ -879,7 +887,11 @@ export function buildConfigToml(options: {
       lines.push('#   { key = "sk-ant-...", label = "default" },');
       lines.push('# ]');
       lines.push('#');
-      lines.push("# Optional per-role model pins (overrides each role's library default):");
+      lines.push("# Optional per-role model pins (overrides each role's library default).");
+      lines.push('# Catalog of model IDs (use the exact `id` field when pinning):');
+      lines.push(
+        '# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts'
+      );
       lines.push('# [llm.api_keys.anthropic.models]');
       lines.push('# narrator = "claude-haiku-4-5-20251001"');
       lines.push('');
@@ -903,7 +915,9 @@ export function buildConfigToml(options: {
       lines.push('');
     }
   } else {
-    lines.push('# Per-agent behavior overrides. Uncomment and edit to customize.');
+    lines.push('# Per-agent behavior overrides (thinking_level, compaction_depth).');
+    lines.push('# Tier-agnostic: applied whether the OAuth or API-keys tier is active.');
+    lines.push('# Uncomment and edit to customize.');
     lines.push('# Supported roles: guide, conductor, reviewer, narrator, worker');
     lines.push('# Model pins live with their tier: see [llm.oauth.<provider>] /');
     lines.push('# [llm.api_keys.<provider>.models] above.');
@@ -932,7 +946,9 @@ export function buildConfigToml(options: {
   if (options.tools?.web_search) {
     lines.push('[tools.web_search]');
     lines.push(`enabled = ${options.tools.web_search.enabled}`);
-    lines.push(`max_results = ${options.tools.web_search.max_results}`);
+    // max_results is a tunable with a code default; same model as operational
+    // settings — keep commented so accidental edits cannot silently change it.
+    lines.push(`# max_results = ${options.tools.web_search.max_results}`);
     lines.push('');
   } else {
     lines.push('# Optional tool feature flags.');
@@ -980,86 +996,77 @@ export function buildConfigToml(options: {
   }
 
   lines.push(...sectionHeader('Operational settings'));
-  const backup = options.backup ?? DEFAULT_OPERATIONAL.backup;
-  const logs = options.logs ?? DEFAULT_OPERATIONAL.logs;
-
-  lines.push('[backup]');
-  lines.push(`# Hours between automatic backups (minimum: 1)`);
-  lines.push(`cooldown_hours = ${backup.cooldownHours}`);
-  lines.push('');
-  lines.push(`# Maximum number of automatic backups to keep`);
-  lines.push(`max_backups = ${backup.maxBackups}`);
-  lines.push('');
-  lines.push('[logs]');
-  lines.push(`# Log file size threshold for rotation in MB`);
-  lines.push(`rotation_threshold_mb = ${logs.rotationThresholdMB}`);
-  lines.push('');
-  lines.push(`# Maximum number of archived log files to keep`);
-  lines.push(`max_archives = ${logs.maxArchives}`);
+  lines.push('# All values below are defaults pinned in code (src/cli/utils/config.ts:');
+  lines.push('# DEFAULT_OPERATIONAL, DEFAULT_SESSION, DEFAULT_DELIVERY). Lines are');
+  lines.push('# commented so accidental edits cannot change runtime behavior — to');
+  lines.push('# tune a value, uncomment its section header AND the specific key, then');
+  lines.push('# restart the daemon. Values left commented stay tied to the code default,');
+  lines.push('# so an upgrade that bumps a default propagates automatically.');
   lines.push('');
 
-  const scheduler = options.scheduler ?? DEFAULT_OPERATIONAL.scheduler;
-  lines.push('[scheduler]');
-  lines.push(`# Minutes between daily summary runs`);
-  lines.push(`daily_summary_interval_minutes = ${scheduler.dailySummaryIntervalMinutes}`);
+  lines.push('# [backup]');
+  lines.push('# # Hours between automatic backups (minimum: 1)');
+  lines.push(`# cooldown_hours = ${DEFAULT_OPERATIONAL.backup.cooldownHours}`);
+  lines.push('# # Maximum number of automatic backups to keep');
+  lines.push(`# max_backups = ${DEFAULT_OPERATIONAL.backup.maxBackups}`);
   lines.push('');
-
-  const chat = options.chat ?? DEFAULT_OPERATIONAL.chat;
-  lines.push('[chat]');
-  lines.push(`# Maximum number of chat messages to keep in UI history`);
-  lines.push(`max_history_messages = ${chat.maxHistoryMessages}`);
+  lines.push('# [logs]');
+  lines.push('# # Log file size threshold for rotation in MB');
+  lines.push(`# rotation_threshold_mb = ${DEFAULT_OPERATIONAL.logs.rotationThresholdMB}`);
+  lines.push('# # Maximum number of archived log files to keep');
+  lines.push(`# max_archives = ${DEFAULT_OPERATIONAL.logs.maxArchives}`);
   lines.push('');
-
-  const knowledge = options.knowledge ?? DEFAULT_OPERATIONAL.knowledge;
-  lines.push('[knowledge]');
-  lines.push(`# Maximum characters per knowledge file before truncation`);
-  lines.push(`budget_chars = ${knowledge.budgetChars}`);
+  lines.push('# [scheduler]');
+  lines.push('# # Minutes between daily summary runs');
+  lines.push(
+    `# daily_summary_interval_minutes = ${DEFAULT_OPERATIONAL.scheduler.dailySummaryIntervalMinutes}`
+  );
   lines.push('');
-
-  const session = options.session ?? DEFAULT_SESSION;
-  lines.push('[session]');
-  lines.push(
-    `# Rotation threshold in bytes (default: ${DEFAULT_SESSION.rotation_size_bytes}). Above this size, the JSONL is rotated.`
-  );
-  lines.push(
-    `# If a compaction anchor exists, rotation copies forward from firstKeptEntryId. Otherwise it falls back`
-  );
-  lines.push(
-    `# to keeping the session header + the most recent ~1 MB tail (bare-bytes-tail rotation), and emits a warn`
-  );
-  lines.push(
-    `# (the absence of a compaction at this size signals the agent has been in a failure loop).`
-  );
-  lines.push(`rotation_size_bytes = ${session.rotation_size_bytes}`);
+  lines.push('# [chat]');
+  lines.push('# # Maximum number of chat messages to keep in UI history');
+  lines.push(`# max_history_messages = ${DEFAULT_OPERATIONAL.chat.maxHistoryMessages}`);
   lines.push('');
-  lines.push(
-    `# Maximum number of .jsonl.archived files to retain per agent's session directory (default: ${DEFAULT_SESSION.archive_keep_count}).`
-  );
-  lines.push(
-    `# After each rotation or session reset, older archives are pruned by mtime so disk usage stays bounded`
-  );
-  lines.push(
-    `# even for high-volume agents (e.g. the Narrator, which archives once per scheduled task).`
-  );
-  lines.push(`archive_keep_count = ${session.archive_keep_count}`);
+  lines.push('# [knowledge]');
+  lines.push('# # Maximum characters per knowledge file before truncation');
+  lines.push(`# budget_chars = ${DEFAULT_OPERATIONAL.knowledge.budgetChars}`);
   lines.push('');
-
-  const delivery = options.delivery ?? DEFAULT_DELIVERY;
-  lines.push('[delivery]');
+  lines.push('# [session]');
+  lines.push('# # Rotation threshold in bytes. Above this size, the JSONL is rotated.');
   lines.push(
-    `# Hard cap on inter-agent delivery size in bytes (default: ${DEFAULT_DELIVERY.max_bytes})`
+    '# # If a compaction anchor exists, rotation copies forward from firstKeptEntryId. Otherwise it falls back'
   );
-  lines.push(`max_bytes = ${delivery.max_bytes}`);
+  lines.push(
+    '# # to keeping the session header + the most recent ~1 MB tail (bare-bytes-tail rotation).'
+  );
+  lines.push(`# rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
+  lines.push(
+    "# # Maximum number of .jsonl.archived files to retain per agent's session directory."
+  );
+  lines.push(
+    '# # After each rotation or session reset, older archives are pruned by mtime so disk usage stays bounded'
+  );
+  lines.push(
+    '# # even for high-volume agents (e.g. the Narrator, which archives once per scheduled task).'
+  );
+  lines.push(`# archive_keep_count = ${DEFAULT_SESSION.archive_keep_count}`);
   lines.push('');
+  lines.push('# [delivery]');
+  lines.push('# # Hard cap on the size of any single inter-agent delivery, in bytes.');
+  lines.push(`# max_bytes = ${DEFAULT_DELIVERY.max_bytes}`);
+  lines.push("# # Total-size cap on the Narrator's catch-up prompt, in bytes. The daily-");
+  lines.push('# # summary cron (and the trigger_project_story tool) assembles ONE delivery');
+  lines.push('# # for the Narrator by gathering recent entries from agent session JSONL');
+  lines.push('# # files (inter-agent messages, project log updates, DB changes since the');
+  lines.push("# # Narrator's last run). If the assembled bundle would exceed this, the");
+  lines.push('# # oldest entries are dropped first.');
+  lines.push(`# catch_up_budget_bytes = ${DEFAULT_DELIVERY.catch_up_budget_bytes}`);
+  lines.push('# # Per-entry truncation cap applied while assembling the catch-up prompt');
+  lines.push("# # above. Each individual JSONL entry's content is clipped to this size");
+  lines.push('# # before concatenation, so one bloated entry (e.g. a worker that pasted a');
+  lines.push('# # 1 MB tool result into a delivery) cannot eat the whole catch-up budget.');
   lines.push(
-    `# Producer-side budget for catch-up / daily-summary deliveries in bytes (default: ${DEFAULT_DELIVERY.catch_up_budget_bytes})`
+    `# narrator_message_excerpt_bytes = ${DEFAULT_DELIVERY.narrator_message_excerpt_bytes}`
   );
-  lines.push(`catch_up_budget_bytes = ${delivery.catch_up_budget_bytes}`);
-  lines.push('');
-  lines.push(
-    `# Per-message excerpt cap for Narrator-bound deliveries (daily-summary + project story) in bytes (default: ${DEFAULT_DELIVERY.narrator_message_excerpt_bytes})`
-  );
-  lines.push(`narrator_message_excerpt_bytes = ${delivery.narrator_message_excerpt_bytes}`);
   lines.push('');
 
   return lines.join('\n');

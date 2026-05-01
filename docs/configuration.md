@@ -11,24 +11,30 @@ All System2 settings live in `~/.system2/config.toml`, created by `system2 onboa
 
 ```toml
 # System2 Configuration
-# This file contains all System2 settings including API keys.
-# Permissions: 0600 (owner read/write only).
+# All System2 settings: LLM credentials (OAuth + API keys), per-agent
+# overrides, services, databases, and operational defaults.
+# Edited both programmatically by System2 (e.g. `system2 login` updates
+# `[llm.oauth]`) and manually by you. Changes apply on daemon restart.
+# Permissions: 0600 (owner read/write only — protects credentials).
 
 # ════════════════════════════════════════════════════════════════════════
 # LLM credentials — OAuth tier
 # ════════════════════════════════════════════════════════════════════════
-# Subscription credentials. Tried first when present; the API-keys tier
-# below is only used after every OAuth credential is in cooldown.
+# OAuth providers and failover order. Subscription tokens live in
+# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.
+# This tier is tried first; the API-keys tier below is only used after
+# every OAuth credential is in cooldown.
 # Supported providers: anthropic, openai-codex, github-copilot.
-# Tokens live in ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.
 
 [llm.oauth]
 primary = "anthropic"
 fallback = []   # any of: anthropic, openai-codex, github-copilot
 
-# Optional per-provider OAuth model pin. When omitted, the resolver picks
-# the family flagship from pi-ai's catalog (claude-opus-* for anthropic,
-# gpt-5.x[-codex] for openai-codex, gpt-X.Y for github-copilot).
+# Optional per-OAuth-provider model pin. When omitted, the resolver picks
+# the family flagship from pi-ai's catalog. Family rules:
+# https://github.com/diegoscarabelli/system2/blob/main/docs/configuration.md
+# Catalog of model IDs (use the exact `id` field when pinning):
+# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts
 [llm.oauth.anthropic]
 model = "claude-opus-4-7"
 
@@ -51,6 +57,8 @@ keys = [
 # Optional per-role model pins for the API-keys tier. Keys are role names
 # (guide, conductor, reviewer, narrator, worker). Overrides the default
 # from the role's frontmatter for the matched provider.
+# Catalog of model IDs (use the exact `id` field when pinning):
+# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts
 [llm.api_keys.anthropic.models]
 narrator = "claude-haiku-4-5-20251001"
 conductor = "claude-sonnet-4-6"
@@ -110,7 +118,7 @@ key = "BSA..."
 # ════════════════════════════════════════════════════════════════════════
 [tools.web_search]
 enabled = true
-max_results = 5
+# max_results = 5    # tunable knob; commented so accidental edits stay inert
 
 # ════════════════════════════════════════════════════════════════════════
 # Databases
@@ -123,31 +131,59 @@ max_results = 5
 # ════════════════════════════════════════════════════════════════════════
 # Operational settings
 # ════════════════════════════════════════════════════════════════════════
-[backup]
-cooldown_hours = 24    # Min hours between auto-backups
-max_backups = 3        # Max backup copies to keep
+# All values below are defaults pinned in code (src/cli/utils/config.ts:
+# DEFAULT_OPERATIONAL, DEFAULT_SESSION, DEFAULT_DELIVERY). Lines are
+# commented so accidental edits cannot change runtime behavior — to
+# tune a value, uncomment its section header AND the specific key, then
+# restart the daemon. Values left commented stay tied to the code default,
+# so an upgrade that bumps a default propagates automatically.
 
-[logs]
-rotation_threshold_mb = 10  # Log file rotation threshold
-max_archives = 5            # Max rotated log files
+# [backup]
+# # Hours between automatic backups (minimum: 1)
+# cooldown_hours = 24
+# # Maximum number of automatic backups to keep
+# max_backups = 3
 
-[scheduler]
-daily_summary_interval_minutes = 30  # Narrator summary frequency
+# [logs]
+# # Log file size threshold for rotation in MB
+# rotation_threshold_mb = 10
+# # Maximum number of archived log files to keep
+# max_archives = 5
 
-[chat]
-max_history_messages = 1000  # Max messages in chat history ring buffer
+# [scheduler]
+# # Minutes between daily summary runs
+# daily_summary_interval_minutes = 30
 
-[knowledge]
-budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overruns
+# [chat]
+# # Maximum number of chat messages to keep in UI history
+# max_history_messages = 100
 
-[session]
-rotation_size_bytes = 10485760        # Rotation threshold (~10 MB); anchored if compaction exists, bare-bytes-tail otherwise
-archive_keep_count = 5                # Max .jsonl.archived files retained per agent's session directory
+# [knowledge]
+# # Maximum characters per knowledge file before truncation
+# budget_chars = 20000
 
-[delivery]
-max_bytes = 1048576                # Hard cap on inter-agent delivery wire size (~1 MB)
-catch_up_budget_bytes = 524288     # Producer budget for catch-up / daily-summary deliveries (~512 KB)
-narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Narrator-bound deliveries (~16 KB)
+# [session]
+# # Rotation threshold in bytes. Above this size, the JSONL is rotated.
+# # Anchored if a compaction anchor exists, bare-bytes-tail otherwise.
+# rotation_size_bytes = 10485760
+# # Max .jsonl.archived files retained per agent's session directory.
+# archive_keep_count = 5
+
+# [delivery]
+# # Hard cap on the size of any single inter-agent delivery, in bytes.
+# max_bytes = 1048576
+# # Total-size cap on the Narrator's catch-up prompt, in bytes. The daily-
+# # summary cron (and the trigger_project_story tool) assembles ONE delivery
+# # for the Narrator by gathering recent entries from agent session JSONL
+# # files (inter-agent messages, project log updates, DB changes since the
+# # Narrator's last run). If the assembled bundle would exceed this, the
+# # oldest entries are dropped first.
+# catch_up_budget_bytes = 524288
+# # Per-entry truncation cap applied while assembling the catch-up prompt
+# # above. Each individual JSONL entry's content is clipped to this size
+# # before concatenation, so one bloated entry (e.g. a worker that pasted a
+# # 1 MB tool result into a delivery) cannot eat the whole catch-up budget.
+# narrator_message_excerpt_bytes = 16384
 ```
 
 ## Sections
@@ -194,9 +230,9 @@ To prevent oversized inter-agent deliveries from triggering provider context-ove
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `max_bytes` | 1048576 (1 MB) | Hard wire-size cap. Approximately 25% of a 1M-token context window. Producers should self-bound; this is the loud-fail boundary at which deliveries are rejected. |
-| `catch_up_budget_bytes` | 524288 (512 KB) | Producer-side budget for catch-up and daily-summary deliveries. Typically half of `max_bytes`, leaving headroom for headers, DB-changes sections, and SDK overhead. When activity exceeds this budget, oldest entries are dropped first. |
-| `narrator_message_excerpt_bytes` | 16384 (16 KB) | Per-`custom_message` content cap when feeding session JSONL into Narrator-bound deliveries (daily-summary cron and `trigger_project_story` tool). Prevents individual messages with oversized content from bloating the delivery. |
+| `max_bytes` | 1048576 (1 MB) | Hard cap on the size of any single inter-agent delivery, in bytes (~25% of a 1M-token context window). The loud-fail boundary at which a delivery is rejected outright. |
+| `catch_up_budget_bytes` | 524288 (512 KB) | Total-size cap on the Narrator's catch-up prompt. The daily-summary cron (and the `trigger_project_story` tool) assembles **one** delivery for the Narrator by gathering recent entries from agent session JSONL files (inter-agent messages, project log updates, DB changes since the Narrator's last run). Set to half of `max_bytes` by default to leave headroom for headers, DB-changes sections, and SDK overhead. When the assembled bundle would exceed this, the oldest entries are dropped first. |
+| `narrator_message_excerpt_bytes` | 16384 (16 KB) | Per-entry truncation cap applied **while assembling** the catch-up prompt above. Each individual JSONL entry's content (typically a `custom_message` between agents) is clipped to this size before concatenation, so one bloated entry (e.g. a worker that pasted a 1 MB tool result into a delivery) cannot eat the whole catch-up budget. Used by both the daily-summary cron and the `trigger_project_story` tool. |
 
 **Invariant:** `catch_up_budget_bytes` must be less than `max_bytes`. This is validated at startup; if violated, a warning is logged.
 
@@ -275,6 +311,8 @@ Model selection differs between tiers, reflecting their cost models:
 
 - **OAuth tier (flat-fee subscription)**: one model per provider, used by every agent role. The model is picked from pi-ai's catalog by a family-prefix regex per provider (`claude-opus-*` for Anthropic, `gpt-X.Y[-codex]` for openai-codex, `gpt-X.Y` for github-copilot), so newer flagships propagate automatically when pi-ai bumps. Override with `[llm.oauth.<provider>] model = "..."` to pin a specific model — strictly validated against the catalog at startup.
 - **API-keys tier (pay-per-token)**: per-role × per-provider matrix. Defaults come from each agent's frontmatter `api_keys_models:` block (only api-keys-tier providers; OAuth-only providers are intentionally absent). Override per role with `[llm.api_keys.<provider>.models][<role>] = "..."` — also validated at startup.
+
+**Looking up model IDs.** The authoritative list of model IDs available for each provider is pi-ai's catalog: [`packages/ai/src/models.generated.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts) in the pi-mono repo. Use the exact `id` field there when pinning a model in `[llm.oauth.<provider>]` or `[llm.api_keys.<provider>.models]`. Startup validation cross-checks every pin against this catalog and surfaces typos with Levenshtein "did you mean" hints, so a misspelling fails at `system2 start` rather than at the first inference call.
 
 **Auto-fallback on entitlement errors (OAuth tier only).** When a model picked by the family-prefix resolver returns 403 or 404 (typical signals for "model not available on this plan" / "model not found"), the host steps the credential to a hardcoded fallback for the rest of the session and retries once. Defaults today: `claude-sonnet-4-6` for anthropic, `gpt-5.4` for openai-codex, `gpt-4.1` for github-copilot. The fallback fires only when the model came from the resolver — explicit user pins (`[llm.oauth.<provider>] model = "..."`) bubble the error up so misconfiguration surfaces loudly.
 

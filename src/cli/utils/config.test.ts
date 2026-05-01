@@ -42,41 +42,49 @@ describe('buildConfigToml', () => {
     expect(result).toContain('brave-key-123');
   });
 
-  it('includes tools section when web_search configured', () => {
+  it('includes tools section when web_search configured (max_results stays commented)', () => {
+    // Same model as operational settings: tunable knobs are commented even
+    // in the live block so accidental edits can't silently change behavior.
+    // The live `enabled = true` reflects the user's onboarding choice;
+    // max_results is the code default and stays inert until uncommented.
     const result = buildConfigToml({
       tools: { web_search: { enabled: true, max_results: 10 } },
     });
     expect(result).toContain('[tools.web_search]');
     expect(result).toContain('enabled = true');
-    expect(result).toContain('max_results = 10');
+    expect(result).toContain('# max_results = 10');
+    expect(result).not.toMatch(/^max_results = 10$/m);
   });
 
-  it('uses default operational values when not specified', () => {
+  // Operational settings are always emitted as commented templates
+  // (header + key = value, both prefixed with `#`). Values come from
+  // DEFAULT_OPERATIONAL / DEFAULT_SESSION / DEFAULT_DELIVERY in code. Users
+  // tune them by hand-editing the toml; the emitter is not the path for
+  // customization. This guards against accidental edits silently changing
+  // behavior — if a line stays commented, the runtime falls back to the
+  // pinned code default, so a default bump propagates automatically.
+  it('emits operational sections as commented defaults', () => {
     const result = buildConfigToml({});
-    expect(result).toContain('cooldown_hours = 24');
-    expect(result).toContain('max_backups = 3');
-    // [logs] section uses MB-based threshold
-    expect(result).toContain('rotation_threshold_mb = 10');
-    expect(result).toContain('max_archives = 5');
-    expect(result).toContain('daily_summary_interval_minutes = 30');
-    expect(result).toContain('max_history_messages = 100');
-    // [session] section uses bytes-based threshold
-    expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
-  });
-
-  it('uses custom operational values when specified', () => {
-    const result = buildConfigToml({
-      backup: { cooldownHours: 12, maxBackups: 3 },
-      logs: { rotationThresholdMB: 5, maxArchives: 10 },
-      scheduler: { dailySummaryIntervalMinutes: 15 },
-      chat: { maxHistoryMessages: 50 },
-    });
-    expect(result).toContain('cooldown_hours = 12');
-    expect(result).toContain('max_backups = 3');
-    expect(result).toContain('rotation_threshold_mb = 5');
-    expect(result).toContain('max_archives = 10');
-    expect(result).toContain('daily_summary_interval_minutes = 15');
-    expect(result).toContain('max_history_messages = 50');
+    // Header lines themselves are commented.
+    expect(result).toMatch(/^# \[backup\]$/m);
+    expect(result).toMatch(/^# \[logs\]$/m);
+    expect(result).toMatch(/^# \[scheduler\]$/m);
+    expect(result).toMatch(/^# \[chat\]$/m);
+    expect(result).toMatch(/^# \[knowledge\]$/m);
+    expect(result).toMatch(/^# \[session\]$/m);
+    expect(result).toMatch(/^# \[delivery\]$/m);
+    // Default values appear, but commented.
+    expect(result).toContain('# cooldown_hours = 24');
+    expect(result).toContain('# max_backups = 3');
+    expect(result).toContain('# rotation_threshold_mb = 10');
+    expect(result).toContain('# max_archives = 5');
+    expect(result).toContain('# daily_summary_interval_minutes = 30');
+    expect(result).toContain('# max_history_messages = 100');
+    expect(result).toContain(`# rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
+    expect(result).toContain(`# max_bytes = ${DEFAULT_DELIVERY.max_bytes}`);
+    // No live (uncommented) operational headers.
+    expect(result).not.toMatch(/^\[backup\]$/m);
+    expect(result).not.toMatch(/^\[delivery\]$/m);
   });
 
   it('skips empty provider keys', () => {
@@ -1135,74 +1143,49 @@ describe('convertTomlSession', () => {
 });
 
 describe('buildConfigToml — [session] section', () => {
-  it('emits [session] section with default values when not specified', () => {
+  it('emits [session] as a commented template (defaults pinned in code)', () => {
     const result = buildConfigToml({});
-    expect(result).toContain('[session]');
-    expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
-    expect(result).toContain(`archive_keep_count = ${DEFAULT_SESSION.archive_keep_count}`);
+    expect(result).toMatch(/^# \[session\]$/m);
+    expect(result).toContain(`# rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
+    expect(result).toContain(`# archive_keep_count = ${DEFAULT_SESSION.archive_keep_count}`);
+    // No live header — runtime falls back to DEFAULT_SESSION when commented.
+    expect(result).not.toMatch(/^\[session\]$/m);
   });
 
-  it('emits [session] section with custom values when specified', () => {
-    const result = buildConfigToml({
-      session: {
-        rotation_size_bytes: 20 * 1024 * 1024,
-        archive_keep_count: 10,
-      },
-    });
-    expect(result).toContain('[session]');
-    expect(result).toContain(`rotation_size_bytes = ${20 * 1024 * 1024}`);
-    expect(result).toContain('archive_keep_count = 10');
-  });
-
-  it('round-trips [session] section through TOML.parse and convertTomlSession', () => {
+  it('round-trips a hand-built [session] section through convertTomlSession', () => {
     const input = {
       rotation_size_bytes: 15 * 1024 * 1024,
       archive_keep_count: 7,
     };
-    const toml = buildConfigToml({ session: input });
+    const toml = `[session]\nrotation_size_bytes = ${input.rotation_size_bytes}\narchive_keep_count = ${input.archive_keep_count}\n`;
     const parsed = TOML.parse(toml) as Record<string, unknown>;
     const sessionSection = parsed.session as Parameters<typeof convertTomlSession>[0];
-    const reconstructed = convertTomlSession(sessionSection);
-    expect(reconstructed).toEqual(input);
+    expect(convertTomlSession(sessionSection)).toEqual(input);
   });
 });
 
 describe('buildConfigToml — [delivery] section', () => {
-  it('emits [delivery] section with default values when not specified', () => {
+  it('emits [delivery] as a commented template (defaults pinned in code)', () => {
     const result = buildConfigToml({});
-    expect(result).toContain('[delivery]');
-    expect(result).toContain(`max_bytes = ${DEFAULT_DELIVERY.max_bytes}`);
-    expect(result).toContain(`catch_up_budget_bytes = ${DEFAULT_DELIVERY.catch_up_budget_bytes}`);
+    expect(result).toMatch(/^# \[delivery\]$/m);
+    expect(result).toContain(`# max_bytes = ${DEFAULT_DELIVERY.max_bytes}`);
+    expect(result).toContain(`# catch_up_budget_bytes = ${DEFAULT_DELIVERY.catch_up_budget_bytes}`);
     expect(result).toContain(
-      `narrator_message_excerpt_bytes = ${DEFAULT_DELIVERY.narrator_message_excerpt_bytes}`
+      `# narrator_message_excerpt_bytes = ${DEFAULT_DELIVERY.narrator_message_excerpt_bytes}`
     );
+    expect(result).not.toMatch(/^\[delivery\]$/m);
   });
 
-  it('emits [delivery] section with custom values when specified', () => {
-    const result = buildConfigToml({
-      delivery: {
-        max_bytes: 1048576,
-        catch_up_budget_bytes: 524288,
-        narrator_message_excerpt_bytes: 8192,
-      },
-    });
-    expect(result).toContain('[delivery]');
-    expect(result).toContain('max_bytes = 1048576');
-    expect(result).toContain('catch_up_budget_bytes = 524288');
-    expect(result).toContain('narrator_message_excerpt_bytes = 8192');
-  });
-
-  it('round-trips [delivery] section through TOML.parse and convertTomlDelivery', () => {
+  it('round-trips a hand-built [delivery] section through convertTomlDelivery', () => {
     const input = {
       max_bytes: 2097152,
       catch_up_budget_bytes: 1048576,
       narrator_message_excerpt_bytes: 16384,
     };
-    const toml = buildConfigToml({ delivery: input });
+    const toml = `[delivery]\nmax_bytes = ${input.max_bytes}\ncatch_up_budget_bytes = ${input.catch_up_budget_bytes}\nnarrator_message_excerpt_bytes = ${input.narrator_message_excerpt_bytes}\n`;
     const parsed = TOML.parse(toml) as Record<string, unknown>;
     const deliverySection = parsed.delivery as Parameters<typeof convertTomlDelivery>[0];
-    const reconstructed = convertTomlDelivery(deliverySection);
-    expect(reconstructed).toEqual(input);
+    expect(convertTomlDelivery(deliverySection)).toEqual(input);
   });
 });
 
