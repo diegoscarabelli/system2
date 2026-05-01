@@ -117,7 +117,7 @@ All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
 - **`[scheduler]`**: Narrator frequency (default: every 30 minutes)
 - **`[backup]`**: backup cooldown and retention (default: every 24 hours, keep 3)
 
-**Supported LLM providers:** Anthropic, Google Gemini, OpenAI, OpenRouter, Cerebras, Groq, Mistral, xAI, and any OpenAI-compatible endpoint.
+**Supported API-keys providers:** Anthropic, Google Gemini, OpenAI, OpenRouter, Cerebras, Groq, Mistral, xAI, and any OpenAI-compatible endpoint. (OAuth tier providers are listed separately under `[llm.oauth]` above.)
 
 See [docs/configuration.md](docs/configuration.md) for the full reference.
 

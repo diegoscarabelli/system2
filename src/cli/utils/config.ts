@@ -649,6 +649,9 @@ export function buildConfigToml(options: {
   chat?: System2Config['chat'];
   knowledge?: System2Config['knowledge'];
 }): string {
+  const HR = '═'.repeat(72);
+  const sectionHeader = (label: string): string[] => [`# ${HR}`, `# ${label}`, `# ${HR}`];
+
   const lines: string[] = [
     '# System2 Configuration',
     '# This file contains all System2 settings including API keys.',
@@ -658,25 +661,16 @@ export function buildConfigToml(options: {
 
   if (options.llm) {
     const { primary, fallback, providers } = options.llm;
-    lines.push('# LLM credentials. Two tiers, used in order:');
-    lines.push('#   1. [llm.oauth]: subscription credentials. Tried first when present.');
-    lines.push('#   2. [llm.api_keys]: API key tier. Used after the OAuth tier is exhausted.');
-    lines.push(
-      '# Each tier has a `primary` provider and an ordered `fallback` list. Within the API key tier,'
-    );
-    lines.push(
-      '# multiple keys per provider (under [llm.api_keys.<provider>].keys) rotate automatically on failures.'
-    );
-    lines.push('');
 
     if (options.llm.oauth) {
-      lines.push('# OAuth tier. Supported providers: anthropic, openai-codex, github-copilot.');
+      lines.push(...sectionHeader('LLM credentials — OAuth tier'));
+      lines.push('# Subscription credentials. Tried first when present; the API-keys tier');
+      lines.push('# below is only used after every OAuth credential is in cooldown.');
+      lines.push('# Supported providers: anthropic, openai-codex, github-copilot.');
       lines.push(
         '# Tokens live in ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.'
       );
-      lines.push(
-        '# Edit primary/fallback to reorder; remove a provider here AND its JSON file to fully deregister it.'
-      );
+      lines.push('');
       lines.push('[llm.oauth]');
       lines.push(`primary = "${options.llm.oauth.primary}"`);
       const fb = options.llm.oauth.fallback.map((f) => `"${f}"`).join(', ');
@@ -693,6 +687,10 @@ export function buildConfigToml(options: {
       }
     }
 
+    lines.push(...sectionHeader('LLM credentials — API keys tier'));
+    lines.push('# Pay-per-token. Each provider can hold multiple keys; rotation across keys');
+    lines.push('# and providers happens automatically on failures.');
+    lines.push('');
     lines.push('[llm.api_keys]');
     lines.push(`primary = "${primary}"`);
     lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
@@ -759,6 +757,7 @@ export function buildConfigToml(options: {
     }
   }
 
+  lines.push(...sectionHeader('Per-agent behavior overrides'));
   // Agents section: per-role behavior overrides (thinking, compaction).
   if (options.agents && Object.keys(options.agents).length > 0) {
     for (const [role, override] of Object.entries(options.agents)) {
@@ -794,22 +793,33 @@ export function buildConfigToml(options: {
     lines.push('');
   }
 
-  // Services section
+  lines.push(...sectionHeader('Services'));
   if (options.services?.brave_search) {
     lines.push('[services.brave_search]');
     lines.push(`key = "${options.services.brave_search.key}"`);
     lines.push('');
+  } else {
+    lines.push('# Optional service credentials. Brave Search powers web_search/web_fetch.');
+    lines.push('# [services.brave_search]');
+    lines.push('# key = "BSA..."');
+    lines.push('');
   }
 
-  // Tools section
+  lines.push(...sectionHeader('Tools'));
   if (options.tools?.web_search) {
     lines.push('[tools.web_search]');
     lines.push(`enabled = ${options.tools.web_search.enabled}`);
     lines.push(`max_results = ${options.tools.web_search.max_results}`);
     lines.push('');
+  } else {
+    lines.push('# Optional tool feature flags.');
+    lines.push('# [tools.web_search]');
+    lines.push('# enabled = true');
+    lines.push('# max_results = 5');
+    lines.push('');
   }
 
-  // Databases section
+  lines.push(...sectionHeader('Databases'));
   if (options.databases && Object.keys(options.databases).length > 0) {
     for (const [name, conn] of Object.entries(options.databases)) {
       lines.push(`[databases.${name}]`);
@@ -846,7 +856,7 @@ export function buildConfigToml(options: {
     lines.push('');
   }
 
-  // Operational sections
+  lines.push(...sectionHeader('Operational settings'));
   const backup = options.backup ?? DEFAULT_OPERATIONAL.backup;
   const logs = options.logs ?? DEFAULT_OPERATIONAL.logs;
 

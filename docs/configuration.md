@@ -10,7 +10,18 @@ All System2 settings live in `~/.system2/config.toml`, created by `system2 onboa
 ## config.toml Reference
 
 ```toml
-# OAuth tier — subscription credentials, tried first
+# System2 Configuration
+# This file contains all System2 settings including API keys.
+# Permissions: 0600 (owner read/write only).
+
+# ════════════════════════════════════════════════════════════════════════
+# LLM credentials — OAuth tier
+# ════════════════════════════════════════════════════════════════════════
+# Subscription credentials. Tried first when present; the API-keys tier
+# below is only used after every OAuth credential is in cooldown.
+# Supported providers: anthropic, openai-codex, github-copilot.
+# Tokens live in ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.
+
 [llm.oauth]
 primary = "anthropic"
 fallback = []   # any of: anthropic, openai-codex, github-copilot
@@ -21,7 +32,12 @@ fallback = []   # any of: anthropic, openai-codex, github-copilot
 [llm.oauth.anthropic]
 model = "claude-opus-4-7"
 
-# API key tier — billed per token, used after OAuth tier exhausted
+# ════════════════════════════════════════════════════════════════════════
+# LLM credentials — API keys tier
+# ════════════════════════════════════════════════════════════════════════
+# Pay-per-token. Each provider can hold multiple keys; rotation across keys
+# and providers happens automatically on failures.
+
 [llm.api_keys]
 primary = "anthropic"
 fallback = ["google", "openai"]
@@ -73,30 +89,40 @@ base_url = "http://localhost:4000/v1"
 model = "my-model"
 compat_reasoning = true  # optional, default true
 
-# Per-role agent behavior overrides (optional). Tier-agnostic — applied
-# whether the OAuth or API-keys tier is active.
+# ════════════════════════════════════════════════════════════════════════
+# Per-agent behavior overrides
+# ════════════════════════════════════════════════════════════════════════
+# Tier-agnostic — applied whether the OAuth or API-keys tier is active.
 # For per-role MODEL pins, use [llm.api_keys.<provider>.models] (above).
 # For OAuth model pins, use [llm.oauth.<provider>] (above).
 [agents.guide]
 thinking_level = "medium"
 compaction_depth = 5
 
-# Service credentials
+# ════════════════════════════════════════════════════════════════════════
+# Services
+# ════════════════════════════════════════════════════════════════════════
 [services.brave_search]
 key = "BSA..."
 
-# Tool settings
+# ════════════════════════════════════════════════════════════════════════
+# Tools
+# ════════════════════════════════════════════════════════════════════════
 [tools.web_search]
 enabled = true
 max_results = 5
 
-# Database connections (added during onboarding)
+# ════════════════════════════════════════════════════════════════════════
+# Databases
+# ════════════════════════════════════════════════════════════════════════
 # [databases.my_postgres]
 # type = "postgres"
 # database = "analytics"
 # user = "readonly"
 
-# Operational settings (defaults are fine for most users)
+# ════════════════════════════════════════════════════════════════════════
+# Operational settings
+# ════════════════════════════════════════════════════════════════════════
 [backup]
 cooldown_hours = 24    # Min hours between auto-backups
 max_backups = 3        # Max backup copies to keep
