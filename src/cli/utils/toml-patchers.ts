@@ -651,6 +651,9 @@ export function addKeyToApiKeyProvider(
   provider: LlmProvider,
   key: LlmKey
 ): { changed: boolean } {
+  if (!existsSync(configPath)) {
+    throw new Error(`config.toml not found at ${configPath}`);
+  }
   const raw = readFileSync(configPath, 'utf-8');
   const parsed = TOML.parse(raw) as {
     llm?: { api_keys?: Record<string, unknown> };
@@ -685,6 +688,9 @@ export function removeKeyFromApiKeyProvider(
   provider: LlmProvider,
   label: string
 ): { changed: boolean } {
+  if (!existsSync(configPath)) {
+    throw new Error(`config.toml not found at ${configPath}`);
+  }
   const raw = readFileSync(configPath, 'utf-8');
   const parsed = TOML.parse(raw) as {
     llm?: { api_keys?: Record<string, unknown> };
@@ -724,6 +730,9 @@ const WEB_SEARCH_SECTION_PATTERN = /^\[tools\.web_search\][^\n]*\n(?:[^[#\s][^\n
  * its content is preserved (we only add it when it doesn't exist).
  */
 export function setBraveSearchKey(configPath: string, apiKey: string): { changed: boolean } {
+  if (!existsSync(configPath)) {
+    throw new Error(`config.toml not found at ${configPath}`);
+  }
   const raw = readFileSync(configPath, 'utf-8');
   let next = raw;
 
@@ -757,6 +766,9 @@ export function setBraveSearchKey(configPath: string, apiKey: string): { changed
  * No-op if neither section exists.
  */
 export function removeBraveSearch(configPath: string): { changed: boolean } {
+  if (!existsSync(configPath)) {
+    throw new Error(`config.toml not found at ${configPath}`);
+  }
   const raw = readFileSync(configPath, 'utf-8');
   if (!BRAVE_SECTION_PATTERN.test(raw) && !WEB_SEARCH_SECTION_PATTERN.test(raw)) {
     return { changed: false };
@@ -783,6 +795,9 @@ export function replaceKeyInApiKeyProvider(
   label: string,
   newKey: string
 ): { changed: boolean } {
+  if (!existsSync(configPath)) {
+    throw new Error(`config.toml not found at ${configPath}`);
+  }
   const raw = readFileSync(configPath, 'utf-8');
   const parsed = TOML.parse(raw) as {
     llm?: { api_keys?: Record<string, unknown> };

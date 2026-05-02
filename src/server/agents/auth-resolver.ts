@@ -435,6 +435,15 @@ export class AuthResolver {
     // pi-ai's refresh).
     const merged: OAuthCredentials = { ...cred, ...updated, label: cred.label };
     this.oauthCredentials[provider] = merged;
+    // Clear any cooldown left over from a 401 on the now-superseded credential.
+    // Without this, a successfully refreshed credential is still treated as
+    // unavailable by getActiveKey / createAuthStorage until the original
+    // cooldown expires (~5 min). The downstream symptom: AgentHost.reinit
+    // rebuilds an AuthStorage with no entry for `provider`, and pi-coding-agent
+    // throws "No API key found for <provider>" — even though the new token is
+    // healthy on disk and in memory. The cooldown was set to penalise the OLD
+    // token; the refreshed token deserves a clean slate.
+    this.cooldowns.delete(this.cooldownKey('oauth', provider, 0));
     log.info(`[AuthResolver] OAuth token refreshed for ${provider}:${cred.label}`);
 
     const persist = this.persistCallbacks[provider];
