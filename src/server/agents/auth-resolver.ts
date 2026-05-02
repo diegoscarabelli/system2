@@ -156,7 +156,10 @@ export class AuthResolver {
       const cred = this.oauthCredentials[provider];
       if (!cred) continue;
       if (this.isKeyUnavailable(this.cooldownKey('oauth', provider, 0))) continue;
-      return { tier: 'oauth', provider, keyIndex: 0, label: cred.label };
+      // OAuth credentials no longer carry a per-credential label (one-per-
+      // provider on disk). Use the provider id as the ActiveCredential label
+      // so log/UI consumers still get a meaningful identifier.
+      return { tier: 'oauth', provider, keyIndex: 0, label: provider };
     }
     // Keys tier
     for (const provider of this.keysOrder) {
@@ -185,7 +188,9 @@ export class AuthResolver {
       const cred = this.oauthCredentials[provider];
       if (!cred) return undefined;
       if (this.isKeyUnavailable(this.cooldownKey('oauth', provider, 0))) return undefined;
-      return { tier: 'oauth', provider, keyIndex: 0, label: cred.label };
+      // OAuth credentials are one-per-provider; the ActiveCredential label
+      // for OAuth is just the provider id (mirrors getActiveCredential above).
+      return { tier: 'oauth', provider, keyIndex: 0, label: provider };
     };
 
     const tryKeys = (): ActiveCredential | undefined => {
@@ -431,9 +436,8 @@ export class AuthResolver {
     // Defensive merge: start with the old credential (preserves provider-
     // specific extras like Copilot's enterpriseDomain), overlay the refreshed
     // fields (typically access/refresh/expires plus any extras pi-ai chose to
-    // return), then explicitly preserve label (set during login, not by
-    // pi-ai's refresh).
-    const merged: OAuthCredentials = { ...cred, ...updated, label: cred.label };
+    // return).
+    const merged: OAuthCredentials = { ...cred, ...updated };
     this.oauthCredentials[provider] = merged;
     // Clear any cooldown left over from a 401 on the now-superseded credential.
     // Without this, a successfully refreshed credential is still treated as
@@ -444,7 +448,7 @@ export class AuthResolver {
     // healthy on disk and in memory. The cooldown was set to penalise the OLD
     // token; the refreshed token deserves a clean slate.
     this.cooldowns.delete(this.cooldownKey('oauth', provider, 0));
-    log.info(`[AuthResolver] OAuth token refreshed for ${provider}:${cred.label}`);
+    log.info(`[AuthResolver] OAuth token refreshed for ${provider}`);
 
     const persist = this.persistCallbacks[provider];
     if (persist) {

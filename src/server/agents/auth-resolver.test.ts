@@ -358,7 +358,6 @@ function makeOAuthCreds(expiresInMs: number = 60 * 60_000): OAuthCredentials {
     access: 'sk-ant-oat-abc',
     refresh: 'rt-xyz',
     expires: Date.now() + expiresInMs,
-    label: 'claude-pro',
   };
 }
 
@@ -378,7 +377,9 @@ describe('AuthResolver — two-tier model', () => {
     const active = resolver.getActiveCredential();
     expect(active?.tier).toBe('oauth');
     expect(active?.provider).toBe('anthropic');
-    expect(active?.label).toBe('claude-pro');
+    // OAuth credentials no longer carry a per-credential label; the
+    // ActiveCredential label for OAuth is the provider id (mirrors getActiveKey).
+    expect(active?.label).toBe('anthropic');
   });
 
   it('falls back to keys tier when oauth tier is omitted', () => {
@@ -505,7 +506,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'new-access',
         refresh: 'rt-2',
         expires: Date.now() + 60 * 60_000,
-        label: 'claude-pro',
       }),
     });
     expect(refreshed.has('anthropic')).toBe(true);
@@ -557,7 +557,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'new',
         refresh: 'rt-2',
         expires: Date.now() + 60 * 60_000,
-        label: 'claude-pro',
       };
     };
     await Promise.all([
@@ -605,7 +604,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'recovered',
         refresh: 'rt-2',
         expires: Date.now() + 60 * 60_000,
-        label: 'claude-pro',
       }),
     });
     expect(refreshed.has('anthropic')).toBe(true);
@@ -629,7 +627,6 @@ describe('AuthResolver.ensureFresh', () => {
           access: 'forced-new',
           refresh: 'rt-new',
           expires: Date.now() + 60 * 60_000,
-          label: 'claude-pro',
         };
       },
       force: ['anthropic'],
@@ -690,7 +687,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'a1',
         refresh: 'rt-rotated',
         expires: Date.now() + 1000,
-        label: cred.label,
       }; // still expiring
     };
 
@@ -704,7 +700,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'a2',
         refresh: 'rt-final',
         expires: Date.now() + 60 * 60_000,
-        label: cred.label,
       };
     };
 
@@ -750,7 +745,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'fresh-access',
         refresh: 'rt-new',
         expires: Date.now() + 60 * 60_000,
-        label: 'claude-pro',
       }),
       force: ['anthropic'],
     });

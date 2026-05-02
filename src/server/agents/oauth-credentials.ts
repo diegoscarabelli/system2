@@ -5,7 +5,6 @@ import { log } from '../utils/logger.js';
 
 /**
  * Pi-ai's OAuth credential shape. Returned by pi-ai's login() and refreshToken().
- * Does NOT include `label` — that field is assigned by system2's CLI at save time.
  */
 export interface PiAiOAuthCredentials {
   access: string;
@@ -19,13 +18,13 @@ export interface PiAiOAuthCredentials {
 }
 
 /**
- * System2's persisted OAuth credential shape: pi-ai's fields plus a human-readable
- * label set by the CLI at login time. This is what gets written to
- * ~/.system2/oauth/<provider>.json.
+ * System2's persisted OAuth credential shape: identical to pi-ai's. Older
+ * versions added a `label` field, but OAuth credentials are stored one-per-
+ * provider (`<provider>.json`) and the runtime never addressed them by label,
+ * so the field was vestigial. Removed in 0.3.0. Existing on-disk files
+ * containing `label` still load — the extra field is harmless and ignored.
  */
-export interface OAuthCredentials extends PiAiOAuthCredentials {
-  label: string;
-}
+export type OAuthCredentials = PiAiOAuthCredentials;
 
 const OAUTH_DIR = 'oauth';
 
@@ -44,8 +43,7 @@ export function loadOAuthCredentials(
     if (
       typeof parsed.access !== 'string' ||
       typeof parsed.refresh !== 'string' ||
-      typeof parsed.expires !== 'number' ||
-      typeof parsed.label !== 'string'
+      typeof parsed.expires !== 'number'
     ) {
       log.warn(`[oauth-credentials] ${provider}.json missing required fields, ignoring`);
       return null;

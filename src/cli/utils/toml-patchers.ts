@@ -769,14 +769,25 @@ export function setBraveSearchKey(configPath: string, apiKey: string): { changed
   const raw = readFileSync(configPath, 'utf-8');
   let next = raw;
 
+  // Brave Search section. Three placements, in priority order:
+  //   1. Live `[services.brave_search]` exists → rewrite the key in place.
+  //   2. Commented stub `# [services.brave_search]\n# key = "..."` exists →
+  //      replace the stub with a live block (matches the OAuth/api-keys patcher
+  //      stub-replacement pattern; without this, the live block lands at EOF
+  //      and the commented stub stays put — confusing duplicate schema).
+  //   3. Neither exists → append at end.
+  const braveLiveBlock = `[services.brave_search]\nkey = "${escapeTomlString(apiKey)}"\n`;
   if (BRAVE_SECTION_PATTERN.test(next)) {
-    next = next.replace(
-      BRAVE_SECTION_PATTERN,
-      `[services.brave_search]\nkey = "${escapeTomlString(apiKey)}"\n`
-    );
+    next = next.replace(BRAVE_SECTION_PATTERN, braveLiveBlock);
   } else {
-    const sep = next.endsWith('\n') ? '' : '\n';
-    next = `${next}${sep}\n[services.brave_search]\nkey = "${escapeTomlString(apiKey)}"\n`;
+    const braveStubPattern = /^# \[services\.brave_search\]\n# key\s*=\s*"[^"]*"\n/m;
+    const braveStubReplaced = next.replace(braveStubPattern, braveLiveBlock);
+    if (braveStubReplaced !== next) {
+      next = braveStubReplaced;
+    } else {
+      const sep = next.endsWith('\n') ? '' : '\n';
+      next = `${next}${sep}\n${braveLiveBlock}`;
+    }
   }
 
   if (WEB_SEARCH_SECTION_PATTERN.test(next)) {
@@ -799,13 +810,23 @@ export function setBraveSearchKey(configPath: string, apiKey: string): { changed
       return block.replace(/^(\[tools\.web_search\][^\n]*\n)/, '$1enabled = true\n');
     });
   } else {
-    // max_results intentionally omitted: buildConfigToml emits it as a commented
-    // operational default (DEFAULT_WEB_SEARCH_MAX_RESULTS), and writing it live
-    // here would freeze the value at the time the user added the key, so future
-    // bumps of the code default wouldn't propagate. The loader supplies the
-    // default when the field is absent.
-    const sep = next.endsWith('\n') ? '' : '\n';
-    next = `${next}${sep}\n[tools.web_search]\nenabled = true\n`;
+    // No live `[tools.web_search]`. Two placements, mirrored from Brave above:
+    // try the commented stub first (header + commented enabled + commented
+    // max_results, as buildConfigToml emits it), fall through to EOF append.
+    // max_results intentionally omitted from the live block: buildConfigToml
+    // emits it as a commented operational default, and writing it live here
+    // would freeze the value at the time the user added the key, so future
+    // bumps of the code default wouldn't propagate.
+    const webSearchLiveBlock = `[tools.web_search]\nenabled = true\n`;
+    const webSearchStubPattern =
+      /^# \[tools\.web_search\]\n# enabled\s*=\s*[a-zA-Z]+\n# max_results\s*=\s*\d+\n/m;
+    const webSearchStubReplaced = next.replace(webSearchStubPattern, webSearchLiveBlock);
+    if (webSearchStubReplaced !== next) {
+      next = webSearchStubReplaced;
+    } else {
+      const sep = next.endsWith('\n') ? '' : '\n';
+      next = `${next}${sep}\n${webSearchLiveBlock}`;
+    }
   }
 
   if (next === raw) return { changed: false };

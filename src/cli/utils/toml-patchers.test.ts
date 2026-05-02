@@ -811,6 +811,35 @@ describe('Brave Search patchers', () => {
     expect(parsed.tools?.web_search?.max_results).toBe(7);
   });
 
+  it('setBraveSearchKey replaces the commented-stub blocks instead of appending at EOF', () => {
+    // Regression: previously, when the file contained the commented stubs
+    // buildConfigToml emits (`# [services.brave_search]\n# key = "BSA..."` and
+    // `# [tools.web_search]\n# enabled = true\n# max_results = 5`), setBraveSearchKey
+    // appended live blocks at EOF and left the stubs in place — confusing duplicate
+    // schema. Now: detect each stub and replace in place, mirroring the OAuth /
+    // api-keys patcher stub-replacement behaviour.
+    writeFileSync(
+      configPath,
+      `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n\n# [services.brave_search]\n# key = "BSA..."\n\n# [tools.web_search]\n# enabled = true\n# max_results = 5\n`
+    );
+    setBraveSearchKey(configPath, 'BSK-real-key');
+    const content = readFileSync(configPath, 'utf-8');
+    // Stubs are gone (no commented `# [services.brave_search]` or `# [tools.web_search]`).
+    expect(content).not.toMatch(/^# \[services\.brave_search\]/m);
+    expect(content).not.toMatch(/^# \[tools\.web_search\]/m);
+    // Live blocks present and parse cleanly.
+    const parsed = TOML.parse(content) as {
+      services?: { brave_search?: { key?: string } };
+      tools?: { web_search?: { enabled?: boolean } };
+    };
+    expect(parsed.services?.brave_search?.key).toBe('BSK-real-key');
+    expect(parsed.tools?.web_search?.enabled).toBe(true);
+    // Exactly one live block per section — the stub-replace path didn't also
+    // append at EOF.
+    expect(content.match(/^\[services\.brave_search\]/gm)).toHaveLength(1);
+    expect(content.match(/^\[tools\.web_search\]/gm)).toHaveLength(1);
+  });
+
   it('setBraveSearchKey rewrites enabled with trailing inline comment without duplicating the key', () => {
     // Regression: the previous regex required the line to end at \s*$ so a
     // trailing inline comment caused the rewrite branch to miss; the no-line

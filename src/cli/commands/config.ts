@@ -250,14 +250,9 @@ async function handleOAuthProvider(
     // 'relogin' falls through to the standard login flow below.
   }
 
-  const defaultLabel = target;
-  const label = (await p.text({
-    message: 'Label for this OAuth credential:',
-    placeholder: defaultLabel,
-    defaultValue: defaultLabel,
-  })) as string | symbol;
-  if (p.isCancel(label)) return;
-
+  // OAuth credentials no longer have per-credential labels (one-per-provider
+  // on disk). Skip the label prompt entirely; the provider id alone identifies
+  // the credential everywhere it's referenced.
   if (!existsSync(system2Dir)) {
     await mkdirAsync(system2Dir, { recursive: true });
   }
@@ -285,10 +280,7 @@ async function handleOAuthProvider(
       },
       onProgress: (m) => s.message(m),
     });
-    saveOAuthCredentials(system2Dir, target, {
-      ...creds,
-      label: (typeof label === 'string' && label) || defaultLabel,
-    });
+    saveOAuthCredentials(system2Dir, target, creds);
     s.stop('✓ OAuth login successful');
   } catch (err) {
     s.stop('✗ OAuth login failed');

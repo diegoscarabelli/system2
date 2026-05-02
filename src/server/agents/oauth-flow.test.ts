@@ -36,7 +36,6 @@ describe('OAuth end-to-end flow', () => {
       access: 'sk-ant-oat-old',
       refresh: 'rt-1',
       expires: Date.now() + 60_000,
-      label: 'claude-pro',
     });
 
     const loaded = loadOAuthCredentials(tmpDir, 'anthropic');
@@ -52,13 +51,13 @@ describe('OAuth end-to-end flow', () => {
 
     let active = resolver.getActiveCredential();
     expect(active?.tier).toBe('oauth');
-    expect(active?.label).toBe('claude-pro');
+    // OAuth ActiveCredential.label is the provider id (no per-credential label).
+    expect(active?.label).toBe('anthropic');
 
     const fakeRefresh = vi.fn(async () => ({
       access: 'sk-ant-oat-new',
       refresh: 'rt-2',
       expires: Date.now() + 60 * 60_000,
-      label: 'claude-pro',
     }));
     const refreshed = await resolver.ensureFresh({ refresh: fakeRefresh });
     expect(refreshed.has('anthropic')).toBe(true);
@@ -77,7 +76,6 @@ describe('OAuth end-to-end flow', () => {
       access: 'sk-ant-oat-old',
       refresh: 'rt-1',
       expires: Date.now() + 60 * 60_000,
-      label: 'claude-pro',
     });
     const loaded = loadOAuthCredentials(tmpDir, 'anthropic');
     if (!loaded) throw new Error('expected credentials to load');
@@ -104,13 +102,11 @@ describe('OAuth end-to-end flow', () => {
       access: 'a',
       refresh: 'ar',
       expires: Date.now() + 60 * 60_000,
-      label: 'claude-pro',
     });
     saveOAuthCredentials(tmpDir, 'openai-codex', {
       access: 'o',
       refresh: 'or',
       expires: Date.now() + 60 * 60_000,
-      label: 'codex',
     });
     const a = loadOAuthCredentials(tmpDir, 'anthropic');
     const o = loadOAuthCredentials(tmpDir, 'openai-codex');
