@@ -396,7 +396,9 @@ function findSectionLineRange(lines: string[], headerLine: string): [number, num
       break;
     }
   }
-  // Include trailing blank lines so the deletion doesn't leave a double blank.
+  // Roll `end` back past any trailing blank lines so they STAY (they belong to
+  // the next section's leading gutter). Removing the section then leaves the
+  // next section's spacing intact.
   while (end > start + 1 && lines[end - 1].trim() === '') end--;
   return [start, end];
 }

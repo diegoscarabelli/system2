@@ -727,8 +727,16 @@ async function reorderFallbacks(opts: ReorderOptions): Promise<void> {
   const same =
     order.length === opts.fallback.length && order.every((id, i) => id === opts.fallback[i]);
   if (!same) {
-    opts.commit(order);
-    p.log.info('✓ Fallback order updated');
+    // The toml patcher can throw when the section's on-disk shape is unusual
+    // enough that the line-anchored regex can't find it. Surface the error and
+    // return cleanly so the user lands back in the submenu instead of crashing
+    // the whole `system2 config` session with a raw stack trace.
+    try {
+      opts.commit(order);
+      p.log.info('✓ Fallback order updated');
+    } catch (err) {
+      p.log.error(err instanceof Error ? err.message : String(err));
+    }
   }
 }
 

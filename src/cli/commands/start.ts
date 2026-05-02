@@ -28,9 +28,16 @@ import { rotateLogIfNeeded } from '../utils/log-rotation.js';
  */
 export function hasConfiguredCredentialTier(configPath: string): boolean {
   if (!existsSync(configPath)) return false;
-  const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
-    llm?: { oauth?: { primary?: string }; api_keys?: { primary?: string } };
-  };
+  // Swallow parse errors and return false: callers report a friendly
+  // "no credentials configured" message and exit. The downstream loadConfig()
+  // also catches parse errors and falls back to defaults, so we don't want a
+  // raw TOML.parse stack trace to fire here before that path runs.
+  let parsed: { llm?: { oauth?: { primary?: string }; api_keys?: { primary?: string } } };
+  try {
+    parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as typeof parsed;
+  } catch {
+    return false;
+  }
   const oauthPrimary = parsed.llm?.oauth?.primary;
   const apiKeysPrimary = parsed.llm?.api_keys?.primary;
   return Boolean(oauthPrimary || apiKeysPrimary);
