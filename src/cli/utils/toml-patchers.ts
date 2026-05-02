@@ -188,6 +188,41 @@ export function removeProviderFromOAuthTier(
 }
 
 /**
+ * Overwrite `[llm.oauth].fallback` with the supplied ordered list. Validates
+ * that no entry equals the current primary (use `setProviderAsPrimary` to
+ * change the primary). If the new order matches the current `fallback` exactly,
+ * this is a no-op (no file write).
+ */
+export function setOAuthFallbackOrder(
+  configPath: string,
+  newFallback: LlmProvider[]
+): { changed: boolean } {
+  const current = readOAuthTier(configPath);
+  if (!current) {
+    throw new Error(`[llm.oauth] section not found in ${configPath}`);
+  }
+  if (newFallback.some((entry) => entry === current.primary)) {
+    throw new Error(`primary cannot appear in fallback: ${current.primary}`);
+  }
+  const same =
+    newFallback.length === current.fallback.length &&
+    newFallback.every((p, i) => p === current.fallback[i]);
+  if (same) return { changed: false };
+
+  const raw = readFileSync(configPath, 'utf-8');
+  if (!OAUTH_BLOCK_PATTERN.test(raw)) {
+    throw new Error(
+      `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
+        `Edit the file manually if it has unusual formatting.`
+    );
+  }
+  const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
+  const replacement = `[llm.oauth]\nprimary = "${current.primary}"\nfallback = [${fbStr}]\n`;
+  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacement));
+  return { changed: true };
+}
+
+/**
  * Promote `provider` to primary in `[llm.oauth]`. The current primary becomes the
  * head of fallback (preserving the rest of fallback's order). If `provider` is
  * already primary, no-op.
