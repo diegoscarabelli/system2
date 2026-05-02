@@ -143,6 +143,17 @@ export function addProviderToOAuthTier(
     return { changed: true };
   }
 
+  // Defense against malformed OAuth tier (header present, primary missing).
+  // Mirrors the API-keys-tier guard. Without this, the fallback-rewrite below
+  // would interpolate `undefined` as the primary value and produce invalid
+  // TOML, or leave the tier in a no-primary state the runtime can't use.
+  if (!oauth.primary) {
+    throw new Error(
+      `[llm.oauth] section exists in ${configPath} but is malformed (missing primary?). ` +
+        'Edit the file manually to fix it before adding providers via system2 config.'
+    );
+  }
+
   const inTier = oauth.primary === provider || (oauth.fallback ?? []).includes(provider);
   if (inTier) return { changed: false };
 
@@ -383,9 +394,14 @@ export function addProviderToApiKeysTier(
   // lacks `primary`. In the second case, falling through to the "create tier"
   // branch below would append a second [llm.api_keys] block alongside the
   // existing malformed one — duplicate `primary`/`fallback` assignments which
-  // make config.toml unparseable. Detect via the live-tier regex (matches the
-  // header + immediate key=value lines, never the commented stub) and refuse.
-  if (!current && API_KEYS_BLOCK_PATTERN.test(raw)) {
+  // make config.toml unparseable.
+  // Two regexes are needed: API_KEYS_BLOCK_PATTERN matches the header plus
+  // at least one key=value line (typical malformed: header + only fallback).
+  // API_KEYS_HEADER_ONLY_PATTERN matches a bare header with NO body lines
+  // (typical malformed: user typed `[llm.api_keys]` and nothing else). Either
+  // shape means the tier is present-but-malformed; refuse rather than append.
+  const headerOnly = /^\[llm\.api_keys\]\s*$/m;
+  if (!current && (API_KEYS_BLOCK_PATTERN.test(raw) || headerOnly.test(raw))) {
     throw new Error(
       `[llm.api_keys] section exists in ${configPath} but is malformed (missing primary?). ` +
         'Edit the file manually to fix it before adding providers via system2 config.'
