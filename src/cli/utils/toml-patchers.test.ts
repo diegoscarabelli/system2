@@ -440,6 +440,29 @@ describe('addProviderToApiKeysTier', () => {
       addProviderToApiKeysTier(configPath, 'anthropic', [{ key: 'sk-2', label: 'work' }])
     ).toThrow(/already in \[llm\.api_keys\]/);
   });
+
+  it('rejects empty keys array, empty key/label fields, and duplicate labels', () => {
+    writeFileSync(configPath, `[llm]\n`);
+    // Empty array.
+    expect(() => addProviderToApiKeysTier(configPath, 'anthropic', [])).toThrow(
+      /keys array is empty/
+    );
+    // Empty key.
+    expect(() =>
+      addProviderToApiKeysTier(configPath, 'anthropic', [{ key: '', label: 'x' }])
+    ).toThrow(/empty key value/);
+    // Empty label.
+    expect(() =>
+      addProviderToApiKeysTier(configPath, 'anthropic', [{ key: 'sk-1', label: '' }])
+    ).toThrow(/empty label/);
+    // Duplicate label.
+    expect(() =>
+      addProviderToApiKeysTier(configPath, 'anthropic', [
+        { key: 'sk-1', label: 'main' },
+        { key: 'sk-2', label: 'main' },
+      ])
+    ).toThrow(/duplicate label "main"/);
+  });
 });
 
 describe('removeProviderFromApiKeysTier', () => {
@@ -786,6 +809,28 @@ describe('Brave Search patchers', () => {
     };
     expect(parsed.tools?.web_search?.enabled).toBe(true);
     expect(parsed.tools?.web_search?.max_results).toBe(7);
+  });
+
+  it('setBraveSearchKey rewrites enabled with trailing inline comment without duplicating the key', () => {
+    // Regression: the previous regex required the line to end at \s*$ so a
+    // trailing inline comment caused the rewrite branch to miss; the no-line
+    // branch then fired and inserted a second `enabled = true` line, producing
+    // duplicate keys (invalid TOML, throws on parse).
+    writeFileSync(
+      configPath,
+      `[services.brave_search]\nkey = "OLD"\n\n[tools.web_search]\nenabled = false  # disabled for now\nmax_results = 5\n`
+    );
+    setBraveSearchKey(configPath, 'NEW');
+    const content = readFileSync(configPath, 'utf-8');
+    // Exactly one `enabled = …` line; comment dropped (intentional, the rewrite
+    // replaces the whole line) but max_results preserved.
+    const enabledMatches = content.match(/^enabled\s*=/gm) ?? [];
+    expect(enabledMatches).toHaveLength(1);
+    const parsed = TOML.parse(content) as {
+      tools?: { web_search?: { enabled?: boolean; max_results?: number } };
+    };
+    expect(parsed.tools?.web_search?.enabled).toBe(true);
+    expect(parsed.tools?.web_search?.max_results).toBe(5);
   });
 });
 

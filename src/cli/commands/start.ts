@@ -151,11 +151,6 @@ export async function start(options: {
 
   const port = options.port || 4242;
 
-  // Automatic backup (only in normal start mode, not foreground spawned by background)
-  if (!options.foreground) {
-    backupIfNeeded();
-  }
-
   const tierLines = formatTierBanner(config.llm);
   if (tierLines.length === 0) {
     // Defensive: hasConfiguredCredentialTier above already gates on this, but
@@ -163,6 +158,14 @@ export async function start(options: {
     // from hasConfiguredCredentialTier's primary-only check.
     console.error('Error: No auth tier configured. Run `system2 config` to add credentials.');
     process.exit(1);
+  }
+
+  // Automatic backup (only in normal start mode, not foreground spawned by
+  // background). Runs AFTER the tier validation so a misconfigured config
+  // (primary set but provider has no keys, etc.) doesn't generate an
+  // unwanted backup before exiting.
+  if (!options.foreground) {
+    backupIfNeeded();
   }
 
   console.log('Starting System2 Gateway...');

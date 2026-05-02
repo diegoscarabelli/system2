@@ -476,10 +476,31 @@ async function addNewApiKeyProvider(configPath: string, target: LlmProvider): Pr
     if (!extras) return; // user cancelled
   }
 
+  // Track labels to enforce uniqueness within a single provider's keys array.
+  // Later operations (replace/remove by label) would be ambiguous otherwise,
+  // and addProviderToApiKeysTier will throw on duplicates anyway — catch them
+  // here at collection time so the user can correct the typo without losing
+  // the rest of the in-progress entry batch.
   const keys: LlmKey[] = [];
-  const first = await promptForKeyAndLabel(target);
+  const seenLabels = new Set<string>();
+  const collectUnique = async (firstAttempt: boolean): Promise<LlmKey | null> => {
+    while (true) {
+      const k = await promptForKeyAndLabel(target);
+      if (!k) return null;
+      if (seenLabels.has(k.label)) {
+        p.log.warn(`Label "${k.label}" already used for ${target}. Pick a different label.`);
+        // Loop: re-prompt until the user gives a unique label or cancels.
+        // (firstAttempt is informational; same loop semantics either way.)
+        void firstAttempt;
+        continue;
+      }
+      return k;
+    }
+  };
+  const first = await collectUnique(true);
   if (!first) return;
   keys.push(first);
+  seenLabels.add(first.label);
 
   while (true) {
     const more = await p.confirm({
@@ -487,9 +508,10 @@ async function addNewApiKeyProvider(configPath: string, target: LlmProvider): Pr
       initialValue: false,
     });
     if (p.isCancel(more) || !more) break;
-    const k = await promptForKeyAndLabel(target);
+    const k = await collectUnique(false);
     if (!k) break;
     keys.push(k);
+    seenLabels.add(k.label);
   }
 
   try {

@@ -394,6 +394,27 @@ export function addProviderToApiKeysTier(
   if (!existsSync(configPath)) {
     throw new Error(`config.toml not found at ${configPath}`);
   }
+  // Validate the keys array up-front. Later operations (replace/remove by
+  // label) address keys by their `label`, so duplicate labels would leave
+  // the provider in an ambiguous state. Empty keys/labels would silently
+  // succeed at parse time but break runtime auth resolution. Surface these
+  // as clear errors here rather than letting them rot until first use.
+  if (keys.length === 0) {
+    throw new Error(`addProviderToApiKeysTier: keys array is empty for ${provider}`);
+  }
+  const seenLabels = new Set<string>();
+  for (const k of keys) {
+    if (!k.key) {
+      throw new Error(`addProviderToApiKeysTier: empty key value for ${provider}`);
+    }
+    if (!k.label) {
+      throw new Error(`addProviderToApiKeysTier: empty label for ${provider}`);
+    }
+    if (seenLabels.has(k.label)) {
+      throw new Error(`addProviderToApiKeysTier: duplicate label "${k.label}" for ${provider}`);
+    }
+    seenLabels.add(k.label);
+  }
   const current = readApiKeysTier(configPath);
   if (current && (current.primary === provider || current.fallback.includes(provider))) {
     throw new Error(`${provider} already in [llm.api_keys]`);
@@ -763,10 +784,16 @@ export function setBraveSearchKey(configPath: string, apiKey: string): { changed
     // `enabled = false` would leave web search off even though the user just
     // set a Brave key (and the caller logs "web search tool enabled").
     // Match the section block, then rewrite its `enabled = …` line in place.
+    //
+    // The line-match regex tolerates an optional trailing `# comment`, so a
+    // line like `enabled = false  # disabled for now` rewrites cleanly. Without
+    // this, the rewrite would miss, the no-line branch would fire, and we'd
+    // emit a duplicate `enabled = true` line — producing invalid TOML.
+    const enabledLine = /^enabled\s*=\s*[a-zA-Z]+\s*(?:#[^\n]*)?$/m;
     next = next.replace(WEB_SEARCH_SECTION_PATTERN, (block) => {
-      if (/^enabled\s*=\s*true\s*$/m.test(block)) return block;
-      if (/^enabled\s*=\s*[a-zA-Z]+\s*$/m.test(block)) {
-        return block.replace(/^enabled\s*=\s*[a-zA-Z]+\s*$/m, 'enabled = true');
+      if (/^enabled\s*=\s*true\s*(?:#[^\n]*)?$/m.test(block)) return block;
+      if (enabledLine.test(block)) {
+        return block.replace(enabledLine, 'enabled = true');
       }
       // No `enabled = …` line at all: insert one immediately after the header.
       return block.replace(/^(\[tools\.web_search\][^\n]*\n)/, '$1enabled = true\n');
