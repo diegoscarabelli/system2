@@ -111,6 +111,21 @@ export async function config(options: ConfigOptions = {}): Promise<void> {
     process.exit(1);
   }
 
+  // Upfront TOML validation: surface a clean parse error and exit, rather than
+  // letting any of the submenus / patchers / read* helpers crash mid-flow with
+  // a stack trace. Submenus all do their own TOML.parse calls; if any of them
+  // would fail, we'd rather catch it here at a single guarded entry point.
+  try {
+    TOML.parse(readFileSync(configPath, 'utf-8'));
+  } catch (err) {
+    p.intro('🧠 System2 configuration');
+    p.cancel(
+      `config.toml could not be parsed:\n  ${err instanceof Error ? err.message : String(err)}\n\n` +
+        'Fix the syntax error manually before running system2 config.'
+    );
+    process.exit(1);
+  }
+
   p.intro('🧠 System2 configuration');
 
   while (true) {

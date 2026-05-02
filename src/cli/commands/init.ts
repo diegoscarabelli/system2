@@ -39,7 +39,14 @@ export async function init(options: InitOptions = {}): Promise<void> {
 
   console.clear();
 
-  if (existsSync(dir)) {
+  // Gate on configPath (the install marker), not the directory itself.
+  // Without this, a stray `~/.system2/` directory (e.g. left behind after a
+  // partial uninstall, or pre-created by another tool) would lock the user
+  // out: `system2 init` would refuse to write the template, and the missing
+  // config.toml would also block `system2 config` and `system2 start`. This
+  // lets `init` recover by writing the template into an existing-but-empty
+  // directory.
+  if (existsSync(configPath)) {
     p.intro('🧠 Welcome back to System2!');
     p.log.info(
       `Found existing installation at ${dir}.\n\n` +
@@ -53,6 +60,8 @@ export async function init(options: InitOptions = {}): Promise<void> {
 
   p.intro('🧠 Welcome to System2, the AI multi-agent system for working with data.');
 
+  // mkdir is recursive + idempotent, so this works whether the directory
+  // already exists (config.toml-less recovery case) or is brand new.
   await mkdir(dir, { recursive: true });
   await mkdir(join(dir, 'sessions'), { recursive: true });
   await mkdir(join(dir, 'projects'), { recursive: true });

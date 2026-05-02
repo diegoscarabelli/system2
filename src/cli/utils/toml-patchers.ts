@@ -377,6 +377,32 @@ export function addProviderToApiKeysTier(
   }
 
   const raw = readFileSync(configPath, 'utf-8');
+
+  // Defense against `readApiKeysTier`'s null-when-malformed conflation: it
+  // returns null both when [llm.api_keys] is absent AND when it exists but
+  // lacks `primary`. In the second case, falling through to the "create tier"
+  // branch below would append a second [llm.api_keys] block alongside the
+  // existing malformed one — duplicate `primary`/`fallback` assignments which
+  // make config.toml unparseable. Detect via the live-tier regex (matches the
+  // header + immediate key=value lines, never the commented stub) and refuse.
+  if (!current && API_KEYS_BLOCK_PATTERN.test(raw)) {
+    throw new Error(
+      `[llm.api_keys] section exists in ${configPath} but is malformed (missing primary?). ` +
+        'Edit the file manually to fix it before adding providers via system2 config.'
+    );
+  }
+
+  // Also guard the appended sub-section: TOML.parse will accept duplicate
+  // [llm.api_keys.<provider>] sections but our patchers can't reason about
+  // multiple of them, and they confuse readers. Detect via header regex.
+  const dupSubPattern = new RegExp(`^\\[llm\\.api_keys\\.${provider}\\]`, 'm');
+  if (dupSubPattern.test(raw)) {
+    throw new Error(
+      `[llm.api_keys.${provider}] sub-section already exists in ${configPath}. ` +
+        'This usually indicates a malformed file; edit manually to deduplicate before retrying.'
+    );
+  }
+
   const subsection = `\n[llm.api_keys.${provider}]\n${formatKeysBlock(keys)}\n`;
 
   if (!current) {

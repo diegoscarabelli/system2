@@ -734,8 +734,8 @@ export function buildConfigToml(options: {
   services?: ServicesConfig;
   // tools.web_search.max_results is not accepted: the emitter always writes
   // it commented at DEFAULT_WEB_SEARCH_MAX_RESULTS, mirroring the operational
-  // sections. Only `enabled` reflects a user choice (yes/no to web search at
-  // onboarding) and gets emitted live.
+  // sections. Only `enabled` reflects a user choice (yes/no to web search via
+  // `system2 config`) and gets emitted live.
   tools?: { web_search?: { enabled: boolean } };
   databases?: DatabasesConfig;
   // Operational settings ([backup], [logs], [scheduler], [chat], [knowledge],
@@ -766,7 +766,7 @@ export function buildConfigToml(options: {
     const providers = options.llm?.providers ?? {};
 
     // OAuth tier: emit divider + (live block | commented template) so users
-    // who skipped OAuth at onboarding still see how to enable it later.
+    // who skipped OAuth in `system2 config` still see how to enable it later.
     lines.push(...sectionHeader('LLM credentials — OAuth tier'));
     lines.push('# OAuth providers and failover order. Subscription tokens live in');
     lines.push('# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 config`.');
@@ -813,8 +813,7 @@ export function buildConfigToml(options: {
     }
 
     // API-keys tier. "Configured" means at least one provider has keys; a
-    // bare primary/fallback with no provider entries is not configured (the
-    // shape onboard synthesizes when the user opts out — see onboard.ts).
+    // bare primary/fallback with no provider entries is not configured.
     const apiKeysConfigured = Object.values(providers).some((p) => p && p.keys.length > 0);
 
     lines.push(...sectionHeader('LLM credentials — API keys tier'));

@@ -18,15 +18,6 @@ import { CONFIG_FILE, loadConfig, SYSTEM2_DIR } from '../utils/config.js';
 import { rotateLogIfNeeded } from '../utils/log-rotation.js';
 
 /**
- * Returns true when at least one credential tier is configured in
- * `config.toml`: either `[llm.oauth].primary` or `[llm.api_keys].primary`
- * is a non-empty string. A missing config file or a fully-commented
- * template returns false.
- *
- * Used by `start()` to refuse launching the daemon without credentials,
- * and steered toward `system2 config` for setup.
- */
-/**
  * Tri-state credential probe. Returns:
  * - 'configured' when at least one of [llm.oauth].primary or [llm.api_keys].primary is set.
  * - 'missing' when the config file is absent or has no live primary in either tier.
@@ -35,6 +26,9 @@ import { rotateLogIfNeeded } from '../utils/log-rotation.js';
  * The tri-state lets `start()` print distinct messages for "you forgot to run
  * `system2 config`" vs "your config.toml has a syntax error", instead of
  * collapsing parse failures into a misleading "no credentials" message.
+ *
+ * `hasConfiguredCredentialTier` below is a boolean shim retained for the
+ * existing test surface; it returns true only for the 'configured' state.
  */
 export type CredentialTierStatus =
   | { kind: 'configured' }
