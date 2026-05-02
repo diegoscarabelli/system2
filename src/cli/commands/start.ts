@@ -9,11 +9,32 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import TOML from '@iarna/toml';
 import open from 'open';
+import pc from 'picocolors';
 import type { LlmConfig } from '../../shared/index.js';
 import { backupIfNeeded } from '../utils/backup.js';
-import { loadConfig, SYSTEM2_DIR } from '../utils/config.js';
+import { CONFIG_FILE, loadConfig, SYSTEM2_DIR } from '../utils/config.js';
 import { rotateLogIfNeeded } from '../utils/log-rotation.js';
+
+/**
+ * Returns true when at least one credential tier is configured in
+ * `config.toml`: either `[llm.oauth].primary` or `[llm.api_keys].primary`
+ * is a non-empty string. A missing config file or a fully-commented
+ * template returns false.
+ *
+ * Used by `start()` to refuse launching the daemon without credentials,
+ * and steered toward `system2 config` for setup.
+ */
+export function hasConfiguredCredentialTier(configPath: string): boolean {
+  if (!existsSync(configPath)) return false;
+  const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
+    llm?: { oauth?: { primary?: string }; api_keys?: { primary?: string } };
+  };
+  const oauthPrimary = parsed.llm?.oauth?.primary;
+  const apiKeysPrimary = parsed.llm?.api_keys?.primary;
+  return Boolean(oauthPrimary || apiKeysPrimary);
+}
 
 /**
  * Build the auth-tier lines for the startup banner. Returns one line per
@@ -59,6 +80,14 @@ export async function start(options: {
   if (!config.llm) {
     console.error('Error: System2 has not been onboarded yet.');
     console.error('Please run: system2 onboard');
+    process.exit(1);
+  }
+
+  // Refuse to launch when neither [llm.oauth].primary nor [llm.api_keys].primary
+  // is configured. The user-facing fix path is `system2 config`.
+  if (!hasConfiguredCredentialTier(CONFIG_FILE)) {
+    console.error(pc.red('✗ No LLM credentials configured.'));
+    console.error('Run `system2 config` to set up an OAuth provider or API key provider.');
     process.exit(1);
   }
 
