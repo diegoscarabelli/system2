@@ -14,7 +14,7 @@ function makeTwoTierConfig(): LlmConfig {
       anthropic: { keys: [{ key: 'sk-ant-api03-fallback', label: 'api-fallback' }] },
       openai: { keys: [{ key: 'oai-1', label: 'main' }] },
     },
-    oauth: { primary: 'anthropic', fallback: [] },
+    oauth: { primary: 'anthropic', fallback: [], providers: {} },
   };
 }
 
@@ -98,7 +98,7 @@ describe('OAuth end-to-end flow', () => {
   it('cycles through entire OAuth tier before dropping to keys tier', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: ['openai'] },
+      oauth: { primary: 'anthropic', fallback: ['openai-codex'], providers: {} },
     };
     saveOAuthCredentials(tmpDir, 'anthropic', {
       access: 'a',
@@ -106,18 +106,18 @@ describe('OAuth end-to-end flow', () => {
       expires: Date.now() + 60 * 60_000,
       label: 'claude-pro',
     });
-    saveOAuthCredentials(tmpDir, 'openai', {
+    saveOAuthCredentials(tmpDir, 'openai-codex', {
       access: 'o',
       refresh: 'or',
       expires: Date.now() + 60 * 60_000,
       label: 'codex',
     });
     const a = loadOAuthCredentials(tmpDir, 'anthropic');
-    const o = loadOAuthCredentials(tmpDir, 'openai');
+    const o = loadOAuthCredentials(tmpDir, 'openai-codex');
     if (!a || !o) throw new Error('expected credentials to load');
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: a,
-      openai: o,
+      'openai-codex': o,
     });
 
     expect(resolver.getActiveCredential()).toMatchObject({
@@ -126,9 +126,12 @@ describe('OAuth end-to-end flow', () => {
     });
 
     resolver.markKeyFailed('anthropic', 'auth', 'fail', 0, 'oauth');
-    expect(resolver.getActiveCredential()).toMatchObject({ tier: 'oauth', provider: 'openai' });
+    expect(resolver.getActiveCredential()).toMatchObject({
+      tier: 'oauth',
+      provider: 'openai-codex',
+    });
 
-    resolver.markKeyFailed('openai', 'auth', 'fail', 0, 'oauth');
+    resolver.markKeyFailed('openai-codex', 'auth', 'fail', 0, 'oauth');
     expect(resolver.getActiveCredential()).toMatchObject({
       tier: 'api_keys',
       provider: 'anthropic',

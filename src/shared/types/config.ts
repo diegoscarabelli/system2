@@ -5,20 +5,48 @@
  * Used by both CLI (config loading) and server (AuthResolver, AgentHost).
  */
 
-export type LlmProvider =
-  | 'anthropic'
-  | 'cerebras'
-  | 'github-copilot'
-  | 'google'
-  | 'google-antigravity'
-  | 'google-gemini-cli'
-  | 'groq'
-  | 'mistral'
-  | 'openai'
-  | 'openai-codex'
-  | 'openai-compatible'
-  | 'openrouter'
-  | 'xai';
+/** All providers system2 understands across both tiers. The OAuth tier is
+ *  restricted to a subset: see OAUTH_PROVIDER_IDS. */
+export const LLM_PROVIDER_IDS = [
+  'anthropic',
+  'cerebras',
+  'github-copilot',
+  'google',
+  'groq',
+  'mistral',
+  'openai',
+  'openai-codex',
+  'openai-compatible',
+  'openrouter',
+  'xai',
+] as const;
+
+export type LlmProvider = (typeof LLM_PROVIDER_IDS)[number];
+
+/** Providers that support OAuth login (subset of LLM_PROVIDER_IDS). The other
+ *  providers are API-keys-only. */
+export const OAUTH_PROVIDER_IDS = ['anthropic', 'github-copilot', 'openai-codex'] as const;
+
+export type OAuthProvider = (typeof OAUTH_PROVIDER_IDS)[number];
+
+/** Providers usable in the API-keys tier. Excludes the OAuth-only providers
+ *  (`openai-codex`, `github-copilot`), since `buildProvidersFromSource` does
+ *  not iterate them and supplying keys for them in `[llm.api_keys]` would be
+ *  silently ignored. Used to validate `[llm.api_keys].primary` and
+ *  `[llm.api_keys].fallback` at parse time. */
+export const API_KEYS_PROVIDER_IDS = [
+  'anthropic',
+  'cerebras',
+  'google',
+  'groq',
+  'mistral',
+  'openai',
+  'openai-compatible',
+  'openrouter',
+  'xai',
+] as const;
+
+export type ApiKeysProvider = (typeof API_KEYS_PROVIDER_IDS)[number];
 
 export interface LlmKey {
   key: string;
@@ -31,11 +59,22 @@ export interface LlmProviderConfig {
   model?: string;
   compat_reasoning?: boolean;
   routing?: Record<string, string[]>;
+  /** Per-role model pins for the API-keys tier. Keys are role names (guide,
+   *  conductor, reviewer, narrator, worker). */
+  models?: Record<string, string>;
+}
+
+export interface LlmOAuthProviderConfig {
+  /** Optional model pin for this OAuth provider. When omitted, the resolver
+   *  picks the family flagship from pi-ai's catalog (see resolveOAuthModel). */
+  model?: string;
 }
 
 export interface LlmOAuthConfig {
-  primary: LlmProvider;
-  fallback: LlmProvider[];
+  primary: OAuthProvider;
+  fallback: OAuthProvider[];
+  /** Per-provider OAuth-tier overrides (currently just `model`). */
+  providers: Partial<Record<OAuthProvider, LlmOAuthProviderConfig>>;
 }
 
 export interface LlmConfig {
@@ -56,7 +95,11 @@ export interface ServicesConfig {
 
 export interface WebSearchToolConfig {
   enabled: boolean;
-  max_results: number;
+  /** Optional. When omitted, callers fall back to DEFAULT_WEB_SEARCH_MAX_RESULTS
+   *  in src/cli/utils/config.ts. The buildConfigToml emitter never reads this
+   *  field — it always writes a commented `# max_results = <default>` line so
+   *  accidental edits stay inert until the user deliberately uncomments. */
+  max_results?: number;
 }
 
 export interface ToolsConfig {
@@ -103,7 +146,6 @@ export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high';
 export interface AgentOverrideConfig {
   thinking_level?: ThinkingLevel;
   compaction_depth?: number;
-  models?: Partial<Record<Exclude<LlmProvider, 'openai-compatible'>, string>>;
 }
 
 export interface AgentsConfig {

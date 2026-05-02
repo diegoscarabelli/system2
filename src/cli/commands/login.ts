@@ -10,6 +10,19 @@ import { saveOAuthCredentials } from '../../server/agents/oauth-credentials.js';
 import type { LlmProvider } from '../../shared/index.js';
 import { CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
 
+/**
+ * Format the message shown when an OAuth provider needs browser auth.
+ * Some providers (Anthropic, Codex) use a localhost callback flow and only
+ * supply `url`; others (GitHub Copilot) use the device flow and supply an
+ * `instructions` string with the user code that must be entered manually.
+ * Returning a single formatted string lets login/onboard share the wording
+ * and gives us a small testable surface for "don't drop the device code".
+ */
+export function formatOAuthAuthMessage(url: string, instructions?: string): string {
+  const detail = instructions ? `\n${instructions}` : '';
+  return `Open this URL to authenticate (browser should open automatically):\n${url}${detail}`;
+}
+
 function isDaemonRunning(): boolean {
   const pidFile = join(SYSTEM2_DIR, 'server.pid');
   if (!existsSync(pidFile)) return false;
@@ -31,18 +44,8 @@ const OAUTH_PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
   },
   {
     value: 'openai-codex',
-    label: 'OpenAI Codex (ChatGPT Plus/Pro)',
-    hint: 'Uses your ChatGPT subscription. Codex models only.',
-  },
-  {
-    value: 'google-gemini-cli',
-    label: 'Google Gemini CLI (Gemini subscription)',
-    hint: 'Uses your Google account / Gemini subscription.',
-  },
-  {
-    value: 'google-antigravity',
-    label: 'Google Antigravity',
-    hint: 'Uses your Google account via Antigravity. Access to Gemini 3, Claude, GPT-OSS.',
+    label: 'OpenAI Codex (ChatGPT)',
+    hint: 'Uses your ChatGPT account.',
   },
   {
     value: 'github-copilot',
@@ -100,14 +103,23 @@ export function addProviderToOAuthTier(
   const inTier = oauth.primary === provider || (oauth.fallback ?? []).includes(provider);
   if (inTier) return { changed: false };
 
-  // Append to fallback array. Reconstruct the section in-place via regex on the existing section.
-  // Anchor at line start (multiline) so `[llm.oauth]` mentions in comments don't
-  // get matched and rewritten. See removeProviderFromOAuthTier for the same fix.
-  const sectionPattern = /^\[llm\.oauth\]([\s\S]*?)(?=\r?\n\[|$(?![\r\n]))/m;
-  const match = raw.match(sectionPattern);
+  // Append to fallback array. Capture ONLY the [llm.oauth] header + its
+  // immediate key=value lines, stopping at the first blank line, comment,
+  // or next `[`-section. A wider span would include intervening commented
+  // templates and section dividers (which buildConfigToml emits between
+  // tiers); replacing that span destroys structure. See OAUTH_BLOCK_PATTERN.
+  const match = raw.match(OAUTH_BLOCK_PATTERN);
   if (!match) {
-    // Shouldn't happen because oauth is non-null, but guard anyway
-    return { changed: false };
+    // TOML.parse found [llm.oauth] but the regex doesn't match — likely an
+    // unusual on-disk format (leading whitespace before the header, key on
+    // same line as header, etc.). Throw rather than silently no-op: the
+    // credential file has already been written, so a silent miss here would
+    // leave the user logged in but not registered in [llm.oauth]. Matches
+    // the failure mode of removeProviderFromOAuthTier / setProviderAsPrimary.
+    throw new Error(
+      `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
+        `Edit the file manually if it has unusual formatting.`
+    );
   }
   const newFallback = [...(oauth.fallback ?? []), provider];
   const fallbackLine = `fallback = [${newFallback.map((f) => `"${f}"`).join(', ')}]`;
@@ -118,16 +130,34 @@ export function addProviderToOAuthTier(
   if (replacedSection === match[0]) {
     const withFallback = match[0].replace(/(primary\s*=\s*"[^"]*"\s*\n)/, `$1${fallbackLine}\n`);
     if (withFallback === match[0]) {
-      // Could not even find a primary= line — bail.
-      return { changed: false };
+      // No primary= line either — same partial-success risk as a regex miss.
+      throw new Error(
+        `Could not locate primary= line in [llm.oauth] section of ${configPath} ` +
+          `to anchor a fallback insertion. Edit the file manually.`
+      );
     }
-    writeFileSync(configPath, raw.replace(sectionPattern, withFallback));
+    writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, withFallback));
     return { changed: true };
   }
 
-  writeFileSync(configPath, raw.replace(sectionPattern, replacedSection));
+  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacedSection));
   return { changed: true };
 }
+
+/**
+ * Pattern matching the [llm.oauth] block: header line + immediate key=value
+ * lines (typically primary + fallback), stopping at the first blank line,
+ * comment line, or next `[`-section header.
+ *
+ * Prior versions used a wide pattern that ran to the next live `[`-section,
+ * which silently consumed everything in between — fine when adjacent
+ * sections were always live, but corrupting once buildConfigToml started
+ * emitting commented templates and dividers between live sections. The
+ * narrow pattern preserves those structural elements (and any
+ * `[llm.oauth.<provider>]` sub-section model pins, which sit below a blank
+ * line and so are now also preserved).
+ */
+const OAUTH_BLOCK_PATTERN = /^\[llm\.oauth\][^\n]*\n(?:[^[#\s][^\n]*\n)+/m;
 
 /**
  * Patch config.toml to remove `provider` from `[llm.oauth]`.
@@ -162,15 +192,11 @@ export function removeProviderFromOAuthTier(
     newFallback = newFallback.filter((f) => f !== provider);
   }
 
-  // Anchor at line start (multiline) so `[llm.oauth]` mentions in comments don't
-  // get matched and rewritten. The new buildConfigToml emits comments that include
-  // the literal text `[llm.oauth]` in prose; without the anchor, raw.replace would
-  // overwrite from the comment line onward and corrupt the file.
-  const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\r?\n\[|$(?![\r\n]))/m;
-  if (!sectionPattern.test(raw)) {
+  if (!OAUTH_BLOCK_PATTERN.test(raw)) {
     // TOML parse found [llm.oauth] but the regex doesn't match — likely an
-    // unusual on-disk format (leading whitespace before the header, etc.).
-    // Throw rather than silently no-op while reporting changed=true.
+    // unusual on-disk format (leading whitespace before the header, key on
+    // same line as header, etc.). Throw rather than silently no-op while
+    // reporting changed=true.
     throw new Error(
       `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
         `Edit the file manually if it has unusual formatting.`
@@ -178,13 +204,13 @@ export function removeProviderFromOAuthTier(
   }
 
   if (newPrimary === null) {
-    writeFileSync(configPath, raw.replace(sectionPattern, ''));
+    writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, ''));
     return { changed: true };
   }
 
   const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-  const replacement = `\n[llm.oauth]\nprimary = "${newPrimary}"\nfallback = [${fbStr}]\n`;
-  writeFileSync(configPath, raw.replace(sectionPattern, replacement));
+  const replacement = `[llm.oauth]\nprimary = "${newPrimary}"\nfallback = [${fbStr}]\n`;
+  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacement));
   return { changed: true };
 }
 
@@ -222,24 +248,18 @@ export function setProviderAsPrimary(
   const newFallback = [current.primary, ...current.fallback.filter((f) => f !== provider)];
 
   const raw = readFileSync(configPath, 'utf-8');
-  // Anchor at line start (multiline) so `[llm.oauth]` mentions in comments don't
-  // get matched and rewritten. The new buildConfigToml emits comments that include
-  // the literal text `[llm.oauth]` in prose; without the anchor, raw.replace would
-  // overwrite from the comment line onward and corrupt the file.
-  const sectionPattern = /^\[llm\.oauth\][\s\S]*?(?=\r?\n\[|$(?![\r\n]))/m;
-  if (!sectionPattern.test(raw)) {
+  if (!OAUTH_BLOCK_PATTERN.test(raw)) {
     // TOML parse found [llm.oauth] (readOAuthTier returned non-null) but the
-    // regex doesn't match — likely an unusual on-disk format (leading whitespace
-    // before the header, etc.). Throw rather than silently no-op while reporting
-    // changed=true.
+    // regex doesn't match — likely an unusual on-disk format. Throw rather
+    // than silently no-op while reporting changed=true.
     throw new Error(
       `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
         `Edit the file manually if it has unusual formatting.`
     );
   }
   const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-  const replacement = `\n[llm.oauth]\nprimary = "${provider}"\nfallback = [${fbStr}]\n`;
-  writeFileSync(configPath, raw.replace(sectionPattern, replacement));
+  const replacement = `[llm.oauth]\nprimary = "${provider}"\nfallback = [${fbStr}]\n`;
+  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacement));
   return { changed: true };
 }
 
@@ -354,15 +374,15 @@ async function performLoginIteration(): Promise<'continue' | 'done'> {
   s.start('Waiting for browser authentication...');
   try {
     const creds = await loginProvider(target, {
-      onAuth: ({ url }) => {
+      onAuth: ({ url, instructions }) => {
         // Stop, print the URL persistently, attempt to open the browser, then
         // restart the spinner. s.message() would be overwritten on the next
         // onProgress; p.log.info() under an active spinner is suppressed.
-        // Stop+log+restart guarantees the URL stays visible. open() is
+        // Stop+log+restart guarantees the URL/code stay visible. open() is
         // best-effort: if it fails (no browser, headless env, etc.), the user
         // can still copy the URL above the spinner.
         s.stop('Browser authentication required:');
-        p.log.info(`Open this URL to authenticate (browser should open automatically):\n${url}`);
+        p.log.info(formatOAuthAuthMessage(url, instructions));
         void open(url).catch(() => {
           // Browser open failed — URL is already printed; user copies manually.
         });
@@ -383,7 +403,7 @@ async function performLoginIteration(): Promise<'continue' | 'done'> {
       },
       onProgress: (m) => s.message(m),
     });
-    // Spread preserves provider-specific extras (projectId, email, enterpriseDomain).
+    // Spread preserves provider-specific extras (e.g. Copilot's enterpriseDomain).
     saveOAuthCredentials(SYSTEM2_DIR, target, {
       ...creds,
       label: label || defaultLabel,

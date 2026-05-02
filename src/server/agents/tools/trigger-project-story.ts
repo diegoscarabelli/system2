@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
 import { resolveProjectDir } from '../../projects/dir.js'; // used for backfilling dir_name on legacy projects
 import {
@@ -39,20 +39,24 @@ export function createTriggerProjectStoryTool(
   registry: AgentRegistry,
   narratorMessageExcerptBytes?: number
 ) {
-  const params = Type.Object({
+  const triggerProjectStoryParams = Type.Object({
     project_id: Type.Number({
       description:
         'The project ID to trigger the story for. Must be a project you are assigned to.',
     }),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof triggerProjectStoryParams> = {
     name: 'trigger_project_story',
     label: 'Trigger Project Story',
     description:
       'Signal project completion and trigger the project story workflow. The server creates a story task for the Narrator, collects all project data, and delivers two messages: a final project-log update and a project story data package. Returns the story task ID. Call this during the close-project routine after all tasks are resolved.',
-    parameters: params,
-    execute: async (_toolCallId, params) => {
+    parameters: triggerProjectStoryParams,
+    execute: async (_toolCallId, rawParams) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof triggerProjectStoryParams>;
       try {
         // Validate caller
         const caller = db.getAgent(agentId);

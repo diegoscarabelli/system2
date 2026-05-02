@@ -33,6 +33,8 @@ import {
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
   type LlmConfig,
   type LlmProvider,
+  OAUTH_FALLBACKS,
+  resolveOAuthModel,
   type ServicesConfig,
   type ThinkingLevel,
   type ToolsConfig,
@@ -134,7 +136,13 @@ interface AgentDefinition {
    *  (`daily_summaries/*.md`, `memory.md`, per-project `log.md`) rather than in their session.
    *  Prevents context-overflow loops where each tick's restored session keeps growing. */
   reset_session_after_scheduled_task?: boolean;
-  models: {
+  /** Default model per provider for the API-keys tier. The OAuth tier
+   *  ignores these — it auto-picks one model per provider via
+   *  resolveOAuthModel for all roles. Users override per-role via
+   *  `[llm.api_keys.<provider>.models][<role>]` in config.toml.
+   *  Only api-keys-tier providers are listed (no github-copilot or
+   *  openai-codex, which are OAuth-only). */
+  api_keys_models: {
     anthropic: string;
     cerebras: string;
     google: string;
@@ -184,6 +192,57 @@ export interface AgentHostConfig {
   onAgentTerminate?: () => void;
 }
 
+/**
+ * Pure helper: pick the model ID for `provider` under the active credential
+ * tier. Returns `{ id, autoResolved }` where `autoResolved` is true only when
+ * the model came from the OAuth resolver / hardcoded fallback path (no
+ * explicit `[llm.oauth.<provider>].model` pin) — gates the 403/404 → fallback
+ * hook in handlePotentialError.
+ *
+ * Resolution order:
+ *   - OAuth: user pin → OAUTH_FALLBACKS (if already stepped down) → resolveOAuthModel
+ *   - API-keys (most providers): [llm.api_keys.<provider>.models][role] → frontmatter api_keys_models[provider]
+ *   - API-keys (openai-compatible): the global `[llm.api_keys.openai-compatible].model`,
+ *     since the provider's model isn't in pi-ai's catalog and isn't pinned per-role.
+ *     Callers that hand the returned id to a `ModelRegistry` must also call
+ *     `registry.registerProvider('openai-compatible', { ... })` first — the
+ *     helper returns the id but does not mutate any registry.
+ */
+export function pickModelForTier(args: {
+  tier: AuthTier;
+  provider: LlmProvider;
+  role: string;
+  llmConfig: LlmConfig;
+  frontmatterModels: Partial<Record<LlmProvider, string>>;
+  fallbackUsedFor: ReadonlySet<LlmProvider>;
+}): { id: string | undefined; autoResolved: boolean } {
+  const { tier, provider, role, llmConfig, frontmatterModels, fallbackUsedFor } = args;
+  if (tier === 'oauth') {
+    // `oauth.providers` is keyed by OAuthProvider (the narrowed subset);
+    // `provider` here is LlmProvider. Index via a typed cast: if the active
+    // provider isn't in OAUTH_PROVIDER_IDS the lookup just returns undefined,
+    // which is the correct fall-through (no user pin → resolver path below).
+    const userPin =
+      llmConfig.oauth?.providers[provider as keyof NonNullable<typeof llmConfig.oauth>['providers']]
+        ?.model;
+    if (userPin) return { id: userPin, autoResolved: false };
+    if (fallbackUsedFor.has(provider)) {
+      return { id: OAUTH_FALLBACKS[provider], autoResolved: true };
+    }
+    return { id: resolveOAuthModel(provider), autoResolved: true };
+  }
+  // openai-compatible's model is configured globally under
+  // `[llm.api_keys.openai-compatible].model`, not per-role and not in
+  // pi-ai's catalog. Per-role pins / frontmatter don't apply.
+  if (provider === 'openai-compatible') {
+    return { id: llmConfig.providers['openai-compatible']?.model, autoResolved: false };
+  }
+  const id =
+    llmConfig.providers[provider]?.models?.[role] ??
+    frontmatterModels[provider as keyof typeof frontmatterModels];
+  return { id, autoResolved: false };
+}
+
 export class AgentHost {
   private session: AgentSession | null = null;
   private db: DatabaseClient;
@@ -223,6 +282,15 @@ export class AgentHost {
   private busy = false;
   private lastTurnErrored = false;
   private oauthRefreshAttempted = false;
+  /** True when the active OAuth model was NOT explicitly user-pinned in
+   *  [llm.oauth.<provider>].model — i.e., it came from resolveOAuthModel or
+   *  from OAUTH_FALLBACKS after a prior 403/404 step-down. Gates the 403/404
+   *  → fallback hook so explicit user pins fail loudly. */
+  private oauthAutoResolved = false;
+  /** Per-provider record of which OAuth credentials have already stepped down
+   *  to OAUTH_FALLBACKS this session. One step-down per provider; restart
+   *  re-tries the family flagship. */
+  private oauthFallbackUsedFor: Set<LlmProvider> = new Set();
   private deliverySendCount = 0;
   private compactionCount = 0;
   private compactionDepth = 0;
@@ -285,7 +353,7 @@ export class AgentHost {
     // Use shared AuthResolver if provided, otherwise create a local one
     this.authResolver = config.authResolver ?? new AuthResolver(config.llmConfig);
     const authStorage = this.authResolver.createAuthStorage();
-    this.modelRegistry = new ModelRegistry(authStorage);
+    this.modelRegistry = ModelRegistry.create(authStorage);
     const activeCred = this.authResolver.getActiveCredential();
     this.currentProvider = activeCred?.provider ?? this.authResolver.primaryProvider;
     this.currentKeyIndex = activeCred?.keyIndex ?? 0;
@@ -385,16 +453,11 @@ export class AgentHost {
       if (roleOverride.compaction_depth !== undefined) {
         agentConfig.compaction_depth = roleOverride.compaction_depth;
       }
-      if (roleOverride.models) {
-        agentConfig.models = { ...agentConfig.models, ...roleOverride.models };
-      }
     }
 
-    this.agentModels = agentConfig.models ?? {};
-    // Validate the merged (provider, modelId) pairs against pi-ai's catalog.
-    // Fails fast on typos in agent frontmatter or [agents.<role>.models] overrides
-    // so the user gets a clear error at startup rather than a runtime API failure.
-    validateAgentModels({ [agentRecord.role]: { models: this.agentModels } });
+    this.agentModels = agentConfig.api_keys_models ?? {};
+    // Validate frontmatter (provider, modelId) pairs against pi-ai's catalog.
+    validateAgentModels({ [agentRecord.role]: this.agentModels });
     // Source the session-reset flag from the agent library frontmatter unless the constructor
     // caller passed an explicit value. Precedence: explicit caller value (true OR false) wins;
     // otherwise the frontmatter value (default false for unset) governs reset behavior. Gating on
@@ -410,7 +473,7 @@ export class AgentHost {
 
     log.info('[AgentHost] Agent config loaded:', {
       name: agentConfig.name,
-      models: agentConfig.models,
+      api_keys_models: agentConfig.api_keys_models,
       overrides: roleOverride ? Object.keys(roleOverride) : [],
       provider: llmProvider,
     });
@@ -444,18 +507,27 @@ export class AgentHost {
         ],
       });
     } else {
-      // Try active provider first, then fallback providers in order
+      // Try active provider first, then fallback providers in order.
       const providersToTry = [
         llmProvider,
         ...this.authResolver.providerOrder.filter((p) => p !== llmProvider),
       ];
 
       let resolvedProvider: LlmProvider | undefined;
+      let autoResolved = false;
       for (const provider of providersToTry) {
-        const id = agentConfig.models[provider as keyof typeof agentConfig.models];
-        if (id) {
-          modelId = id;
+        const result = pickModelForTier({
+          tier: this.currentTier,
+          provider,
+          role: agentRecord.role,
+          llmConfig: this.llmConfig,
+          frontmatterModels: agentConfig.api_keys_models,
+          fallbackUsedFor: this.oauthFallbackUsedFor,
+        });
+        if (result.id) {
+          modelId = result.id;
           resolvedProvider = provider;
+          autoResolved = result.autoResolved;
           if (provider !== llmProvider) {
             log.info(
               `[AgentHost] No model for ${llmProvider} in ${agentConfig.name}, falling back to ${provider}`
@@ -472,6 +544,7 @@ export class AgentHost {
       llmProvider = resolvedProvider;
       this.currentProvider = resolvedProvider;
       this.currentKeyIndex = this.authResolver.getActiveKey(resolvedProvider)?.keyIndex ?? 0;
+      this.oauthAutoResolved = this.currentTier === 'oauth' && autoResolved;
     }
 
     log.info('[AgentHost] Selected model:', modelId, 'for provider:', llmProvider);
@@ -785,6 +858,35 @@ export class AgentHost {
     // Reset the send counter: the failed turn's sends are abandoned.
     // The retry/failover path will re-send and re-increment as needed.
     this.deliverySendCount = 0;
+
+    // OAuth model fallback: when the auto-resolved family flagship returns
+    // 403/404 (provider-specific entitlement / "model not found" signals),
+    // step down to OAUTH_FALLBACKS[provider] for the rest of the session.
+    // Skipped if the user explicitly pinned a model (oauthAutoResolved=false)
+    // — explicit pins fail loudly so the user fixes the pin.
+    if (
+      this.currentTier === 'oauth' &&
+      this.oauthAutoResolved &&
+      !this.oauthFallbackUsedFor.has(this.currentProvider) &&
+      (statusCode === 403 || statusCode === 404)
+    ) {
+      const fallback = OAUTH_FALLBACKS[this.currentProvider];
+      if (fallback) {
+        this.oauthFallbackUsedFor.add(this.currentProvider);
+        log.warn(
+          `[AgentHost] OAuth ${this.currentProvider} returned ${statusCode}; ` +
+            `stepping to fallback ${fallback}`
+        );
+        await this.reinitializeWithProvider(
+          this.currentProvider,
+          promptToRetry,
+          deliveriesToRetry,
+          'OAuth model fallback',
+          `${statusCode} on ${this.currentProvider} OAuth credential, retrying with ${fallback}`
+        );
+        return;
+      }
+    }
 
     // OAuth refresh-and-retry: 401 from an OAuth-tier credential should refresh once
     // before failing over. Refresh updates in-memory tokens; reinitialize the session
@@ -1130,7 +1232,7 @@ export class AgentHost {
 
       // Recreate model registry with updated auth
       const authStorage = this.authResolver.createAuthStorage();
-      this.modelRegistry = new ModelRegistry(authStorage);
+      this.modelRegistry = ModelRegistry.create(authStorage);
 
       // Reinitialize the session
       await this.initialize();

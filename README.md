@@ -24,8 +24,8 @@ It exists to help people think more clearly about complex questions and empower 
 
 1. **[Node.js 20+](https://nodejs.org/)** and **[pnpm 8+](https://pnpm.io/installation)** (in a terminal, run `node -v` and `pnpm -v` to check)
 2. **An LLM credential** (at least one required). Two tiers, combinable, both configurable during onboarding:
-   - **OAuth subscription support** (recommended if you already pay for one of these): use your existing AI account instead of API keys, with no per-token cost. Supported: Anthropic (Claude Pro/Max), OpenAI (ChatGPT Plus/Pro via the Codex CLI flow), Google (Gemini subscription via the Gemini CLI flow), Google Antigravity (via your Google account), and GitHub Copilot.
-   - **API keys**: pay-per-token across providers. [OpenRouter](https://openrouter.ai/) is recommended for access to multiple models with one key; Anthropic, Google, OpenAI, and others also work. You can add multiple keys for rotation and multiple providers for failover.
+   - **OAuth subscription support**: use your existing AI account. OAuth subscription is recommended for sustained workloads. Supported: [Anthropic](https://claude.com/pricing) (paid plan required), [OpenAI](https://chatgpt.com/pricing), and [GitHub Copilot](https://github.com/features/copilot/plans). Free tiers vary by provider — see each provider's pricing page.
+   - **API keys**: an alternative tier. Generally costlier per use than an OAuth subscription; free-tier models avoid the cost but come with tight rate limits and higher latency. [OpenRouter](https://openrouter.ai/) gives access to multiple models with one key; Anthropic, Google, OpenAI, and others also work. You can add multiple keys for rotation and multiple providers for failover.
 
    Combining both tiers gives you OAuth as the primary path with API keys as fallback when an OAuth subscription rate-limits.
 3. **Brave Search API key** (highly recommended). Enables agents to search the web and fetch web pages content. This is useful for researching APIs, documentation, and data sources on the web. [Get one here](https://brave.com/search/api/).
@@ -39,7 +39,7 @@ pnpm add -g @diegoscarabelli/system2      # install System2 globally
 system2 onboard          # one-time setup (see below)
 ```
 
-`system2 onboard` creates the `~/.system2/` directory and walks you through LLM credential setup (OAuth from any of the 5 supported subscriptions, API keys, or both, as described in Prerequisites) and optional Brave Search setup. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
+`system2 onboard` creates the `~/.system2/` directory and walks you through LLM credential setup (OAuth from any of the 3 supported subscriptions, API keys, or both, as described in Prerequisites) and optional Brave Search setup. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
 
 ```bash
 system2 start            # starts the server and opens the browser
@@ -75,7 +75,7 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**OAuth credentials.** Use `system2 login` to manage OAuth subscriptions: it lists all 5 supported providers (already-logged-in ones are annotated) and you pick one. Selecting a fresh provider runs the auth flow; selecting an already-logged-in provider opens a contextual menu to re-login, remove, or cancel. Stop the daemon before running it, and restart afterward to pick up the change.
+**OAuth credentials.** Use `system2 login` to manage OAuth subscriptions: it lists all 3 supported providers (already-logged-in ones are annotated) and you pick one. Selecting a fresh provider runs the auth flow; selecting an already-logged-in provider opens a contextual menu to re-login, remove, or cancel. Stop the daemon before running it, and restart afterward to pick up the change.
 
 ```bash
 system2 login            # interactive: add, re-login, or remove an OAuth credential
@@ -109,15 +109,15 @@ pnpm update -g @diegoscarabelli/system2
 
 All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
 
-- **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, Google Gemini CLI, Google Antigravity, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
-- **`[llm.api_keys]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation. (Legacy 0.2.x `[llm]` shape still parsed with a deprecation warning.)
+- **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
+- **`[llm.api_keys]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation.
 - **`[databases.*]`**: analytical database connections (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite) that agents and dashboard artifacts can query
-- **`[agents.*]`**: per-role overrides for thinking level, context compaction depth, and model selection per provider
+- **`[agents.*]`**: per-role behavior overrides for thinking level and context compaction depth. Per-role model pins live with their tier credentials: `[llm.api_keys.<provider>.models][<role>]` for the API-keys tier; `[llm.oauth.<provider>] model = "..."` for the OAuth tier (one model per provider, all roles).
 - **`[services.brave_search]`**: web search via Brave Search API (highly recommended)
 - **`[scheduler]`**: Narrator frequency (default: every 30 minutes)
 - **`[backup]`**: backup cooldown and retention (default: every 24 hours, keep 3)
 
-**Supported LLM providers:** Anthropic, Google Gemini, OpenAI, OpenRouter, Cerebras, Groq, Mistral, xAI, and any OpenAI-compatible endpoint.
+**Supported API-keys providers:** Anthropic, Google Gemini, OpenAI, OpenRouter, Cerebras, Groq, Mistral, xAI, and any OpenAI-compatible endpoint. (OAuth tier providers are listed separately under `[llm.oauth]` above.)
 
 See [docs/configuration.md](docs/configuration.md) for the full reference.
 
@@ -147,7 +147,7 @@ System2's home directory is `~/.system2/`. It holds all system state: configurat
 ├── app.db                           SQLite database (gitignored)
 ├── config.toml                      Settings and API keys (0600, gitignored)
 ├── oauth/                           OAuth credentials (0600, gitignored)
-│   └── {provider}.json              OAuth tokens (one file per logged-in provider, e.g. anthropic.json, google-antigravity.json)
+│   └── {provider}.json              OAuth tokens (one file per logged-in provider, e.g. anthropic.json, openai-codex.json)
 ├── knowledge/                       Persistent knowledge (git-tracked)
 │   ├── conductor.md                 Conductor role-specific knowledge
 │   ├── daily_summaries/             Daily activity logs

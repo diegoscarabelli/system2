@@ -1,6 +1,6 @@
 import TOML from '@iarna/toml';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentsConfig, LlmConfig } from '../../shared/index.js';
+import type { LlmConfig } from '../../shared/index.js';
 import {
   buildConfigToml,
   convertTomlAgents,
@@ -10,7 +10,9 @@ import {
   convertTomlSession,
   DEFAULT_DELIVERY,
   DEFAULT_SESSION,
+  DEFAULT_WEB_SEARCH_MAX_RESULTS,
   validateAgentModels,
+  validateLlmModels,
 } from './config.js';
 
 describe('buildConfigToml', () => {
@@ -41,41 +43,51 @@ describe('buildConfigToml', () => {
     expect(result).toContain('brave-key-123');
   });
 
-  it('includes tools section when web_search configured', () => {
+  it('includes tools section when web_search configured (max_results emitted commented at code default)', () => {
+    // Same model as operational settings: tunable knobs are emitted commented
+    // at the code default so accidental edits can't silently change behavior.
+    // The live `enabled = true` reflects the user's onboarding choice;
+    // max_results is intentionally not accepted as input (callers cannot pass
+    // a non-default value — the emitter would silently ignore it). To tune,
+    // user uncomments the `# max_results = 5` line in config.toml.
     const result = buildConfigToml({
-      tools: { web_search: { enabled: true, max_results: 10 } },
+      tools: { web_search: { enabled: true } },
     });
     expect(result).toContain('[tools.web_search]');
     expect(result).toContain('enabled = true');
-    expect(result).toContain('max_results = 10');
+    expect(result).toContain(`# max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
+    expect(result).not.toMatch(/^max_results = /m);
   });
 
-  it('uses default operational values when not specified', () => {
+  // Operational settings are always emitted as commented templates
+  // (header + key = value, both prefixed with `#`). Values come from
+  // DEFAULT_OPERATIONAL / DEFAULT_SESSION / DEFAULT_DELIVERY in code. Users
+  // tune them by hand-editing the toml; the emitter is not the path for
+  // customization. This guards against accidental edits silently changing
+  // behavior — if a line stays commented, the runtime falls back to the
+  // pinned code default, so a default bump propagates automatically.
+  it('emits operational sections as commented defaults', () => {
     const result = buildConfigToml({});
-    expect(result).toContain('cooldown_hours = 24');
-    expect(result).toContain('max_backups = 3');
-    // [logs] section uses MB-based threshold
-    expect(result).toContain('rotation_threshold_mb = 10');
-    expect(result).toContain('max_archives = 5');
-    expect(result).toContain('daily_summary_interval_minutes = 30');
-    expect(result).toContain('max_history_messages = 100');
-    // [session] section uses bytes-based threshold
-    expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
-  });
-
-  it('uses custom operational values when specified', () => {
-    const result = buildConfigToml({
-      backup: { cooldownHours: 12, maxBackups: 3 },
-      logs: { rotationThresholdMB: 5, maxArchives: 10 },
-      scheduler: { dailySummaryIntervalMinutes: 15 },
-      chat: { maxHistoryMessages: 50 },
-    });
-    expect(result).toContain('cooldown_hours = 12');
-    expect(result).toContain('max_backups = 3');
-    expect(result).toContain('rotation_threshold_mb = 5');
-    expect(result).toContain('max_archives = 10');
-    expect(result).toContain('daily_summary_interval_minutes = 15');
-    expect(result).toContain('max_history_messages = 50');
+    // Header lines themselves are commented.
+    expect(result).toMatch(/^# \[backup\]$/m);
+    expect(result).toMatch(/^# \[logs\]$/m);
+    expect(result).toMatch(/^# \[scheduler\]$/m);
+    expect(result).toMatch(/^# \[chat\]$/m);
+    expect(result).toMatch(/^# \[knowledge\]$/m);
+    expect(result).toMatch(/^# \[session\]$/m);
+    expect(result).toMatch(/^# \[delivery\]$/m);
+    // Default values appear, but commented.
+    expect(result).toContain('# cooldown_hours = 24');
+    expect(result).toContain('# max_backups = 3');
+    expect(result).toContain('# rotation_threshold_mb = 10');
+    expect(result).toContain('# max_archives = 5');
+    expect(result).toContain('# daily_summary_interval_minutes = 30');
+    expect(result).toContain('# max_history_messages = 100');
+    expect(result).toContain(`# rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
+    expect(result).toContain(`# max_bytes = ${DEFAULT_DELIVERY.max_bytes}`);
+    // No live (uncommented) operational headers.
+    expect(result).not.toMatch(/^\[backup\]$/m);
+    expect(result).not.toMatch(/^\[delivery\]$/m);
   });
 
   it('skips empty provider keys', () => {
@@ -275,7 +287,10 @@ describe('buildConfigToml', () => {
     expect(result).toContain('[llm.api_keys.xai]');
     expect(result).toContain('xai-key');
     expect(result).not.toContain('base_url');
-    expect(result).not.toContain('model =');
+    // model line shouldn't be emitted as actual TOML for non openai-compatible
+    // providers (only openai-compatible's [llm.api_keys.openai-compatible]
+    // section uses one). Comment-block examples are fine.
+    expect(result).not.toMatch(/^model = /m);
   });
 
   it('includes databases section when configured', () => {
@@ -392,58 +407,36 @@ describe('buildConfigToml', () => {
     expect(result).toContain('compaction_depth = 5');
   });
 
-  it('includes agents section with per-provider model overrides', () => {
+  it('emits [agents.<role>] block with scalar fields', () => {
     const result = buildConfigToml({
       agents: {
-        conductor: {
-          models: {
-            anthropic: 'claude-opus-4-6',
-            google: 'gemini-2.5-pro',
-          },
-        },
-      },
-    });
-    expect(result).toContain('[agents.conductor.models]');
-    expect(result).toContain('anthropic = "claude-opus-4-6"');
-    expect(result).toContain('google = "gemini-2.5-pro"');
-  });
-
-  it('outputs agents with both scalar fields and models', () => {
-    const result = buildConfigToml({
-      agents: {
-        guide: {
-          thinking_level: 'high',
-          compaction_depth: 3,
-          models: {
-            anthropic: 'claude-opus-4-6',
-          },
-        },
+        guide: { thinking_level: 'high', compaction_depth: 3 },
       },
     });
     expect(result).toContain('[agents.guide]');
     expect(result).toContain('thinking_level = "high"');
     expect(result).toContain('compaction_depth = 3');
-    expect(result).toContain('[agents.guide.models]');
-    expect(result).toContain('anthropic = "claude-opus-4-6"');
   });
 
-  it('outputs multiple agent role overrides', () => {
+  it('emits multiple agent role overrides', () => {
     const result = buildConfigToml({
       agents: {
         guide: { thinking_level: 'medium' },
-        conductor: { models: { google: 'gemini-2.5-pro' } },
+        conductor: { compaction_depth: 8 },
       },
     });
     expect(result).toContain('[agents.guide]');
     expect(result).toContain('thinking_level = "medium"');
-    expect(result).toContain('[agents.conductor.models]');
-    expect(result).toContain('google = "gemini-2.5-pro"');
+    expect(result).toContain('[agents.conductor]');
+    expect(result).toContain('compaction_depth = 8');
   });
 
   it('shows commented agents hint when not configured', () => {
     const result = buildConfigToml({});
     expect(result).toContain('# [agents.');
     expect(result).not.toMatch(/^\[agents\./m);
+    // Model-pin hints live in their tier sections now, not under agents.
+    expect(result).not.toMatch(/# Per-role model pins.*live under/);
   });
 });
 
@@ -554,21 +547,11 @@ describe('convertTomlDatabases', () => {
 });
 
 describe('convertTomlAgents', () => {
-  it('converts valid overrides with all fields', () => {
+  it('converts valid overrides with both fields', () => {
     const result = convertTomlAgents({
-      guide: {
-        thinking_level: 'high',
-        compaction_depth: 3,
-        models: { anthropic: 'claude-opus-4-6', google: 'gemini-2.5-pro' },
-      },
+      guide: { thinking_level: 'high', compaction_depth: 3 },
     });
-    expect(result).toEqual({
-      guide: {
-        thinking_level: 'high',
-        compaction_depth: 3,
-        models: { anthropic: 'claude-opus-4-6', google: 'gemini-2.5-pro' },
-      },
-    });
+    expect(result).toEqual({ guide: { thinking_level: 'high', compaction_depth: 3 } });
   });
 
   it('converts partial overrides (only thinking_level)', () => {
@@ -576,13 +559,6 @@ describe('convertTomlAgents', () => {
       conductor: { thinking_level: 'low' },
     });
     expect(result).toEqual({ conductor: { thinking_level: 'low' } });
-  });
-
-  it('converts partial overrides (only models)', () => {
-    const result = convertTomlAgents({
-      reviewer: { models: { openai: 'gpt-4o' } },
-    });
-    expect(result).toEqual({ reviewer: { models: { openai: 'gpt-4o' } } });
   });
 
   it('ignores invalid thinking_level with warning', () => {
@@ -621,38 +597,6 @@ describe('convertTomlAgents', () => {
     warnSpy.mockRestore();
   });
 
-  it('filters out unknown model providers with warning', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = convertTomlAgents({
-      guide: { models: { anthropic: 'claude-opus-4-6', 'openai-compatible': 'local-model' } },
-    });
-    expect(result).toEqual({ guide: { models: { anthropic: 'claude-opus-4-6' } } });
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Ignoring unknown model provider')
-    );
-    warnSpy.mockRestore();
-  });
-
-  it('rejects non-string model values with warning', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = convertTomlAgents({
-      guide: { models: { anthropic: 42 as never } },
-    });
-    expect(result).toEqual({});
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid model'));
-    warnSpy.mockRestore();
-  });
-
-  it('rejects empty-string model values with warning', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = convertTomlAgents({
-      guide: { models: { anthropic: '' } },
-    });
-    expect(result).toEqual({});
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid model'));
-    warnSpy.mockRestore();
-  });
-
   it('skips roles with no valid overrides', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = convertTomlAgents({
@@ -666,12 +610,12 @@ describe('convertTomlAgents', () => {
   it('handles multiple roles', () => {
     const result = convertTomlAgents({
       guide: { thinking_level: 'high', compaction_depth: 5 },
-      conductor: { models: { google: 'gemini-2.5-pro' } },
+      conductor: { compaction_depth: 8 },
       narrator: { thinking_level: 'off' },
     });
     expect(result).toEqual({
       guide: { thinking_level: 'high', compaction_depth: 5 },
-      conductor: { models: { google: 'gemini-2.5-pro' } },
+      conductor: { compaction_depth: 8 },
       narrator: { thinking_level: 'off' },
     });
   });
@@ -683,7 +627,7 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
       primary: 'anthropic',
       fallback: [],
       providers: { anthropic: { keys: [] } },
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const toml = buildConfigToml({ llm });
     expect(toml).toMatch(/\[llm\.oauth\]\s*\nprimary\s*=\s*"anthropic"\s*\nfallback\s*=\s*\[\]/);
@@ -696,7 +640,6 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
       providers: { anthropic: { keys: [{ key: 'k', label: 'l' }] } },
     };
     const toml = buildConfigToml({ llm });
-    // Match the section header at line start, not any mention of the bracketed string in comments.
     expect(toml).not.toMatch(/^\[llm\.oauth\]/m);
   });
 
@@ -708,130 +651,334 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
         anthropic: { keys: [] },
         openai: { keys: [{ key: 'oai-1', label: 'main' }] },
       },
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const toml = buildConfigToml({ llm });
     const parsed = TOML.parse(toml) as Record<string, unknown>;
     const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
     const reconstructed = convertTomlLlm(llmSection);
-    expect(reconstructed.oauth).toEqual({ primary: 'anthropic', fallback: [] });
+    expect(reconstructed.oauth?.primary).toBe('anthropic');
+    expect(reconstructed.oauth?.fallback).toEqual([]);
     expect(reconstructed.primary).toBe('openai');
     expect(reconstructed.providers.openai?.keys[0].key).toBe('oai-1');
   });
 
-  it('parses the legacy 0.2.x [llm] flat schema with a deprecation warning', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const legacyToml = `
-[llm]
-primary = "anthropic"
-fallback = ["openai"]
-
-[llm.oauth]
-primary = "anthropic"
-fallback = []
-
-[llm.anthropic]
-keys = [{ key = "sk-ant-legacy", label = "main" }]
-
-[llm.openai]
-keys = [{ key = "sk-oai-legacy", label = "main" }]
-`;
-    const parsed = TOML.parse(legacyToml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    const result = convertTomlLlm(llmSection);
-    expect(result.primary).toBe('anthropic');
-    expect(result.fallback).toEqual(['openai']);
-    expect(result.providers.anthropic?.keys[0].key).toBe('sk-ant-legacy');
-    expect(result.providers.openai?.keys[0].key).toBe('sk-oai-legacy');
-    expect(result.oauth?.primary).toBe('anthropic');
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('legacy [llm] schema'));
-    warnSpy.mockRestore();
+  it('emits [llm.oauth.<provider>] block when an OAuth model pin is set', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
+      oauth: {
+        primary: 'anthropic',
+        fallback: [],
+        providers: { anthropic: { model: 'claude-opus-4-7' } },
+      },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toContain('[llm.oauth.anthropic]');
+    expect(toml).toContain('model = "claude-opus-4-7"');
   });
 
-  it('prefers [llm.api_keys] over legacy fields when both are present, with a warning', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const mixedToml = `
-[llm]
-primary = "ignored"
-fallback = ["also-ignored"]
-
-[llm.api_keys]
-primary = "openai"
-fallback = []
-
-[llm.api_keys.openai]
-keys = [{ key = "wins", label = "main" }]
-
-[llm.anthropic]
-keys = [{ key = "loses", label = "main" }]
-`;
-    const parsed = TOML.parse(mixedToml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    const result = convertTomlLlm(llmSection);
-    expect(result.primary).toBe('openai');
-    expect(result.providers.openai?.keys[0].key).toBe('wins');
-    expect(result.providers.anthropic).toBeUndefined();
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mixes legacy [llm]'));
-    warnSpy.mockRestore();
+  it('emits [llm.api_keys.<provider>.models] block for per-role pins', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: {
+        anthropic: {
+          keys: [{ key: 'sk-ant', label: 'main' }],
+          models: { narrator: 'claude-haiku-4-5-20251001', conductor: 'claude-sonnet-4-6' },
+        },
+      },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toContain('[llm.api_keys.anthropic.models]');
+    expect(toml).toContain('narrator = "claude-haiku-4-5-20251001"');
+    expect(toml).toContain('conductor = "claude-sonnet-4-6"');
   });
 
-  it('warns when only legacy [llm].fallback remains alongside [llm.api_keys]', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const mixedToml = `
-[llm]
-fallback = ["openai"]
-
-[llm.api_keys]
-primary = "anthropic"
-
-[llm.api_keys.anthropic]
-keys = [{ key = "sk-ant-1", label = "main" }]
-`;
-    const parsed = TOML.parse(mixedToml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    convertTomlLlm(llmSection);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mixes legacy [llm]'));
-    warnSpy.mockRestore();
+  // Regression guard: when onboard skips the api-keys tier, it synthesizes
+  // a placeholder LlmConfig with primary set but no provider keys. The TOML
+  // should NOT emit a live [llm.api_keys] block — that would lie about the
+  // configuration. Instead emit a commented template the user can uncomment.
+  it('emits commented api-keys template (no live block) when no provider has keys', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [] } },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
+    };
+    const toml = buildConfigToml({ llm });
+    // No live [llm.api_keys] block at line start.
+    expect(toml).not.toMatch(/^\[llm\.api_keys\]/m);
+    expect(toml).not.toMatch(/^\[llm\.api_keys\.anthropic\]/m);
+    // But the section header divider is present, plus a commented template
+    // showing primary/fallback and per-provider keys shape.
+    expect(toml).toContain('LLM credentials — API keys tier');
+    expect(toml).toContain('# [llm.api_keys]');
+    expect(toml).toContain('# [llm.api_keys.anthropic]');
+    expect(toml).toMatch(/#\s+keys\s*=\s*\[/);
   });
 
-  it('warns when a legacy provider sub-table has only routing/base_url (no keys)', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const mixedToml = `
-[llm.api_keys]
-primary = "openai"
-
-[llm.api_keys.openai]
-keys = [{ key = "sk-1", label = "main" }]
-
-[llm.openrouter]
-routing = { order = ["anthropic"] }
-`;
-    const parsed = TOML.parse(mixedToml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    convertTomlLlm(llmSection);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mixes legacy [llm]'));
-    warnSpy.mockRestore();
+  // OAuth section symmetry: when the user opts out of OAuth, emit the
+  // divider header + a commented hint instead of silently dropping the
+  // section. Discoverable affordance for "how do I enable OAuth later?".
+  it('emits OAuth section header + commented template when oauth is undefined', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toContain('LLM credentials — OAuth tier');
+    expect(toml).not.toMatch(/^\[llm\.oauth\]/m);
+    expect(toml).toContain('# [llm.oauth]');
+    expect(toml).toContain('system2 login');
   });
 
-  it('does not warn when [llm.api_keys] is the only populated section under [llm]', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const cleanToml = `
-[llm.api_keys]
-primary = "anthropic"
-fallback = []
+  // Inline hints: per-role pins (api-keys) and per-provider model pins (OAuth)
+  // should be hinted next to their respective live blocks, not buried under
+  // [agents.<role>]. Reasoning: when a user wants to pin an OAuth model they
+  // look in the OAuth section, not the agents section.
+  it('emits commented api-keys per-role models hint inline when no pins exist', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toContain('# [llm.api_keys.anthropic.models]');
+    // Hint must live in the api-keys section (above the agents divider).
+    const apiKeysIdx = toml.indexOf('# [llm.api_keys.anthropic.models]');
+    const agentsDividerIdx = toml.indexOf('Per-agent behavior overrides');
+    expect(apiKeysIdx).toBeGreaterThan(-1);
+    expect(agentsDividerIdx).toBeGreaterThan(apiKeysIdx);
+  });
 
-[llm.api_keys.anthropic]
-keys = [{ key = "sk-ant-1", label = "main" }]
+  it('emits commented OAuth model-pin hint inline when no pins exist', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
+    };
+    const toml = buildConfigToml({ llm });
+    expect(toml).toContain('# [llm.oauth.anthropic]');
+    expect(toml).toContain('# model = "claude-opus-4-7"');
+    const oauthHintIdx = toml.indexOf('# [llm.oauth.anthropic]');
+    const apiKeysHeaderIdx = toml.indexOf('LLM credentials — API keys tier');
+    expect(oauthHintIdx).toBeGreaterThan(-1);
+    expect(apiKeysHeaderIdx).toBeGreaterThan(oauthHintIdx);
+  });
 
-[llm.oauth]
-primary = "anthropic"
-fallback = []
-`;
-    const parsed = TOML.parse(cleanToml) as Record<string, unknown>;
+  it('omits the inline api-keys models hint when at least one role is pinned', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: {
+        anthropic: {
+          keys: [{ key: 'sk-ant', label: 'main' }],
+          models: { narrator: 'claude-haiku-4-5-20251001' },
+        },
+      },
+    };
+    const toml = buildConfigToml({ llm });
+    // Live block is present; no commented stand-in hint to avoid duplication.
+    expect(toml).toContain('[llm.api_keys.anthropic.models]');
+    expect(toml).not.toContain('# [llm.api_keys.anthropic.models]');
+  });
+
+  it('round-trips an api-keys-skipped (oauth-only) config through TOML.parse', () => {
+    const llm: LlmConfig = {
+      primary: 'anthropic',
+      fallback: [],
+      providers: { anthropic: { keys: [] } },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
+    };
+    const toml = buildConfigToml({ llm });
+    const parsed = TOML.parse(toml) as Record<string, unknown>;
     const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    convertTomlLlm(llmSection);
-    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('legacy'));
-    warnSpy.mockRestore();
+    const reconstructed = convertTomlLlm(llmSection);
+    expect(reconstructed.oauth?.primary).toBe('anthropic');
+    // No live [llm.api_keys] in the toml → primary defaults to 'anthropic',
+    // providers map is empty (no provider had keys).
+    expect(reconstructed.providers).toEqual({});
+  });
+});
+
+describe('validateLlmModels', () => {
+  it('passes when OAuth pin and api-keys per-role pins are in catalog', () => {
+    expect(() =>
+      validateLlmModels({
+        primary: 'anthropic',
+        fallback: [],
+        providers: {
+          anthropic: {
+            keys: [],
+            models: { narrator: 'claude-haiku-4-5-20251001' },
+          },
+        },
+        oauth: {
+          primary: 'anthropic',
+          fallback: [],
+          providers: { anthropic: { model: 'claude-opus-4-7' } },
+        },
+      })
+    ).not.toThrow();
+  });
+
+  it('throws on unknown OAuth model with did-you-mean hint', () => {
+    expect(() =>
+      validateLlmModels({
+        primary: 'anthropic',
+        fallback: [],
+        providers: {},
+        oauth: {
+          primary: 'anthropic',
+          fallback: [],
+          providers: { anthropic: { model: 'claude-opus-4-99' } },
+        },
+      })
+    ).toThrow(/\[llm\.oauth\.anthropic\]\.model.*Did you mean/);
+  });
+
+  it('throws on unknown api-keys per-role model with did-you-mean hint', () => {
+    expect(() =>
+      validateLlmModels({
+        primary: 'anthropic',
+        fallback: [],
+        providers: {
+          anthropic: { keys: [], models: { narrator: 'claude-opus-4-99' } },
+        },
+      })
+    ).toThrow(/\[llm\.api_keys\.anthropic\.models\]\.narrator.*Did you mean/);
+  });
+
+  it('throws on unknown provider in OAuth pin', () => {
+    expect(() =>
+      validateLlmModels({
+        primary: 'anthropic',
+        fallback: [],
+        providers: {},
+        oauth: {
+          primary: 'anthropic',
+          fallback: [],
+          providers: { anthopic: { model: 'claude-opus-4-7' } } as never,
+        },
+      })
+    ).toThrow(/unknown provider "anthopic"/);
+  });
+
+  it('is a no-op when neither OAuth nor api-keys carry model pins', () => {
+    expect(() =>
+      validateLlmModels({
+        primary: 'anthropic',
+        fallback: [],
+        providers: { anthropic: { keys: [{ key: 'sk-x', label: 'main' }] } },
+      })
+    ).not.toThrow();
+  });
+});
+
+describe('convertTomlLlm — new shape', () => {
+  it('parses [llm.oauth.<provider>].model overrides', () => {
+    const llm = convertTomlLlm({
+      oauth: {
+        primary: 'anthropic',
+        fallback: [],
+        anthropic: { model: 'claude-opus-4-7' },
+      },
+      api_keys: { primary: 'anthropic', fallback: [] },
+    });
+    expect(llm.oauth?.providers.anthropic?.model).toBe('claude-opus-4-7');
+  });
+
+  it('skips OAuth provider entries without a model field', () => {
+    const llm = convertTomlLlm({
+      oauth: {
+        primary: 'anthropic',
+        fallback: [],
+        anthropic: { model: 'claude-opus-4-7' },
+        'openai-codex': {},
+      },
+      api_keys: { primary: 'anthropic', fallback: [] },
+    });
+    expect(llm.oauth?.providers).toEqual({ anthropic: { model: 'claude-opus-4-7' } });
+  });
+
+  it('parses [llm.api_keys.<provider>.models][<role>] per-role pins', () => {
+    const llm = convertTomlLlm({
+      api_keys: {
+        primary: 'anthropic',
+        fallback: [],
+        anthropic: {
+          keys: [{ key: 'sk-x', label: 'main' }],
+          models: { narrator: 'claude-haiku-4-5-20251001' },
+        },
+      },
+    });
+    expect(llm.providers.anthropic?.models?.narrator).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('omits api-keys models field when not set', () => {
+    const llm = convertTomlLlm({
+      api_keys: {
+        primary: 'anthropic',
+        fallback: [],
+        anthropic: { keys: [{ key: 'sk-x', label: 'main' }] },
+      },
+    });
+    expect(llm.providers.anthropic?.models).toBeUndefined();
+  });
+
+  it('throws on unknown [llm.api_keys].primary provider', () => {
+    expect(() => convertTomlLlm({ api_keys: { primary: 'anthrpic', fallback: [] } })).toThrow(
+      /\[llm\.api_keys\]\.primary.*not a supported API keys provider/
+    );
+  });
+
+  it('throws on unknown entry in [llm.api_keys].fallback', () => {
+    expect(() =>
+      convertTomlLlm({ api_keys: { primary: 'anthropic', fallback: ['oops'] } })
+    ).toThrow(/\[llm\.api_keys\]\.fallback\[0\].*not a supported API keys provider/);
+  });
+
+  it('throws on unknown [llm.oauth].primary provider', () => {
+    expect(() =>
+      convertTomlLlm({
+        oauth: { primary: 'gemini-cli', fallback: [] },
+        api_keys: { primary: 'anthropic', fallback: [] },
+      })
+    ).toThrow(/\[llm\.oauth\]\.primary.*not a supported OAuth provider/);
+  });
+
+  it('throws when [llm.oauth.<p>] pin exists without [llm.oauth].primary', () => {
+    // User wrote `[llm.oauth.anthropic] model = "..."` but forgot the
+    // `[llm.oauth] primary = "..."` table. Before this guard the pin would
+    // be silently ignored (OAuth tier disabled), which is hard to debug.
+    expect(() =>
+      convertTomlLlm({
+        oauth: { anthropic: { model: 'claude-opus-4-7' } },
+        api_keys: { primary: 'anthropic', fallback: [] },
+      })
+    ).toThrow(/anthropic.*\[llm\.oauth\]\.primary is missing/);
+  });
+
+  it('does not throw when [llm.oauth] is entirely absent', () => {
+    // Distinct from the orphan-pin case: no oauth table at all means the
+    // user has explicitly chosen api-keys-only. Don't surface an error.
+    expect(() =>
+      convertTomlLlm({ api_keys: { primary: 'anthropic', fallback: [] } })
+    ).not.toThrow();
+  });
+
+  it('rejects an api-keys-only provider in [llm.oauth].fallback', () => {
+    // openai is api-keys-only; OAuth tier supports openai-codex instead.
+    expect(() =>
+      convertTomlLlm({
+        oauth: { primary: 'anthropic', fallback: ['openai'] },
+        api_keys: { primary: 'anthropic', fallback: [] },
+      })
+    ).toThrow(/\[llm\.oauth\]\.fallback\[0\].*not a supported OAuth provider/);
   });
 });
 
@@ -1019,143 +1166,103 @@ describe('convertTomlSession', () => {
 });
 
 describe('buildConfigToml — [session] section', () => {
-  it('emits [session] section with default values when not specified', () => {
+  it('emits [session] as a commented template (defaults pinned in code)', () => {
     const result = buildConfigToml({});
-    expect(result).toContain('[session]');
-    expect(result).toContain(`rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
-    expect(result).toContain(`archive_keep_count = ${DEFAULT_SESSION.archive_keep_count}`);
+    expect(result).toMatch(/^# \[session\]$/m);
+    expect(result).toContain(`# rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
+    expect(result).toContain(`# archive_keep_count = ${DEFAULT_SESSION.archive_keep_count}`);
+    // No live header — runtime falls back to DEFAULT_SESSION when commented.
+    expect(result).not.toMatch(/^\[session\]$/m);
   });
 
-  it('emits [session] section with custom values when specified', () => {
-    const result = buildConfigToml({
-      session: {
-        rotation_size_bytes: 20 * 1024 * 1024,
-        archive_keep_count: 10,
-      },
-    });
-    expect(result).toContain('[session]');
-    expect(result).toContain(`rotation_size_bytes = ${20 * 1024 * 1024}`);
-    expect(result).toContain('archive_keep_count = 10');
-  });
-
-  it('round-trips [session] section through TOML.parse and convertTomlSession', () => {
+  it('round-trips a hand-built [session] section through convertTomlSession', () => {
     const input = {
       rotation_size_bytes: 15 * 1024 * 1024,
       archive_keep_count: 7,
     };
-    const toml = buildConfigToml({ session: input });
+    const toml = `[session]\nrotation_size_bytes = ${input.rotation_size_bytes}\narchive_keep_count = ${input.archive_keep_count}\n`;
     const parsed = TOML.parse(toml) as Record<string, unknown>;
     const sessionSection = parsed.session as Parameters<typeof convertTomlSession>[0];
-    const reconstructed = convertTomlSession(sessionSection);
-    expect(reconstructed).toEqual(input);
+    expect(convertTomlSession(sessionSection)).toEqual(input);
   });
 });
 
 describe('buildConfigToml — [delivery] section', () => {
-  it('emits [delivery] section with default values when not specified', () => {
+  it('emits [delivery] as a commented template (defaults pinned in code)', () => {
     const result = buildConfigToml({});
-    expect(result).toContain('[delivery]');
-    expect(result).toContain(`max_bytes = ${DEFAULT_DELIVERY.max_bytes}`);
-    expect(result).toContain(`catch_up_budget_bytes = ${DEFAULT_DELIVERY.catch_up_budget_bytes}`);
+    expect(result).toMatch(/^# \[delivery\]$/m);
+    expect(result).toContain(`# max_bytes = ${DEFAULT_DELIVERY.max_bytes}`);
+    expect(result).toContain(`# catch_up_budget_bytes = ${DEFAULT_DELIVERY.catch_up_budget_bytes}`);
     expect(result).toContain(
-      `narrator_message_excerpt_bytes = ${DEFAULT_DELIVERY.narrator_message_excerpt_bytes}`
+      `# narrator_message_excerpt_bytes = ${DEFAULT_DELIVERY.narrator_message_excerpt_bytes}`
     );
+    expect(result).not.toMatch(/^\[delivery\]$/m);
   });
 
-  it('emits [delivery] section with custom values when specified', () => {
-    const result = buildConfigToml({
-      delivery: {
-        max_bytes: 1048576,
-        catch_up_budget_bytes: 524288,
-        narrator_message_excerpt_bytes: 8192,
-      },
-    });
-    expect(result).toContain('[delivery]');
-    expect(result).toContain('max_bytes = 1048576');
-    expect(result).toContain('catch_up_budget_bytes = 524288');
-    expect(result).toContain('narrator_message_excerpt_bytes = 8192');
-  });
-
-  it('round-trips [delivery] section through TOML.parse and convertTomlDelivery', () => {
+  it('round-trips a hand-built [delivery] section through convertTomlDelivery', () => {
     const input = {
       max_bytes: 2097152,
       catch_up_budget_bytes: 1048576,
       narrator_message_excerpt_bytes: 16384,
     };
-    const toml = buildConfigToml({ delivery: input });
+    const toml = `[delivery]\nmax_bytes = ${input.max_bytes}\ncatch_up_budget_bytes = ${input.catch_up_budget_bytes}\nnarrator_message_excerpt_bytes = ${input.narrator_message_excerpt_bytes}\n`;
     const parsed = TOML.parse(toml) as Record<string, unknown>;
     const deliverySection = parsed.delivery as Parameters<typeof convertTomlDelivery>[0];
-    const reconstructed = convertTomlDelivery(deliverySection);
-    expect(reconstructed).toEqual(input);
+    expect(convertTomlDelivery(deliverySection)).toEqual(input);
   });
 });
 
 describe('validateAgentModels', () => {
   it('passes when all models are in pi-ai catalog', () => {
-    const agents: AgentsConfig = {
-      narrator: {
-        models: { anthropic: 'claude-haiku-4-5-20251001', openai: 'gpt-4o-mini' },
-      },
-    };
-    expect(() => validateAgentModels(agents)).not.toThrow();
+    expect(() =>
+      validateAgentModels({
+        narrator: { anthropic: 'claude-haiku-4-5-20251001', openai: 'gpt-4o-mini' },
+      })
+    ).not.toThrow();
   });
 
   it('passes for the new OAuth providers when models exist in their catalogs', () => {
-    const agents: AgentsConfig = {
-      conductor: {
-        models: {
+    expect(() =>
+      validateAgentModels({
+        conductor: {
           'openai-codex': 'gpt-5.3-codex',
-          'google-gemini-cli': 'gemini-3-pro-preview',
-          'google-antigravity': 'gemini-3.1-pro-high',
           'github-copilot': 'claude-sonnet-4.6',
         },
-      },
-    };
-    expect(() => validateAgentModels(agents)).not.toThrow();
+      })
+    ).not.toThrow();
   });
 
   it('throws with did-you-mean suggestion on a model typo', () => {
-    const agents: AgentsConfig = {
-      narrator: { models: { anthropic: 'claude-sonet-4-6' } },
-    };
-    expect(() => validateAgentModels(agents)).toThrow(/Did you mean ".*claude.*"/i);
+    expect(() => validateAgentModels({ narrator: { anthropic: 'claude-sonet-4-6' } })).toThrow(
+      /Did you mean ".*claude.*"/i
+    );
   });
 
   it('throws when model is not in catalog and no close match exists', () => {
-    const agents: AgentsConfig = {
-      narrator: { models: { anthropic: 'totally-fake-model-xyz' } },
-    };
-    expect(() => validateAgentModels(agents)).toThrow(/not in pi-ai's catalog/);
+    expect(() =>
+      validateAgentModels({ narrator: { anthropic: 'totally-fake-model-xyz' } })
+    ).toThrow(/not in pi-ai's catalog/);
   });
 
   it('throws for openai-compatible (not allowed as a per-agent override)', () => {
-    // openai-compatible registers its model dynamically at runtime via
-    // [llm.openai-compatible].model; per-agent overrides for it are rejected
-    // by convertTomlAgents and treated as unknown by validateAgentModels.
-    const agents = {
-      narrator: { models: { 'openai-compatible': 'whatever-local-model' } },
-    } as unknown as AgentsConfig;
-    expect(() => validateAgentModels(agents)).toThrow(/unknown provider "openai-compatible"/);
+    expect(() =>
+      validateAgentModels({ narrator: { 'openai-compatible': 'whatever-local-model' } })
+    ).toThrow(/unknown provider "openai-compatible"/);
   });
 
   it('throws on unknown provider id (e.g., a typo) instead of silently skipping', () => {
-    const agents = {
-      narrator: { models: { anthopic: 'claude-sonnet-4-6' } },
-    } as unknown as AgentsConfig;
-    expect(() => validateAgentModels(agents)).toThrow(/unknown provider "anthopic"/);
+    expect(() => validateAgentModels({ narrator: { anthopic: 'claude-sonnet-4-6' } })).toThrow(
+      /unknown provider "anthopic"/
+    );
   });
 
   it('throws on unknown provider with the list of valid providers in the message', () => {
-    const agents = {
-      narrator: { models: { 'imaginary-provider': 'foo' } },
-    } as unknown as AgentsConfig;
-    expect(() => validateAgentModels(agents)).toThrow(/Valid providers:.*anthropic.*openai-codex/);
+    expect(() => validateAgentModels({ narrator: { 'imaginary-provider': 'foo' } })).toThrow(
+      /Valid providers:.*anthropic.*openai-codex/
+    );
   });
 
-  it('treats agents without models as no-op', () => {
-    const agents: AgentsConfig = {
-      narrator: { thinking_level: 'medium' },
-    };
-    expect(() => validateAgentModels(agents)).not.toThrow();
+  it('treats empty models map as no-op', () => {
+    expect(() => validateAgentModels({ narrator: {} })).not.toThrow();
   });
 });

@@ -63,7 +63,7 @@ All runtime state lives in `~/.system2/`:
 ├── artifacts/                       Project-free reports, dashboards, exports
 ├── config.toml                      Settings and API keys (0600, gitignored)
 ├── oauth/                           OAuth credentials (0600, gitignored)
-│   └── {provider}.json              OAuth tokens (one file per logged-in provider, e.g. anthropic.json, google-antigravity.json)
+│   └── {provider}.json              OAuth tokens (one file per logged-in provider, e.g. anthropic.json, openai-codex.json)
 ├── knowledge/                       Persistent knowledge (injected into prompts)
 │   ├── conductor.md                 Conductor role-specific knowledge
 │   ├── daily_summaries/             Daily activity logs

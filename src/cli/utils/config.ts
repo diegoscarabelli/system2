@@ -15,25 +15,30 @@ import TOML from '@iarna/toml';
 import type {
   AgentOverrideConfig,
   AgentsConfig,
+  ApiKeysProvider,
   DatabaseConnectionConfig,
   DatabasesConfig,
   DeliveryConfig,
   LlmConfig,
   LlmProvider,
   LlmProviderConfig,
+  OAuthProvider,
   ServicesConfig,
   SessionConfig,
   ThinkingLevel,
   ToolsConfig,
 } from '../../shared/index.js';
 import {
+  API_KEYS_PROVIDER_IDS,
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
   DEFAULT_SESSION_ROTATION_SIZE_BYTES,
+  OAUTH_PROVIDER_IDS,
   validateAgentModels,
+  validateLlmModels,
 } from '../../shared/index.js';
 
 // Re-export so existing CLI consumers (and tests) can import from this module.
-export { validateAgentModels };
+export { validateAgentModels, validateLlmModels };
 
 export const SYSTEM2_DIR = join(homedir(), '.system2');
 export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
@@ -84,6 +89,13 @@ interface ProviderKeysToml {
   base_url?: string;
   model?: string;
   compat_reasoning?: boolean;
+  /** Per-role model pins (api-keys tier). Keys are role names. */
+  models?: Record<string, string>;
+}
+
+interface OAuthProviderToml {
+  /** Optional model pin for this OAuth provider; empty falls through to the resolver. */
+  model?: string;
 }
 
 interface TomlConfig {
@@ -104,27 +116,16 @@ interface TomlConfig {
     oauth?: {
       primary?: string;
       fallback?: string[];
+      anthropic?: OAuthProviderToml;
+      'openai-codex'?: OAuthProviderToml;
+      'github-copilot'?: OAuthProviderToml;
     };
-    /** Legacy 0.2.x fields under [llm] root. Replaced by [llm.api_keys] in 0.3.0;
-     *  still parsed by convertTomlLlm with a deprecation warning. */
-    primary?: string;
-    fallback?: string[];
-    anthropic?: ProviderKeysToml;
-    cerebras?: ProviderKeysToml;
-    google?: ProviderKeysToml;
-    groq?: ProviderKeysToml;
-    mistral?: ProviderKeysToml;
-    openai?: ProviderKeysToml;
-    openrouter?: ProviderKeysToml;
-    xai?: ProviderKeysToml;
-    'openai-compatible'?: ProviderKeysToml;
   };
   agents?: Record<
     string,
     {
       thinking_level?: string;
       compaction_depth?: number;
-      models?: Record<string, string>;
     }
   >;
   services?: {
@@ -181,6 +182,12 @@ interface TomlConfig {
   };
 }
 
+/** Default `max_results` for the web_search tool. The emitter always writes
+ *  this commented (mirrors the operational-sections model: code-pinned default,
+ *  user uncomments + edits to override). The loader falls back to this when
+ *  the toml field is absent. */
+export const DEFAULT_WEB_SEARCH_MAX_RESULTS = 5;
+
 /** Default delivery budget values. Must stay in sync with MAX_DELIVERY_BYTES,
  *  CATCH_UP_BUDGET_BYTES, and NARRATOR_MESSAGE_EXCERPT_BYTES in the server package. */
 export const DEFAULT_DELIVERY: DeliveryConfig = {
@@ -222,25 +229,33 @@ const DEFAULT_OPERATIONAL: Pick<
   },
 };
 
-/** Either the new [llm.api_keys] table or the legacy [llm] root — same field shape. */
-type ApiKeysTomlSource = {
-  primary?: string;
-  fallback?: string[];
-  anthropic?: ProviderKeysToml;
-  cerebras?: ProviderKeysToml;
-  google?: ProviderKeysToml;
-  groq?: ProviderKeysToml;
-  mistral?: ProviderKeysToml;
-  openai?: ProviderKeysToml;
-  openrouter?: ProviderKeysToml;
-  xai?: ProviderKeysToml;
-  'openai-compatible'?: ProviderKeysToml;
-};
+type ApiKeysTomlSource = NonNullable<NonNullable<TomlConfig['llm']>['api_keys']>;
 
 function buildProvidersFromSource(
   source: ApiKeysTomlSource
 ): Partial<Record<LlmProvider, LlmProviderConfig>> {
   const providers: Partial<Record<LlmProvider, LlmProviderConfig>> = {};
+
+  function attachModels(
+    cfg: LlmProviderConfig,
+    providerName: string,
+    sub: ProviderKeysToml | undefined
+  ) {
+    if (!sub?.models) return;
+    const validModels: Record<string, string> = {};
+    for (const [role, modelId] of Object.entries(sub.models)) {
+      if (typeof modelId === 'string' && modelId.length > 0) {
+        validModels[role] = modelId;
+      } else {
+        console.warn(
+          `[Config] Ignoring invalid [llm.api_keys.${providerName}.models].${role}: expected a non-empty string.`
+        );
+      }
+    }
+    if (Object.keys(validModels).length > 0) {
+      cfg.models = validModels;
+    }
+  }
 
   for (const name of [
     'anthropic',
@@ -251,11 +266,13 @@ function buildProvidersFromSource(
     'openai',
     'xai',
   ] as const) {
-    const providerToml = source[name];
-    if (providerToml?.keys && providerToml.keys.length > 0) {
-      const validKeys = providerToml.keys.filter((k) => k.key);
+    const sub = source[name];
+    if (sub?.keys && sub.keys.length > 0) {
+      const validKeys = sub.keys.filter((k) => k.key);
       if (validKeys.length > 0) {
-        providers[name] = { keys: validKeys };
+        const cfg: LlmProviderConfig = { keys: validKeys };
+        attachModels(cfg, name, sub);
+        providers[name] = cfg;
       }
     }
   }
@@ -281,11 +298,13 @@ function buildProvidersFromSource(
           config.routing = validRouting;
         }
       }
+      attachModels(config, 'openrouter', openrouterToml);
       providers.openrouter = config;
     }
   }
 
-  // openai-compatible has extra fields (base_url, model)
+  // openai-compatible has extra fields (base_url, model). No `models` per-role
+  // map — the model is set globally for this provider.
   const compatToml = source['openai-compatible'];
   if (compatToml?.keys && compatToml.keys.length > 0) {
     const validKeys = compatToml.keys.filter((k) => k.key);
@@ -302,73 +321,101 @@ function buildProvidersFromSource(
   return providers;
 }
 
-/** True when any legacy 0.2.x [llm] field is set. Independent of api_keys presence.
- *  Detects `primary`, `fallback`, and any populated provider sub-table field
- *  (`keys`, `routing`, `base_url`, `model`, `compat_reasoning`) so users get a
- *  warning even when only stragglers like `[llm].fallback` or `[llm.openrouter.routing]`
- *  remain after a partial migration to `[llm.api_keys]`. */
-function hasLegacyLlmFields(toml: NonNullable<TomlConfig['llm']>): boolean {
-  if (typeof toml.primary === 'string') return true;
-  if (Array.isArray(toml.fallback) && toml.fallback.length > 0) return true;
-  for (const name of [
-    'anthropic',
-    'cerebras',
-    'google',
-    'groq',
-    'mistral',
-    'openai',
-    'openrouter',
-    'xai',
-    'openai-compatible',
-  ] as const) {
-    const sub = toml[name];
-    if (!sub) continue;
-    if (
-      (sub.keys?.length ?? 0) > 0 ||
-      sub.routing !== undefined ||
-      sub.base_url !== undefined ||
-      sub.model !== undefined ||
-      sub.compat_reasoning !== undefined
-    ) {
-      return true;
-    }
+/**
+ * Validate a provider ID against an allow-list. Throws with a helpful list
+ * on miss. `tier` is "API keys" or "OAuth" for the error message; `field`
+ * is e.g. `[llm.api_keys].primary` for context.
+ */
+function validateProviderId<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  tier: string,
+  field: string
+): T {
+  if (typeof value !== 'string' || !(allowed as readonly string[]).includes(value)) {
+    throw new Error(
+      `${field} = "${String(value)}" is not a supported ${tier} provider. ` +
+        `Valid: ${allowed.join(', ')}.`
+    );
   }
-  return false;
+  return value as T;
+}
+
+function validateProviderArray<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  tier: string,
+  field: string
+): T[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array of ${tier} provider IDs.`);
+  }
+  return value.map((entry, idx) => validateProviderId(entry, allowed, tier, `${field}[${idx}]`));
 }
 
 /**
- * Convert TOML LLM section to LlmConfig. Reads both the new [llm.api_keys] shape
- * and the legacy 0.2.x flat shape; legacy emits a deprecation warning.
+ * Convert TOML [llm] section to LlmConfig. Reads only the [llm.api_keys] and
+ * [llm.oauth] shape; the previous flat [llm] layout is no longer parsed.
  */
 export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
-  const hasLegacy = hasLegacyLlmFields(toml);
-  if (hasLegacy && toml.api_keys) {
-    console.warn(
-      '[Config] config.toml mixes legacy [llm] fields with the new [llm.api_keys] table. ' +
-        'The new table wins; legacy primary/fallback/per-provider entries under [llm] are ignored.'
-    );
-  } else if (hasLegacy) {
-    console.warn(
-      '[Config] config.toml uses the legacy [llm] schema (0.2.x). ' +
-        'Migrate to the [llm.api_keys] schema documented in docs/configuration.md. ' +
-        'Legacy parsing will be removed in a future release.'
-    );
-  }
-
-  const apiKeysSource: ApiKeysTomlSource = toml.api_keys ?? toml;
+  const apiKeysSource: ApiKeysTomlSource = toml.api_keys ?? {};
   const providers = buildProvidersFromSource(apiKeysSource);
 
-  const config: LlmConfig = {
-    primary: (apiKeysSource.primary as LlmProvider) ?? 'anthropic',
-    fallback: (apiKeysSource.fallback as LlmProvider[]) ?? [],
-    providers,
-  };
+  const primary: ApiKeysProvider =
+    apiKeysSource.primary === undefined
+      ? 'anthropic'
+      : validateProviderId(
+          apiKeysSource.primary,
+          API_KEYS_PROVIDER_IDS,
+          'API keys',
+          '[llm.api_keys].primary'
+        );
+  const fallback: ApiKeysProvider[] = validateProviderArray(
+    apiKeysSource.fallback,
+    API_KEYS_PROVIDER_IDS,
+    'API keys',
+    '[llm.api_keys].fallback'
+  );
 
-  if (toml.oauth?.primary) {
-    config.oauth = {
-      primary: toml.oauth.primary as LlmProvider,
-      fallback: (toml.oauth.fallback as LlmProvider[]) ?? [],
-    };
+  const config: LlmConfig = { primary, fallback, providers };
+
+  if (toml.oauth) {
+    // Detect orphan per-provider pins: user wrote `[llm.oauth.<provider>] model = "..."`
+    // but forgot the `[llm.oauth] primary = "..."` table. Without primary the
+    // OAuth tier is disabled, which would silently ignore the pins. Surface it.
+    const pinnedProviders = OAUTH_PROVIDER_IDS.filter((p) => toml.oauth?.[p]?.model);
+    if (!toml.oauth.primary && pinnedProviders.length > 0) {
+      throw new Error(
+        `[llm.oauth.<provider>] model pin(s) found for ${pinnedProviders.join(', ')} ` +
+          `but [llm.oauth].primary is missing. Add [llm.oauth] primary = "<provider>" ` +
+          `to enable the OAuth tier, or remove the pin(s) if you don't want OAuth.`
+      );
+    }
+    if (toml.oauth.primary) {
+      const oauthProviders: Partial<Record<OAuthProvider, { model?: string }>> = {};
+      for (const name of OAUTH_PROVIDER_IDS) {
+        const sub = toml.oauth[name];
+        if (sub?.model) {
+          oauthProviders[name] = { model: sub.model };
+        }
+      }
+      config.oauth = {
+        primary: validateProviderId(
+          toml.oauth.primary,
+          OAUTH_PROVIDER_IDS,
+          'OAuth',
+          '[llm.oauth].primary'
+        ),
+        fallback: validateProviderArray(
+          toml.oauth.fallback,
+          OAUTH_PROVIDER_IDS,
+          'OAuth',
+          '[llm.oauth].fallback'
+        ),
+        providers: oauthProviders,
+      };
+    }
   }
 
   return config;
@@ -393,7 +440,7 @@ function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
   if (toml.web_search) {
     tools.web_search = {
       enabled: toml.web_search.enabled ?? false,
-      max_results: toml.web_search.max_results ?? 5,
+      max_results: toml.web_search.max_results ?? DEFAULT_WEB_SEARCH_MAX_RESULTS,
     };
   }
   return tools;
@@ -511,24 +558,9 @@ export function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>)
 
 const VALID_THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high']);
 
-const VALID_MODEL_PROVIDERS = new Set<string>([
-  'anthropic',
-  'cerebras',
-  'github-copilot',
-  'google',
-  'google-antigravity',
-  'google-gemini-cli',
-  'groq',
-  'mistral',
-  'openai',
-  'openai-codex',
-  'openrouter',
-  'xai',
-]);
-
 /**
  * Convert TOML agents section to AgentsConfig.
- * Each entry is a role name with optional overrides for thinking_level, compaction_depth, and models.
+ * Each entry is a role name with optional overrides for thinking_level and compaction_depth.
  */
 export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): AgentsConfig {
   const agents: AgentsConfig = {};
@@ -554,28 +586,6 @@ export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): Agen
         console.warn(
           `[Config] Ignoring invalid compaction_depth "${entry.compaction_depth}" for agent "${role}". Expected an integer >= 0.`
         );
-      }
-    }
-
-    if (entry.models && Object.keys(entry.models).length > 0) {
-      const validModels: Record<string, string> = {};
-      for (const [provider, model] of Object.entries(entry.models as Record<string, unknown>)) {
-        if (!VALID_MODEL_PROVIDERS.has(provider)) {
-          console.warn(
-            `[Config] Ignoring unknown model provider "${provider}" for agent "${role}". Valid providers: ${[...VALID_MODEL_PROVIDERS].join(', ')}`
-          );
-          continue;
-        }
-        if (typeof model === 'string' && model.length > 0) {
-          validModels[provider] = model;
-        } else {
-          console.warn(
-            `[Config] Ignoring invalid model "${String(model)}" for provider "${provider}" on agent "${role}". Expected a non-empty string.`
-          );
-        }
-      }
-      if (Object.keys(validModels).length > 0) {
-        override.models = validModels as AgentOverrideConfig['models'];
       }
     }
 
@@ -685,15 +695,11 @@ export function loadConfig(): System2Config {
 
   if (tomlConfig.llm) {
     config.llm = convertTomlLlm(tomlConfig.llm);
+    validateLlmModels(config.llm);
   }
 
   if (tomlConfig.agents) {
     config.agents = convertTomlAgents(tomlConfig.agents);
-    // Catch model-id typos at config load. Unknown provider IDs in TOML are
-    // already filtered with a warning by convertTomlAgents above; this throws
-    // only on unknown model IDs (within known providers). Frontmatter typos
-    // for either provider or model are caught later in AgentHost.loadAgent.
-    validateAgentModels(config.agents);
   }
 
   if (tomlConfig.services) {
@@ -726,179 +732,257 @@ export function buildConfigToml(options: {
   llm?: LlmConfig;
   agents?: AgentsConfig;
   services?: ServicesConfig;
-  tools?: ToolsConfig;
+  // tools.web_search.max_results is not accepted: the emitter always writes
+  // it commented at DEFAULT_WEB_SEARCH_MAX_RESULTS, mirroring the operational
+  // sections. Only `enabled` reflects a user choice (yes/no to web search at
+  // onboarding) and gets emitted live.
+  tools?: { web_search?: { enabled: boolean } };
   databases?: DatabasesConfig;
-  delivery?: DeliveryConfig;
-  session?: SessionConfig;
-  backup?: System2Config['backup'];
-  logs?: System2Config['logs'];
-  scheduler?: System2Config['scheduler'];
-  chat?: System2Config['chat'];
-  knowledge?: System2Config['knowledge'];
+  // Operational settings ([backup], [logs], [scheduler], [chat], [knowledge],
+  // [session], [delivery]) are not accepted as input. They are always emitted
+  // as commented templates whose values come from DEFAULT_OPERATIONAL,
+  // DEFAULT_SESSION, and DEFAULT_DELIVERY. Users edit ~/.system2/config.toml
+  // by hand to tune them; the emitter is not the path for customization.
 }): string {
+  const HR = '═'.repeat(72);
+  const sectionHeader = (label: string): string[] => [`# ${HR}`, `# ${label}`, `# ${HR}`];
+
   const lines: string[] = [
     '# System2 Configuration',
-    '# This file contains all System2 settings including API keys.',
-    '# Permissions: 0600 (owner read/write only).',
+    '# All System2 settings: LLM credentials (OAuth + API keys), per-agent',
+    '# overrides, services, databases, and operational defaults.',
+    '# Edited both programmatically by System2 (e.g. `system2 login` updates',
+    '# `[llm.oauth]`) and manually by you. Changes apply on daemon restart.',
+    '# Permissions: 0600 (owner read/write only — protects credentials).',
     '',
   ];
 
   if (options.llm) {
-    const { primary, fallback, providers } = options.llm;
-    lines.push('# LLM credentials. Two tiers, used in order:');
-    lines.push('#   1. [llm.oauth]: subscription credentials. Tried first when present.');
-    lines.push('#   2. [llm.api_keys]: API key tier. Used after the OAuth tier is exhausted.');
-    lines.push(
-      '# Each tier has a `primary` provider and an ordered `fallback` list. Within the API key tier,'
-    );
-    lines.push(
-      '# multiple keys per provider (under [llm.api_keys.<provider>].keys) rotate automatically on failures.'
-    );
-    lines.push('');
+    const { fallback, providers } = options.llm;
 
+    // OAuth tier: emit divider + (live block | commented template) so users
+    // who skipped OAuth at onboarding still see how to enable it later.
+    lines.push(...sectionHeader('LLM credentials — OAuth tier'));
+    lines.push('# OAuth providers and failover order. Subscription tokens live in');
+    lines.push('# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.');
+    lines.push('# This tier is tried first; the API-keys tier below is only used after');
+    lines.push('# every OAuth credential is in cooldown.');
+    lines.push('# Supported providers: anthropic, openai-codex, github-copilot.');
+    lines.push('');
     if (options.llm.oauth) {
-      lines.push('# OAuth tier. Supported providers: anthropic, openai-codex, google-gemini-cli,');
-      lines.push(
-        '# google-antigravity, github-copilot. Tokens live in ~/.system2/oauth/<provider>.json'
-      );
-      lines.push(
-        '# (mode 0600), managed by `system2 login`. Edit primary/fallback to reorder; remove a'
-      );
-      lines.push('# provider here AND its JSON file to fully deregister it.');
       lines.push('[llm.oauth]');
       lines.push(`primary = "${options.llm.oauth.primary}"`);
       const fb = options.llm.oauth.fallback.map((f) => `"${f}"`).join(', ');
       lines.push(`fallback = [${fb}]`);
       lines.push('');
-    }
 
-    lines.push('[llm.api_keys]');
-    lines.push(`primary = "${primary}"`);
-    lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
-    lines.push('');
-
-    for (const name of [
-      'anthropic',
-      'cerebras',
-      'google',
-      'groq',
-      'mistral',
-      'openai',
-      'openai-compatible',
-      'openrouter',
-      'xai',
-    ] as const) {
-      const provider = providers[name];
-      if (provider && provider.keys.length > 0) {
-        // Per-provider key sections are self-explanatory; the rotation/label
-        // semantics are documented once in the top-level comment block.
-        lines.push(`[llm.api_keys.${name}]`);
-        lines.push('keys = [');
-        for (const key of provider.keys) {
-          if (key.key) {
-            lines.push(`  { key = "${key.key}", label = "${key.label}" },`);
-          }
-        }
-        lines.push(']');
-
-        // openrouter has extra fields
-        if (name === 'openrouter' && provider.routing) {
-          lines.push('');
-          lines.push('[llm.api_keys.openrouter.routing]');
-          for (const [prefix, order] of Object.entries(provider.routing)) {
-            const key = /^[A-Za-z0-9_-]+$/.test(prefix) ? prefix : `"${prefix}"`;
-            lines.push(`${key} = [${order.map((s) => `"${s}"`).join(', ')}]`);
-          }
-        }
-
-        // openai-compatible has extra fields
-        if (name === 'openai-compatible') {
-          if (provider.base_url) {
-            lines.push(`base_url = "${provider.base_url}"`);
-          }
-          if (provider.model) {
-            lines.push(`model = "${provider.model}"`);
-          }
-          if (provider.compat_reasoning !== undefined) {
-            lines.push(`compat_reasoning = ${provider.compat_reasoning}`);
-          }
-        }
-
+      // Per-provider OAuth model pins. Live entries first, then a commented
+      // hint so users see the override syntax inline with the section.
+      const liveOAuthPins: string[] = [];
+      for (const [provider, sub] of Object.entries(options.llm.oauth.providers)) {
+        if (!sub?.model) continue;
+        liveOAuthPins.push(provider);
+        lines.push(`[llm.oauth.${provider}]`);
+        lines.push(`model = "${sub.model}"`);
         lines.push('');
       }
+      if (liveOAuthPins.length === 0) {
+        lines.push('# Optional per-OAuth-provider model pin. When omitted, the resolver picks');
+        lines.push("# the family flagship from pi-ai's catalog. Family rules:");
+        lines.push('# https://github.com/diegoscarabelli/system2/blob/main/docs/configuration.md');
+        lines.push('# Catalog of model IDs (use the exact `id` field when pinning):');
+        lines.push(
+          '# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts'
+        );
+        lines.push('# [llm.oauth.anthropic]');
+        lines.push('# model = "claude-opus-4-7"');
+        lines.push('');
+      }
+    } else {
+      lines.push('# Run `system2 login` to enable OAuth, or uncomment the block below and');
+      lines.push('# add credentials manually.');
+      lines.push('# [llm.oauth]');
+      lines.push('# primary = "anthropic"');
+      lines.push('# fallback = []');
+      lines.push('');
+    }
+
+    // API-keys tier. "Configured" means at least one provider has keys; a
+    // bare primary/fallback with no provider entries is not configured (the
+    // shape onboard synthesizes when the user opts out — see onboard.ts).
+    const apiKeysConfigured = Object.values(providers).some((p) => p && p.keys.length > 0);
+
+    lines.push(...sectionHeader('LLM credentials — API keys tier'));
+    lines.push('# Pay-per-token. Each provider can hold multiple keys; rotation across keys');
+    lines.push('# and providers happens automatically on failures.');
+    lines.push('');
+
+    if (apiKeysConfigured) {
+      lines.push('[llm.api_keys]');
+      lines.push(`primary = "${options.llm.primary}"`);
+      lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
+      lines.push('');
+
+      let anyModelsPinned = false;
+      for (const name of [
+        'anthropic',
+        'cerebras',
+        'google',
+        'groq',
+        'mistral',
+        'openai',
+        'openai-compatible',
+        'openrouter',
+        'xai',
+      ] as const) {
+        const provider = providers[name];
+        if (provider && provider.keys.length > 0) {
+          // Per-provider key sections are self-explanatory; the rotation/label
+          // semantics are documented once in the top-level comment block.
+          lines.push(`[llm.api_keys.${name}]`);
+          lines.push('keys = [');
+          for (const key of provider.keys) {
+            if (key.key) {
+              lines.push(`  { key = "${key.key}", label = "${key.label}" },`);
+            }
+          }
+          lines.push(']');
+
+          // openrouter has extra fields
+          if (name === 'openrouter' && provider.routing) {
+            lines.push('');
+            lines.push('[llm.api_keys.openrouter.routing]');
+            for (const [prefix, order] of Object.entries(provider.routing)) {
+              const key = /^[A-Za-z0-9_-]+$/.test(prefix) ? prefix : `"${prefix}"`;
+              lines.push(`${key} = [${order.map((s) => `"${s}"`).join(', ')}]`);
+            }
+          }
+
+          // openai-compatible has extra fields
+          if (name === 'openai-compatible') {
+            if (provider.base_url) {
+              lines.push(`base_url = "${provider.base_url}"`);
+            }
+            if (provider.model) {
+              lines.push(`model = "${provider.model}"`);
+            }
+            if (provider.compat_reasoning !== undefined) {
+              lines.push(`compat_reasoning = ${provider.compat_reasoning}`);
+            }
+          }
+
+          // Per-role model pins for this provider (api-keys tier).
+          if (provider.models && Object.keys(provider.models).length > 0) {
+            anyModelsPinned = true;
+            lines.push('');
+            lines.push(`[llm.api_keys.${name}.models]`);
+            for (const [role, modelId] of Object.entries(provider.models)) {
+              lines.push(`${role} = "${modelId}"`);
+            }
+          }
+
+          lines.push('');
+        }
+      }
+
+      // Inline hint for per-role model pins, when the user hasn't pinned any.
+      if (!anyModelsPinned) {
+        lines.push('# Optional per-role model pins for the API-keys tier. Keys are role names');
+        lines.push("# (guide, conductor, reviewer, narrator, worker). Overrides the role's");
+        lines.push('# library frontmatter default for the matched provider.');
+        lines.push('# Catalog of model IDs (use the exact `id` field when pinning):');
+        lines.push(
+          '# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts'
+        );
+        lines.push('# [llm.api_keys.anthropic.models]');
+        lines.push('# narrator = "claude-haiku-4-5-20251001"');
+        lines.push('# conductor = "claude-sonnet-4-6"');
+        lines.push('');
+      }
+    } else {
+      lines.push('# Add API keys to enable as failover when the OAuth tier is exhausted.');
+      lines.push('# Uncomment and edit:');
+      lines.push('# [llm.api_keys]');
+      lines.push('# primary = "anthropic"');
+      lines.push('# fallback = ["google", "openai"]');
+      lines.push('#');
+      lines.push('# [llm.api_keys.anthropic]');
+      lines.push('# keys = [');
+      lines.push('#   { key = "sk-ant-...", label = "default" },');
+      lines.push('# ]');
+      lines.push('#');
+      lines.push("# Optional per-role model pins (overrides each role's library default).");
+      lines.push('# Catalog of model IDs (use the exact `id` field when pinning):');
+      lines.push(
+        '# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts'
+      );
+      lines.push('# [llm.api_keys.anthropic.models]');
+      lines.push('# narrator = "claude-haiku-4-5-20251001"');
+      lines.push('');
     }
   }
 
-  // Agents section (per-role overrides)
+  lines.push(...sectionHeader('Per-agent behavior overrides'));
+  // Agents section: per-role behavior overrides (thinking, compaction).
   if (options.agents && Object.keys(options.agents).length > 0) {
     for (const [role, override] of Object.entries(options.agents)) {
-      const hasScalarFields =
-        override.thinking_level !== undefined || override.compaction_depth !== undefined;
-      const hasModels = override.models && Object.keys(override.models).length > 0;
-
-      if (hasScalarFields) {
-        lines.push(`[agents.${role}]`);
-        if (override.thinking_level !== undefined) {
-          lines.push(`thinking_level = "${override.thinking_level}"`);
-        }
-        if (override.compaction_depth !== undefined) {
-          lines.push(`compaction_depth = ${override.compaction_depth}`);
-        }
-        lines.push('');
+      if (override.thinking_level === undefined && override.compaction_depth === undefined) {
+        continue;
       }
-
-      if (hasModels && override.models) {
-        lines.push(`[agents.${role}.models]`);
-        for (const [provider, model] of Object.entries(override.models)) {
-          lines.push(`${provider} = "${model}"`);
-        }
-        lines.push('');
+      lines.push(`[agents.${role}]`);
+      if (override.thinking_level !== undefined) {
+        lines.push(`thinking_level = "${override.thinking_level}"`);
       }
+      if (override.compaction_depth !== undefined) {
+        lines.push(`compaction_depth = ${override.compaction_depth}`);
+      }
+      lines.push('');
     }
   } else {
-    lines.push('# Per-agent model and behavior overrides. Uncomment and edit to customize.');
+    lines.push('# Per-agent behavior overrides (thinking_level, compaction_depth).');
+    lines.push('# Tier-agnostic: applied whether the OAuth or API-keys tier is active.');
+    lines.push('# Uncomment and edit to customize.');
     lines.push('# Supported roles: guide, conductor, reviewer, narrator, worker');
+    lines.push('# Model pins live with their tier: see [llm.oauth.<provider>] /');
+    lines.push('# [llm.api_keys.<provider>.models] above.');
     lines.push('#');
-    lines.push('# Example 1: override thinking level and pin a specific model');
     lines.push('# [agents.conductor]');
     lines.push('# thinking_level = "high"              # off | minimal | low | medium | high');
     lines.push(
       '# compaction_depth = 8                 # keep N auto-compactions in sliding window'
     );
-    lines.push('#');
-    lines.push('# [agents.conductor.models]');
-    lines.push('# anthropic = "claude-opus-4-6"        # pin a model for a specific provider');
-    lines.push('#');
-    lines.push(
-      '# Example 2: route a role through OpenRouter to a specific upstream (e.g. Vertex AI)'
-    );
-    lines.push('# [agents.conductor.models]');
-    lines.push(
-      '# openrouter = "google/gemini-3.1-pro-preview" # model ID as listed on openrouter.ai'
-    );
-    lines.push('#');
-    lines.push('# To control which upstream providers OpenRouter uses for a model prefix:');
-    lines.push('# [llm.api_keys.openrouter.routing]');
-    lines.push('# "google/" = ["google-vertex/global", "google-vertex", "google-ai-studio"]');
     lines.push('');
   }
 
-  // Services section
+  lines.push(...sectionHeader('Services'));
   if (options.services?.brave_search) {
     lines.push('[services.brave_search]');
     lines.push(`key = "${options.services.brave_search.key}"`);
     lines.push('');
-  }
-
-  // Tools section
-  if (options.tools?.web_search) {
-    lines.push('[tools.web_search]');
-    lines.push(`enabled = ${options.tools.web_search.enabled}`);
-    lines.push(`max_results = ${options.tools.web_search.max_results}`);
+  } else {
+    lines.push('# Optional service credentials. Brave Search powers web_search/web_fetch.');
+    lines.push('# [services.brave_search]');
+    lines.push('# key = "BSA..."');
     lines.push('');
   }
 
-  // Databases section
+  lines.push(...sectionHeader('Tools'));
+  if (options.tools?.web_search) {
+    lines.push('[tools.web_search]');
+    lines.push(`enabled = ${options.tools.web_search.enabled}`);
+    // max_results is a tunable with a code default; same model as operational
+    // settings — keep commented so accidental edits cannot silently change it.
+    lines.push(`# max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
+    lines.push('');
+  } else {
+    lines.push('# Optional tool feature flags.');
+    lines.push('# [tools.web_search]');
+    lines.push('# enabled = true');
+    lines.push(`# max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
+    lines.push('');
+  }
+
+  lines.push(...sectionHeader('Databases'));
   if (options.databases && Object.keys(options.databases).length > 0) {
     for (const [name, conn] of Object.entries(options.databases)) {
       lines.push(`[databases.${name}]`);
@@ -935,87 +1019,78 @@ export function buildConfigToml(options: {
     lines.push('');
   }
 
-  // Operational sections
-  const backup = options.backup ?? DEFAULT_OPERATIONAL.backup;
-  const logs = options.logs ?? DEFAULT_OPERATIONAL.logs;
-
-  lines.push('[backup]');
-  lines.push(`# Hours between automatic backups (minimum: 1)`);
-  lines.push(`cooldown_hours = ${backup.cooldownHours}`);
-  lines.push('');
-  lines.push(`# Maximum number of automatic backups to keep`);
-  lines.push(`max_backups = ${backup.maxBackups}`);
-  lines.push('');
-  lines.push('[logs]');
-  lines.push(`# Log file size threshold for rotation in MB`);
-  lines.push(`rotation_threshold_mb = ${logs.rotationThresholdMB}`);
-  lines.push('');
-  lines.push(`# Maximum number of archived log files to keep`);
-  lines.push(`max_archives = ${logs.maxArchives}`);
+  lines.push(...sectionHeader('Operational settings'));
+  lines.push('# All values below are defaults pinned in code (src/cli/utils/config.ts:');
+  lines.push('# DEFAULT_OPERATIONAL, DEFAULT_SESSION, DEFAULT_DELIVERY). Lines are');
+  lines.push('# commented so accidental edits cannot change runtime behavior — to');
+  lines.push('# tune a value, uncomment its section header AND the specific key, then');
+  lines.push('# restart the daemon. Values left commented stay tied to the code default,');
+  lines.push('# so an upgrade that bumps a default propagates automatically.');
   lines.push('');
 
-  const scheduler = options.scheduler ?? DEFAULT_OPERATIONAL.scheduler;
-  lines.push('[scheduler]');
-  lines.push(`# Minutes between daily summary runs`);
-  lines.push(`daily_summary_interval_minutes = ${scheduler.dailySummaryIntervalMinutes}`);
+  lines.push('# [backup]');
+  lines.push('# # Hours between automatic backups (minimum: 1)');
+  lines.push(`# cooldown_hours = ${DEFAULT_OPERATIONAL.backup.cooldownHours}`);
+  lines.push('# # Maximum number of automatic backups to keep');
+  lines.push(`# max_backups = ${DEFAULT_OPERATIONAL.backup.maxBackups}`);
   lines.push('');
-
-  const chat = options.chat ?? DEFAULT_OPERATIONAL.chat;
-  lines.push('[chat]');
-  lines.push(`# Maximum number of chat messages to keep in UI history`);
-  lines.push(`max_history_messages = ${chat.maxHistoryMessages}`);
+  lines.push('# [logs]');
+  lines.push('# # Log file size threshold for rotation in MB');
+  lines.push(`# rotation_threshold_mb = ${DEFAULT_OPERATIONAL.logs.rotationThresholdMB}`);
+  lines.push('# # Maximum number of archived log files to keep');
+  lines.push(`# max_archives = ${DEFAULT_OPERATIONAL.logs.maxArchives}`);
   lines.push('');
-
-  const knowledge = options.knowledge ?? DEFAULT_OPERATIONAL.knowledge;
-  lines.push('[knowledge]');
-  lines.push(`# Maximum characters per knowledge file before truncation`);
-  lines.push(`budget_chars = ${knowledge.budgetChars}`);
+  lines.push('# [scheduler]');
+  lines.push('# # Minutes between daily summary runs');
+  lines.push(
+    `# daily_summary_interval_minutes = ${DEFAULT_OPERATIONAL.scheduler.dailySummaryIntervalMinutes}`
+  );
   lines.push('');
-
-  const session = options.session ?? DEFAULT_SESSION;
-  lines.push('[session]');
-  lines.push(
-    `# Rotation threshold in bytes (default: ${DEFAULT_SESSION.rotation_size_bytes}). Above this size, the JSONL is rotated.`
-  );
-  lines.push(
-    `# If a compaction anchor exists, rotation copies forward from firstKeptEntryId. Otherwise it falls back`
-  );
-  lines.push(
-    `# to keeping the session header + the most recent ~1 MB tail (bare-bytes-tail rotation), and emits a warn`
-  );
-  lines.push(
-    `# (the absence of a compaction at this size signals the agent has been in a failure loop).`
-  );
-  lines.push(`rotation_size_bytes = ${session.rotation_size_bytes}`);
+  lines.push('# [chat]');
+  lines.push('# # Maximum number of chat messages to keep in UI history');
+  lines.push(`# max_history_messages = ${DEFAULT_OPERATIONAL.chat.maxHistoryMessages}`);
   lines.push('');
-  lines.push(
-    `# Maximum number of .jsonl.archived files to retain per agent's session directory (default: ${DEFAULT_SESSION.archive_keep_count}).`
-  );
-  lines.push(
-    `# After each rotation or session reset, older archives are pruned by mtime so disk usage stays bounded`
-  );
-  lines.push(
-    `# even for high-volume agents (e.g. the Narrator, which archives once per scheduled task).`
-  );
-  lines.push(`archive_keep_count = ${session.archive_keep_count}`);
+  lines.push('# [knowledge]');
+  lines.push('# # Maximum characters per knowledge file before truncation');
+  lines.push(`# budget_chars = ${DEFAULT_OPERATIONAL.knowledge.budgetChars}`);
   lines.push('');
-
-  const delivery = options.delivery ?? DEFAULT_DELIVERY;
-  lines.push('[delivery]');
+  lines.push('# [session]');
+  lines.push('# # Rotation threshold in bytes. Above this size, the JSONL is rotated.');
   lines.push(
-    `# Hard cap on inter-agent delivery size in bytes (default: ${DEFAULT_DELIVERY.max_bytes})`
+    '# # If a compaction anchor exists, rotation copies forward from firstKeptEntryId. Otherwise it falls back'
   );
-  lines.push(`max_bytes = ${delivery.max_bytes}`);
+  lines.push(
+    '# # to keeping the session header + the most recent ~1 MB tail (bare-bytes-tail rotation).'
+  );
+  lines.push(`# rotation_size_bytes = ${DEFAULT_SESSION.rotation_size_bytes}`);
+  lines.push(
+    "# # Maximum number of .jsonl.archived files to retain per agent's session directory."
+  );
+  lines.push(
+    '# # After each rotation or session reset, older archives are pruned by mtime so disk usage stays bounded'
+  );
+  lines.push(
+    '# # even for high-volume agents (e.g. the Narrator, which archives once per scheduled task).'
+  );
+  lines.push(`# archive_keep_count = ${DEFAULT_SESSION.archive_keep_count}`);
   lines.push('');
+  lines.push('# [delivery]');
+  lines.push('# # Hard cap on the size of any single inter-agent delivery, in bytes.');
+  lines.push(`# max_bytes = ${DEFAULT_DELIVERY.max_bytes}`);
+  lines.push("# # Total-size cap on the Narrator's catch-up prompt, in bytes. The daily-");
+  lines.push('# # summary cron (and the trigger_project_story tool) assembles ONE delivery');
+  lines.push('# # for the Narrator by gathering recent entries from agent session JSONL');
+  lines.push('# # files (inter-agent messages, project log updates, DB changes since the');
+  lines.push("# # Narrator's last run). If the assembled bundle would exceed this, the");
+  lines.push('# # oldest entries are dropped first.');
+  lines.push(`# catch_up_budget_bytes = ${DEFAULT_DELIVERY.catch_up_budget_bytes}`);
+  lines.push('# # Per-entry truncation cap applied while assembling the catch-up prompt');
+  lines.push("# # above. Each individual JSONL entry's content is clipped to this size");
+  lines.push('# # before concatenation, so one bloated entry (e.g. a worker that pasted a');
+  lines.push('# # 1 MB tool result into a delivery) cannot eat the whole catch-up budget.');
   lines.push(
-    `# Producer-side budget for catch-up / daily-summary deliveries in bytes (default: ${DEFAULT_DELIVERY.catch_up_budget_bytes})`
+    `# narrator_message_excerpt_bytes = ${DEFAULT_DELIVERY.narrator_message_excerpt_bytes}`
   );
-  lines.push(`catch_up_budget_bytes = ${delivery.catch_up_budget_bytes}`);
-  lines.push('');
-  lines.push(
-    `# Per-message excerpt cap for Narrator-bound deliveries (daily-summary + project story) in bytes (default: ${DEFAULT_DELIVERY.narrator_message_excerpt_bytes})`
-  );
-  lines.push(`narrator_message_excerpt_bytes = ${delivery.narrator_message_excerpt_bytes}`);
   lines.push('');
 
   return lines.join('\n');

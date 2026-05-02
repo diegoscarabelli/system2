@@ -31,7 +31,7 @@ import type {
 } from '../shared/index.js';
 import type { OAuthCredentialsMap } from './agents/auth-resolver.js';
 import { AuthResolver } from './agents/auth-resolver.js';
-import { AgentHost, MAX_DELIVERY_BYTES } from './agents/host.js';
+import { AgentHost, MAX_DELIVERY_BYTES, pickModelForTier } from './agents/host.js';
 import {
   loadOAuthCredentials,
   type OAuthCredentials,
@@ -121,8 +121,6 @@ export class Server {
     const SUPPORTED_OAUTH_PROVIDERS: ReadonlySet<LlmProvider> = new Set([
       'anthropic',
       'github-copilot',
-      'google-antigravity',
-      'google-gemini-cli',
       'openai-codex',
     ]);
 
@@ -781,8 +779,22 @@ export class Server {
   }
 
   /**
-   * Resolve the Narrator's model from its frontmatter for use by the ConversationSummarizer.
-   * Returns the model and a ModelRegistry, or null if resolution fails.
+   * Resolve the Narrator's model for use by the ConversationSummarizer. Mirrors
+   * AgentHost's tier-aware selection so the summarizer's compaction model
+   * matches what the Narrator actually runs on:
+   *   - OAuth tier: `[llm.oauth.<provider>] model` pin → resolveOAuthModel
+   *     (family flagship from pi-ai's catalog).
+   *   - API-keys tier: `[llm.api_keys.<provider>.models].narrator` →
+   *     `narrator.md` frontmatter `api_keys_models[<provider>]`.
+   *
+   * Defers tier/provider selection to `AuthResolver.getActiveCredential()` so
+   * the summarizer is initialized only when there is a usable credential at
+   * server boot — picking a provider whose credential file is missing or
+   * whose api-keys section has no keys would just produce 401s on every
+   * summarizer request. The summarizer is a one-shot init at boot; if the
+   * boot-time active credential later goes into cooldown, summarizer calls
+   * may fail until the credential recovers (acceptable: the chat-history
+   * sidecar degrades to no-op summaries, no agent traffic affected).
    */
   private resolveNarratorModel(): { model: Model<Api>; registry: ModelRegistry } | null {
     // Agent definition files are co-located with AgentHost (dist/agents/library/)
@@ -794,22 +806,71 @@ export class Server {
       return null;
     }
 
-    const { data: meta } = matter(readFileSync(narratorPath, 'utf-8'));
-    const models = meta.models as Record<string, string> | undefined;
-    if (!models) return null;
-
-    const modelRegistry = new ModelRegistry(this.authResolver.createAuthStorage());
-
-    for (const provider of this.authResolver.providerOrder) {
-      const modelId = models[provider];
-      if (modelId) {
-        const model = modelRegistry.find(provider, modelId);
-        if (model) return { model, registry: modelRegistry };
-      }
+    const active = this.authResolver.getActiveCredential();
+    if (!active) {
+      log.warn('[Server] No usable credential at boot; ConversationSummarizer disabled');
+      return null;
     }
 
-    log.warn('[Server] No narrator model found for any configured provider');
-    return null;
+    const { data: meta } = matter(readFileSync(narratorPath, 'utf-8'));
+    const apiKeysModels = (meta.api_keys_models ?? {}) as Partial<Record<LlmProvider, string>>;
+    const llm = this.config.llmConfig;
+
+    const { id } = pickModelForTier({
+      tier: active.tier,
+      provider: active.provider,
+      role: 'narrator',
+      llmConfig: llm,
+      frontmatterModels: apiKeysModels,
+      fallbackUsedFor: new Set<LlmProvider>(),
+    });
+    if (!id) {
+      log.warn(
+        `[Server] No narrator model resolved for active credential ${active.tier}:${active.provider}; ConversationSummarizer disabled`
+      );
+      return null;
+    }
+
+    const modelRegistry = ModelRegistry.create(this.authResolver.createAuthStorage());
+
+    // openai-compatible isn't in pi-ai's catalog; AgentHost dynamically
+    // registers it before each session. Mirror that here so the summarizer
+    // works for users on LiteLLM / vLLM / Ollama / Thaura. Skip silently
+    // when base_url is missing — the user's api-keys config is malformed
+    // and other call paths will surface the error.
+    if (active.provider === 'openai-compatible') {
+      const providerConfig = llm.providers['openai-compatible'];
+      if (!providerConfig?.base_url) {
+        log.warn(
+          '[Server] openai-compatible provider missing base_url; ConversationSummarizer disabled'
+        );
+        return null;
+      }
+      modelRegistry.registerProvider('openai-compatible', {
+        baseUrl: providerConfig.base_url,
+        api: 'openai-completions',
+        models: [
+          {
+            id,
+            name: id,
+            reasoning: providerConfig.compat_reasoning ?? true,
+            input: ['text'],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 128000,
+            maxTokens: 4096,
+          },
+        ],
+      });
+    }
+
+    const model = modelRegistry.find(active.provider, id);
+    if (!model) {
+      log.warn(
+        `[Server] Narrator model "${id}" not in pi-ai catalog for ${active.provider}; ConversationSummarizer disabled`
+      );
+      return null;
+    }
+    return { model, registry: modelRegistry };
   }
 
   /**

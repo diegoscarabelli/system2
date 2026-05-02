@@ -5,7 +5,7 @@
  */
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 
 const DEFAULT_MAX_RESULTS = 5;
 
@@ -22,7 +22,7 @@ interface BraveSearchApiResponse {
 export function createWebSearchTool(apiKey: string, maxResults?: number) {
   const defaultCount = maxResults ?? DEFAULT_MAX_RESULTS;
 
-  const params = Type.Object({
+  const webSearchParams = Type.Object({
     query: Type.String({
       description: 'The search query',
     }),
@@ -33,13 +33,17 @@ export function createWebSearchTool(apiKey: string, maxResults?: number) {
     ),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof webSearchParams> = {
     name: 'web_search',
     label: 'Web Search',
     description:
       'Search the web using Brave Search and return structured results with title, URL, and description.',
-    parameters: params,
-    execute: async (_toolCallId, params, signal, _onUpdate) => {
+    parameters: webSearchParams,
+    execute: async (_toolCallId, rawParams, signal, _onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof webSearchParams>;
       const count = Math.min(params.count ?? defaultCount, 20);
       const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(params.query)}&count=${count}`;
 

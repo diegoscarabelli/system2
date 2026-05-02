@@ -20,10 +20,12 @@ import type {
   LlmOAuthConfig,
   LlmProvider,
   LlmProviderConfig,
+  OAuthProvider,
   ServicesConfig,
   ToolsConfig,
 } from '../../shared/index.js';
 import { buildConfigToml, CONFIG_FILE, SYSTEM2_DIR, writeConfigFile } from '../utils/config.js';
+import { formatOAuthAuthMessage } from './login.js';
 
 const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
@@ -37,7 +39,7 @@ const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: 'xai', label: 'xAI (Grok)' },
 ];
 
-const OAUTH_PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
+const OAUTH_PROVIDERS: { value: OAuthProvider; label: string; hint: string }[] = [
   {
     value: 'anthropic',
     label: 'Anthropic (Claude Pro/Max)',
@@ -45,18 +47,8 @@ const OAUTH_PROVIDERS: { value: LlmProvider; label: string; hint: string }[] = [
   },
   {
     value: 'openai-codex',
-    label: 'OpenAI Codex (ChatGPT Plus/Pro)',
-    hint: 'Uses your ChatGPT subscription. Codex models only.',
-  },
-  {
-    value: 'google-gemini-cli',
-    label: 'Google Gemini CLI (Gemini subscription)',
-    hint: 'Uses your Google account / Gemini subscription.',
-  },
-  {
-    value: 'google-antigravity',
-    label: 'Google Antigravity',
-    hint: 'Uses your Google account via Antigravity. Access to Gemini 3, Claude, GPT-OSS.',
+    label: 'OpenAI Codex (ChatGPT)',
+    hint: 'Uses your ChatGPT account.',
   },
   {
     value: 'github-copilot',
@@ -249,9 +241,12 @@ async function collectWebSearchConfig(): Promise<{
     process.exit(0);
   }
 
+  // max_results intentionally omitted: buildConfigToml emits it as a
+  // commented code-default and the loader falls back to the same default
+  // when the toml line is absent.
   return {
     services: { brave_search: { key: braveKey } },
-    tools: { web_search: { enabled: true, max_results: 5 } },
+    tools: { web_search: { enabled: true } },
   };
 }
 
@@ -281,14 +276,14 @@ async function runOAuthLogin(provider: LlmProvider): Promise<{ label: string } |
   s.start('Waiting for browser authentication...');
   try {
     const creds = await loginProvider(provider, {
-      onAuth: ({ url }) => {
+      onAuth: ({ url, instructions }) => {
         // Stop, print the URL persistently, attempt to open the browser, then
         // restart the spinner. s.message() would be overwritten on the next
         // onProgress; p.log.info() under an active spinner is suppressed.
-        // Stop+log+restart guarantees the URL stays visible. open() is
+        // Stop+log+restart guarantees the URL/code stay visible. open() is
         // best-effort.
         s.stop('Browser authentication required:');
-        p.log.info(`Open this URL to authenticate (browser should open automatically):\n${url}`);
+        p.log.info(formatOAuthAuthMessage(url, instructions));
         void open(url).catch(() => {
           // Browser open failed — URL is already printed; user copies manually.
         });
@@ -306,7 +301,7 @@ async function runOAuthLogin(provider: LlmProvider): Promise<{ label: string } |
       },
       onProgress: (m) => s.message(m),
     });
-    // Spread preserves provider-specific extras (projectId, email, enterpriseDomain).
+    // Spread preserves provider-specific extras (e.g. Copilot's enterpriseDomain).
     saveOAuthCredentials(SYSTEM2_DIR, provider, {
       ...creds,
       label: label || defaultLabel,
@@ -336,14 +331,14 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
   if (!wantsOAuth) return null;
 
   let availableOAuth = [...OAUTH_PROVIDERS];
-  let primary: LlmProvider | undefined;
+  let primary: OAuthProvider | undefined;
 
   // Outer loop: keep trying primary candidates until one succeeds or the user gives up.
   while (!primary && availableOAuth.length > 0) {
     const candidate = (await p.select({
       message: 'Select your primary OAuth provider:',
       options: availableOAuth,
-    })) as LlmProvider;
+    })) as OAuthProvider;
     if (p.isCancel(candidate)) {
       p.cancel('Onboarding cancelled');
       process.exit(0);
@@ -384,7 +379,7 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
   // Don't reuse availableOAuth: it has been pruned of providers the user gave up on as
   // primary candidates, but a transient primary failure shouldn't permanently disqualify
   // them from being tried as fallback.
-  const fallback: LlmProvider[] = [];
+  const fallback: OAuthProvider[] = [];
   let availableFallback = OAUTH_PROVIDERS.filter((o) => o.value !== primary);
   while (availableFallback.length > 0) {
     const addMore = await p.confirm({
@@ -400,7 +395,7 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
     const next = (await p.select({
       message: 'Select fallback OAuth provider:',
       options: availableFallback,
-    })) as LlmProvider;
+    })) as OAuthProvider;
     if (p.isCancel(next)) {
       p.cancel('Onboarding cancelled');
       process.exit(0);
@@ -412,7 +407,7 @@ async function collectOAuthTier(): Promise<LlmOAuthConfig | null> {
     availableFallback = availableFallback.filter((o) => o.value !== next);
   }
 
-  return { primary, fallback };
+  return { primary, fallback, providers: {} };
 }
 
 /**
@@ -578,8 +573,11 @@ export async function onboard(): Promise<void> {
 
   p.log.info(
     'Before we can get to work, we need at least one LLM provider configured. ' +
-      'You can use OAuth (Claude Pro/Max subscription) and/or API keys. ' +
-      "Don't worry, you can always change or add providers later by editing ~/.system2/config.toml directly."
+      'You can use an OAuth subscription (Anthropic, OpenAI Codex, or GitHub Copilot) ' +
+      'and/or API keys for any of the supported providers. ' +
+      'You can change this later: run `system2 login` to add, remove, or change the ' +
+      'primary OAuth provider, or edit `~/.system2/config.toml` directly to update ' +
+      'API keys and per-role pins.'
   );
 
   try {

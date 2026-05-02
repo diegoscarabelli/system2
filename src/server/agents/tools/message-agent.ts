@@ -7,7 +7,7 @@
  */
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
 import { log } from '../../utils/logger.js';
 import { MAX_DELIVERY_BYTES } from '../host.js';
@@ -19,7 +19,7 @@ export function createMessageAgentTool(
   db: DatabaseClient,
   maxDeliveryBytes: number = MAX_DELIVERY_BYTES
 ) {
-  const params = Type.Object({
+  const messageAgentParams = Type.Object({
     agent_id: Type.Number({
       description:
         'The database ID of the agent to send a message to. Use read_system2_db to find agent IDs.',
@@ -35,13 +35,17 @@ export function createMessageAgentTool(
     ),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof messageAgentParams> = {
     name: 'message_agent',
     label: 'Message Agent',
     description:
       "Send a message to another agent in the system. The message appears in the receiver's context and triggers processing. Two delivery modes: default waits for the receiver to finish its current turn, urgent (urgent: true) interrupts mid-turn for time-sensitive corrections or priority changes. Use read_system2_db to look up available agents by role.",
-    parameters: params,
-    execute: async (_toolCallId, args, signal) => {
+    parameters: messageAgentParams,
+    execute: async (_toolCallId, rawParams, signal) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const args = rawParams as Static<typeof messageAgentParams>;
       if (signal?.aborted) {
         return {
           content: [{ type: 'text', text: 'Aborted.' }],

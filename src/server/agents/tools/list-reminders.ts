@@ -3,14 +3,14 @@ import { Type } from '@sinclair/typebox';
 import type { ReminderManager } from '../../reminders/manager.js';
 
 export function createListRemindersTool(agentId: number, reminderManager: ReminderManager) {
-  const params = Type.Object({});
+  const listRemindersParams = Type.Object({});
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof listRemindersParams> = {
     name: 'list_reminders',
     label: 'List Reminders',
     description:
       'List your active (pending) reminders. Shows reminder ID, message, and scheduled fire time.',
-    parameters: params,
+    parameters: listRemindersParams,
     execute: async () => {
       try {
         const reminders = reminderManager.listForAgent(agentId);

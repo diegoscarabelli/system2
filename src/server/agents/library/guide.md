@@ -4,17 +4,18 @@ description: Your personal guide to the world of reasoning with data
 version: 1.0.0
 thinking_level: high
 compaction_depth: 10
-models:
+# Default model per provider for the API-keys tier. The OAuth tier ignores
+# these — it auto-picks one model per provider via resolveOAuthModel for all
+# roles. Override per-role with [llm.api_keys.<provider>.models][<role>] in
+# config.toml. Only api-keys-tier providers are listed; github-copilot and
+# openai-codex are OAuth-only and intentionally absent.
+api_keys_models:
   anthropic: claude-sonnet-4-6
   cerebras: zai-glm-4.7
-  github-copilot: claude-sonnet-4.6
   google: gemini-3.1-pro-preview
-  google-antigravity: claude-sonnet-4-6
-  google-gemini-cli: gemini-3-pro-preview
   groq: llama-3.3-70b-versatile
   mistral: mistral-large-latest
   openai: gpt-4o
-  openai-codex: gpt-5.4
   openrouter: google/gemini-3.1-pro-preview
   xai: grok-2-latest
 ---

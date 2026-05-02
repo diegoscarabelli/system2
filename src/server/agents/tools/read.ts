@@ -6,23 +6,27 @@
 
 import { readFile } from 'node:fs/promises';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import { resolvePath } from './resolve-path.js';
 
 export function createReadTool() {
-  const params = Type.Object({
+  const readParams = Type.Object({
     path: Type.String({
       description: 'Path to the file to read (absolute or relative to home directory)',
     }),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof readParams> = {
     name: 'read',
     label: 'Read File',
     description:
       'Read the contents of a file from the filesystem. Accepts absolute paths or ~/ relative paths. Returns the full file content as text. Use this to inspect files before editing, review data outputs, or read configuration.',
-    parameters: params,
-    execute: async (_toolCallId, params, _signal, _onUpdate) => {
+    parameters: readParams,
+    execute: async (_toolCallId, rawParams, _signal, _onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof readParams>;
       try {
         const filePath = resolvePath(params.path);
 

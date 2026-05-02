@@ -59,23 +59,22 @@ describe('oauth dispatcher', () => {
       access: 'old',
       refresh: 'r',
       expires: Date.now() - 1000,
-      label: 'google-antigravity',
-      projectId: 'proj-1',
+      label: 'main',
     };
     const refreshed = { ...cred, access: 'new', expires: Date.now() + 3600_000 };
     const mockRefresh = vi.fn().mockResolvedValue(refreshed);
     mockedGetOAuthProvider.mockReturnValue({
-      id: 'google-antigravity',
-      name: 'Antigravity',
+      id: 'anthropic',
+      name: 'Anthropic',
       login: vi.fn(),
       refreshToken: mockRefresh,
       getApiKey: () => '',
     } as unknown as ReturnType<typeof getOAuthProvider>);
-    const result = await refreshOAuthToken('google-antigravity', cred);
-    expect(mockedGetOAuthProvider).toHaveBeenCalledWith('google-antigravity');
+    const result = await refreshOAuthToken('anthropic', cred);
+    expect(mockedGetOAuthProvider).toHaveBeenCalledWith('anthropic');
     expect(mockRefresh).toHaveBeenCalledWith(cred);
     expect(result.access).toBe('new');
-    expect(result.projectId).toBe('proj-1');
+    expect(result.label).toBe('main');
   });
 
   it('throws when pi-ai does not have a provider with the given id', async () => {

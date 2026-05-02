@@ -6,24 +6,28 @@
  */
 
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
 
 export function createReadSystem2DbTool(db: DatabaseClient) {
-  const params = Type.Object({
+  const readSystem2DbParams = Type.Object({
     sql: Type.String({
       description:
         'SQL SELECT query to execute against the System2 app database (~/.system2/app.db). Tables: project, task, agent, task_link, task_comment.',
     }),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof readSystem2DbParams> = {
     name: 'read_system2_db',
     label: 'Read System2 DB',
     description:
       'Execute a SQL SELECT query against the System2 app database (~/.system2/app.db) to retrieve projects, tasks, agents, task links, and comments. This tool is only for the System2 management database — not for data pipeline databases (use bash for those).',
-    parameters: params,
-    execute: async (_toolCallId, params, _signal, _onUpdate) => {
+    parameters: readSystem2DbParams,
+    execute: async (_toolCallId, rawParams, _signal, _onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof readSystem2DbParams>;
       try {
         const results = db.query(params.sql);
 

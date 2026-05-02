@@ -9,25 +9,29 @@
 import { existsSync } from 'node:fs';
 import { basename, isAbsolute, normalize } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import type { DatabaseClient } from '../../db/client.js';
 import { isTildePath, resolvePath } from './resolve-path.js';
 
 export function createShowArtifactTool(db: DatabaseClient) {
-  const params = Type.Object({
+  const showArtifactParams = Type.Object({
     file_path: Type.String({
       description:
         'Absolute path to the artifact file (e.g. "/home/user/reports/dashboard.html"). Supports ~/ prefix for home directory.',
     }),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof showArtifactParams> = {
     name: 'show_artifact',
     label: 'Show Artifact',
     description:
       'Display an artifact file in the UI panel. The file can be anywhere on the filesystem — specify an absolute path. If the artifact is registered in the database, its title is used for the tab label. The UI watches the file for live reload. Only one artifact is watched per client connection at a time.',
-    parameters: params,
-    execute: async (_toolCallId, params, _signal, _onUpdate) => {
+    parameters: showArtifactParams,
+    execute: async (_toolCallId, rawParams, _signal, _onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof showArtifactParams>;
       // Reject bare relative paths — require absolute or ~/ prefix
       if (!isAbsolute(params.file_path) && !isTildePath(params.file_path)) {
         return {

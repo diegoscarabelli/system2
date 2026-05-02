@@ -18,12 +18,7 @@ function fakeOAuthProvider(id: string) {
     name: id,
     login: vi.fn(),
     refreshToken: vi.fn(),
-    getApiKey: (creds: { access: string; projectId?: string }) => {
-      if (id === 'google-gemini-cli' || id === 'google-antigravity') {
-        return JSON.stringify({ token: creds.access, projectId: creds.projectId });
-      }
-      return creds.access;
-    },
+    getApiKey: (creds: { access: string; projectId?: string }) => creds.access,
   } as unknown as ReturnType<typeof getOAuthProvider>;
 }
 
@@ -354,7 +349,7 @@ function makeTwoTierConfig(): LlmConfig {
       },
       openai: { keys: [{ key: 'oai-key-1', label: 'main' }] },
     },
-    oauth: { primary: 'anthropic', fallback: [] },
+    oauth: { primary: 'anthropic', fallback: [], providers: {} },
   };
 }
 
@@ -425,22 +420,22 @@ describe('AuthResolver — two-tier model', () => {
   it('walks oauth fallback before dropping to keys tier', () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: ['openai'] },
+      oauth: { primary: 'anthropic', fallback: ['openai-codex'], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(),
-      openai: { ...makeOAuthCreds(), label: 'codex' },
+      'openai-codex': { ...makeOAuthCreds(), label: 'codex' },
     });
     resolver.markKeyFailed('anthropic', 'auth', 'fail', 0, 'oauth');
     const active = resolver.getActiveCredential();
     expect(active?.tier).toBe('oauth');
-    expect(active?.provider).toBe('openai');
+    expect(active?.provider).toBe('openai-codex');
   });
 
   it('providerOrder includes both tiers, deduplicated', () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds() });
     expect(resolver.providerOrder).toEqual(['anthropic', 'openai']);
@@ -461,7 +456,7 @@ describe('AuthResolver.createAuthStorage', () => {
   it('formats anthropic OAuth as raw access token', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: { ...makeOAuthCreds(), access: 'sk-ant-oat-abc' },
@@ -470,57 +465,11 @@ describe('AuthResolver.createAuthStorage', () => {
     expect(await storage.getApiKey('anthropic')).toBe('sk-ant-oat-abc');
   });
 
-  it('wraps google-gemini-cli OAuth as JSON with token and projectId', async () => {
-    const cfg: LlmConfig = {
-      primary: 'google-gemini-cli',
-      fallback: [],
-      providers: { 'google-gemini-cli': { keys: [] } },
-      oauth: { primary: 'google-gemini-cli', fallback: [] },
-    };
-    const resolver = new AuthResolver(cfg, undefined, {
-      'google-gemini-cli': {
-        access: 'gca-access',
-        refresh: 'rt',
-        expires: Date.now() + 3600_000,
-        label: 'gemini',
-        projectId: 'proj-42',
-      },
-    });
-    const storage = resolver.createAuthStorage();
-    const key = await storage.getApiKey('google-gemini-cli');
-    expect(key).toBeDefined();
-    expect(JSON.parse(key as string)).toEqual({ token: 'gca-access', projectId: 'proj-42' });
-  });
-
-  it('wraps google-antigravity OAuth as JSON with token and projectId', async () => {
-    const cfg: LlmConfig = {
-      primary: 'google-antigravity',
-      fallback: [],
-      providers: { 'google-antigravity': { keys: [] } },
-      oauth: { primary: 'google-antigravity', fallback: [] },
-    };
-    const resolver = new AuthResolver(cfg, undefined, {
-      'google-antigravity': {
-        access: 'antigrav-access',
-        refresh: 'rt',
-        expires: Date.now() + 3600_000,
-        label: 'antigravity',
-        projectId: 'proj-99',
-      },
-    });
-    const storage = resolver.createAuthStorage();
-    const key = await storage.getApiKey('google-antigravity');
-    expect(JSON.parse(key as string)).toEqual({
-      token: 'antigrav-access',
-      projectId: 'proj-99',
-    });
-  });
-
   it('falls back to raw access token when pi-ai has no provider for the id', async () => {
     mockedGetOAuthProvider.mockReturnValue(undefined);
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: { ...makeOAuthCreds(), access: 'fallback-access' },
@@ -543,7 +492,7 @@ describe('AuthResolver.ensureFresh', () => {
     const persisted: OAuthCredentials[] = [];
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(60_000), // 1 min — within buffer
@@ -579,7 +528,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('does nothing when OAuth tokens are fresh', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     let calls = 0;
     const resolver = new AuthResolver(cfg, undefined, {
@@ -597,7 +546,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('serializes concurrent ensureFresh calls per provider', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
     let count = 0;
@@ -622,7 +571,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('throws when refresh fails', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
     await expect(
@@ -637,7 +586,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('releases the refresh lock after failure so subsequent calls can succeed', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, { anthropic: makeOAuthCreds(1000) });
 
@@ -667,7 +616,7 @@ describe('AuthResolver.ensureFresh', () => {
   it('forces refresh for providers in the force list even if not near expiry', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(60 * 60_000), // 1 hour — well within fresh window
@@ -693,18 +642,18 @@ describe('AuthResolver.ensureFresh', () => {
   it('does not force-refresh providers not in the force list', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: ['openai'] },
+      oauth: { primary: 'anthropic', fallback: ['openai-codex'], providers: {} },
     };
     let anthropicCalled = false;
-    let openaiCalled = false;
+    let codexCalled = false;
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(60 * 60_000), // fresh
-      openai: { ...makeOAuthCreds(60 * 60_000), label: 'openai-oauth' }, // fresh
+      'openai-codex': { ...makeOAuthCreds(60 * 60_000), label: 'codex-oauth' }, // fresh
     });
     await resolver.ensureFresh({
       refresh: async (provider, _cred) => {
         if (provider === 'anthropic') anthropicCalled = true;
-        else openaiCalled = true;
+        else codexCalled = true;
         return {
           access: 'new',
           refresh: 'rt-new',
@@ -715,14 +664,14 @@ describe('AuthResolver.ensureFresh', () => {
       force: ['anthropic'], // only force anthropic
     });
     expect(anthropicCalled).toBe(true);
-    expect(openaiCalled).toBe(false);
+    expect(codexCalled).toBe(false);
   });
 
   // Bug B regression: use latest credential after awaiting an existing refresh lock
   it('uses the latest credential after awaiting an existing refresh lock', async () => {
     const cfg: LlmConfig = {
       ...makeTwoTierConfig(),
-      oauth: { primary: 'anthropic', fallback: [] },
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     const resolver = new AuthResolver(cfg, undefined, {
       anthropic: makeOAuthCreds(1000), // expiring soon
@@ -772,47 +721,5 @@ describe('AuthResolver.ensureFresh', () => {
     expect(seen[1]).toBe('rt-rotated');
     // Final state should reflect the second refresh
     expect(resolver.getActiveOAuthCredential('anthropic')?.refresh).toBe('rt-final');
-  });
-
-  it('passes full credential to refresh callback and persists extras', async () => {
-    const cfg: LlmConfig = {
-      ...makeTwoTierConfig(),
-      oauth: { primary: 'google-antigravity', fallback: [] },
-    };
-    const expiredCred: OAuthCredentials = {
-      access: 'old-access',
-      refresh: 'r1',
-      expires: Date.now() - 1000,
-      label: 'google-antigravity',
-      projectId: 'proj-1',
-      email: 'a@b.com',
-    };
-    const resolver = new AuthResolver(cfg, undefined, {
-      'google-antigravity': expiredCred,
-    });
-
-    const persisted: OAuthCredentials[] = [];
-    resolver.setPersistOAuth('google-antigravity', async (c) => {
-      persisted.push(c);
-    });
-
-    const refresh = vi.fn(
-      async (_provider: LlmProvider, cred: OAuthCredentials): Promise<OAuthCredentials> => ({
-        access: 'new-access',
-        refresh: 'r2',
-        expires: Date.now() + 3600_000,
-        label: cred.label,
-        projectId: cred.projectId, // pi-ai's antigravity refresh round-trips this
-        email: cred.email,
-      })
-    );
-
-    const refreshed = await resolver.ensureFresh({ refresh });
-    expect(refresh).toHaveBeenCalledWith('google-antigravity', expiredCred);
-    expect(refreshed.has('google-antigravity')).toBe(true);
-    expect(persisted).toHaveLength(1);
-    expect(persisted[0].projectId).toBe('proj-1');
-    expect(persisted[0].email).toBe('a@b.com');
-    expect(persisted[0].access).toBe('new-access');
   });
 });

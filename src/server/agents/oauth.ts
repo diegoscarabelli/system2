@@ -11,14 +11,14 @@ export function isExpiringSoon(expires: number, bufferMs: number = REFRESH_BUFFE
 
 /**
  * Run the OAuth login flow for the given provider via pi-ai's registry.
- * Pi-ai handles the browser callback, PKCE, token exchange, and any provider-
- * specific post-processing (e.g., Antigravity's project-id discovery). Returned
- * credentials may include provider-specific extras (projectId, email,
- * enterpriseDomain); the open-shape preserves them through save/load and refresh.
+ * Pi-ai handles the browser callback, PKCE, token exchange, and any
+ * provider-specific post-processing. Returned credentials may include
+ * provider-specific extras (e.g. Copilot's enterpriseDomain); the open-shape
+ * preserves them through save/load and refresh.
  *
- * Returns PiAiOAuthCredentials (not OAuthCredentials) because pi-ai's login does
- * NOT assign the human-readable `label` field — that's set by the CLI at save
- * time. Callers must add `label` before calling saveOAuthCredentials.
+ * Returns PiAiOAuthCredentials (not OAuthCredentials) because pi-ai's login
+ * does NOT assign the human-readable `label` field — that's set by the CLI
+ * at save time. Callers must add `label` before calling saveOAuthCredentials.
  */
 export async function loginProvider(
   provider: LlmProvider,
@@ -34,8 +34,8 @@ export async function loginProvider(
 
 /**
  * Refresh OAuth credentials for the given provider via pi-ai's registry.
- * Takes the full credential object so provider-specific extras (projectId, etc.)
- * survive the round-trip.
+ * Takes the full credential object so provider-specific extras (e.g.
+ * Copilot's enterpriseDomain) survive the round-trip.
  *
  * Returns PiAiOAuthCredentials (label-less) for the same reason as loginProvider:
  * pi-ai's refreshToken doesn't return the label. AuthResolver.doRefresh restores

@@ -21,12 +21,12 @@
 import { appendFile, mkdir, open, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-import { Type } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import { commitIfStateDir } from './git-commit.js';
 import { resolvePath } from './resolve-path.js';
 
 export function createEditTool() {
-  const params = Type.Object({
+  const editParams = Type.Object({
     path: Type.String({
       description: 'Path to the file to edit (absolute or relative to home directory)',
     }),
@@ -60,13 +60,17 @@ export function createEditTool() {
     ),
   });
 
-  const tool: AgentTool<typeof params> = {
+  const tool: AgentTool<typeof editParams> = {
     name: 'edit',
     label: 'Edit File',
     description:
       'Edit a file by replacing an exact string match, or append content to a file. When append is true, appends new_string to the end of the file (creating it if needed) — use this for adding entries to logs, memory files, and similar. When append is not set, old_string must appear exactly once in the file (include more context if not unique). Set regex to true to treat old_string as a regex pattern — useful when you need to replace a field value without knowing the current value (e.g. old_string: "fieldName: .*"). Prefer this over `write` for modifying existing files. Use `write` for creating new files or complete rewrites.',
-    parameters: params,
-    execute: async (_toolCallId, params, signal, _onUpdate) => {
+    parameters: editParams,
+    execute: async (_toolCallId, rawParams, signal, _onUpdate) => {
+      // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
+      // schema field as possibly undefined). Required fields are validated
+      // before execute is called, so narrow once via the schema's Static type.
+      const params = rawParams as Static<typeof editParams>;
       try {
         if (signal?.aborted) {
           return {

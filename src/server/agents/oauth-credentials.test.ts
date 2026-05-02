@@ -31,6 +31,23 @@ describe('oauth-credentials', () => {
     expect(loadOAuthCredentials(dir, 'openai')).toBeNull();
   });
 
+  // Guard: PiAiOAuthCredentials documents an open shape ([key: string]: unknown)
+  // so pi-ai's per-provider refresh handlers can stash provider-specific extras
+  // (e.g. Copilot's enterpriseDomain). If save/load ever tightens to a closed
+  // shape, those extras would be silently dropped on the next refresh cycle.
+  it('preserves provider-specific extras through save/load', () => {
+    const creds = {
+      access: 'gho_abc',
+      refresh: 'ghr_xyz',
+      expires: 1714680000000,
+      label: 'copilot',
+      enterpriseDomain: 'acme.ghe.com',
+      apiKey: { token: 'tk_123', expiresAt: 1714680000000 },
+    };
+    saveOAuthCredentials(dir, 'github-copilot', creds);
+    expect(loadOAuthCredentials(dir, 'github-copilot')).toEqual(creds);
+  });
+
   it('writes file with mode 0600', () => {
     saveOAuthCredentials(dir, 'anthropic', { access: 'a', refresh: 'b', expires: 1, label: 'l' });
     const stats = statSync(join(dir, 'oauth', 'anthropic.json'));
@@ -70,23 +87,5 @@ describe('oauth-credentials', () => {
     mkdirSync(join(dir, 'oauth'), { recursive: true });
     writeFileSync(join(dir, 'oauth', 'anthropic.json'), JSON.stringify({ access: 'a' }));
     expect(loadOAuthCredentials(dir, 'anthropic')).toBeNull();
-  });
-
-  it('round-trips provider-specific extras (projectId, email)', () => {
-    saveOAuthCredentials(dir, 'google-antigravity', {
-      access: 'access-token',
-      refresh: 'refresh-token',
-      expires: Date.now() + 3600_000,
-      label: 'google-antigravity',
-      projectId: 'proj-123',
-      email: 'user@example.com',
-    });
-    const loaded = loadOAuthCredentials(dir, 'google-antigravity');
-    expect(loaded).not.toBeNull();
-    expect(loaded?.projectId).toBe('proj-123');
-    expect(loaded?.email).toBe('user@example.com');
-    // Required fields still present
-    expect(loaded?.access).toBe('access-token');
-    expect(loaded?.label).toBe('google-antigravity');
   });
 });

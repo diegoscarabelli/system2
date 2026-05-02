@@ -10,12 +10,40 @@ All System2 settings live in `~/.system2/config.toml`, created by `system2 onboa
 ## config.toml Reference
 
 ```toml
-# OAuth tier — subscription credentials, tried first
+# System2 Configuration
+# All System2 settings: LLM credentials (OAuth + API keys), per-agent
+# overrides, services, databases, and operational defaults.
+# Edited both programmatically by System2 (e.g. `system2 login` updates
+# `[llm.oauth]`) and manually by you. Changes apply on daemon restart.
+# Permissions: 0600 (owner read/write only — protects credentials).
+
+# ════════════════════════════════════════════════════════════════════════
+# LLM credentials — OAuth tier
+# ════════════════════════════════════════════════════════════════════════
+# OAuth providers and failover order. Subscription tokens live in
+# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.
+# This tier is tried first; the API-keys tier below is only used after
+# every OAuth credential is in cooldown.
+# Supported providers: anthropic, openai-codex, github-copilot.
+
 [llm.oauth]
 primary = "anthropic"
-fallback = []   # any of: anthropic, openai-codex, google-gemini-cli, google-antigravity, github-copilot
+fallback = []   # any of: anthropic, openai-codex, github-copilot
 
-# API key tier — billed per token, used after OAuth tier exhausted
+# Optional per-OAuth-provider model pin. When omitted, the resolver picks
+# the family flagship from pi-ai's catalog. Family rules:
+# https://github.com/diegoscarabelli/system2/blob/main/docs/configuration.md
+# Catalog of model IDs (use the exact `id` field when pinning):
+# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts
+[llm.oauth.anthropic]
+model = "claude-opus-4-7"
+
+# ════════════════════════════════════════════════════════════════════════
+# LLM credentials — API keys tier
+# ════════════════════════════════════════════════════════════════════════
+# Pay-per-token. Each provider can hold multiple keys; rotation across keys
+# and providers happens automatically on failures.
+
 [llm.api_keys]
 primary = "anthropic"
 fallback = ["google", "openai"]
@@ -25,6 +53,15 @@ keys = [
   { key = "sk-ant-...", label = "personal" },
   { key = "sk-ant-...", label = "work" },
 ]
+
+# Optional per-role model pins for the API-keys tier. Keys are role names
+# (guide, conductor, reviewer, narrator, worker). Overrides the default
+# from the role's frontmatter for the matched provider.
+# Catalog of model IDs (use the exact `id` field when pinning):
+# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts
+[llm.api_keys.anthropic.models]
+narrator = "claude-haiku-4-5-20251001"
+conductor = "claude-sonnet-4-6"
 
 [llm.api_keys.cerebras]
 keys = [{ key = "csk-...", label = "default" }]
@@ -60,60 +97,93 @@ base_url = "http://localhost:4000/v1"
 model = "my-model"
 compat_reasoning = true  # optional, default true
 
-# Per-role agent overrides (optional)
-# Override thinking_level, compaction_depth, or models for any agent role.
-# Only specified fields override the library defaults.
+# ════════════════════════════════════════════════════════════════════════
+# Per-agent behavior overrides
+# ════════════════════════════════════════════════════════════════════════
+# Tier-agnostic — applied whether the OAuth or API-keys tier is active.
+# For per-role MODEL pins, use [llm.api_keys.<provider>.models] (above).
+# For OAuth model pins, use [llm.oauth.<provider>] (above).
 [agents.guide]
 thinking_level = "medium"
 compaction_depth = 5
 
-[agents.guide.models]
-anthropic = "claude-opus-4-6"
-
-[agents.conductor.models]
-google = "gemini-3.1-pro-preview"
-
-# Service credentials
+# ════════════════════════════════════════════════════════════════════════
+# Services
+# ════════════════════════════════════════════════════════════════════════
 [services.brave_search]
 key = "BSA..."
 
-# Tool settings
+# ════════════════════════════════════════════════════════════════════════
+# Tools
+# ════════════════════════════════════════════════════════════════════════
 [tools.web_search]
 enabled = true
-max_results = 5
+# max_results = 5    # tunable knob; commented so accidental edits stay inert
 
-# Database connections (added during onboarding)
+# ════════════════════════════════════════════════════════════════════════
+# Databases
+# ════════════════════════════════════════════════════════════════════════
 # [databases.my_postgres]
 # type = "postgres"
 # database = "analytics"
 # user = "readonly"
 
-# Operational settings (defaults are fine for most users)
-[backup]
-cooldown_hours = 24    # Min hours between auto-backups
-max_backups = 3        # Max backup copies to keep
+# ════════════════════════════════════════════════════════════════════════
+# Operational settings
+# ════════════════════════════════════════════════════════════════════════
+# All values below are defaults pinned in code (src/cli/utils/config.ts:
+# DEFAULT_OPERATIONAL, DEFAULT_SESSION, DEFAULT_DELIVERY). Lines are
+# commented so accidental edits cannot change runtime behavior — to
+# tune a value, uncomment its section header AND the specific key, then
+# restart the daemon. Values left commented stay tied to the code default,
+# so an upgrade that bumps a default propagates automatically.
 
-[logs]
-rotation_threshold_mb = 10  # Log file rotation threshold
-max_archives = 5            # Max rotated log files
+# [backup]
+# # Hours between automatic backups (minimum: 1)
+# cooldown_hours = 24
+# # Maximum number of automatic backups to keep
+# max_backups = 3
 
-[scheduler]
-daily_summary_interval_minutes = 30  # Narrator summary frequency
+# [logs]
+# # Log file size threshold for rotation in MB
+# rotation_threshold_mb = 10
+# # Maximum number of archived log files to keep
+# max_archives = 5
 
-[chat]
-max_history_messages = 1000  # Max messages in chat history ring buffer
+# [scheduler]
+# # Minutes between daily summary runs
+# daily_summary_interval_minutes = 30
 
-[knowledge]
-budget_chars = 20000  # Max chars per knowledge file; Narrator condenses overruns
+# [chat]
+# # Maximum number of chat messages to keep in UI history
+# max_history_messages = 100
 
-[session]
-rotation_size_bytes = 10485760        # Rotation threshold (~10 MB); anchored if compaction exists, bare-bytes-tail otherwise
-archive_keep_count = 5                # Max .jsonl.archived files retained per agent's session directory
+# [knowledge]
+# # Maximum characters per knowledge file before truncation
+# budget_chars = 20000
 
-[delivery]
-max_bytes = 1048576                # Hard cap on inter-agent delivery wire size (~1 MB)
-catch_up_budget_bytes = 524288     # Producer budget for catch-up / daily-summary deliveries (~512 KB)
-narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Narrator-bound deliveries (~16 KB)
+# [session]
+# # Rotation threshold in bytes. Above this size, the JSONL is rotated.
+# # Anchored if a compaction anchor exists, bare-bytes-tail otherwise.
+# rotation_size_bytes = 10485760
+# # Max .jsonl.archived files retained per agent's session directory.
+# archive_keep_count = 5
+
+# [delivery]
+# # Hard cap on the size of any single inter-agent delivery, in bytes.
+# max_bytes = 1048576
+# # Total-size cap on the Narrator's catch-up prompt, in bytes. The daily-
+# # summary cron (and the trigger_project_story tool) assembles ONE delivery
+# # for the Narrator by gathering recent entries from agent session JSONL
+# # files (inter-agent messages, project log updates, DB changes since the
+# # Narrator's last run). If the assembled bundle would exceed this, the
+# # oldest entries are dropped first.
+# catch_up_budget_bytes = 524288
+# # Per-entry truncation cap applied while assembling the catch-up prompt
+# # above. Each individual JSONL entry's content is clipped to this size
+# # before concatenation, so one bloated entry (e.g. a worker that pasted a
+# # 1 MB tool result into a delivery) cannot eat the whole catch-up budget.
+# narrator_message_excerpt_bytes = 16384
 ```
 
 ## Sections
@@ -121,8 +191,10 @@ narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Nar
 | Section | Description | TypeScript Type |
 |---------|-------------|-----------------|
 | `[llm.api_keys]` | API-key tier: primary provider, fallback order, per-provider keys | `LlmConfig` |
+| `[llm.api_keys.<provider>.models]` | Per-role model pins for the API-keys tier (keys are role names) | `LlmProviderConfig.models` |
 | `[llm.oauth]` | OAuth tier: primary + fallback subscription providers (tried first) | `LlmOAuthConfig` |
-| `[agents.*]` | Per-role agent overrides (models, thinking, compaction) | `AgentsConfig` |
+| `[llm.oauth.<provider>]` | Optional per-OAuth-provider model pin (`model = "..."`) | `LlmOAuthProviderConfig` |
+| `[agents.*]` | Per-role behavior overrides (`thinking_level`, `compaction_depth`) | `AgentsConfig` |
 | `[services.*]` | External service credentials | `ServicesConfig` |
 | `[tools.*]` | Tool feature flags | `ToolsConfig` |
 | `[databases.*]` | External database connections | `DatabasesConfig` |
@@ -147,9 +219,7 @@ narrator_message_excerpt_bytes = 16384  # Per-custom_message content cap for Nar
 | `openai-compatible` | Any OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura) |
 | `openrouter` | Any model via OpenRouter (uses `provider/model` IDs) |
 | `xai` | Grok |
-| `openai-codex` | OAuth-only: ChatGPT subscription via OpenAI Codex CLI flow. Codex models only (gpt-5.x-codex variants). |
-| `google-gemini-cli` | OAuth-only: Google account / Gemini subscription via Google Gemini CLI flow. Gemini 2.x and 3 variants. |
-| `google-antigravity` | OAuth-only: Google account via Antigravity. Access to Gemini 3, Claude (Sonnet/Opus thinking variants), and GPT-OSS. |
+| `openai-codex` | OAuth-only: ChatGPT account via the OpenAI Codex CLI flow. Reaches the gpt-5.x line plus codex-specialized variants. |
 | `github-copilot` | OAuth-only: GitHub Copilot subscription. Mixed lineup including Claude Sonnet/Haiku and GPT-5 variants. |
 
 Each provider supports multiple labeled keys for rotation. Keys are tried in order until one succeeds.
@@ -160,9 +230,9 @@ To prevent oversized inter-agent deliveries from triggering provider context-ove
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `max_bytes` | 1048576 (1 MB) | Hard wire-size cap. Approximately 25% of a 1M-token context window. Producers should self-bound; this is the loud-fail boundary at which deliveries are rejected. |
-| `catch_up_budget_bytes` | 524288 (512 KB) | Producer-side budget for catch-up and daily-summary deliveries. Typically half of `max_bytes`, leaving headroom for headers, DB-changes sections, and SDK overhead. When activity exceeds this budget, oldest entries are dropped first. |
-| `narrator_message_excerpt_bytes` | 16384 (16 KB) | Per-`custom_message` content cap when feeding session JSONL into Narrator-bound deliveries (daily-summary cron and `trigger_project_story` tool). Prevents individual messages with oversized content from bloating the delivery. |
+| `max_bytes` | 1048576 (1 MB) | Hard cap on the size of any single inter-agent delivery, in bytes (~25% of a 1M-token context window). The loud-fail boundary at which a delivery is rejected outright. |
+| `catch_up_budget_bytes` | 524288 (512 KB) | Total-size cap on the Narrator's catch-up prompt. The daily-summary cron (and the `trigger_project_story` tool) assembles **one** delivery for the Narrator by gathering recent entries from agent session JSONL files (inter-agent messages, project log updates, DB changes since the Narrator's last run). Set to half of `max_bytes` by default to leave headroom for headers, DB-changes sections, and SDK overhead. When the assembled bundle would exceed this, the oldest entries are dropped first. |
+| `narrator_message_excerpt_bytes` | 16384 (16 KB) | Per-entry truncation cap applied **while assembling** the catch-up prompt above. Each individual JSONL entry's content (typically a `custom_message` between agents) is clipped to this size before concatenation, so one bloated entry (e.g. a worker that pasted a 1 MB tool result into a delivery) cannot eat the whole catch-up budget. Used by both the daily-summary cron and the `trigger_project_story` tool. |
 
 **Invariant:** `catch_up_budget_bytes` must be less than `max_bytes`. This is validated at startup; if violated, a warning is logged.
 
@@ -214,24 +284,37 @@ See [Agents](agents.md#authresolver-auth-resolverts) for implementation details.
 
 System2 has two auth tiers:
 
-- **OAuth tier**: subscription credentials (`[llm.oauth]`). Tried first. Five providers are supported as first-class OAuth IDs: `anthropic` (Claude Pro/Max), `openai-codex` (ChatGPT subscription via the Codex CLI flow), `google-gemini-cli` (Google account / Gemini subscription), `google-antigravity` (Google account via Antigravity, exposing Gemini 3, Claude thinking variants, and GPT-OSS), and `github-copilot` (Copilot subscription). Any of the five may be used as `primary` or in `fallback`, in any order.
-- **API key tier** — `[llm.api_keys].primary` + `fallback`, with per-provider keys nested at `[llm.api_keys.<provider>].keys`. Used after the OAuth tier is fully exhausted (every OAuth credential in cooldown). The legacy 0.2.x layout (`[llm].primary` + sibling `[llm.<provider>]`) is still parsed with a one-time deprecation warning; migrate by moving fields under `[llm.api_keys]`.
+- **OAuth tier**: subscription credentials (`[llm.oauth]`). Tried first. Three providers are supported as first-class OAuth IDs: `anthropic` (Claude Pro/Max), `openai-codex` (ChatGPT subscription via the Codex CLI flow), and `github-copilot` (Copilot subscription). Any of the three may be used as `primary` or in `fallback`, in any order.
+- **API key tier** — `[llm.api_keys].primary` + `fallback`, with per-provider keys nested at `[llm.api_keys.<provider>].keys`. Used after the OAuth tier is fully exhausted (every OAuth credential in cooldown).
 
 The OAuth tier is fully exhausted before the system drops into the API key tier — never interleaving. If `[llm.oauth]` is absent, system2 behaves exactly like an API-key-only setup.
 
 ### OAuth subscription support
 
-System2 delegates OAuth provider behavior to pi-ai's provider registry. `getOAuthProvider(id)` returns a small adapter that knows how to run the browser login flow, refresh access tokens, and surface a usable bearer for each of the five providers (`anthropic`, `openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`). The agent loop, custom tools, and multi-agent orchestration are unchanged across providers; only the auth path varies. The `[llm.oauth]` shape (`primary` + `fallback`) accepts any of the five provider IDs, in any order.
+System2 delegates OAuth provider behavior to pi-ai's provider registry. `getOAuthProvider(id)` returns a small adapter that knows how to run the browser login flow, refresh access tokens, and surface a usable bearer for each of the three providers (`anthropic`, `openai-codex`, `github-copilot`). The agent loop, custom tools, and multi-agent orchestration are unchanged across providers; only the auth path varies. The `[llm.oauth]` shape (`primary` + `fallback`) accepts any of the three provider IDs, in any order.
 
-**Credential shape.** Credentials are written to `~/.system2/oauth/<provider>.json` (mode 0600). The `OAuthCredentials` type has an open shape: providers that need extra context store it alongside the access/refresh tokens. Antigravity records `projectId` and the user's `email`; Gemini CLI records its own `projectId`; Copilot may record an `enterpriseDomain`. These extras are preserved across refreshes.
+> **Note:** pi-ai 0.71.0 (2026-04-30) removed `google-gemini-cli` and `google-antigravity` because Google has been disabling user accounts that authenticate via these flows from third-party tools (pi-mono#4017, pi-mono#3999). System2 aligns. If you have legacy `~/.system2/oauth/google-{gemini-cli,antigravity}.json` credential files, they are silently ignored at startup; safe to delete.
+
+**Credential shape.** Credentials are written to `~/.system2/oauth/<provider>.json` (mode 0600). The `OAuthCredentials` type has an open shape: providers that need extra context store it alongside the access/refresh tokens. Copilot may record an `enterpriseDomain`. These extras are preserved across refreshes.
 
 **Setup:** During `system2 onboard`, the first step asks whether to configure OAuth and lets you pick a provider. The chosen provider's browser flow runs; the resulting tokens are saved to `~/.system2/oauth/<provider>.json`.
 
 **Refresh:** OAuth access tokens expire on each provider's own schedule (Anthropic roughly hourly; the others vary). The daemon refreshes them automatically before each agent session creation and on 401 errors. Refreshed tokens are persisted back to the same file.
 
-**Anthropic-specific behavior.** The pi-ai SDK detects Anthropic OAuth tokens (substring match `sk-ant-oat`) and switches the Anthropic client to Bearer auth plus the Claude Code identity headers required by the Pro/Max subscription path. The other providers do not share that path: `openai-codex` posts to the OpenAI Responses API with Codex-CLI-shaped requests, `google-gemini-cli` and `google-antigravity` go through Google's Cloud Code Assist surface, and `github-copilot` hits Copilot's chat completions endpoint, each with its own request shape, headers, and project/enterprise scoping.
+**Anthropic-specific behavior.** The pi-ai SDK detects Anthropic OAuth tokens (substring match `sk-ant-oat`) and switches the Anthropic client to Bearer auth plus the Claude Code identity headers required by the Pro/Max subscription path. The other providers do not share that path: `openai-codex` posts to the OpenAI Responses API with Codex-CLI-shaped requests, and `github-copilot` hits Copilot's chat completions endpoint, each with its own request shape, headers, and project/enterprise scoping.
 
 **Failover:** A 401 on an OAuth credential triggers one refresh-and-retry. If refresh succeeds, the session reinitializes with the new token and the prompt retries. If refresh fails (or any other error), the OAuth credential enters cooldown and the next OAuth fallback is tried; once the OAuth tier is exhausted, the system drops into the API key tier.
+
+### Model selection
+
+Model selection differs between tiers, reflecting their cost models:
+
+- **OAuth tier (flat-fee subscription)**: one model per provider, used by every agent role. The model is picked from pi-ai's catalog by a family-prefix regex per provider (`claude-opus-*` for Anthropic, `gpt-X.Y[-codex]` for openai-codex, `gpt-X.Y` for github-copilot), so newer flagships propagate automatically when pi-ai bumps. Override with `[llm.oauth.<provider>] model = "..."` to pin a specific model — strictly validated against the catalog at startup.
+- **API-keys tier (pay-per-token)**: per-role × per-provider matrix. Defaults come from each agent's frontmatter `api_keys_models:` block (only api-keys-tier providers; OAuth-only providers are intentionally absent). Override per role with `[llm.api_keys.<provider>.models][<role>] = "..."` — also validated at startup.
+
+**Looking up model IDs.** The authoritative list of model IDs available for each provider is pi-ai's catalog: [`packages/ai/src/models.generated.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts) in the pi-mono repo. Use the exact `id` field there when pinning a model in `[llm.oauth.<provider>]` or `[llm.api_keys.<provider>.models]`. Startup validation cross-checks every pin against this catalog and surfaces typos with Levenshtein "did you mean" hints, so a misspelling fails at `system2 start` rather than at the first inference call.
+
+**Auto-fallback on entitlement errors (OAuth tier only).** When a model picked by the family-prefix resolver returns 403 or 404 (typical signals for "model not available on this plan" / "model not found"), the host steps the credential to a hardcoded fallback for the rest of the session and retries once. Defaults today: `claude-sonnet-4-6` for anthropic, `gpt-5.4` for openai-codex, `gpt-4.1` for github-copilot. The fallback fires only when the model came from the resolver — explicit user pins (`[llm.oauth.<provider>] model = "..."`) bubble the error up so misconfiguration surfaces loudly.
 
 **Caveats:**
 - Claude Pro/Max usage limits are sized for one human in Claude Code. A multi-agent system2 workload (Guide + Conductor + Reviewer + Workers + Narrator running concurrently) can hit the 5-hour message cap quickly. Configure the API key tier as fallback for sustained workloads.
@@ -240,7 +323,7 @@ System2 delegates OAuth provider behavior to pi-ai's provider registry. `getOAut
 
 ### Re-authenticating and managing credentials post-onboarding
 
-Use `system2 login` to manage OAuth credentials after onboarding. The command takes no positional arguments and is fully interactive: it presents a select of all five OAuth providers, with already-logged-in entries annotated. Behavior depends on the selection:
+Use `system2 login` to manage OAuth credentials after onboarding. The command takes no positional arguments and is fully interactive: it presents a select of all three OAuth providers, with already-logged-in entries annotated. Behavior depends on the selection:
 
 - **Not yet logged in.** The command runs the provider's browser OAuth flow, writes `~/.system2/oauth/<provider>.json`, and (if `[llm.oauth]` is missing or doesn't include the provider) auto-patches `config.toml` to enable the OAuth tier.
 - **Already logged in.** A 3-way menu opens: **re-login** (re-runs the OAuth flow, useful when a refresh token has been invalidated by signing out, password change, revoked grant, or idle-expiry), **remove** (deletes `~/.system2/oauth/<provider>.json` and removes the provider from `[llm.oauth]` in `config.toml`), or **cancel**.
@@ -260,41 +343,44 @@ You do not need to switch auth methods manually for cost or rate-limit reasons �
 
 ## Agent Overrides
 
-Each agent role (guide, conductor, narrator, reviewer, worker) has default settings defined in its library file (`src/server/agents/library/{role}.md`). You can override these defaults per role in config.toml under `[agents.<role>]` sections without modifying the source code.
+Each agent role (guide, conductor, narrator, reviewer, worker) has default settings defined in its library file (`src/server/agents/library/{role}.md`). The `[agents.<role>]` section in config.toml overrides the role's behavior knobs. Model pins live with their tier credentials, not under `[agents.<role>]`.
 
-### Overridable fields
+### Overridable fields under `[agents.<role>]`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `thinking_level` | `off`, `minimal`, `low`, `medium`, `high` | Controls extended thinking depth for the agent's LLM calls |
-| `compaction_depth` | integer >= 0 | Number of auto-compactions before pruning old context (0 disables) |
-| `models.<provider>` | string | Model ID to use when running on a specific provider |
+| `thinking_level` | `off`, `minimal`, `low`, `medium`, `high` | Extended-thinking depth for the agent's LLM calls. Tier-agnostic. |
+| `compaction_depth` | integer >= 0 | Number of auto-compactions before pruning old context (0 disables). Tier-agnostic. |
 
-All fields are optional. Only specified fields override the library defaults; unspecified fields keep their defaults.
+All fields are optional. Only specified fields override the library defaults.
+
+Per-role model pins live elsewhere:
+
+- **API-keys tier**: `[llm.api_keys.<provider>.models][<role>]` — see [Model selection](#model-selection).
+- **OAuth tier**: one model per provider via `[llm.oauth.<provider>] model = "..."`. The same model applies to every role on that provider.
 
 ### Example
 
 ```toml
-# Use Opus instead of Sonnet for the Guide on Anthropic
 [agents.guide]
 thinking_level = "medium"
 compaction_depth = 5
 
-[agents.guide.models]
-anthropic = "claude-opus-4-6"
+# Per-role model pins (API-keys tier) — keys are role names.
+[llm.api_keys.anthropic.models]
+narrator = "claude-haiku-4-5-20251001"
+guide = "claude-sonnet-4-6"
 
-# Use Gemini 3.1 Pro for the Conductor on Google
-[agents.conductor.models]
-google = "gemini-3.1-pro-preview"
+# OAuth tier — one model for all roles on this provider.
+[llm.oauth.anthropic]
+model = "claude-opus-4-7"
 ```
 
-`[agents.<role>.models]` accepts every provider ID listed in the [providers table](#llm-providers) **except** `openai-compatible`, including the four OAuth-only additions (`openai-codex`, `google-gemini-cli`, `google-antigravity`, `github-copilot`). `openai-compatible` is not supported as a per-agent model override (the model for that provider is set globally via `[llm.api_keys.openai-compatible].model`). At startup, every supported `(provider, modelId)` pair is cross-checked against pi-ai's `MODELS` catalog; unknown provider IDs throw with the list of valid providers, and unknown model IDs throw with did-you-mean suggestions on near-miss typos.
+Unknown provider IDs and model IDs are cross-checked against pi-ai's catalog at startup; unknown values throw with did-you-mean suggestions on near-miss typos.
 
 ### How it works
 
-During agent initialization, `AgentHost` reads the library frontmatter first, then applies any matching `[agents.<role>]` overrides from config.toml. For models, the merge is per-provider: `{ ...libraryModels, ...configModels }`. For scalar fields (`thinking_level`, `compaction_depth`), the config value replaces the library default.
-
-This means you can override a single provider's model without affecting the others, or change the thinking level for one role without touching the rest.
+During agent initialization, `AgentHost` reads the library frontmatter first, then applies any matching `[agents.<role>]` overrides from config.toml. Model resolution branches by the active tier: OAuth picks one model per provider via the resolver (or `[llm.oauth.<p>].model`); API-keys reads `[llm.api_keys.<p>.models][<role>]` first, then frontmatter `api_keys_models[<provider>]`.
 
 ## Databases
 

@@ -1,18 +1,12 @@
 /**
  * Agent model validation.
  *
- * Cross-checks every (provider, modelId) pair declared by agent configs
- * (frontmatter defaults + [agents.<role>.models] overrides) against pi-ai's
- * model catalog. Surfaces typos and retired model ids at startup with a
- * Levenshtein-nearest "did you mean" suggestion, instead of as a runtime API
- * failure deep inside an agent loop.
- *
- * Lives in src/shared/ so both the CLI (config-load time) and the server
- * (AgentHost.loadAgent time) can call it without crossing module boundaries.
+ * Cross-checks (provider, modelId) pairs from agent frontmatter against
+ * pi-ai's catalog. Surfaces typos at startup with a Levenshtein "did you
+ * mean" hint instead of failing deep in an agent loop.
  */
 
 import { getModels, getProviders } from '@mariozechner/pi-ai';
-import type { AgentsConfig } from './types/config.js';
 
 /**
  * Compute Levenshtein edit distance for did-you-mean suggestions on model id typos.
@@ -70,44 +64,34 @@ function nearestModelId(provider: string, attempted: string): string | undefined
   return best && best.dist <= 3 ? best.id : undefined;
 }
 
-/**
- * Providers that intentionally aren't in pi-ai's MODELS catalog and are still
- * acceptable as per-agent overrides — they would be skipped by the "unknown
- * provider" check rather than throwing. Currently empty: `openai-compatible`
- * is NOT a valid per-agent override (its model is set globally via
- * `[llm.api_keys.openai-compatible].model`), and `convertTomlAgents` already rejects it
- * at TOML-parse time. Kept as an explicit Set so future non-catalog providers
- * can be added without changing the validator's structure.
- */
+/** Providers whose models aren't in pi-ai's MODELS catalog by design (the
+ *  user supplies the model via config). Currently empty; reserved for future
+ *  non-catalog providers. `openai-compatible` is intentionally not here —
+ *  its model is set globally, never per-agent. */
 const DYNAMIC_PROVIDERS: ReadonlySet<string> = new Set();
 
 /**
- * Validate every (provider, modelId) pair declared in an agents config against
- * pi-ai's model catalog. Throws on first mismatch:
+ * Validate every (provider, modelId) pair against pi-ai's catalog.
+ * Throws with a Levenshtein "did you mean" hint on typos.
  *
- * - Unknown provider id → throws with the list of valid providers.
- * - Provider known but modelId unknown → throws with a Levenshtein-nearest
- *   "did you mean" suggestion.
- *
- * Skips known dynamic providers (DYNAMIC_PROVIDERS) since their model isn't
- * in pi-ai's catalog by design (the user supplies it in config).
+ * Input shape: role → provider → modelId. Skips DYNAMIC_PROVIDERS (their
+ * models aren't in pi-ai's catalog by design).
  */
-export function validateAgentModels(agents: AgentsConfig): void {
+export function validateAgentModels(models: Record<string, Partial<Record<string, string>>>): void {
   const knownProviders = getKnownProviderSet();
-  for (const [role, override] of Object.entries(agents)) {
-    if (!override.models) continue;
-    for (const [provider, modelId] of Object.entries(override.models)) {
+  for (const [role, providerMap] of Object.entries(models)) {
+    if (!providerMap) continue;
+    for (const [provider, modelId] of Object.entries(providerMap)) {
       if (!modelId) continue;
       if (DYNAMIC_PROVIDERS.has(provider)) continue;
       if (!knownProviders.has(provider)) {
         const validProviders = [...knownProviders, ...DYNAMIC_PROVIDERS].sort().join(', ');
         throw new Error(
-          `Agent "${role}" references unknown provider "${provider}" in models override. ` +
+          `Agent "${role}" references unknown provider "${provider}". ` +
             `Valid providers: ${validProviders}.`
         );
       }
       const ids = getCatalogIds(provider);
-      // ids is guaranteed defined here because provider is in knownProviders.
       if (ids && !ids.includes(modelId)) {
         const nearest = nearestModelId(provider, modelId);
         const suggestion = nearest ? ` Did you mean "${nearest}"?` : '';
@@ -121,8 +105,49 @@ export function validateAgentModels(agents: AgentsConfig): void {
 }
 
 /**
- * Reset the memoized catalogs. Test-only helper; do not call in production code.
- * Useful when tests stub pi-ai's getProviders/getModels and need a fresh read.
+ * Validate model pins from `[llm.*]` against pi-ai's catalog.
+ * Walks `oauth.providers[*].model` and `providers[*].models[*]`. Throws with
+ * a Levenshtein "did you mean" hint on typos.
+ */
+export function validateLlmModels(llm: import('./types/config.js').LlmConfig): void {
+  const knownProviders = getKnownProviderSet();
+
+  function check(label: string, provider: string, modelId: string): void {
+    if (DYNAMIC_PROVIDERS.has(provider)) return;
+    if (!knownProviders.has(provider)) {
+      const valid = [...knownProviders, ...DYNAMIC_PROVIDERS].sort().join(', ');
+      throw new Error(
+        `${label} references unknown provider "${provider}". Valid providers: ${valid}.`
+      );
+    }
+    const ids = getCatalogIds(provider);
+    if (ids && !ids.includes(modelId)) {
+      const nearest = nearestModelId(provider, modelId);
+      const suggestion = nearest ? ` Did you mean "${nearest}"?` : '';
+      throw new Error(
+        `${label} references model "${modelId}" for provider "${provider}", ` +
+          `which is not in pi-ai's catalog.${suggestion}`
+      );
+    }
+  }
+
+  if (llm.oauth) {
+    for (const [provider, sub] of Object.entries(llm.oauth.providers)) {
+      if (!sub?.model) continue;
+      check(`[llm.oauth.${provider}].model`, provider, sub.model);
+    }
+  }
+
+  for (const [provider, sub] of Object.entries(llm.providers)) {
+    if (!sub?.models) continue;
+    for (const [role, modelId] of Object.entries(sub.models)) {
+      check(`[llm.api_keys.${provider}.models].${role}`, provider, modelId);
+    }
+  }
+}
+
+/**
+ * Reset memoized catalogs. Test-only helper; not for production code.
  */
 export function _resetAgentModelsCacheForTests(): void {
   knownProviderSet = undefined;
