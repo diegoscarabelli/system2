@@ -29,9 +29,9 @@ import type {
   SessionConfig,
   ToolsConfig,
 } from '../shared/index.js';
-import type { OAuthCredentialsMap } from './agents/auth-resolver.js';
+import type { AuthTier, OAuthCredentialsMap } from './agents/auth-resolver.js';
 import { AuthResolver } from './agents/auth-resolver.js';
-import { AgentHost, MAX_DELIVERY_BYTES } from './agents/host.js';
+import { AgentHost, MAX_DELIVERY_BYTES, pickModelForTier } from './agents/host.js';
 import {
   loadOAuthCredentials,
   type OAuthCredentials,
@@ -779,8 +779,16 @@ export class Server {
   }
 
   /**
-   * Resolve the Narrator's model from its frontmatter for use by the ConversationSummarizer.
-   * Returns the model and a ModelRegistry, or null if resolution fails.
+   * Resolve the Narrator's model for use by the ConversationSummarizer. Mirrors
+   * AgentHost's tier-aware selection so the summarizer's compaction model
+   * matches what the Narrator actually runs on:
+   *   - OAuth tier: `[llm.oauth.<provider>] model` pin → resolveOAuthModel
+   *     (family flagship from pi-ai's catalog).
+   *   - API-keys tier: `[llm.api_keys.<provider>.models].narrator` →
+   *     `narrator.md` frontmatter `api_keys_models[<provider>]`.
+   * Walks OAuth providers first (in `[llm.oauth].primary` + fallback order),
+   * then api-keys providers, returning the first (provider, model) pair that
+   * resolves in the catalog.
    */
   private resolveNarratorModel(): { model: Model<Api>; registry: ModelRegistry } | null {
     // Agent definition files are co-located with AgentHost (dist/agents/library/)
@@ -793,17 +801,37 @@ export class Server {
     }
 
     const { data: meta } = matter(readFileSync(narratorPath, 'utf-8'));
-    const models = meta.models as Record<string, string> | undefined;
-    if (!models) return null;
-
+    const apiKeysModels = (meta.api_keys_models ?? {}) as Partial<Record<LlmProvider, string>>;
+    const llm = this.config.llmConfig;
     const modelRegistry = ModelRegistry.create(this.authResolver.createAuthStorage());
+    const noFallback: ReadonlySet<LlmProvider> = new Set();
 
-    for (const provider of this.authResolver.providerOrder) {
-      const modelId = models[provider];
-      if (modelId) {
-        const model = modelRegistry.find(provider, modelId);
-        if (model) return { model, registry: modelRegistry };
+    const tryProvider = (
+      tier: AuthTier,
+      provider: LlmProvider
+    ): { model: Model<Api>; registry: ModelRegistry } | null => {
+      const { id } = pickModelForTier({
+        tier,
+        provider,
+        role: 'narrator',
+        llmConfig: llm,
+        frontmatterModels: apiKeysModels,
+        fallbackUsedFor: noFallback,
+      });
+      if (!id) return null;
+      const model = modelRegistry.find(provider, id);
+      return model ? { model, registry: modelRegistry } : null;
+    };
+
+    if (llm.oauth) {
+      for (const p of [llm.oauth.primary, ...llm.oauth.fallback]) {
+        const result = tryProvider('oauth', p);
+        if (result) return result;
       }
+    }
+    for (const p of [llm.primary, ...llm.fallback]) {
+      const result = tryProvider('api_keys', p);
+      if (result) return result;
     }
 
     log.warn('[Server] No narrator model found for any configured provider');
