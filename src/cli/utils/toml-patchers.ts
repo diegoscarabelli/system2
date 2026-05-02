@@ -777,8 +777,17 @@ export function setBraveSearchKey(configPath: string, apiKey: string): { changed
   //      and the commented stub stays put — confusing duplicate schema).
   //   3. Neither exists → append at end.
   const braveLiveBlock = `[services.brave_search]\nkey = "${escapeTomlString(apiKey)}"\n`;
+  // Header-only detection: a bare `[services.brave_search]` with no body
+  // bypasses BRAVE_SECTION_PATTERN (which requires at least one key=value
+  // line). Without this, we'd fall through to stub or EOF append and end up
+  // with two `[services.brave_search]` headers in the file — duplicate
+  // tables, parsers reject. Same class as the [llm.api_keys] header-only
+  // guard in addProviderToApiKeysTier.
+  const braveHeaderOnly = /^\[services\.brave_search\]\s*$/m;
   if (BRAVE_SECTION_PATTERN.test(next)) {
     next = next.replace(BRAVE_SECTION_PATTERN, braveLiveBlock);
+  } else if (braveHeaderOnly.test(next)) {
+    next = next.replace(braveHeaderOnly, braveLiveBlock.replace(/\n$/, ''));
   } else {
     const braveStubPattern = /^# \[services\.brave_search\]\n# key\s*=\s*"[^"]*"\n/m;
     const braveStubReplaced = next.replace(braveStubPattern, braveLiveBlock);
@@ -790,17 +799,30 @@ export function setBraveSearchKey(configPath: string, apiKey: string): { changed
     }
   }
 
-  if (WEB_SEARCH_SECTION_PATTERN.test(next)) {
+  // Header-only detection (mirror of the Brave guard above): a bare
+  // `[tools.web_search]` with no body would otherwise be treated as
+  // "missing" and we'd append a second header — duplicate-table bug.
+  const webSearchHeaderOnly = /^\[tools\.web_search\]\s*$/m;
+  if (webSearchHeaderOnly.test(next) && !WEB_SEARCH_SECTION_PATTERN.test(next)) {
+    next = next.replace(
+      webSearchHeaderOnly,
+      '[tools.web_search]\nenabled = true\n# max_results = 5'
+    );
+  } else if (WEB_SEARCH_SECTION_PATTERN.test(next)) {
     // Section exists: force enabled = true. Otherwise a pre-existing
     // `enabled = false` would leave web search off even though the user just
     // set a Brave key (and the caller logs "web search tool enabled").
     // Match the section block, then rewrite its `enabled = …` line in place.
     //
     // The line-match regex tolerates an optional trailing `# comment`, so a
-    // line like `enabled = false  # disabled for now` rewrites cleanly. Without
-    // this, the rewrite would miss, the no-line branch would fire, and we'd
-    // emit a duplicate `enabled = true` line — producing invalid TOML.
-    const enabledLine = /^enabled\s*=\s*[a-zA-Z]+\s*(?:#[^\n]*)?$/m;
+    // line like `enabled = false  # disabled for now` rewrites cleanly. The
+    // value matcher is permissive (`[^\n#]+`) so hand-edited shapes the
+    // user might paste — `enabled = "false"` (string), `enabled = 0`
+    // (int), `enabled = nope` — all rewrite cleanly to a single canonical
+    // line. Without this, the rewrite would miss those shapes, the
+    // no-line branch would fire, and we'd insert a duplicate `enabled`
+    // key — producing invalid TOML (parsers reject duplicate keys).
+    const enabledLine = /^enabled\s*=\s*[^\n#]+(?:#[^\n]*)?$/m;
     next = next.replace(WEB_SEARCH_SECTION_PATTERN, (block) => {
       if (/^enabled\s*=\s*true\s*(?:#[^\n]*)?$/m.test(block)) return block;
       if (enabledLine.test(block)) {

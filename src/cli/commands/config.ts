@@ -242,9 +242,16 @@ async function handleOAuthProvider(
       return;
     }
     if (action === 'promote') {
-      const r = setProviderAsPrimary(configPath, target);
-      if (r.changed) p.log.info(`✓ Set ${target} as primary OAuth provider`);
-      else p.log.info(`${target} was already primary — no changes`);
+      // Wrapped: setProviderAsPrimary throws when the on-disk [llm.oauth]
+      // shape is unusual enough that the line-anchored regex misses. An
+      // uncaught throw here would crash the interactive session.
+      try {
+        const r = setProviderAsPrimary(configPath, target);
+        if (r.changed) p.log.info(`✓ Set ${target} as primary OAuth provider`);
+        else p.log.info(`${target} was already primary — no changes`);
+      } catch (err) {
+        p.log.error(err instanceof Error ? err.message : String(err));
+      }
       return;
     }
     // 'relogin' falls through to the standard login flow below.
@@ -288,10 +295,21 @@ async function handleOAuthProvider(
     return;
   }
 
-  // Auto-patch config.toml. The credential is useless until [llm.oauth] references it.
-  const patchResult = addProviderToOAuthTier(configPath, target);
-  if (patchResult.changed) {
-    p.log.info(`✓ Updated [llm.oauth] in ${configPath}`);
+  // Auto-patch config.toml. The credential is useless until [llm.oauth]
+  // references it. Wrapped: addProviderToOAuthTier throws when the on-disk
+  // shape is unusual (regex misses what TOML.parse finds). We've already
+  // saved the credential file, so a throw here would leave the user with a
+  // valid OAuth credential that the runtime can't see — surface the error
+  // and return to the submenu so they can re-run after fixing config.toml,
+  // instead of crashing the whole interactive session.
+  try {
+    const patchResult = addProviderToOAuthTier(configPath, target);
+    if (patchResult.changed) {
+      p.log.info(`✓ Updated [llm.oauth] in ${configPath}`);
+    }
+  } catch (err) {
+    p.log.error(err instanceof Error ? err.message : String(err));
+    return;
   }
 
   // Offer to promote, only when there's an existing different primary.
@@ -455,8 +473,15 @@ async function handleApiKeyProvider(configPath: string, target: LlmProvider): Pr
       p.log.info('Removal cancelled');
       return;
     }
-    const r = removeProviderFromApiKeysTier(configPath, target);
-    if (r.changed) p.log.info(`✓ Removed ${target} from [llm.api_keys]`);
+    // Wrapped: removeProviderFromApiKeysTier throws on unusual on-disk
+    // shapes (regex miss). An uncaught throw here would crash the
+    // interactive session right after the user confirmed.
+    try {
+      const r = removeProviderFromApiKeysTier(configPath, target);
+      if (r.changed) p.log.info(`✓ Removed ${target} from [llm.api_keys]`);
+    } catch (err) {
+      p.log.error(err instanceof Error ? err.message : String(err));
+    }
   }
 }
 

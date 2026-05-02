@@ -865,6 +865,49 @@ describe('Brave Search patchers', () => {
     expect(content).toMatch(/\[tools\.web_search\]\nenabled = true\n# max_results = 5\n/);
   });
 
+  it('setBraveSearchKey handles header-only [services.brave_search] / [tools.web_search] without duplicating headers', () => {
+    // Regression: BRAVE/WEB_SEARCH_SECTION_PATTERN require at least one
+    // key=value line after the header. A bare `[services.brave_search]` /
+    // `[tools.web_search]` (no body) bypassed that pattern, fell through to
+    // stub or EOF append, and produced two headers — duplicate-table TOML.
+    writeFileSync(
+      configPath,
+      `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n\n[services.brave_search]\n\n[tools.web_search]\n`
+    );
+    setBraveSearchKey(configPath, 'BSK-1');
+    const content = readFileSync(configPath, 'utf-8');
+    // Exactly one of each header (no duplicates); file parses cleanly.
+    expect(content.match(/^\[services\.brave_search\]/gm)).toHaveLength(1);
+    expect(content.match(/^\[tools\.web_search\]/gm)).toHaveLength(1);
+    const parsed = TOML.parse(content) as {
+      services?: { brave_search?: { key?: string } };
+      tools?: { web_search?: { enabled?: boolean } };
+    };
+    expect(parsed.services?.brave_search?.key).toBe('BSK-1');
+    expect(parsed.tools?.web_search?.enabled).toBe(true);
+  });
+
+  it('setBraveSearchKey rewrites a non-boolean enabled (e.g. enabled = "false") without duplicating', () => {
+    // Regression: the prior `[a-zA-Z]+` value matcher missed string,
+    // numeric, or other hand-edited values. The rewrite branch missed,
+    // the no-line branch fired, and we inserted a duplicate `enabled`
+    // key — which TOML parsers reject. The broadened `[^\n#]+` value
+    // matcher rewrites all of these to a single canonical line.
+    writeFileSync(
+      configPath,
+      `[services.brave_search]\nkey = "OLD"\n\n[tools.web_search]\nenabled = "false"\nmax_results = 5\n`
+    );
+    setBraveSearchKey(configPath, 'NEW');
+    const content = readFileSync(configPath, 'utf-8');
+    // Exactly one `enabled = …` line; file parses cleanly.
+    expect(content.match(/^enabled\s*=/gm)).toHaveLength(1);
+    const parsed = TOML.parse(content) as {
+      tools?: { web_search?: { enabled?: boolean; max_results?: number } };
+    };
+    expect(parsed.tools?.web_search?.enabled).toBe(true);
+    expect(parsed.tools?.web_search?.max_results).toBe(5);
+  });
+
   it('setBraveSearchKey rewrites enabled with trailing inline comment without duplicating the key', () => {
     // Regression: the previous regex required the line to end at \s*$ so a
     // trailing inline comment caused the rewrite branch to miss; the no-line
