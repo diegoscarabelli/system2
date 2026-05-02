@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LlmConfig } from '../../shared/index.js';
-import { formatTierBanner } from './start.js';
+import { formatTierBanner, hasConfiguredCredentialTier } from './start.js';
 
 describe('formatTierBanner', () => {
   it('shows only OAuth line when api-keys has no provider keys', () => {
@@ -68,5 +71,37 @@ describe('formatTierBanner', () => {
       oauth: { primary: 'anthropic', fallback: [], providers: {} },
     };
     expect(formatTierBanner(llm)).toEqual(['  OAuth tier:   anthropic']);
+  });
+});
+
+describe('hasConfiguredCredentialTier', () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'system2-start-test-'));
+    configPath = join(dir, 'config.toml');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('returns false for empty (commented-template) config', () => {
+    writeFileSync(configPath, `# [llm.oauth]\n# primary = "anthropic"\n`);
+    expect(hasConfiguredCredentialTier(configPath)).toBe(false);
+  });
+
+  it('returns true when [llm.oauth].primary is set', () => {
+    writeFileSync(configPath, `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n`);
+    expect(hasConfiguredCredentialTier(configPath)).toBe(true);
+  });
+
+  it('returns true when [llm.api_keys].primary is set', () => {
+    writeFileSync(
+      configPath,
+      `[llm.api_keys]\nprimary = "anthropic"\nfallback = []\n[llm.api_keys.anthropic]\nkeys = [{ key = "x", label = "y" }]\n`
+    );
+    expect(hasConfiguredCredentialTier(configPath)).toBe(true);
   });
 });

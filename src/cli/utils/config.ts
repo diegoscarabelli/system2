@@ -734,8 +734,8 @@ export function buildConfigToml(options: {
   services?: ServicesConfig;
   // tools.web_search.max_results is not accepted: the emitter always writes
   // it commented at DEFAULT_WEB_SEARCH_MAX_RESULTS, mirroring the operational
-  // sections. Only `enabled` reflects a user choice (yes/no to web search at
-  // onboarding) and gets emitted live.
+  // sections. Only `enabled` reflects a user choice (yes/no to web search via
+  // `system2 config`) and gets emitted live.
   tools?: { web_search?: { enabled: boolean } };
   databases?: DatabasesConfig;
   // Operational settings ([backup], [logs], [scheduler], [chat], [knowledge],
@@ -751,25 +751,30 @@ export function buildConfigToml(options: {
     '# System2 Configuration',
     '# All System2 settings: LLM credentials (OAuth + API keys), per-agent',
     '# overrides, services, databases, and operational defaults.',
-    '# Edited both programmatically by System2 (e.g. `system2 login` updates',
-    '# `[llm.oauth]`) and manually by you. Changes apply on daemon restart.',
+    '# Edited both programmatically by System2 (e.g. `system2 config` updates',
+    '# `[llm.oauth]` and `[llm.api_keys]`) and manually by you. Changes apply on daemon restart.',
     '# Permissions: 0600 (owner read/write only — protects credentials).',
     '',
   ];
 
-  if (options.llm) {
-    const { fallback, providers } = options.llm;
+  // Always emit the LLM section structure. When `options.llm` is omitted (e.g.
+  // `system2 init` writes an empty template), the live blocks fall through to
+  // commented stubs so the schema remains discoverable for hand-editing and so
+  // the file is patcher-ready for `system2 config`.
+  {
+    const fallback = options.llm?.fallback ?? [];
+    const providers = options.llm?.providers ?? {};
 
     // OAuth tier: emit divider + (live block | commented template) so users
-    // who skipped OAuth at onboarding still see how to enable it later.
+    // who skipped OAuth in `system2 config` still see how to enable it later.
     lines.push(...sectionHeader('LLM credentials — OAuth tier'));
     lines.push('# OAuth providers and failover order. Subscription tokens live in');
-    lines.push('# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.');
+    lines.push('# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 config`.');
     lines.push('# This tier is tried first; the API-keys tier below is only used after');
     lines.push('# every OAuth credential is in cooldown.');
     lines.push('# Supported providers: anthropic, openai-codex, github-copilot.');
     lines.push('');
-    if (options.llm.oauth) {
+    if (options.llm?.oauth) {
       lines.push('[llm.oauth]');
       lines.push(`primary = "${options.llm.oauth.primary}"`);
       const fb = options.llm.oauth.fallback.map((f) => `"${f}"`).join(', ');
@@ -799,7 +804,7 @@ export function buildConfigToml(options: {
         lines.push('');
       }
     } else {
-      lines.push('# Run `system2 login` to enable OAuth, or uncomment the block below and');
+      lines.push('# Run `system2 config` to enable OAuth, or uncomment the block below and');
       lines.push('# add credentials manually.');
       lines.push('# [llm.oauth]');
       lines.push('# primary = "anthropic"');
@@ -808,8 +813,7 @@ export function buildConfigToml(options: {
     }
 
     // API-keys tier. "Configured" means at least one provider has keys; a
-    // bare primary/fallback with no provider entries is not configured (the
-    // shape onboard synthesizes when the user opts out — see onboard.ts).
+    // bare primary/fallback with no provider entries is not configured.
     const apiKeysConfigured = Object.values(providers).some((p) => p && p.keys.length > 0);
 
     lines.push(...sectionHeader('LLM credentials — API keys tier'));
@@ -817,7 +821,7 @@ export function buildConfigToml(options: {
     lines.push('# and providers happens automatically on failures.');
     lines.push('');
 
-    if (apiKeysConfigured) {
+    if (apiKeysConfigured && options.llm) {
       lines.push('[llm.api_keys]');
       lines.push(`primary = "${options.llm.primary}"`);
       lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);

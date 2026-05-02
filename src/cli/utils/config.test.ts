@@ -732,7 +732,7 @@ describe('buildConfigToml — [llm.oauth] tier', () => {
     expect(toml).toContain('LLM credentials — OAuth tier');
     expect(toml).not.toMatch(/^\[llm\.oauth\]/m);
     expect(toml).toContain('# [llm.oauth]');
-    expect(toml).toContain('system2 login');
+    expect(toml).toContain('system2 config');
   });
 
   // Inline hints: per-role pins (api-keys) and per-provider model pins (OAuth)

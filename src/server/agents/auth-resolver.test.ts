@@ -358,7 +358,6 @@ function makeOAuthCreds(expiresInMs: number = 60 * 60_000): OAuthCredentials {
     access: 'sk-ant-oat-abc',
     refresh: 'rt-xyz',
     expires: Date.now() + expiresInMs,
-    label: 'claude-pro',
   };
 }
 
@@ -378,7 +377,9 @@ describe('AuthResolver — two-tier model', () => {
     const active = resolver.getActiveCredential();
     expect(active?.tier).toBe('oauth');
     expect(active?.provider).toBe('anthropic');
-    expect(active?.label).toBe('claude-pro');
+    // OAuth credentials no longer carry a per-credential label; the
+    // ActiveCredential label for OAuth is the provider id (mirrors getActiveKey).
+    expect(active?.label).toBe('anthropic');
   });
 
   it('falls back to keys tier when oauth tier is omitted', () => {
@@ -505,7 +506,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'new-access',
         refresh: 'rt-2',
         expires: Date.now() + 60 * 60_000,
-        label: 'claude-pro',
       }),
     });
     expect(refreshed.has('anthropic')).toBe(true);
@@ -557,7 +557,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'new',
         refresh: 'rt-2',
         expires: Date.now() + 60 * 60_000,
-        label: 'claude-pro',
       };
     };
     await Promise.all([
@@ -605,7 +604,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'recovered',
         refresh: 'rt-2',
         expires: Date.now() + 60 * 60_000,
-        label: 'claude-pro',
       }),
     });
     expect(refreshed.has('anthropic')).toBe(true);
@@ -629,7 +627,6 @@ describe('AuthResolver.ensureFresh', () => {
           access: 'forced-new',
           refresh: 'rt-new',
           expires: Date.now() + 60 * 60_000,
-          label: 'claude-pro',
         };
       },
       force: ['anthropic'],
@@ -690,7 +687,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'a1',
         refresh: 'rt-rotated',
         expires: Date.now() + 1000,
-        label: cred.label,
       }; // still expiring
     };
 
@@ -704,7 +700,6 @@ describe('AuthResolver.ensureFresh', () => {
         access: 'a2',
         refresh: 'rt-final',
         expires: Date.now() + 60 * 60_000,
-        label: cred.label,
       };
     };
 
@@ -721,5 +716,48 @@ describe('AuthResolver.ensureFresh', () => {
     expect(seen[1]).toBe('rt-rotated');
     // Final state should reflect the second refresh
     expect(resolver.getActiveOAuthCredential('anthropic')?.refresh).toBe('rt-final');
+  });
+
+  it('clears the OAuth cooldown after a successful refresh', async () => {
+    // Regression: a 401 from the daemon would put oauth:<provider>:0 into a
+    // 5-min cooldown. The OAuth refresh-and-retry path then refreshes the
+    // token, but if the cooldown isn't cleared, getActiveKey skips the
+    // refreshed credential as unavailable, createAuthStorage emits no entry
+    // for the provider, and pi-coding-agent throws "No API key found for
+    // <provider>" on the next prompt — even though the new token is healthy.
+    const cfg: LlmConfig = {
+      ...makeTwoTierConfig(),
+      oauth: { primary: 'anthropic', fallback: [], providers: {} },
+    };
+    const resolver = new AuthResolver(cfg, undefined, {
+      anthropic: makeOAuthCreds(60 * 60_000), // fresh — only refresh because force
+    });
+
+    // Simulate the 401-triggered cooldown set by AgentHost.handlePotentialError.
+    resolver.markKeyFailed('anthropic', 'auth', '401 invalid credentials', 0, 'oauth');
+    expect(resolver.isKeyInCooldown('anthropic', 0, 'oauth')).toBe(true);
+    // Tier-scoped: OAuth is unavailable while cooled down (the default
+    // getActiveKey would fall through to api_keys, masking the bug).
+    expect(resolver.getActiveKey('anthropic', 'oauth')).toBeUndefined();
+
+    await resolver.ensureFresh({
+      refresh: async (_provider, _cred): Promise<OAuthCredentials> => ({
+        access: 'fresh-access',
+        refresh: 'rt-new',
+        expires: Date.now() + 60 * 60_000,
+      }),
+      force: ['anthropic'],
+    });
+
+    expect(resolver.isKeyInCooldown('anthropic', 0, 'oauth')).toBe(false);
+    expect(resolver.getActiveKey('anthropic', 'oauth')).toMatchObject({
+      tier: 'oauth',
+      provider: 'anthropic',
+      keyIndex: 0,
+    });
+    // And the rebuilt auth storage now contains the refreshed credential, so
+    // the downstream pi-coding-agent reinit can see it.
+    const storage = resolver.createAuthStorage();
+    expect(storage.has('anthropic')).toBe(true);
   });
 });
