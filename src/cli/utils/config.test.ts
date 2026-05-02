@@ -10,6 +10,7 @@ import {
   convertTomlSession,
   DEFAULT_DELIVERY,
   DEFAULT_SESSION,
+  DEFAULT_WEB_SEARCH_MAX_RESULTS,
   validateAgentModels,
   validateLlmModels,
 } from './config.js';
@@ -42,18 +43,20 @@ describe('buildConfigToml', () => {
     expect(result).toContain('brave-key-123');
   });
 
-  it('includes tools section when web_search configured (max_results stays commented)', () => {
-    // Same model as operational settings: tunable knobs are commented even
-    // in the live block so accidental edits can't silently change behavior.
+  it('includes tools section when web_search configured (max_results emitted commented at code default)', () => {
+    // Same model as operational settings: tunable knobs are emitted commented
+    // at the code default so accidental edits can't silently change behavior.
     // The live `enabled = true` reflects the user's onboarding choice;
-    // max_results is the code default and stays inert until uncommented.
+    // max_results is intentionally not accepted as input (callers cannot pass
+    // a non-default value — the emitter would silently ignore it). To tune,
+    // user uncomments the `# max_results = 5` line in config.toml.
     const result = buildConfigToml({
-      tools: { web_search: { enabled: true, max_results: 10 } },
+      tools: { web_search: { enabled: true } },
     });
     expect(result).toContain('[tools.web_search]');
     expect(result).toContain('enabled = true');
-    expect(result).toContain('# max_results = 10');
-    expect(result).not.toMatch(/^max_results = 10$/m);
+    expect(result).toContain(`# max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
+    expect(result).not.toMatch(/^max_results = /m);
   });
 
   // Operational settings are always emitted as commented templates

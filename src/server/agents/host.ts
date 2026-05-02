@@ -201,7 +201,12 @@ export interface AgentHostConfig {
  *
  * Resolution order:
  *   - OAuth: user pin → OAUTH_FALLBACKS (if already stepped down) → resolveOAuthModel
- *   - API-keys: [llm.api_keys.<provider>.models][role] → frontmatter api_keys_models[provider]
+ *   - API-keys (most providers): [llm.api_keys.<provider>.models][role] → frontmatter api_keys_models[provider]
+ *   - API-keys (openai-compatible): the global `[llm.api_keys.openai-compatible].model`,
+ *     since the provider's model isn't in pi-ai's catalog and isn't pinned per-role.
+ *     Callers that hand the returned id to a `ModelRegistry` must also call
+ *     `registry.registerProvider('openai-compatible', { ... })` first — the
+ *     helper returns the id but does not mutate any registry.
  */
 export function pickModelForTier(args: {
   tier: AuthTier;
@@ -225,6 +230,12 @@ export function pickModelForTier(args: {
       return { id: OAUTH_FALLBACKS[provider], autoResolved: true };
     }
     return { id: resolveOAuthModel(provider), autoResolved: true };
+  }
+  // openai-compatible's model is configured globally under
+  // `[llm.api_keys.openai-compatible].model`, not per-role and not in
+  // pi-ai's catalog. Per-role pins / frontmatter don't apply.
+  if (provider === 'openai-compatible') {
+    return { id: llmConfig.providers['openai-compatible']?.model, autoResolved: false };
   }
   const id =
     llmConfig.providers[provider]?.models?.[role] ??

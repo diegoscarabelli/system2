@@ -832,6 +832,37 @@ export class Server {
     }
 
     const modelRegistry = ModelRegistry.create(this.authResolver.createAuthStorage());
+
+    // openai-compatible isn't in pi-ai's catalog; AgentHost dynamically
+    // registers it before each session. Mirror that here so the summarizer
+    // works for users on LiteLLM / vLLM / Ollama / Thaura. Skip silently
+    // when base_url is missing — the user's api-keys config is malformed
+    // and other call paths will surface the error.
+    if (active.provider === 'openai-compatible') {
+      const providerConfig = llm.providers['openai-compatible'];
+      if (!providerConfig?.base_url) {
+        log.warn(
+          '[Server] openai-compatible provider missing base_url; ConversationSummarizer disabled'
+        );
+        return null;
+      }
+      modelRegistry.registerProvider('openai-compatible', {
+        baseUrl: providerConfig.base_url,
+        api: 'openai-completions',
+        models: [
+          {
+            id,
+            name: id,
+            reasoning: providerConfig.compat_reasoning ?? true,
+            input: ['text'],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 128000,
+            maxTokens: 4096,
+          },
+        ],
+      });
+    }
+
     const model = modelRegistry.find(active.provider, id);
     if (!model) {
       log.warn(

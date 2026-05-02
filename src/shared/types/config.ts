@@ -95,7 +95,11 @@ export interface ServicesConfig {
 
 export interface WebSearchToolConfig {
   enabled: boolean;
-  max_results: number;
+  /** Optional. When omitted, callers fall back to DEFAULT_WEB_SEARCH_MAX_RESULTS
+   *  in src/cli/utils/config.ts. The buildConfigToml emitter never reads this
+   *  field — it always writes a commented `# max_results = <default>` line so
+   *  accidental edits stay inert until the user deliberately uncomments. */
+  max_results?: number;
 }
 
 export interface ToolsConfig {

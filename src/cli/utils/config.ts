@@ -182,6 +182,12 @@ interface TomlConfig {
   };
 }
 
+/** Default `max_results` for the web_search tool. The emitter always writes
+ *  this commented (mirrors the operational-sections model: code-pinned default,
+ *  user uncomments + edits to override). The loader falls back to this when
+ *  the toml field is absent. */
+export const DEFAULT_WEB_SEARCH_MAX_RESULTS = 5;
+
 /** Default delivery budget values. Must stay in sync with MAX_DELIVERY_BYTES,
  *  CATCH_UP_BUDGET_BYTES, and NARRATOR_MESSAGE_EXCERPT_BYTES in the server package. */
 export const DEFAULT_DELIVERY: DeliveryConfig = {
@@ -434,7 +440,7 @@ function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
   if (toml.web_search) {
     tools.web_search = {
       enabled: toml.web_search.enabled ?? false,
-      max_results: toml.web_search.max_results ?? 5,
+      max_results: toml.web_search.max_results ?? DEFAULT_WEB_SEARCH_MAX_RESULTS,
     };
   }
   return tools;
@@ -726,7 +732,11 @@ export function buildConfigToml(options: {
   llm?: LlmConfig;
   agents?: AgentsConfig;
   services?: ServicesConfig;
-  tools?: ToolsConfig;
+  // tools.web_search.max_results is not accepted: the emitter always writes
+  // it commented at DEFAULT_WEB_SEARCH_MAX_RESULTS, mirroring the operational
+  // sections. Only `enabled` reflects a user choice (yes/no to web search at
+  // onboarding) and gets emitted live.
+  tools?: { web_search?: { enabled: boolean } };
   databases?: DatabasesConfig;
   // Operational settings ([backup], [logs], [scheduler], [chat], [knowledge],
   // [session], [delivery]) are not accepted as input. They are always emitted
@@ -962,13 +972,13 @@ export function buildConfigToml(options: {
     lines.push(`enabled = ${options.tools.web_search.enabled}`);
     // max_results is a tunable with a code default; same model as operational
     // settings — keep commented so accidental edits cannot silently change it.
-    lines.push(`# max_results = ${options.tools.web_search.max_results}`);
+    lines.push(`# max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
     lines.push('');
   } else {
     lines.push('# Optional tool feature flags.');
     lines.push('# [tools.web_search]');
     lines.push('# enabled = true');
-    lines.push('# max_results = 5');
+    lines.push(`# max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
     lines.push('');
   }
 

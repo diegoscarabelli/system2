@@ -241,9 +241,12 @@ async function collectWebSearchConfig(): Promise<{
     process.exit(0);
   }
 
+  // max_results intentionally omitted: buildConfigToml emits it as a
+  // commented code-default and the loader falls back to the same default
+  // when the toml line is absent.
   return {
     services: { brave_search: { key: braveKey } },
-    tools: { web_search: { enabled: true, max_results: 5 } },
+    tools: { web_search: { enabled: true } },
   };
 }
 
