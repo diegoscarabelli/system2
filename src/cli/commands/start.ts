@@ -26,21 +26,41 @@ import { rotateLogIfNeeded } from '../utils/log-rotation.js';
  * Used by `start()` to refuse launching the daemon without credentials,
  * and steered toward `system2 config` for setup.
  */
-export function hasConfiguredCredentialTier(configPath: string): boolean {
-  if (!existsSync(configPath)) return false;
-  // Swallow parse errors and return false: callers report a friendly
-  // "no credentials configured" message and exit. The downstream loadConfig()
-  // also catches parse errors and falls back to defaults, so we don't want a
-  // raw TOML.parse stack trace to fire here before that path runs.
+/**
+ * Tri-state credential probe. Returns:
+ * - 'configured' when at least one of [llm.oauth].primary or [llm.api_keys].primary is set.
+ * - 'missing' when the config file is absent or has no live primary in either tier.
+ * - 'malformed' when TOML.parse fails (with the parse error attached).
+ *
+ * The tri-state lets `start()` print distinct messages for "you forgot to run
+ * `system2 config`" vs "your config.toml has a syntax error", instead of
+ * collapsing parse failures into a misleading "no credentials" message.
+ */
+export type CredentialTierStatus =
+  | { kind: 'configured' }
+  | { kind: 'missing' }
+  | { kind: 'malformed'; error: Error };
+
+export function probeCredentialTier(configPath: string): CredentialTierStatus {
+  if (!existsSync(configPath)) return { kind: 'missing' };
   let parsed: { llm?: { oauth?: { primary?: string }; api_keys?: { primary?: string } } };
   try {
     parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as typeof parsed;
-  } catch {
-    return false;
+  } catch (err) {
+    return { kind: 'malformed', error: err instanceof Error ? err : new Error(String(err)) };
   }
   const oauthPrimary = parsed.llm?.oauth?.primary;
   const apiKeysPrimary = parsed.llm?.api_keys?.primary;
-  return Boolean(oauthPrimary || apiKeysPrimary);
+  return oauthPrimary || apiKeysPrimary ? { kind: 'configured' } : { kind: 'missing' };
+}
+
+/**
+ * Boolean shim retained for the existing test surface and any external callers.
+ * Treats malformed configs as "not configured" — start() should call
+ * probeCredentialTier directly to distinguish the two failure modes.
+ */
+export function hasConfiguredCredentialTier(configPath: string): boolean {
+  return probeCredentialTier(configPath).kind === 'configured';
 }
 
 /**
@@ -92,7 +112,16 @@ export async function start(options: {
   // Step 2: at least one credential tier configured?
   // (init writes a fully-commented template, so a brand-new install fails this
   // check until `system2 config` adds an OAuth or API-key provider.)
-  if (!hasConfiguredCredentialTier(CONFIG_FILE)) {
+  // Distinguish "no credentials" from "config is malformed" so the error
+  // message points the user at the actual problem.
+  const tierStatus = probeCredentialTier(CONFIG_FILE);
+  if (tierStatus.kind === 'malformed') {
+    console.error(pc.red('✗ config.toml could not be parsed:'));
+    console.error(`  ${tierStatus.error.message}`);
+    console.error('Fix the syntax error, or run `system2 config` to manage credentials.');
+    process.exit(1);
+  }
+  if (tierStatus.kind === 'missing') {
     console.error(pc.red('✗ No LLM credentials configured.'));
     console.error('Run `system2 config` to set up an OAuth provider or API key provider.');
     process.exit(1);

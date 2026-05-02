@@ -766,6 +766,20 @@ describe('escapeTomlString', () => {
     expect(escapeTomlString('a\rb')).toBe('a\\rb');
   });
 
+  it('escapes C0 control chars (and DEL) as \\uXXXX', () => {
+    // Per TOML spec, raw control chars are illegal in basic strings. The
+    // catch-all in escapeTomlString must produce \uXXXX escapes for any C0
+    // control or DEL not already named (\b, \t, \n, \f, \r are special-cased).
+    expect(escapeTomlString('a b')).toBe('a\\u0000b');
+    expect(escapeTomlString('ab')).toBe('a\\u0001b');
+    expect(escapeTomlString('ab')).toBe('a\\u001fb');
+    expect(escapeTomlString('ab')).toBe('a\\u007fb');
+    // The escape round-trips through @iarna/toml back to the original char.
+    const toml = `[t]\nkey = "${escapeTomlString('ab')}"\n`;
+    const parsed = TOML.parse(toml) as { t?: { key?: string } };
+    expect(parsed.t?.key).toBe('ab');
+  });
+
   it('produces TOML that round-trips through TOML.parse without injection', () => {
     // Adversarial label: closing quote + injecting another key/value.
     const malicious = 'normal", primary = "evil';

@@ -27,16 +27,18 @@ vi.mock('@clack/prompts', async () => {
   };
 });
 
-// Mock daemon-running check to always be false.
-const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
-  throw new Error('process.exit called');
-}) as never);
-
 describe('system2 config (main menu navigation)', () => {
   let dir: string;
   let configPath: string;
+  // Spy is created per-suite and restored on teardown so the override doesn't
+  // leak into other test files in the same Vitest run (other tests that call
+  // process.exit would otherwise throw).
+  let exitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as never);
     dir = mkdtempSync(join(tmpdir(), 'system2-config-test-'));
     configPath = join(dir, 'config.toml');
     writeFileSync(configPath, `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n`);
@@ -44,11 +46,11 @@ describe('system2 config (main menu navigation)', () => {
     vi.mocked(p.confirm).mockReset();
     vi.mocked(p.password).mockReset();
     vi.mocked(p.text).mockReset();
-    exitSpy.mockClear();
   });
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+    exitSpy.mockRestore();
   });
 
   it('exits when the user picks "Done" on the main menu', async () => {

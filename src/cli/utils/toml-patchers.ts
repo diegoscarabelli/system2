@@ -31,14 +31,27 @@ import type { LlmKey, LlmProvider } from '../../shared/index.js';
  * Use the explicit character class `/[\b]/g` for the rare backspace case.
  */
 export function escapeTomlString(s: string): string {
-  return s
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/[\b]/g, '\\b')
-    .replace(/\t/g, '\\t')
-    .replace(/\n/g, '\\n')
-    .replace(/\f/g, '\\f')
-    .replace(/\r/g, '\\r');
+  return (
+    s
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/[\b]/g, '\\b')
+      .replace(/\t/g, '\\t')
+      .replace(/\n/g, '\\n')
+      .replace(/\f/g, '\\f')
+      .replace(/\r/g, '\\r')
+      // Catch-all: any remaining C0 control char (U+0000..U+001F minus those
+      // handled above, plus DEL U+007F) is illegal in a TOML basic string per
+      // spec. Emit as a \\uXXXX escape rather than dropping or leaving raw, so
+      // escapeTomlString can never produce invalid TOML for any input. The
+      // control-char range in the regex is intentional; biome's
+      // noControlCharactersInRegex would otherwise flag both U+0000 and U+007F.
+      .replace(
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char escape
+        /[\u0000-\u001f\u007f]/g,
+        (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
+      )
+  );
 }
 
 // ─── OAuth tier ───────────────────────────────────────────────────────────────
@@ -93,15 +106,28 @@ export function addProviderToOAuthTier(
 
   if (!oauth) {
     const insertion = `[llm.oauth]\nprimary = "${provider}"\nfallback = []\n`;
+    // Preferred: replace the commented stub buildConfigToml emits when no
+    // OAuth is configured (the 3 lines `# [llm.oauth]\n# primary = "..."\n
+    // # fallback = [...]`). Without this, the live block lands at EOF (or
+    // after [llm]) and the commented stub stays put — leaving a confusing
+    // duplicate schema on first `system2 config` run.
+    const stubReplaced = raw.replace(
+      /^# \[llm\.oauth\]\n# primary\s*=\s*"[^"]*"\n# fallback\s*=\s*\[[^\]]*\]\n/m,
+      insertion
+    );
+    if (stubReplaced !== raw) {
+      writeFileSync(configPath, stubReplaced);
+      return { changed: true };
+    }
+
     const lines = raw.split('\n');
     const llmHeaderIdx = lines.findIndex((l) => l.trim() === '[llm]');
     if (llmHeaderIdx === -1) {
-      // No [llm] block. Append at end (preserve trailing newline behavior).
+      // No [llm] block and no commented stub. Append at end.
       const sep = raw.endsWith('\n') ? '' : '\n';
       writeFileSync(configPath, `${raw}${sep}\n${insertion}`);
       return { changed: true };
     }
-    // Find end of [llm] block: next line that starts a new table, or EOF
     let insertIdx = lines.length;
     for (let i = llmHeaderIdx + 1; i < lines.length; i++) {
       if (/^\[/.test(lines[i].trim())) {
@@ -109,7 +135,6 @@ export function addProviderToOAuthTier(
         break;
       }
     }
-    // Skip any blank lines immediately before the next section so we insert *before* the blank line
     while (insertIdx > llmHeaderIdx + 1 && lines[insertIdx - 1].trim() === '') {
       insertIdx--;
     }
@@ -355,10 +380,26 @@ export function addProviderToApiKeysTier(
   const subsection = `\n[llm.api_keys.${provider}]\n${formatKeysBlock(keys)}\n`;
 
   if (!current) {
-    // Create [llm.api_keys] with this provider as primary, plus its sub-section.
-    const block = `\n[llm.api_keys]\nprimary = "${provider}"\nfallback = []\n${subsection}`;
+    const tierBlock = `[llm.api_keys]\nprimary = "${provider}"\nfallback = []\n`;
+    // Preferred: replace the commented stub buildConfigToml emits when no
+    // API-keys provider is configured (the 3 lines `# [llm.api_keys]\n
+    // # primary = "..."\n# fallback = [...]`). Without this, the live tier
+    // block lands at EOF and the commented stub stays put — leaving a
+    // confusing duplicate schema on first `system2 config` run.
+    const stubReplaced = raw.replace(
+      /^# \[llm\.api_keys\]\n# primary\s*=\s*"[^"]*"\n# fallback\s*=\s*\[[^\]]*\]\n/m,
+      tierBlock
+    );
+    if (stubReplaced !== raw) {
+      // The stub matched; append the sub-section at end of file (the commented
+      // example sub-section in the stub is retained and ignored at parse time).
+      const sep = stubReplaced.endsWith('\n') ? '' : '\n';
+      writeFileSync(configPath, `${stubReplaced}${sep}${subsection}`);
+      return { changed: true };
+    }
+    // No stub. Append both at end.
     const sep = raw.endsWith('\n') ? '' : '\n';
-    writeFileSync(configPath, `${raw}${sep}${block}`);
+    writeFileSync(configPath, `${raw}${sep}\n${tierBlock}${subsection}`);
     return { changed: true };
   }
 
@@ -391,7 +432,10 @@ function findSectionLineRange(lines: string[], headerLine: string): [number, num
   if (start === -1) return null;
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
-    if (/^\[/.test(lines[i])) {
+    // Trim consistency: `start` matched against `l.trim()`; the next-header
+    // detection has to do the same so an indented `[next]` is recognised as a
+    // section boundary and we don't run past it deleting unrelated content.
+    if (/^\[/.test(lines[i].trim())) {
       end = i;
       break;
     }
@@ -652,8 +696,13 @@ export function setBraveSearchKey(configPath: string, apiKey: string): { changed
   }
 
   if (!WEB_SEARCH_SECTION_PATTERN.test(next)) {
+    // max_results intentionally omitted: buildConfigToml emits it as a commented
+    // operational default (DEFAULT_WEB_SEARCH_MAX_RESULTS), and writing it live
+    // here would freeze the value at the time the user added the key, so future
+    // bumps of the code default wouldn't propagate. The loader supplies the
+    // default when the field is absent.
     const sep = next.endsWith('\n') ? '' : '\n';
-    next = `${next}${sep}\n[tools.web_search]\nenabled = true\nmax_results = 5\n`;
+    next = `${next}${sep}\n[tools.web_search]\nenabled = true\n`;
   }
 
   if (next === raw) return { changed: false };
