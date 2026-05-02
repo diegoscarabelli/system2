@@ -8,6 +8,7 @@ import { loginProvider } from '../../server/agents/oauth.js';
 import { saveOAuthCredentials } from '../../server/agents/oauth-credentials.js';
 import type { LlmProvider } from '../../shared/index.js';
 import { CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
+import { formatOAuthAuthMessage } from '../utils/oauth-format.js';
 import {
   addProviderToOAuthTier,
   readOAuthTier,
@@ -15,26 +16,16 @@ import {
   setProviderAsPrimary,
 } from '../utils/toml-patchers.js';
 
-// Re-export so existing tests in login.test.ts and any other callers keep
-// working until the test move (Task 5) and the eventual deletion (Task 14).
+// Re-export so existing tests in login.test.ts keep working until Task 14
+// deletes login.ts entirely.
 export {
   addProviderToOAuthTier,
   removeProviderFromOAuthTier,
   setProviderAsPrimary,
 } from '../utils/toml-patchers.js';
+export { formatOAuthAuthMessage } from '../utils/oauth-format.js';
 
-/**
- * Format the message shown when an OAuth provider needs browser auth.
- * Some providers (Anthropic, Codex) use a localhost callback flow and only
- * supply `url`; others (GitHub Copilot) use the device flow and supply an
- * `instructions` string with the user code that must be entered manually.
- * Returning a single formatted string lets login/onboard share the wording
- * and gives us a small testable surface for "don't drop the device code".
- */
-export function formatOAuthAuthMessage(url: string, instructions?: string): string {
-  const detail = instructions ? `\n${instructions}` : '';
-  return `Open this URL to authenticate (browser should open automatically):\n${url}${detail}`;
-}
+// formatOAuthAuthMessage moved to ../utils/oauth-format.ts (re-exported below).
 
 function isDaemonRunning(): boolean {
   const pidFile = join(SYSTEM2_DIR, 'server.pid');

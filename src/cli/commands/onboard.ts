@@ -25,7 +25,7 @@ import type {
   ToolsConfig,
 } from '../../shared/index.js';
 import { buildConfigToml, CONFIG_FILE, SYSTEM2_DIR, writeConfigFile } from '../utils/config.js';
-import { formatOAuthAuthMessage } from './login.js';
+import { formatOAuthAuthMessage } from '../utils/oauth-format.js';
 
 const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
