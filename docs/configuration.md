@@ -1,6 +1,6 @@
 # Configuration
 
-All System2 settings live in `~/.system2/config.toml`, created by `system2 onboard` with `0600` permissions (contains API keys).
+All System2 settings live in `~/.system2/config.toml`, created by `system2 init` with `0600` permissions (contains API keys). The recommended way to manage credentials and services is the interactive [`system2 config`](cli.md#system2-config) menu; hand-editing the file still works for advanced tweaks and per-agent overrides that aren't surfaced in the menu.
 
 **Key source files:**
 - `src/shared/types/config.ts`: TypeScript types
@@ -13,15 +13,16 @@ All System2 settings live in `~/.system2/config.toml`, created by `system2 onboa
 # System2 Configuration
 # All System2 settings: LLM credentials (OAuth + API keys), per-agent
 # overrides, services, databases, and operational defaults.
-# Edited both programmatically by System2 (e.g. `system2 login` updates
-# `[llm.oauth]`) and manually by you. Changes apply on daemon restart.
+# Edited both programmatically by System2 (e.g. `system2 config` updates
+# `[llm.oauth]`, `[llm.api_keys]`, and `[services.brave_search]`) and
+# manually by you. Changes apply on daemon restart.
 # Permissions: 0600 (owner read/write only — protects credentials).
 
 # ════════════════════════════════════════════════════════════════════════
 # LLM credentials — OAuth tier
 # ════════════════════════════════════════════════════════════════════════
 # OAuth providers and failover order. Subscription tokens live in
-# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.
+# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 config`.
 # This tier is tried first; the API-keys tier below is only used after
 # every OAuth credential is in cooldown.
 # Supported providers: anthropic, openai-codex, github-copilot.
@@ -297,7 +298,7 @@ System2 delegates OAuth provider behavior to pi-ai's provider registry. `getOAut
 
 **Credential shape.** Credentials are written to `~/.system2/oauth/<provider>.json` (mode 0600). The `OAuthCredentials` type has an open shape: providers that need extra context store it alongside the access/refresh tokens. Copilot may record an `enterpriseDomain`. These extras are preserved across refreshes.
 
-**Setup:** During `system2 onboard`, the first step asks whether to configure OAuth and lets you pick a provider. The chosen provider's browser flow runs; the resulting tokens are saved to `~/.system2/oauth/<provider>.json`.
+**Setup:** Run `system2 config` and pick **OAuth providers**, then select one of Anthropic, OpenAI Codex, or GitHub Copilot. The chosen provider's browser flow runs; the resulting tokens are saved to `~/.system2/oauth/<provider>.json` and `[llm.oauth]` in `config.toml` is auto-patched. (On a fresh install, `system2 init` lands you in this menu automatically.)
 
 **Refresh:** OAuth access tokens expire on each provider's own schedule (Anthropic roughly hourly; the others vary). The daemon refreshes them automatically before each agent session creation and on 401 errors. Refreshed tokens are persisted back to the same file.
 
@@ -321,22 +322,22 @@ Model selection differs between tiers, reflecting their cost models:
 - Programmatic use of Pro/Max credentials outside Claude Code is in a TOS gray area. Use at your own discretion.
 - Prompt caching is disabled on the OAuth path (the SDK strips `cache_control` from system prompts for OAuth tokens). Per-call billing still goes through the subscription.
 
-### Re-authenticating and managing credentials post-onboarding
+### Re-authenticating and managing credentials
 
-Use `system2 login` to manage OAuth credentials after onboarding. The command takes no positional arguments and is fully interactive: it presents a select of all three OAuth providers, with already-logged-in entries annotated. Behavior depends on the selection:
+Use `system2 config` to manage credentials at any time. The command is re-entrant and fully interactive: pick **OAuth providers** from the main menu to see all three OAuth providers (Anthropic, OpenAI Codex, GitHub Copilot) with already-logged-in entries annotated by their position in the failover chain. Behavior depends on the selection:
 
 - **Not yet logged in.** The command runs the provider's browser OAuth flow, writes `~/.system2/oauth/<provider>.json`, and (if `[llm.oauth]` is missing or doesn't include the provider) auto-patches `config.toml` to enable the OAuth tier.
-- **Already logged in.** A 3-way menu opens: **re-login** (re-runs the OAuth flow, useful when a refresh token has been invalidated by signing out, password change, revoked grant, or idle-expiry), **remove** (deletes `~/.system2/oauth/<provider>.json` and removes the provider from `[llm.oauth]` in `config.toml`), or **cancel**.
+- **Already logged in.** A contextual menu opens: **Re-login** (re-runs the OAuth flow; useful when a refresh token has been invalidated by signing out, password change, revoked grant, or idle-expiry), **Set as primary OAuth provider** (only shown when there's a different primary), **Remove** (deletes `~/.system2/oauth/<provider>.json` and removes the provider from `[llm.oauth]`), or **Cancel**. When two or more fallbacks are configured, a **Reorder fallbacks** entry appears in the OAuth submenu.
 
-If the daemon is running, restart it to pick up the change: `system2 stop && system2 start`.
+API-key providers are managed from the **API key providers** submenu with parallel actions (add another key, replace key, set as primary, remove provider, reorder fallbacks). Brave Search lives under **Services**. Esc inside any flow returns to the enclosing submenu without writing anything.
 
-The `system2 logout` command no longer exists. To remove a credential, run `system2 login`, select the already-logged-in provider, and choose **Remove**.
+If the daemon is running, restart it to pick up the change: `system2 stop && system2 start`. See [`system2 config`](cli.md#system2-config) in the CLI reference for the full menu structure and cancel/back semantics.
 
 ### Changing primary provider or switching auth method
 
 System2 reads `~/.system2/config.toml` only at startup. To change the primary provider, swap which tier is preferred, add or remove a fallback provider, or edit any other LLM configuration:
 
-1. Edit `~/.system2/config.toml` directly (or use `system2 login` for OAuth credential changes).
+1. Use `system2 config` for OAuth credentials, API keys, and services (Brave Search). For everything else (per-agent overrides, model pins, database connections, operational defaults), edit `~/.system2/config.toml` directly.
 2. Restart the daemon: `system2 stop && system2 start`.
 
 You do not need to switch auth methods manually for cost or rate-limit reasons — the two-tier failover handles that automatically. OAuth is tried first; once exhausted, the system drops to the API key tier without any user action. If a transient failure has put a credential into cooldown and you want to force the system to retry it sooner than the cooldown expiry, restart the daemon (which clears in-memory cooldowns).
@@ -557,7 +558,7 @@ Auto-backups: `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/`
 
 ## See Also
 
-- [CLI](cli.md): `system2 onboard` creates the config
+- [CLI](cli.md): `system2 init` creates the config; `system2 config` manages credentials and services
 - [Agents](agents.md): how LLM config drives provider selection
 - [Knowledge System](knowledge-system.md): knowledge directory details and file size budget
 - [Scheduler](scheduler.md): `daily_summary_interval_minutes`

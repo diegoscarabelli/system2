@@ -23,7 +23,7 @@ It exists to help people think more clearly about complex questions and empower 
 ### Prerequisites
 
 1. **[Node.js 20+](https://nodejs.org/)** and **[pnpm 8+](https://pnpm.io/installation)** (in a terminal, run `node -v` and `pnpm -v` to check)
-2. **An LLM credential** (at least one required). Two tiers, combinable, both configurable during onboarding:
+2. **An LLM credential** (at least one required). Two tiers, combinable, both configurable via `system2 config`:
    - **OAuth subscription support**: use your existing AI account. OAuth subscription is recommended for sustained workloads. Supported: [Anthropic](https://claude.com/pricing) (paid plan required), [OpenAI](https://chatgpt.com/pricing), and [GitHub Copilot](https://github.com/features/copilot/plans). Free tiers vary by provider — see each provider's pricing page.
    - **API keys**: an alternative tier. Generally costlier per use than an OAuth subscription; free-tier models avoid the cost but come with tight rate limits and higher latency. [OpenRouter](https://openrouter.ai/) gives access to multiple models with one key; Anthropic, Google, OpenAI, and others also work. You can add multiple keys for rotation and multiple providers for failover.
 
@@ -36,10 +36,10 @@ Open a terminal and run:
 
 ```bash
 pnpm add -g @diegoscarabelli/system2      # install System2 globally
-system2 onboard          # one-time setup (see below)
+system2 init             # one-time setup (see below)
 ```
 
-`system2 onboard` creates the `~/.system2/` directory and walks you through LLM credential setup (OAuth from any of the 3 supported subscriptions, API keys, or both, as described in Prerequisites) and optional Brave Search setup. Everything is saved to `~/.system2/config.toml`, which you can edit directly later.
+`system2 init` scaffolds `~/.system2/` (with `sessions/`, `projects/`, `artifacts/`, and a fully-commented `config.toml`) and immediately hands off to `system2 config` so you can add an LLM credential (OAuth from any of the 3 supported subscriptions, API keys, or both, as described in Prerequisites) and optional Brave Search key in the same flow. Everything is saved to `~/.system2/config.toml`, which you can edit directly later. `system2 init` refuses to overwrite an existing install: re-run `system2 config` to manage credentials, or move `~/.system2/` aside first to start fresh.
 
 ```bash
 system2 start            # starts the server and opens the browser
@@ -75,10 +75,10 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**OAuth credentials.** Use `system2 login` to manage OAuth subscriptions: it lists all 3 supported providers (already-logged-in ones are annotated) and you pick one. Selecting a fresh provider runs the auth flow; selecting an already-logged-in provider opens a contextual menu to re-login, remove, or cancel. Stop the daemon before running it, and restart afterward to pick up the change.
+**Credentials and services.** Use `system2 config` as the one-stop interactive menu for everything credential-related. The top-level menu has three submenus: **OAuth providers** (Anthropic Claude Pro/Max, OpenAI Codex / ChatGPT, GitHub Copilot — re-login, set as primary, remove, reorder fallbacks), **API key providers** (the 9 supported providers — add another key, replace key, set as primary, remove provider, reorder fallbacks), and **Services** (Brave Search — set, replace, or remove the key; the `web_search` tool is auto-enabled when a key is present). Esc inside a submenu or flow returns you to the previous menu; Esc at the top level exits. Stop the daemon before running it, and restart afterward to pick up the change.
 
 ```bash
-system2 login            # interactive: add, re-login, or remove an OAuth credential
+system2 config           # interactive: manage OAuth, API keys, and services
 ```
 
 **Upgrading.** Pull the latest release from npm:
@@ -107,7 +107,7 @@ pnpm update -g @diegoscarabelli/system2
 
 ## Configuration
 
-All settings live in `~/.system2/config.toml`, created by `system2 onboard`.
+All settings live in `~/.system2/config.toml`, created by `system2 init` and managed interactively by `system2 config` (hand-editing still works for advanced tweaks).
 
 - **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
 - **`[llm.api_keys]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation.
