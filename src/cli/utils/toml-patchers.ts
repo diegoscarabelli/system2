@@ -593,3 +593,49 @@ export function removeKeyFromApiKeyProvider(
   );
   return { changed: true };
 }
+
+// ─── Services: Brave Search ───────────────────────────────────────────────────
+
+const BRAVE_SECTION_PATTERN = /^\[services\.brave_search\][^\n]*\n(?:[^[#\s][^\n]*\n)+/m;
+const WEB_SEARCH_SECTION_PATTERN = /^\[tools\.web_search\][^\n]*\n(?:[^[#\s][^\n]*\n)+/m;
+
+/**
+ * Set or replace the Brave Search API key. Always also enables `[tools.web_search]`
+ * (Brave Search is useless without it). If `[tools.web_search]` already exists,
+ * its content is preserved (we only add it when it doesn't exist).
+ */
+export function setBraveSearchKey(configPath: string, apiKey: string): { changed: boolean } {
+  const raw = readFileSync(configPath, 'utf-8');
+  let next = raw;
+
+  if (BRAVE_SECTION_PATTERN.test(next)) {
+    next = next.replace(BRAVE_SECTION_PATTERN, `[services.brave_search]\nkey = "${apiKey}"\n`);
+  } else {
+    const sep = next.endsWith('\n') ? '' : '\n';
+    next = `${next}${sep}\n[services.brave_search]\nkey = "${apiKey}"\n`;
+  }
+
+  if (!WEB_SEARCH_SECTION_PATTERN.test(next)) {
+    const sep = next.endsWith('\n') ? '' : '\n';
+    next = `${next}${sep}\n[tools.web_search]\nenabled = true\nmax_results = 5\n`;
+  }
+
+  if (next === raw) return { changed: false };
+  writeFileSync(configPath, next);
+  return { changed: true };
+}
+
+/**
+ * Remove Brave Search and disable the web search tool by deleting both sections.
+ * No-op if neither section exists.
+ */
+export function removeBraveSearch(configPath: string): { changed: boolean } {
+  const raw = readFileSync(configPath, 'utf-8');
+  if (!BRAVE_SECTION_PATTERN.test(raw) && !WEB_SEARCH_SECTION_PATTERN.test(raw)) {
+    return { changed: false };
+  }
+  let next = raw.replace(BRAVE_SECTION_PATTERN, '').replace(WEB_SEARCH_SECTION_PATTERN, '');
+  next = next.replace(/\n{3,}/g, '\n\n');
+  writeFileSync(configPath, next);
+  return { changed: true };
+}

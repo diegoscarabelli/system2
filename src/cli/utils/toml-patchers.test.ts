@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   addKeyToApiKeyProvider,
   addProviderToApiKeysTier,
+  removeBraveSearch,
   removeKeyFromApiKeyProvider,
   removeProviderFromApiKeysTier,
   setApiKeyProviderAsPrimary,
   setApiKeysFallbackOrder,
+  setBraveSearchKey,
   setOAuthFallbackOrder,
 } from './toml-patchers.js';
 
@@ -376,5 +378,64 @@ describe('removeKeyFromApiKeyProvider', () => {
     expect(() => removeKeyFromApiKeyProvider(configPath, 'anthropic', 'personal')).toThrow(
       /cannot remove the last key/
     );
+  });
+});
+
+describe('Brave Search patchers', () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'system2-toml-test-'));
+    configPath = join(dir, 'config.toml');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('setBraveSearchKey creates [services.brave_search] and enables [tools.web_search]', () => {
+    writeFileSync(configPath, `[llm]\n`);
+    const result = setBraveSearchKey(configPath, 'BSK-test-1');
+    expect(result.changed).toBe(true);
+    const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
+      services?: { brave_search?: { key?: string } };
+      tools?: { web_search?: { enabled?: boolean; max_results?: number } };
+    };
+    expect(parsed.services?.brave_search?.key).toBe('BSK-test-1');
+    expect(parsed.tools?.web_search?.enabled).toBe(true);
+  });
+
+  it('setBraveSearchKey replaces existing key in place', () => {
+    writeFileSync(
+      configPath,
+      `[services.brave_search]\nkey = "OLD"\n\n[tools.web_search]\nenabled = true\nmax_results = 5\n`
+    );
+    const result = setBraveSearchKey(configPath, 'NEW');
+    expect(result.changed).toBe(true);
+    const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
+      services?: { brave_search?: { key?: string } };
+    };
+    expect(parsed.services?.brave_search?.key).toBe('NEW');
+  });
+
+  it('removeBraveSearch deletes both sections', () => {
+    writeFileSync(
+      configPath,
+      `[services.brave_search]\nkey = "BSK"\n\n[tools.web_search]\nenabled = true\nmax_results = 5\n`
+    );
+    const result = removeBraveSearch(configPath);
+    expect(result.changed).toBe(true);
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).not.toMatch(/\[services\.brave_search\]/);
+    expect(content).not.toMatch(/\[tools\.web_search\]/);
+  });
+
+  it('removeBraveSearch is a no-op when sections absent', () => {
+    writeFileSync(configPath, `[llm]\n`);
+    const before = readFileSync(configPath, 'utf-8');
+    const result = removeBraveSearch(configPath);
+    expect(result.changed).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
   });
 });
