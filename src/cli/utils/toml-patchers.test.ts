@@ -840,6 +840,31 @@ describe('Brave Search patchers', () => {
     expect(content.match(/^\[tools\.web_search\]/gm)).toHaveLength(1);
   });
 
+  it('setBraveSearchKey preserves the # max_results commented hint when stub-replacing', () => {
+    // Regression: an earlier version of the stub-replace path stripped the
+    // `# max_results = 5` line entirely, leaving the user with no visible
+    // reference to the tunable. Now the line is preserved (still commented,
+    // so the loader's default propagates) so users can see/uncomment it.
+    writeFileSync(
+      configPath,
+      `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n\n# [services.brave_search]\n# key = "BSA..."\n\n# [tools.web_search]\n# enabled = true\n# max_results = 5\n`
+    );
+    setBraveSearchKey(configPath, 'BSK-real-key');
+    const content = readFileSync(configPath, 'utf-8');
+    // Live web_search block contains enabled = true and the max_results hint.
+    expect(content).toMatch(/^\[tools\.web_search\]\nenabled = true\n# max_results = 5$/m);
+  });
+
+  it('setBraveSearchKey emits the # max_results hint on the EOF-append path too', () => {
+    // Parity check: when there's no commented stub (e.g. a hand-written
+    // partial config), the EOF-append path should still include the hint
+    // so users are exposed to the tunable consistently.
+    writeFileSync(configPath, `[llm]\n`);
+    setBraveSearchKey(configPath, 'BSK-1');
+    const content = readFileSync(configPath, 'utf-8');
+    expect(content).toMatch(/\[tools\.web_search\]\nenabled = true\n# max_results = 5\n/);
+  });
+
   it('setBraveSearchKey rewrites enabled with trailing inline comment without duplicating the key', () => {
     // Regression: the previous regex required the line to end at \s*$ so a
     // trailing inline comment caused the rewrite branch to miss; the no-line

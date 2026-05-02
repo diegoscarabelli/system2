@@ -813,19 +813,29 @@ export function setBraveSearchKey(configPath: string, apiKey: string): { changed
     // No live `[tools.web_search]`. Two placements, mirrored from Brave above:
     // try the commented stub first (header + commented enabled + commented
     // max_results, as buildConfigToml emits it), fall through to EOF append.
-    // max_results intentionally omitted from the live block: buildConfigToml
-    // emits it as a commented operational default, and writing it live here
-    // would freeze the value at the time the user added the key, so future
-    // bumps of the code default wouldn't propagate.
-    const webSearchLiveBlock = `[tools.web_search]\nenabled = true\n`;
+    //
+    // We deliberately PRESERVE the `# max_results = N` line as a commented
+    // hint so the user can still see/uncomment the tunable. Without this,
+    // stub replacement strips the line entirely and there's no visible
+    // reference to max_results in the file. Capturing the original commented
+    // line (rather than hard-coding `# max_results = 5`) keeps the value in
+    // sync with whatever buildConfigToml emitted at init time.
     const webSearchStubPattern =
-      /^# \[tools\.web_search\]\n# enabled\s*=\s*[a-zA-Z]+\n# max_results\s*=\s*\d+\n/m;
-    const webSearchStubReplaced = next.replace(webSearchStubPattern, webSearchLiveBlock);
+      /^# \[tools\.web_search\]\n# enabled\s*=\s*[a-zA-Z]+\n(# max_results\s*=\s*\d+\n)/m;
+    const webSearchStubReplaced = next.replace(
+      webSearchStubPattern,
+      (_, commentedMaxResults: string) =>
+        `[tools.web_search]\nenabled = true\n${commentedMaxResults}`
+    );
     if (webSearchStubReplaced !== next) {
       next = webSearchStubReplaced;
     } else {
+      // No stub. Append a minimal live block at EOF. max_results is
+      // omitted (loader supplies the default); for parity with the stub-
+      // replace path, also include the commented hint so the user has a
+      // visible reference to the tunable.
       const sep = next.endsWith('\n') ? '' : '\n';
-      next = `${next}${sep}\n${webSearchLiveBlock}`;
+      next = `${next}${sep}\n[tools.web_search]\nenabled = true\n# max_results = 5\n`;
     }
   }
 
