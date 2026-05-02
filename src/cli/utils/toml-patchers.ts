@@ -16,6 +16,31 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import TOML from '@iarna/toml';
 import type { LlmKey, LlmProvider } from '../../shared/index.js';
 
+/**
+ * Escape a string for inclusion in a TOML basic (double-quoted) string. User
+ * input (API keys, labels, URLs) can legitimately contain `\`, `"`, or control
+ * characters; without escaping these would produce invalid TOML or, in
+ * adversarial cases, let an attacker inject trailing TOML syntax. Provider IDs
+ * come from a fixed enum (`LlmProvider`) and don't need escaping, but
+ * labels/keys/urls do.
+ *
+ * Escape order matters: backslash MUST be replaced first or every later
+ * substitution that introduces a `\` would be re-escaped on the next pass.
+ *
+ * Note: `/\b/g` in a regex is a word boundary, NOT the backspace control char.
+ * Use the explicit character class `/[\b]/g` for the rare backspace case.
+ */
+export function escapeTomlString(s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/[\b]/g, '\\b')
+    .replace(/\t/g, '\\t')
+    .replace(/\n/g, '\\n')
+    .replace(/\f/g, '\\f')
+    .replace(/\r/g, '\\r');
+}
+
 // ─── OAuth tier ───────────────────────────────────────────────────────────────
 
 /**
@@ -291,12 +316,15 @@ export function readApiKeysTier(
 }
 
 /**
- * Format a `keys = [...]` array as a multi-line block for inclusion in a sub-section.
+ * Format a `keys = [...]` array as a multi-line block for inclusion in a
+ * sub-section. Both `key` and `label` are user input — escape via
+ * `escapeTomlString` so backslashes/quotes/control characters can't produce
+ * invalid TOML or inject trailing syntax.
  */
 function formatKeysBlock(keys: LlmKey[]): string {
   const lines = ['keys = ['];
   for (const k of keys) {
-    lines.push(`  { key = "${k.key}", label = "${k.label}" },`);
+    lines.push(`  { key = "${escapeTomlString(k.key)}", label = "${escapeTomlString(k.label)}" },`);
   }
   lines.push(']');
   return lines.join('\n');
@@ -352,9 +380,11 @@ export function addProviderToApiKeysTier(
 
 /**
  * Find the line range [start, end) for a section starting with `headerLine`.
- * `end` is the index of the next section header line, or `lines.length`.
- * Trailing blank lines BEFORE the next header are included in the range so
- * that removing the section removes its blank-line padding.
+ * `end` is the index of the next section header line, or `lines.length`,
+ * and is rolled back to skip any trailing blank lines that visually belong
+ * to the next section (a divider's blank-line gutter). Removing this range
+ * leaves the next section's leading blank lines intact, so dividers and
+ * spacing aren't accidentally consumed.
  */
 function findSectionLineRange(lines: string[], headerLine: string): [number, number] | null {
   const start = lines.findIndex((l) => l.trim() === headerLine);
@@ -580,7 +610,8 @@ export function removeKeyFromApiKeyProvider(
   if (newKeys.length === existing.length) return { changed: false };
   if (newKeys.length === 0) {
     throw new Error(
-      `cannot remove the last key for ${provider}; use removeProviderFromApiKeysTier instead`
+      `cannot remove the last key for ${provider}; use removeProviderFromApiKeysTier instead. ` +
+        'To swap the value while keeping the label, use replaceKeyInApiKeyProvider.'
     );
   }
   const pattern = buildKeysBlockPattern(provider);
@@ -609,10 +640,13 @@ export function setBraveSearchKey(configPath: string, apiKey: string): { changed
   let next = raw;
 
   if (BRAVE_SECTION_PATTERN.test(next)) {
-    next = next.replace(BRAVE_SECTION_PATTERN, `[services.brave_search]\nkey = "${apiKey}"\n`);
+    next = next.replace(
+      BRAVE_SECTION_PATTERN,
+      `[services.brave_search]\nkey = "${escapeTomlString(apiKey)}"\n`
+    );
   } else {
     const sep = next.endsWith('\n') ? '' : '\n';
-    next = `${next}${sep}\n[services.brave_search]\nkey = "${apiKey}"\n`;
+    next = `${next}${sep}\n[services.brave_search]\nkey = "${escapeTomlString(apiKey)}"\n`;
   }
 
   if (!WEB_SEARCH_SECTION_PATTERN.test(next)) {
@@ -637,5 +671,47 @@ export function removeBraveSearch(configPath: string): { changed: boolean } {
   let next = raw.replace(BRAVE_SECTION_PATTERN, '').replace(WEB_SEARCH_SECTION_PATTERN, '');
   next = next.replace(/\n{3,}/g, '\n\n');
   writeFileSync(configPath, next);
+  return { changed: true };
+}
+
+/**
+ * Replace a key (by label) in `[llm.api_keys.<provider>]` without touching the
+ * tier ordering. Distinct from remove+add: the latter has to go through
+ * `removeProviderFromApiKeysTier` + `addProviderToApiKeysTier` when the provider
+ * has only one key, which mutates `[llm.api_keys].fallback` (and possibly
+ * `primary`). This patcher rewrites the keys array in place atomically, so
+ * tier order is preserved regardless of how many keys the provider has.
+ *
+ * Throws if the sub-section or label doesn't exist.
+ */
+export function replaceKeyInApiKeyProvider(
+  configPath: string,
+  provider: LlmProvider,
+  label: string,
+  newKey: string
+): { changed: boolean } {
+  const raw = readFileSync(configPath, 'utf-8');
+  const parsed = TOML.parse(raw) as {
+    llm?: { api_keys?: Record<string, unknown> };
+  };
+  const sub = parsed.llm?.api_keys?.[provider] as { keys?: LlmKey[] } | undefined;
+  if (!sub) {
+    throw new Error(`[llm.api_keys.${provider}] not found in ${configPath}`);
+  }
+  const existing = sub.keys ?? [];
+  const target = existing.find((k) => k.label === label);
+  if (!target) {
+    throw new Error(`label "${label}" not found for ${provider}`);
+  }
+  if (target.key === newKey) return { changed: false };
+  const newKeys = existing.map((k) => (k.label === label ? { key: newKey, label } : k));
+  const pattern = buildKeysBlockPattern(provider);
+  if (!pattern.test(raw)) {
+    throw new Error(`Could not locate keys array for ${provider} in ${configPath}`);
+  }
+  writeFileSync(
+    configPath,
+    raw.replace(pattern, `$1${formatKeysBlock(newKeys).slice('keys = '.length)}`)
+  );
   return { changed: true };
 }

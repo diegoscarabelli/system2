@@ -96,7 +96,7 @@ export class AuthResolver {
    */
   private validateConfig(config: LlmConfig): LlmConfig {
     if (!config.primary || !config.providers) {
-      throw new Error('Invalid LLM configuration. Run "system2 onboard" to reconfigure.');
+      throw new Error('Invalid LLM configuration. Run "system2 config" to reconfigure.');
     }
     return config;
   }

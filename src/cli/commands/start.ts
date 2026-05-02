@@ -75,19 +75,29 @@ export async function start(options: {
   noBrowser?: boolean;
   foreground?: boolean;
 }): Promise<void> {
-  // Check if onboarded
-  const config = loadConfig();
-  if (!config.llm) {
-    console.error('Error: System2 has not been onboarded yet.');
-    console.error('Please run: system2 onboard');
+  // Step 1: install present?
+  if (!existsSync(CONFIG_FILE)) {
+    console.error('Error: System2 is not initialized.');
+    console.error('Please run: system2 init');
     process.exit(1);
   }
 
-  // Refuse to launch when neither [llm.oauth].primary nor [llm.api_keys].primary
-  // is configured. The user-facing fix path is `system2 config`.
+  // Step 2: at least one credential tier configured?
+  // (init writes a fully-commented template, so a brand-new install fails this
+  // check until `system2 config` adds an OAuth or API-key provider.)
   if (!hasConfiguredCredentialTier(CONFIG_FILE)) {
     console.error(pc.red('✗ No LLM credentials configured.'));
     console.error('Run `system2 config` to set up an OAuth provider or API key provider.');
+    process.exit(1);
+  }
+
+  // Step 3: load + validate. By this point both checks above have passed, so
+  // config.llm should be present. Defensive guard in case the toml schema is
+  // malformed in a way the credential check missed (e.g. legacy 0.2.x layout).
+  const config = loadConfig();
+  if (!config.llm) {
+    console.error('Error: config.toml has credentials but [llm] could not be parsed.');
+    console.error('Run `system2 config` to verify the schema, or edit config.toml manually.');
     process.exit(1);
   }
 
@@ -118,12 +128,10 @@ export async function start(options: {
 
   const tierLines = formatTierBanner(config.llm);
   if (tierLines.length === 0) {
-    // Onboarding enforces "at least one auth tier configured"; reaching
-    // here means config.toml was edited to remove all credentials.
-    console.error(
-      'Error: No auth tier configured. Add OAuth credentials via `system2 login` ' +
-        'or API keys to `[llm.api_keys.<provider>].keys` in config.toml.'
-    );
+    // Defensive: hasConfiguredCredentialTier above already gates on this, but
+    // keep the explicit error in case formatTierBanner's heuristic diverges
+    // from hasConfiguredCredentialTier's primary-only check.
+    console.error('Error: No auth tier configured. Run `system2 config` to add credentials.');
     process.exit(1);
   }
 

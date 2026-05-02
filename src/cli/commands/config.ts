@@ -31,12 +31,13 @@ import {
   addKeyToApiKeyProvider,
   addProviderToApiKeysTier,
   addProviderToOAuthTier,
+  escapeTomlString,
   readApiKeysTier,
   readOAuthTier,
   removeBraveSearch,
-  removeKeyFromApiKeyProvider,
   removeProviderFromApiKeysTier,
   removeProviderFromOAuthTier,
+  replaceKeyInApiKeyProvider,
   setApiKeyProviderAsPrimary,
   setApiKeysFallbackOrder,
   setBraveSearchKey,
@@ -415,27 +416,11 @@ async function handleApiKeyProvider(configPath: string, target: LlmProvider): Pr
       message: `Enter the new key for "${labelChoice}":`,
     })) as string | symbol;
     if (p.isCancel(newKeyValue) || !newKeyValue) return;
-    // Two-step: remove the old key, then re-add with the same label.
-    // addKeyToApiKeyProvider rejects duplicate labels, so we have to remove first.
+    // Replace in place via the dedicated patcher: works whether the provider
+    // has 1 key or many, and never mutates [llm.api_keys].primary/.fallback
+    // (the previous remove+add dance did, when only one key existed).
     try {
-      // Pre-flight: if this is the only key, removeKeyFromApiKeyProvider would
-      // throw. Add first then remove the old by label collision check is not
-      // possible (same label). So special-case: if only one key, write the
-      // sub-section keys array directly via add+remove dance is impossible.
-      // Pragma: we re-use removeProviderFromApiKeysTier + addProviderToApiKeysTier
-      // when there's only one key, otherwise the cheaper remove+add.
-      if (existingKeys.length === 1) {
-        removeProviderFromApiKeysTier(configPath, target);
-        addProviderToApiKeysTier(configPath, target, [
-          { key: newKeyValue as string, label: labelChoice as string },
-        ]);
-      } else {
-        removeKeyFromApiKeyProvider(configPath, target, labelChoice as string);
-        addKeyToApiKeyProvider(configPath, target, {
-          key: newKeyValue as string,
-          label: labelChoice as string,
-        });
-      }
+      replaceKeyInApiKeyProvider(configPath, target, labelChoice as string, newKeyValue as string);
       p.log.info(`✓ Replaced key "${labelChoice}" for ${target}`);
     } catch (err) {
       p.log.error(err instanceof Error ? err.message : String(err));
@@ -494,18 +479,30 @@ async function addNewApiKeyProvider(configPath: string, target: LlmProvider): Pr
 
   try {
     addProviderToApiKeysTier(configPath, target, keys);
-    // openai-compatible: append the extras to the just-created sub-section.
-    // The patcher writes a minimal `keys = [...]` block; we append base_url etc.
-    // via a follow-up minimal regex edit kept inline here to avoid bloating the
-    // patcher API for a single-provider concern.
-    if (extras) {
-      writeOpenAICompatibleExtras(configPath, extras);
-    }
-    p.log.info(`✓ Added ${target} to [llm.api_keys]`);
   } catch (err) {
     p.log.error(err instanceof Error ? err.message : String(err));
     return;
   }
+  // openai-compatible: append base_url/model/compat_reasoning to the just-created
+  // sub-section. If the regex misses, roll back the provider add so the user
+  // doesn't end up with a half-configured openai-compatible entry.
+  if (extras) {
+    try {
+      writeOpenAICompatibleExtras(configPath, extras);
+    } catch (err) {
+      p.log.error(err instanceof Error ? err.message : String(err));
+      try {
+        removeProviderFromApiKeysTier(configPath, target);
+        p.log.info(`Rolled back partial ${target} configuration`);
+      } catch (rollbackErr) {
+        p.log.error(
+          `Failed to roll back: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`
+        );
+      }
+      return;
+    }
+  }
+  p.log.info(`✓ Added ${target} to [llm.api_keys]`);
 
   // If a primary already exists, offer to promote.
   const tier = readApiKeysTier(configPath);
@@ -593,12 +590,20 @@ function writeOpenAICompatibleExtras(
   extras: { base_url: string; model: string; compat_reasoning: boolean }
 ): void {
   const raw = readFileSync(configPath, 'utf-8');
-  // Insert base_url/model/compat_reasoning lines immediately after the closing
-  // `]` of the keys array in [llm.api_keys.openai-compatible].
   const pattern = /(\[llm\.api_keys\.openai-compatible\][\s\S]*?keys\s*=\s*\[[\s\S]*?\n\])\n?/;
-  const insertion = `\nbase_url = "${extras.base_url}"\nmodel = "${extras.model}"\ncompat_reasoning = ${extras.compat_reasoning}\n`;
+  // base_url + model are user input; compat_reasoning is a typed boolean so it
+  // doesn't need escaping (booleans are bare TOML literals).
+  const insertion = `\nbase_url = "${escapeTomlString(extras.base_url)}"\nmodel = "${escapeTomlString(extras.model)}"\ncompat_reasoning = ${extras.compat_reasoning}\n`;
   const match = raw.match(pattern);
-  if (!match) return;
+  if (!match) {
+    // Throw rather than silently return: addProviderToApiKeysTier just wrote
+    // the keys; missing extras would leave the user with a partially-configured
+    // openai-compatible provider that fails at runtime with a confusing error.
+    throw new Error(
+      `Could not locate keys array for openai-compatible in ${configPath} ` +
+        'to append base_url/model/compat_reasoning.'
+    );
+  }
   const replacement = `${match[0].replace(/\n?$/, '')}${insertion}`;
   writeFileSync(configPath, raw.replace(pattern, replacement));
 }

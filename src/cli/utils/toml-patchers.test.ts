@@ -7,10 +7,12 @@ import {
   addKeyToApiKeyProvider,
   addProviderToApiKeysTier,
   addProviderToOAuthTier,
+  escapeTomlString,
   removeBraveSearch,
   removeKeyFromApiKeyProvider,
   removeProviderFromApiKeysTier,
   removeProviderFromOAuthTier,
+  replaceKeyInApiKeyProvider,
   setApiKeyProviderAsPrimary,
   setApiKeysFallbackOrder,
   setBraveSearchKey,
@@ -742,5 +744,112 @@ describe('Brave Search patchers', () => {
     const result = removeBraveSearch(configPath);
     expect(result.changed).toBe(false);
     expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+});
+
+describe('escapeTomlString', () => {
+  it('passes simple ASCII through unchanged', () => {
+    expect(escapeTomlString('sk-ant-1234')).toBe('sk-ant-1234');
+    expect(escapeTomlString('http://localhost:4000/v1')).toBe('http://localhost:4000/v1');
+  });
+
+  it('escapes backslash before doubling other escapes', () => {
+    // Backslash MUST be escaped first or each later substitution that introduces
+    // a backslash gets re-escaped on the next pass.
+    expect(escapeTomlString('a\\b')).toBe('a\\\\b');
+    expect(escapeTomlString('foo"bar')).toBe('foo\\"bar');
+  });
+
+  it('escapes newline / tab / carriage return', () => {
+    expect(escapeTomlString('line1\nline2')).toBe('line1\\nline2');
+    expect(escapeTomlString('a\tb')).toBe('a\\tb');
+    expect(escapeTomlString('a\rb')).toBe('a\\rb');
+  });
+
+  it('produces TOML that round-trips through TOML.parse without injection', () => {
+    // Adversarial label: closing quote + injecting another key/value.
+    const malicious = 'normal", primary = "evil';
+    const escaped = escapeTomlString(malicious);
+    const toml = `[t]\nkey = "${escaped}"\n`;
+    const parsed = TOML.parse(toml) as { t?: { key?: string; primary?: string } };
+    expect(parsed.t?.key).toBe(malicious);
+    expect(parsed.t?.primary).toBeUndefined();
+  });
+});
+
+describe('replaceKeyInApiKeyProvider', () => {
+  let dir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'system2-toml-test-'));
+    configPath = join(dir, 'config.toml');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('replaces a key by label without touching tier order', () => {
+    writeFileSync(
+      configPath,
+      `[llm.api_keys]\nprimary = "anthropic"\nfallback = ["openai"]\n\n[llm.api_keys.anthropic]\nkeys = [\n  { key = "old-1", label = "personal" },\n  { key = "k-2", label = "work" },\n]\n\n[llm.api_keys.openai]\nkeys = [\n  { key = "sk-o", label = "default" },\n]\n`
+    );
+    const result = replaceKeyInApiKeyProvider(configPath, 'anthropic', 'personal', 'new-1');
+    expect(result.changed).toBe(true);
+    const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
+      llm?: {
+        api_keys?: {
+          primary?: string;
+          fallback?: string[];
+          anthropic?: { keys?: Array<{ key: string; label: string }> };
+        };
+      };
+    };
+    // Tier order untouched.
+    expect(parsed.llm?.api_keys?.primary).toBe('anthropic');
+    expect(parsed.llm?.api_keys?.fallback).toEqual(['openai']);
+    // Key swapped, others preserved.
+    expect(parsed.llm?.api_keys?.anthropic?.keys).toEqual([
+      { key: 'new-1', label: 'personal' },
+      { key: 'k-2', label: 'work' },
+    ]);
+  });
+
+  it('preserves tier order even when the provider has only one key', () => {
+    // Regression for the previous remove+add dance, which would have promoted
+    // a fallback to primary in this scenario.
+    writeFileSync(
+      configPath,
+      `[llm.api_keys]\nprimary = "anthropic"\nfallback = ["openai"]\n\n[llm.api_keys.anthropic]\nkeys = [\n  { key = "old", label = "default" },\n]\n\n[llm.api_keys.openai]\nkeys = [\n  { key = "sk-o", label = "default" },\n]\n`
+    );
+    const result = replaceKeyInApiKeyProvider(configPath, 'anthropic', 'default', 'new');
+    expect(result.changed).toBe(true);
+    const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
+      llm?: { api_keys?: { primary?: string; fallback?: string[] } };
+    };
+    expect(parsed.llm?.api_keys?.primary).toBe('anthropic');
+    expect(parsed.llm?.api_keys?.fallback).toEqual(['openai']);
+  });
+
+  it('is a no-op when the new key matches the existing one', () => {
+    writeFileSync(
+      configPath,
+      `[llm.api_keys]\nprimary = "anthropic"\nfallback = []\n\n[llm.api_keys.anthropic]\nkeys = [\n  { key = "same", label = "default" },\n]\n`
+    );
+    const before = readFileSync(configPath, 'utf-8');
+    const result = replaceKeyInApiKeyProvider(configPath, 'anthropic', 'default', 'same');
+    expect(result.changed).toBe(false);
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+
+  it('throws when label is not found', () => {
+    writeFileSync(
+      configPath,
+      `[llm.api_keys]\nprimary = "anthropic"\nfallback = []\n\n[llm.api_keys.anthropic]\nkeys = [\n  { key = "k", label = "default" },\n]\n`
+    );
+    expect(() => replaceKeyInApiKeyProvider(configPath, 'anthropic', 'missing', 'x')).toThrow(
+      /label "missing" not found/
+    );
   });
 });

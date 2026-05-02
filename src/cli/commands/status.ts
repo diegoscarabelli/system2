@@ -21,7 +21,7 @@ export async function status(): Promise<void> {
   if (!existsSync(CONFIG_FILE)) {
     console.log('Status: Not configured');
     console.log('');
-    console.log('Run: system2 onboard');
+    console.log('Run: system2 init');
     process.exit(0);
   }
 

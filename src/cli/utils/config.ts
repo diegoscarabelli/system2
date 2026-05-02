@@ -751,8 +751,8 @@ export function buildConfigToml(options: {
     '# System2 Configuration',
     '# All System2 settings: LLM credentials (OAuth + API keys), per-agent',
     '# overrides, services, databases, and operational defaults.',
-    '# Edited both programmatically by System2 (e.g. `system2 login` updates',
-    '# `[llm.oauth]`) and manually by you. Changes apply on daemon restart.',
+    '# Edited both programmatically by System2 (e.g. `system2 config` updates',
+    '# `[llm.oauth]` and `[llm.api_keys]`) and manually by you. Changes apply on daemon restart.',
     '# Permissions: 0600 (owner read/write only — protects credentials).',
     '',
   ];
@@ -769,7 +769,7 @@ export function buildConfigToml(options: {
     // who skipped OAuth at onboarding still see how to enable it later.
     lines.push(...sectionHeader('LLM credentials — OAuth tier'));
     lines.push('# OAuth providers and failover order. Subscription tokens live in');
-    lines.push('# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 login`.');
+    lines.push('# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 config`.');
     lines.push('# This tier is tried first; the API-keys tier below is only used after');
     lines.push('# every OAuth credential is in cooldown.');
     lines.push('# Supported providers: anthropic, openai-codex, github-copilot.');
@@ -804,7 +804,7 @@ export function buildConfigToml(options: {
         lines.push('');
       }
     } else {
-      lines.push('# Run `system2 login` to enable OAuth, or uncomment the block below and');
+      lines.push('# Run `system2 config` to enable OAuth, or uncomment the block below and');
       lines.push('# add credentials manually.');
       lines.push('# [llm.oauth]');
       lines.push('# primary = "anthropic"');
