@@ -948,6 +948,26 @@ describe('convertTomlLlm — new shape', () => {
     ).toThrow(/\[llm\.oauth\]\.primary.*not a supported OAuth provider/);
   });
 
+  it('throws when [llm.oauth.<p>] pin exists without [llm.oauth].primary', () => {
+    // User wrote `[llm.oauth.anthropic] model = "..."` but forgot the
+    // `[llm.oauth] primary = "..."` table. Before this guard the pin would
+    // be silently ignored (OAuth tier disabled), which is hard to debug.
+    expect(() =>
+      convertTomlLlm({
+        oauth: { anthropic: { model: 'claude-opus-4-7' } },
+        api_keys: { primary: 'anthropic', fallback: [] },
+      })
+    ).toThrow(/anthropic.*\[llm\.oauth\]\.primary is missing/);
+  });
+
+  it('does not throw when [llm.oauth] is entirely absent', () => {
+    // Distinct from the orphan-pin case: no oauth table at all means the
+    // user has explicitly chosen api-keys-only. Don't surface an error.
+    expect(() =>
+      convertTomlLlm({ api_keys: { primary: 'anthropic', fallback: [] } })
+    ).not.toThrow();
+  });
+
   it('rejects an api-keys-only provider in [llm.oauth].fallback', () => {
     // openai is api-keys-only; OAuth tier supports openai-codex instead.
     expect(() =>

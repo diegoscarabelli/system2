@@ -29,7 +29,7 @@ import type {
   SessionConfig,
   ToolsConfig,
 } from '../shared/index.js';
-import type { AuthTier, OAuthCredentialsMap } from './agents/auth-resolver.js';
+import type { OAuthCredentialsMap } from './agents/auth-resolver.js';
 import { AuthResolver } from './agents/auth-resolver.js';
 import { AgentHost, MAX_DELIVERY_BYTES, pickModelForTier } from './agents/host.js';
 import {
@@ -786,9 +786,15 @@ export class Server {
    *     (family flagship from pi-ai's catalog).
    *   - API-keys tier: `[llm.api_keys.<provider>.models].narrator` →
    *     `narrator.md` frontmatter `api_keys_models[<provider>]`.
-   * Walks OAuth providers first (in `[llm.oauth].primary` + fallback order),
-   * then api-keys providers, returning the first (provider, model) pair that
-   * resolves in the catalog.
+   *
+   * Defers tier/provider selection to `AuthResolver.getActiveCredential()` so
+   * the summarizer is initialized only when there is a usable credential at
+   * server boot — picking a provider whose credential file is missing or
+   * whose api-keys section has no keys would just produce 401s on every
+   * summarizer request. The summarizer is a one-shot init at boot; if the
+   * boot-time active credential later goes into cooldown, summarizer calls
+   * may fail until the credential recovers (acceptable: the chat-history
+   * sidecar degrades to no-op summaries, no agent traffic affected).
    */
   private resolveNarratorModel(): { model: Model<Api>; registry: ModelRegistry } | null {
     // Agent definition files are co-located with AgentHost (dist/agents/library/)
@@ -800,42 +806,40 @@ export class Server {
       return null;
     }
 
+    const active = this.authResolver.getActiveCredential();
+    if (!active) {
+      log.warn('[Server] No usable credential at boot; ConversationSummarizer disabled');
+      return null;
+    }
+
     const { data: meta } = matter(readFileSync(narratorPath, 'utf-8'));
     const apiKeysModels = (meta.api_keys_models ?? {}) as Partial<Record<LlmProvider, string>>;
     const llm = this.config.llmConfig;
+
+    const { id } = pickModelForTier({
+      tier: active.tier,
+      provider: active.provider,
+      role: 'narrator',
+      llmConfig: llm,
+      frontmatterModels: apiKeysModels,
+      fallbackUsedFor: new Set<LlmProvider>(),
+    });
+    if (!id) {
+      log.warn(
+        `[Server] No narrator model resolved for active credential ${active.tier}:${active.provider}; ConversationSummarizer disabled`
+      );
+      return null;
+    }
+
     const modelRegistry = ModelRegistry.create(this.authResolver.createAuthStorage());
-    const noFallback: ReadonlySet<LlmProvider> = new Set();
-
-    const tryProvider = (
-      tier: AuthTier,
-      provider: LlmProvider
-    ): { model: Model<Api>; registry: ModelRegistry } | null => {
-      const { id } = pickModelForTier({
-        tier,
-        provider,
-        role: 'narrator',
-        llmConfig: llm,
-        frontmatterModels: apiKeysModels,
-        fallbackUsedFor: noFallback,
-      });
-      if (!id) return null;
-      const model = modelRegistry.find(provider, id);
-      return model ? { model, registry: modelRegistry } : null;
-    };
-
-    if (llm.oauth) {
-      for (const p of [llm.oauth.primary, ...llm.oauth.fallback]) {
-        const result = tryProvider('oauth', p);
-        if (result) return result;
-      }
+    const model = modelRegistry.find(active.provider, id);
+    if (!model) {
+      log.warn(
+        `[Server] Narrator model "${id}" not in pi-ai catalog for ${active.provider}; ConversationSummarizer disabled`
+      );
+      return null;
     }
-    for (const p of [llm.primary, ...llm.fallback]) {
-      const result = tryProvider('api_keys', p);
-      if (result) return result;
-    }
-
-    log.warn('[Server] No narrator model found for any configured provider');
-    return null;
+    return { model, registry: modelRegistry };
   }
 
   /**

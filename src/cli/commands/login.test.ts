@@ -61,6 +61,21 @@ describe('addProviderToOAuthTier', () => {
     expect(readFileSync(configPath, 'utf-8')).toBe(before);
   });
 
+  it('throws when [llm.oauth] is non-null but the regex does not match (consistency with siblings)', () => {
+    // Edge case: TOML.parse recognises `[llm.oauth]` but OAUTH_BLOCK_PATTERN
+    // can't find a line-anchored header (e.g. unusual leading whitespace).
+    // Throwing matches setProviderAsPrimary / removeProviderFromOAuthTier
+    // and prevents a silent partial-success where the credential file is
+    // written but config.toml stays untouched.
+    writeFileSync(
+      configPath,
+      `[llm.api_keys]\nprimary = "anthropic"\nfallback = []\n\n  [llm.oauth]\n  primary = "google"\n  fallback = []\n`
+    );
+    expect(() => addProviderToOAuthTier(configPath, 'anthropic')).toThrow(
+      /Could not locate \[llm\.oauth\] section/
+    );
+  });
+
   it('inserts fallback line when [llm.oauth] has primary but no fallback', () => {
     writeFileSync(
       configPath,

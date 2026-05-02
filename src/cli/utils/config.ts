@@ -374,29 +374,42 @@ export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig 
 
   const config: LlmConfig = { primary, fallback, providers };
 
-  if (toml.oauth?.primary) {
-    const oauthProviders: Partial<Record<OAuthProvider, { model?: string }>> = {};
-    for (const name of OAUTH_PROVIDER_IDS) {
-      const sub = toml.oauth[name];
-      if (sub?.model) {
-        oauthProviders[name] = { model: sub.model };
-      }
+  if (toml.oauth) {
+    // Detect orphan per-provider pins: user wrote `[llm.oauth.<provider>] model = "..."`
+    // but forgot the `[llm.oauth] primary = "..."` table. Without primary the
+    // OAuth tier is disabled, which would silently ignore the pins. Surface it.
+    const pinnedProviders = OAUTH_PROVIDER_IDS.filter((p) => toml.oauth?.[p]?.model);
+    if (!toml.oauth.primary && pinnedProviders.length > 0) {
+      throw new Error(
+        `[llm.oauth.<provider>] model pin(s) found for ${pinnedProviders.join(', ')} ` +
+          `but [llm.oauth].primary is missing. Add [llm.oauth] primary = "<provider>" ` +
+          `to enable the OAuth tier, or remove the pin(s) if you don't want OAuth.`
+      );
     }
-    config.oauth = {
-      primary: validateProviderId(
-        toml.oauth.primary,
-        OAUTH_PROVIDER_IDS,
-        'OAuth',
-        '[llm.oauth].primary'
-      ),
-      fallback: validateProviderArray(
-        toml.oauth.fallback,
-        OAUTH_PROVIDER_IDS,
-        'OAuth',
-        '[llm.oauth].fallback'
-      ),
-      providers: oauthProviders,
-    };
+    if (toml.oauth.primary) {
+      const oauthProviders: Partial<Record<OAuthProvider, { model?: string }>> = {};
+      for (const name of OAUTH_PROVIDER_IDS) {
+        const sub = toml.oauth[name];
+        if (sub?.model) {
+          oauthProviders[name] = { model: sub.model };
+        }
+      }
+      config.oauth = {
+        primary: validateProviderId(
+          toml.oauth.primary,
+          OAUTH_PROVIDER_IDS,
+          'OAuth',
+          '[llm.oauth].primary'
+        ),
+        fallback: validateProviderArray(
+          toml.oauth.fallback,
+          OAUTH_PROVIDER_IDS,
+          'OAuth',
+          '[llm.oauth].fallback'
+        ),
+        providers: oauthProviders,
+      };
+    }
   }
 
   return config;

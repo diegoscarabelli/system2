@@ -110,8 +110,16 @@ export function addProviderToOAuthTier(
   // tiers); replacing that span destroys structure. See OAUTH_BLOCK_PATTERN.
   const match = raw.match(OAUTH_BLOCK_PATTERN);
   if (!match) {
-    // Shouldn't happen because oauth is non-null, but guard anyway
-    return { changed: false };
+    // TOML.parse found [llm.oauth] but the regex doesn't match — likely an
+    // unusual on-disk format (leading whitespace before the header, key on
+    // same line as header, etc.). Throw rather than silently no-op: the
+    // credential file has already been written, so a silent miss here would
+    // leave the user logged in but not registered in [llm.oauth]. Matches
+    // the failure mode of removeProviderFromOAuthTier / setProviderAsPrimary.
+    throw new Error(
+      `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
+        `Edit the file manually if it has unusual formatting.`
+    );
   }
   const newFallback = [...(oauth.fallback ?? []), provider];
   const fallbackLine = `fallback = [${newFallback.map((f) => `"${f}"`).join(', ')}]`;
@@ -122,8 +130,11 @@ export function addProviderToOAuthTier(
   if (replacedSection === match[0]) {
     const withFallback = match[0].replace(/(primary\s*=\s*"[^"]*"\s*\n)/, `$1${fallbackLine}\n`);
     if (withFallback === match[0]) {
-      // Could not even find a primary= line — bail.
-      return { changed: false };
+      // No primary= line either — same partial-success risk as a regex miss.
+      throw new Error(
+        `Could not locate primary= line in [llm.oauth] section of ${configPath} ` +
+          `to anchor a fallback insertion. Edit the file manually.`
+      );
     }
     writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, withFallback));
     return { changed: true };
