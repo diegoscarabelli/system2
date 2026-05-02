@@ -75,7 +75,7 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**Credentials and services.** Use `system2 config` as the one-stop interactive menu for everything stored in `config.toml`. The top-level menu has three submenus: **OAuth providers** (Anthropic Claude Pro/Max, OpenAI Codex / ChatGPT, GitHub Copilot — re-login, set as primary, remove, reorder fallbacks), **API key providers** (the 9 supported providers — add another key, replace key, set as primary, remove provider, reorder fallbacks), and **Services** (Brave Search — set, replace, or remove the key; the `web_search` tool is auto-enabled when a key is present). Esc inside a submenu or flow returns you to the previous menu; Esc at the top level exits. Stop the daemon before running it, and restart afterward to pick up the change.
+**Credentials and services.** Use `system2 config` as the interactive menu for the credential and service sections of `config.toml` (it doesn't touch `[agents.*]`, `[databases.*]`, `[scheduler]`, `[backup]`, or other operational settings — those are hand-edited). The top-level menu has three submenus: **OAuth providers** (Anthropic Claude Pro/Max, OpenAI Codex / ChatGPT, GitHub Copilot — re-login, set as primary, remove, reorder fallbacks), **API key providers** (the 9 supported providers — add another key, replace key, set as primary, remove provider, reorder fallbacks), and **Services** (Brave Search — set, replace, or remove the key; the `web_search` tool is auto-enabled when a key is present). Esc inside a submenu or flow returns you to the previous menu; Esc at the top level exits. Stop the daemon before running it, and restart afterward to pick up the change.
 
 **Resetting `config.toml`.** Need a fresh template (e.g. to recover from a hand-edit you can't untangle)? `mv ~/.system2/config.toml ~/.system2/config.toml.bak` then re-run `system2 init` — it regenerates the template (and re-launches `system2 config`) without touching `app.db`, knowledge files, OAuth credentials, or anything else under `~/.system2/`.
 
@@ -109,7 +109,7 @@ pnpm update -g @diegoscarabelli/system2
 
 ## Configuration
 
-All settings live in `~/.system2/config.toml`, created by `system2 init` and managed interactively by `system2 config` (hand-editing still works for advanced tweaks).
+All settings live in `~/.system2/config.toml`, created by `system2 init`. Credential and service sections (`[llm.oauth]`, `[llm.api_keys]`, `[services.*]`, `[tools.web_search]`) are managed interactively by `system2 config`; everything else (`[agents.*]`, `[databases.*]`, `[scheduler]`, `[backup]`, etc.) is hand-edited.
 
 - **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
 - **`[llm.api_keys]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation.
