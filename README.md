@@ -75,7 +75,7 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**Credentials and services.** Use `system2 config` as the interactive menu for the credential and service sections of `config.toml` (it doesn't touch `[agents.*]`, `[databases.*]`, `[scheduler]`, `[backup]`, or other operational settings — those are hand-edited). The top-level menu has three submenus: **OAuth providers** (Anthropic Claude Pro/Max, OpenAI Codex / ChatGPT, GitHub Copilot — re-login, set as primary, remove, reorder fallbacks), **API key providers** (the 9 supported providers — add another key, replace key, set as primary, remove provider, reorder fallbacks), and **Services** (Brave Search — set, replace, or remove the key; the `web_search` tool is auto-enabled when a key is present). Esc inside a submenu or flow returns you to the previous menu; Esc at the top level exits. Stop the daemon before running it, and restart afterward to pick up the change.
+**Credentials and services.** Use `system2 config` as the interactive menu for the managing credential and service sections of `config.toml`. The top-level menu has three submenus: **OAuth providers**, **API key providers**, and **Services**.
 
 **Resetting `config.toml`.** Need a fresh template (e.g. to recover from a hand-edit you can't untangle)? `mv ~/.system2/config.toml ~/.system2/config.toml.bak` then re-run `system2 init` — it regenerates the template (and re-launches `system2 config`) without touching `app.db`, knowledge files, OAuth credentials, or anything else under `~/.system2/`.
 
