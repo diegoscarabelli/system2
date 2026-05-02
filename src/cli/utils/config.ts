@@ -757,8 +757,13 @@ export function buildConfigToml(options: {
     '',
   ];
 
-  if (options.llm) {
-    const { fallback, providers } = options.llm;
+  // Always emit the LLM section structure. When `options.llm` is omitted (e.g.
+  // `system2 init` writes an empty template), the live blocks fall through to
+  // commented stubs so the schema remains discoverable for hand-editing and so
+  // the file is patcher-ready for `system2 config`.
+  {
+    const fallback = options.llm?.fallback ?? [];
+    const providers = options.llm?.providers ?? {};
 
     // OAuth tier: emit divider + (live block | commented template) so users
     // who skipped OAuth at onboarding still see how to enable it later.
@@ -769,7 +774,7 @@ export function buildConfigToml(options: {
     lines.push('# every OAuth credential is in cooldown.');
     lines.push('# Supported providers: anthropic, openai-codex, github-copilot.');
     lines.push('');
-    if (options.llm.oauth) {
+    if (options.llm?.oauth) {
       lines.push('[llm.oauth]');
       lines.push(`primary = "${options.llm.oauth.primary}"`);
       const fb = options.llm.oauth.fallback.map((f) => `"${f}"`).join(', ');
@@ -817,7 +822,7 @@ export function buildConfigToml(options: {
     lines.push('# and providers happens automatically on failures.');
     lines.push('');
 
-    if (apiKeysConfigured) {
+    if (apiKeysConfigured && options.llm) {
       lines.push('[llm.api_keys]');
       lines.push(`primary = "${options.llm.primary}"`);
       lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
