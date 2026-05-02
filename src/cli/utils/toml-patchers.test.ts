@@ -491,6 +491,33 @@ describe('addProviderToApiKeysTier', () => {
     ).toThrow(/already in \[llm\.api_keys\]/);
   });
 
+  it('places the new sub-section right after the live tier when no other sub-sections exist', () => {
+    // Regression (user-reported): user had `primary = "google"` in
+    // [llm.api_keys] with the live [llm.api_keys.google] previously
+    // appended at EOF. They manually deleted the EOF sub-section. Re-running
+    // system2 config (post round-10 fix) now succeeds, but the placement
+    // logic was scanning for existing live sub-sections to anchor against —
+    // when none remain, it fell through to EOF append, putting the new
+    // sub-section far from the tier block (after operational defaults).
+    // Now: when no existing live sub-sections exist, place immediately
+    // after the [llm.api_keys] tier block (canonical "first sub-section"
+    // location).
+    writeFileSync(
+      configPath,
+      `[llm.api_keys]\nprimary = "google"\nfallback = []\n\n# === operational sections ===\n# [backup]\n# cooldown_hours = 24\n`
+    );
+    addProviderToApiKeysTier(configPath, 'google', [{ key: 'AIzaSyXYZ', label: 'default' }]);
+    const content = readFileSync(configPath, 'utf-8');
+    // Live sub-section appears between the live tier block and the
+    // operational sections, NOT at EOF after them.
+    const tierIdx = content.indexOf('[llm.api_keys]');
+    const subIdx = content.indexOf('[llm.api_keys.google]');
+    const opsIdx = content.indexOf('# [backup]');
+    expect(tierIdx).toBeGreaterThan(-1);
+    expect(subIdx).toBeGreaterThan(tierIdx);
+    expect(opsIdx).toBeGreaterThan(subIdx);
+  });
+
   it('repairs an "in tier but missing sub-section" state without touching tier order', () => {
     // Regression: a hand-edit could leave a provider in [llm.api_keys].fallback
     // without a [llm.api_keys.<provider>] sub-section. Previously,

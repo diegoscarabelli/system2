@@ -572,8 +572,25 @@ export function addProviderToApiKeysTier(
     const sep = before.endsWith('\n') ? '' : '\n';
     next = `${before}${sep}${subsection}${after.startsWith('\n') ? '' : '\n'}${after}`;
   } else {
-    const sep = withTier.endsWith('\n') ? '' : '\n';
-    next = `${withTier}${sep}${subsection}`;
+    // No existing live `[llm.api_keys.<*>]` sub-section to anchor against
+    // (e.g. the user manually deleted the only sub-section, or this is the
+    // repair path where the provider was in the tier list but its sub-
+    // section was never present). Land the new sub-section immediately
+    // after the live `[llm.api_keys]` tier block — that's the canonical
+    // location for "first sub-section under this tier". Falls back to EOF
+    // append only if even the tier block can't be located, which would
+    // indicate a malformed file the patcher shouldn't be touching.
+    const tierRange = findOwnedSectionLineRange(lines, '[llm.api_keys]');
+    if (tierRange) {
+      const [, tierEnd] = tierRange;
+      const before = lines.slice(0, tierEnd).join('\n');
+      const after = lines.slice(tierEnd).join('\n');
+      const sep = before.endsWith('\n') ? '' : '\n';
+      next = `${before}${sep}${subsection}${after.startsWith('\n') ? '' : '\n'}${after}`;
+    } else {
+      const sep = withTier.endsWith('\n') ? '' : '\n';
+      next = `${withTier}${sep}${subsection}`;
+    }
   }
   writeFileSync(configPath, next);
   return { changed: true };
