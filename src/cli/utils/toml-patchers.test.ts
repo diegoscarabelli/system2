@@ -415,6 +415,56 @@ describe('addProviderToApiKeysTier', () => {
     expect(parsed.llm?.api_keys?.anthropic?.keys).toEqual([{ key: 'sk-ant-1', label: 'personal' }]);
   });
 
+  it('on stub-replace, lands the live sub-section right after the live tier (not at EOF)', () => {
+    // Regression: the live `[llm.api_keys.<provider>]` used to be appended at
+    // EOF after the tier-stub-replace, leaving the user with a live tier
+    // block near the top of the file and the matching sub-section dozens of
+    // lines later — visually disjoint and confusing.
+    const fileWithStub =
+      `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n\n` +
+      `# Add API keys to enable as failover when the OAuth tier is exhausted.\n` +
+      `# Uncomment and edit:\n` +
+      `# [llm.api_keys]\n# primary = "anthropic"\n# fallback = ["google", "openai"]\n` +
+      `#\n` +
+      `# [llm.api_keys.anthropic]\n# keys = [\n#   { key = "sk-ant-...", label = "default" },\n# ]\n` +
+      `\n# === Other operational sections ===\n# [backup]\n# cooldown_hours = 24\n`;
+    writeFileSync(configPath, fileWithStub);
+    addProviderToApiKeysTier(configPath, 'google', [{ key: 'AIzaSyXYZ', label: 'default' }]);
+    const content = readFileSync(configPath, 'utf-8');
+    // Live tier is followed by the live sub-section (with at most a blank
+    // line between them), NOT at EOF after the operational sections.
+    expect(content).toMatch(
+      /\[llm\.api_keys\]\nprimary = "google"\nfallback = \[\]\n\n\[llm\.api_keys\.google\]\n/
+    );
+    // The commented anthropic example stays as documentation (different provider).
+    expect(content).toMatch(/^# \[llm\.api_keys\.anthropic\]/m);
+    // Operational sections still after the live blocks (untouched).
+    const apiKeysIdx = content.indexOf('[llm.api_keys.google]');
+    const backupIdx = content.indexOf('# [backup]');
+    expect(apiKeysIdx).toBeGreaterThan(-1);
+    expect(backupIdx).toBeGreaterThan(apiKeysIdx);
+  });
+
+  it('places the new sub-section adjacent to existing live sub-sections, not at EOF', () => {
+    // Regression: when `[llm.api_keys]` already had a live sub-section and the
+    // user added a SECOND provider, the new sub-section was appended at EOF
+    // (often far below operational sections), visually disjoint from the
+    // existing sub-sections it logically belongs with.
+    writeFileSync(
+      configPath,
+      `[llm.api_keys]\nprimary = "openai"\nfallback = []\n\n[llm.api_keys.openai]\nkeys = [\n  { key = "sk-1", label = "default" },\n]\n\n# === operational sections ===\n# [backup]\n# cooldown_hours = 24\n`
+    );
+    addProviderToApiKeysTier(configPath, 'anthropic', [{ key: 'sk-ant', label: 'default' }]);
+    const content = readFileSync(configPath, 'utf-8');
+    // Both live sub-sections appear ahead of the operational sections.
+    const openaiIdx = content.indexOf('[llm.api_keys.openai]');
+    const anthropicIdx = content.indexOf('[llm.api_keys.anthropic]');
+    const backupIdx = content.indexOf('# [backup]');
+    expect(openaiIdx).toBeGreaterThan(-1);
+    expect(anthropicIdx).toBeGreaterThan(openaiIdx);
+    expect(backupIdx).toBeGreaterThan(anthropicIdx);
+  });
+
   it('appends to fallback when api_keys section exists with different primary', () => {
     writeFileSync(
       configPath,

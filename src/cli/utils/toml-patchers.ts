@@ -461,15 +461,18 @@ export function addProviderToApiKeysTier(
     // # primary = "..."\n# fallback = [...]`). Without this, the live tier
     // block lands at EOF and the commented stub stays put — leaving a
     // confusing duplicate schema on first `system2 config` run.
+    //
+    // The replacement bundles tier + sub-section together so the live
+    // sub-section lands directly after the live tier block (and ahead of
+    // the commented `# [llm.api_keys.anthropic]` example that stays in
+    // place as documentation), instead of getting appended at EOF far
+    // from its tier.
     const stubReplaced = raw.replace(
       /^# \[llm\.api_keys\]\n# primary\s*=\s*"[^"]*"\n# fallback\s*=\s*\[[^\]]*\]\n/m,
-      tierBlock
+      `${tierBlock}${subsection}`
     );
     if (stubReplaced !== raw) {
-      // The stub matched; append the sub-section at end of file (the commented
-      // example sub-section in the stub is retained and ignored at parse time).
-      const sep = stubReplaced.endsWith('\n') ? '' : '\n';
-      writeFileSync(configPath, `${stubReplaced}${sep}${subsection}`);
+      writeFileSync(configPath, stubReplaced);
       return { changed: true };
     }
     // No stub. Append both at end.
@@ -489,8 +492,64 @@ export function addProviderToApiKeysTier(
   const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
   const tierReplacement = `[llm.api_keys]\nprimary = "${current.primary}"\nfallback = [${fbStr}]\n`;
   const withTier = raw.replace(API_KEYS_BLOCK_PATTERN, tierReplacement);
-  const sep = withTier.endsWith('\n') ? '' : '\n';
-  writeFileSync(configPath, `${withTier}${sep}${subsection}`);
+
+  // Place the new sub-section adjacent to existing live `[llm.api_keys.<*>]`
+  // sub-sections rather than at EOF. Find the last live sub-section header
+  // and insert the new block immediately after that section's body. Falls
+  // back to EOF append only if no existing sub-section can be located
+  // (shouldn't happen given `current` is non-null and at least the primary
+  // has a sub-section, but the fallback keeps the patcher robust against
+  // a hand-edited config that lost its sub-sections).
+  const lines = withTier.split('\n');
+  let lastSubsectionEnd = -1;
+  // Match `[llm.api_keys.<word>]` but NOT deeper paths like `[llm.api_keys.<x>.models]`
+  // (we want the sub-section root, not its nested model-pin sub-sub-section).
+  const subHeaderPattern = /^\[llm\.api_keys\.[A-Za-z0-9_-]+\]\s*$/;
+  for (let i = 0; i < lines.length; i++) {
+    if (subHeaderPattern.test(lines[i])) {
+      // Find this section's end (next live `[`-section header, commented
+      // `# [...]` section header, or EOF). Treating commented section
+      // headers as boundaries matters because operational defaults emitted
+      // by buildConfigToml live as `# [backup]`, `# [logs]`, etc. — without
+      // recognising them, the scan would run past them all and `end` would
+      // land near EOF, putting the new sub-section after the operational
+      // commented sections instead of next to its api_keys siblings.
+      let end = lines.length;
+      for (let j = i + 1; j < lines.length; j++) {
+        const t = lines[j].trim();
+        if (/^\[/.test(t) || /^#\s*\[/.test(t)) {
+          end = j;
+          break;
+        }
+      }
+      // Roll back past trailing blanks AND comment lines (e.g. divider
+      // banners like `# ═══...`, prose comments) so they remain attached
+      // to the next section as its leading gutter, not consumed by the
+      // section we're identifying. Blank/comment trailing content rarely
+      // belongs to the api_keys sub-section's body (which ends with the
+      // `keys = [...]` array's closing `]`).
+      while (
+        end > i + 1 &&
+        (lines[end - 1].trim() === '' || lines[end - 1].trim().startsWith('#'))
+      ) {
+        end--;
+      }
+      lastSubsectionEnd = end;
+    }
+  }
+  let next: string;
+  if (lastSubsectionEnd >= 0) {
+    // `subsection` already starts with a leading `\n` (separates it from
+    // the preceding section's last line). Splice as a single block.
+    const before = lines.slice(0, lastSubsectionEnd).join('\n');
+    const after = lines.slice(lastSubsectionEnd).join('\n');
+    const sep = before.endsWith('\n') ? '' : '\n';
+    next = `${before}${sep}${subsection}${after.startsWith('\n') ? '' : '\n'}${after}`;
+  } else {
+    const sep = withTier.endsWith('\n') ? '' : '\n';
+    next = `${withTier}${sep}${subsection}`;
+  }
+  writeFileSync(configPath, next);
   return { changed: true };
 }
 
