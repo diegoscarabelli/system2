@@ -39,7 +39,7 @@ pnpm add -g @diegoscarabelli/system2      # install System2 globally
 system2 init             # first-run setup (see below)
 ```
 
-`system2 init` ensures `~/.system2/` exists with the expected layout (`sessions/`, `projects/`, `artifacts/`) and writes a fully-commented `config.toml` template if one isn't already there. On a fresh install it then hands off to `system2 config` so you can add an LLM credential (OAuth from any of the 3 supported subscriptions, API keys, or both, as described in Prerequisites) and an optional Brave Search key in the same flow. If `config.toml` already exists, `init` doesn't touch it and points you at `system2 config` instead — so you can re-run `init` to regenerate the template after deleting/moving `config.toml`, without disturbing the rest of the directory (`app.db`, knowledge files, OAuth credentials, etc.). `system2 config` is the one-stop interactive menu for everything stored in `config.toml`: OAuth providers, API key providers, and services (currently Brave Search).
+`system2 init` creates `~/.system2/` and immediately hands off to `system2 config`, where you add at least one LLM credential and (optionally) the Brave Search key in the same flow.
 
 ```bash
 system2 start            # starts the server and opens the browser
@@ -75,7 +75,9 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**Credentials and services.** Use `system2 config` as the one-stop interactive menu for everything credential-related. The top-level menu has three submenus: **OAuth providers** (Anthropic Claude Pro/Max, OpenAI Codex / ChatGPT, GitHub Copilot — re-login, set as primary, remove, reorder fallbacks), **API key providers** (the 9 supported providers — add another key, replace key, set as primary, remove provider, reorder fallbacks), and **Services** (Brave Search — set, replace, or remove the key; the `web_search` tool is auto-enabled when a key is present). Esc inside a submenu or flow returns you to the previous menu; Esc at the top level exits. Stop the daemon before running it, and restart afterward to pick up the change.
+**Credentials and services.** Use `system2 config` as the one-stop interactive menu for everything stored in `config.toml`. The top-level menu has three submenus: **OAuth providers** (Anthropic Claude Pro/Max, OpenAI Codex / ChatGPT, GitHub Copilot — re-login, set as primary, remove, reorder fallbacks), **API key providers** (the 9 supported providers — add another key, replace key, set as primary, remove provider, reorder fallbacks), and **Services** (Brave Search — set, replace, or remove the key; the `web_search` tool is auto-enabled when a key is present). Esc inside a submenu or flow returns you to the previous menu; Esc at the top level exits. Stop the daemon before running it, and restart afterward to pick up the change.
+
+**Resetting `config.toml`.** Need a fresh template (e.g. to recover from a hand-edit you can't untangle)? `mv ~/.system2/config.toml ~/.system2/config.toml.bak` then re-run `system2 init` — it regenerates the template (and re-launches `system2 config`) without touching `app.db`, knowledge files, OAuth credentials, or anything else under `~/.system2/`.
 
 ```bash
 system2 config           # interactive: manage OAuth, API keys, and services
