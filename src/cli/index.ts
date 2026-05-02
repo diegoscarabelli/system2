@@ -7,8 +7,8 @@
 
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
-import { login } from './commands/login.js';
-import { onboard } from './commands/onboard.js';
+import { config } from './commands/config.js';
+import { init } from './commands/init.js';
 import { start } from './commands/start.js';
 import { status } from './commands/status.js';
 import { stop } from './commands/stop.js';
@@ -26,22 +26,22 @@ program
   .hook('preAction', () => checkForUpdates(pkg.version));
 
 program
-  .command('onboard')
-  .description('Initialize System2 and configure LLM providers')
+  .command('init')
+  .description('Create ~/.system2/ and launch interactive configuration')
   .action(async () => {
-    await onboard();
+    await init();
   });
 
 program
-  .command('login')
-  .description('Manage OAuth providers (log in, re-login, or remove)')
+  .command('config')
+  .description('Manage LLM credentials and services (OAuth, API keys, Brave Search)')
   .action(async () => {
-    await login();
+    await config();
   });
 
 program
   .command('start')
-  .description('Start the System2 server (after onboarding)')
+  .description('Start the System2 server (after `system2 init`)')
   .option('-p, --port <number>', 'Port to run the server on', '4242')
   .option('--no-browser', 'Do not open browser automatically')
   .option('--foreground', 'Run in foreground (for debugging)')
