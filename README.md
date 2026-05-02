@@ -36,10 +36,10 @@ Open a terminal and run:
 
 ```bash
 pnpm add -g @diegoscarabelli/system2      # install System2 globally
-system2 init             # one-time setup (see below)
+system2 init             # first-run setup (see below)
 ```
 
-`system2 init` scaffolds `~/.system2/` (with `sessions/`, `projects/`, `artifacts/`, and a fully-commented `config.toml`) and immediately hands off to `system2 config` so you can add an LLM credential (OAuth from any of the 3 supported subscriptions, API keys, or both, as described in Prerequisites) and optional Brave Search key in the same flow. Everything is saved to `~/.system2/config.toml`, which you can edit directly later. `system2 init` refuses to overwrite an existing install: re-run `system2 config` to manage credentials, or move `~/.system2/` aside first to start fresh.
+`system2 init` ensures `~/.system2/` exists with the expected layout (`sessions/`, `projects/`, `artifacts/`) and writes a fully-commented `config.toml` template if one isn't already there. On a fresh install it then hands off to `system2 config` so you can add an LLM credential (OAuth from any of the 3 supported subscriptions, API keys, or both, as described in Prerequisites) and an optional Brave Search key in the same flow. If `config.toml` already exists, `init` doesn't touch it and points you at `system2 config` instead — so you can re-run `init` to regenerate the template after deleting/moving `config.toml`, without disturbing the rest of the directory (`app.db`, knowledge files, OAuth credentials, etc.). `system2 config` is the one-stop interactive menu for everything stored in `config.toml`: OAuth providers, API key providers, and services (currently Brave Search).
 
 ```bash
 system2 start            # starts the server and opens the browser
