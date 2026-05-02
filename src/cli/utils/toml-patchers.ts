@@ -216,12 +216,24 @@ export function removeProviderFromOAuthTier(
   const oauth = parsed.llm?.oauth;
   if (!oauth) return { changed: false };
 
+  // Guard against a malformed [llm.oauth] block (header present, primary
+  // absent). Without this, removing a fallback entry would leave newPrimary
+  // null → the section-deletion branch below fires and wipes the entire
+  // [llm.oauth] block, even though the user only asked to remove a fallback.
+  // Mirrors the addProviderToOAuthTier guard.
+  if (!oauth.primary) {
+    throw new Error(
+      `[llm.oauth] section exists in ${configPath} but is malformed (missing primary?). ` +
+        'Edit the file manually to fix it before removing providers via system2 config.'
+    );
+  }
+
   const fallback = oauth.fallback ?? [];
   const isPrimary = oauth.primary === provider;
   const inFallback = fallback.includes(provider);
   if (!isPrimary && !inFallback) return { changed: false };
 
-  let newPrimary: string | null = oauth.primary ?? null;
+  let newPrimary: string | null = oauth.primary;
   let newFallback = fallback.slice();
 
   if (isPrimary) {
@@ -746,7 +758,20 @@ export function setBraveSearchKey(configPath: string, apiKey: string): { changed
     next = `${next}${sep}\n[services.brave_search]\nkey = "${escapeTomlString(apiKey)}"\n`;
   }
 
-  if (!WEB_SEARCH_SECTION_PATTERN.test(next)) {
+  if (WEB_SEARCH_SECTION_PATTERN.test(next)) {
+    // Section exists: force enabled = true. Otherwise a pre-existing
+    // `enabled = false` would leave web search off even though the user just
+    // set a Brave key (and the caller logs "web search tool enabled").
+    // Match the section block, then rewrite its `enabled = …` line in place.
+    next = next.replace(WEB_SEARCH_SECTION_PATTERN, (block) => {
+      if (/^enabled\s*=\s*true\s*$/m.test(block)) return block;
+      if (/^enabled\s*=\s*[a-zA-Z]+\s*$/m.test(block)) {
+        return block.replace(/^enabled\s*=\s*[a-zA-Z]+\s*$/m, 'enabled = true');
+      }
+      // No `enabled = …` line at all: insert one immediately after the header.
+      return block.replace(/^(\[tools\.web_search\][^\n]*\n)/, '$1enabled = true\n');
+    });
+  } else {
     // max_results intentionally omitted: buildConfigToml emits it as a commented
     // operational default (DEFAULT_WEB_SEARCH_MAX_RESULTS), and writing it live
     // here would freeze the value at the time the user added the key, so future

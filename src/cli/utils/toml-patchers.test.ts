@@ -152,6 +152,18 @@ describe('removeProviderFromOAuthTier', () => {
     expect(result.changed).toBe(false);
     expect(readFileSync(configPath, 'utf-8')).toBe(before);
   });
+
+  it('throws when [llm.oauth] is malformed (missing primary)', () => {
+    // Regression: without the malformed-tier guard, removing a fallback entry
+    // from a primary-less [llm.oauth] would leave newPrimary null and the
+    // section-deletion branch fires, wiping the entire block.
+    writeFileSync(configPath, `[llm.oauth]\nfallback = ["anthropic", "openai-codex"]\n`);
+    expect(() => removeProviderFromOAuthTier(configPath, 'anthropic')).toThrow(
+      /\[llm\.oauth\] section exists.*malformed/
+    );
+    // File untouched.
+    expect(readFileSync(configPath, 'utf-8')).toContain('fallback = ["anthropic", "openai-codex"]');
+  });
 });
 
 describe('setProviderAsPrimary', () => {
@@ -744,6 +756,36 @@ describe('Brave Search patchers', () => {
     const result = removeBraveSearch(configPath);
     expect(result.changed).toBe(false);
     expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+
+  it('setBraveSearchKey forces enabled = true when [tools.web_search] exists with enabled = false', () => {
+    // Regression: previously, the patcher only ADDED the section when missing,
+    // so a pre-existing `enabled = false` left web search off even though the
+    // caller logs "web search tool enabled".
+    writeFileSync(
+      configPath,
+      `[services.brave_search]\nkey = "OLD"\n\n[tools.web_search]\nenabled = false\nmax_results = 5\n`
+    );
+    setBraveSearchKey(configPath, 'NEW');
+    const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
+      tools?: { web_search?: { enabled?: boolean; max_results?: number } };
+    };
+    expect(parsed.tools?.web_search?.enabled).toBe(true);
+    // Other fields preserved.
+    expect(parsed.tools?.web_search?.max_results).toBe(5);
+  });
+
+  it('setBraveSearchKey adds enabled = true when [tools.web_search] exists with no enabled line', () => {
+    writeFileSync(
+      configPath,
+      `[services.brave_search]\nkey = "OLD"\n\n[tools.web_search]\nmax_results = 7\n`
+    );
+    setBraveSearchKey(configPath, 'NEW');
+    const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
+      tools?: { web_search?: { enabled?: boolean; max_results?: number } };
+    };
+    expect(parsed.tools?.web_search?.enabled).toBe(true);
+    expect(parsed.tools?.web_search?.max_results).toBe(7);
   });
 });
 
