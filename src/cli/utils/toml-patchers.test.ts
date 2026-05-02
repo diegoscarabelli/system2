@@ -491,6 +491,36 @@ describe('addProviderToApiKeysTier', () => {
     ).toThrow(/already in \[llm\.api_keys\]/);
   });
 
+  it('repairs an "in tier but missing sub-section" state without touching tier order', () => {
+    // Regression: a hand-edit could leave a provider in [llm.api_keys].fallback
+    // without a [llm.api_keys.<provider>] sub-section. Previously,
+    // addProviderToApiKeysTier threw "already in [llm.api_keys]" with no
+    // recovery path. Now the patcher detects the inTier-but-no-sub-section
+    // state and writes the missing sub-section in place, preserving the
+    // existing primary/fallback order.
+    writeFileSync(
+      configPath,
+      `[llm.api_keys]\nprimary = "openai"\nfallback = ["anthropic"]\n\n[llm.api_keys.openai]\nkeys = [\n  { key = "sk-1", label = "default" },\n]\n`
+    );
+    const result = addProviderToApiKeysTier(configPath, 'anthropic', [
+      { key: 'sk-ant', label: 'default' },
+    ]);
+    expect(result.changed).toBe(true);
+    const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
+      llm?: {
+        api_keys?: {
+          primary?: string;
+          fallback?: string[];
+          anthropic?: { keys?: Array<{ key: string; label: string }> };
+        };
+      };
+    };
+    // Tier order untouched; sub-section now present.
+    expect(parsed.llm?.api_keys?.primary).toBe('openai');
+    expect(parsed.llm?.api_keys?.fallback).toEqual(['anthropic']);
+    expect(parsed.llm?.api_keys?.anthropic?.keys).toEqual([{ key: 'sk-ant', label: 'default' }]);
+  });
+
   it('rejects empty keys array, empty key/label fields, and duplicate labels', () => {
     writeFileSync(configPath, `[llm]\n`);
     // Empty array.
@@ -913,6 +943,33 @@ describe('Brave Search patchers', () => {
     setBraveSearchKey(configPath, 'BSK-1');
     const content = readFileSync(configPath, 'utf-8');
     expect(content).toMatch(/\[tools\.web_search\]\nenabled = true\n# max_results = 5\n/);
+  });
+
+  it('setBraveSearchKey handles a comment-only [services.brave_search] body without duplicating', () => {
+    // Regression: a section with only commented body lines (e.g. user has
+    // `[services.brave_search]\n# key = "..."` from prior hand-editing —
+    // valid TOML, empty table) bypassed both the live regex (requires
+    // non-comment body) and the header-only regex (requires no body at
+    // all). Previously fell through to EOF append → duplicate-table TOML.
+    writeFileSync(
+      configPath,
+      `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n\n[services.brave_search]\n# key = "OLD-COMMENTED"\n\n[tools.web_search]\n# enabled = false\n`
+    );
+    setBraveSearchKey(configPath, 'BSK-NEW');
+    const content = readFileSync(configPath, 'utf-8');
+    // Exactly one of each header (no duplicates); file parses cleanly.
+    expect(content.match(/^\[services\.brave_search\]/gm)).toHaveLength(1);
+    expect(content.match(/^\[tools\.web_search\]/gm)).toHaveLength(1);
+    const parsed = TOML.parse(content) as {
+      services?: { brave_search?: { key?: string } };
+      tools?: { web_search?: { enabled?: boolean } };
+    };
+    expect(parsed.services?.brave_search?.key).toBe('BSK-NEW');
+    expect(parsed.tools?.web_search?.enabled).toBe(true);
+    // Original commented hint dropped (replaced by the live key); commented
+    // `# enabled = false` also gone because we inserted `enabled = true`
+    // immediately after the header. Both behaviors match the line-based
+    // section-rewrite contract.
   });
 
   it('setBraveSearchKey handles header-only [services.brave_search] / [tools.web_search] without duplicating headers', () => {

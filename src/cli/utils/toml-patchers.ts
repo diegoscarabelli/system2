@@ -416,8 +416,24 @@ export function addProviderToApiKeysTier(
     seenLabels.add(k.label);
   }
   const current = readApiKeysTier(configPath);
-  if (current && (current.primary === provider || current.fallback.includes(provider))) {
-    throw new Error(`${provider} already in [llm.api_keys]`);
+  // "Already in [llm.api_keys]" check, with a recovery exception:
+  // if the provider IS in primary/fallback but its `[llm.api_keys.<provider>]`
+  // sub-section is MISSING (e.g. from a partial hand-edit that deleted the
+  // sub-section), allow this call to write the missing sub-section without
+  // touching tier order. Without this exception, the user gets stuck:
+  // handleApiKeyProvider routes them to addNewApiKeyProvider (because
+  // current.providers.has(provider) is false), which throws "already in
+  // [llm.api_keys]" — and the UI has no way to repair the broken state
+  // short of hand-editing config.toml.
+  if (current) {
+    const inTierList = current.primary === provider || current.fallback.includes(provider);
+    const hasSubsection = current.providers.has(provider);
+    if (inTierList && hasSubsection) {
+      throw new Error(`${provider} already in [llm.api_keys]`);
+    }
+    // inTierList && !hasSubsection is the repair case: continue to the
+    // sub-section-write path below, but skip the tier-rewrite (provider is
+    // already in primary/fallback, no order change needed).
   }
 
   const raw = readFileSync(configPath, 'utf-8');
@@ -481,17 +497,27 @@ export function addProviderToApiKeysTier(
     return { changed: true };
   }
 
-  // Append provider to fallback array, then append sub-section at end of file.
-  const newFallback = [...current.fallback, provider];
-  if (!API_KEYS_BLOCK_PATTERN.test(raw)) {
-    throw new Error(
-      `Could not locate [llm.api_keys] section in ${configPath} for rewrite. ` +
-        `Edit the file manually if it has unusual formatting.`
-    );
+  // Determine whether the tier needs rewriting. In the repair case
+  // (provider already in primary/fallback but sub-section missing), the
+  // tier order is correct as-is — only the sub-section needs writing.
+  const inTierList = current.primary === provider || current.fallback.includes(provider);
+  let withTier: string;
+  if (inTierList) {
+    // Repair: skip tier rewrite, just write the missing sub-section.
+    withTier = raw;
+  } else {
+    // Normal: append provider to fallback, rewrite the tier block.
+    const newFallback = [...current.fallback, provider];
+    if (!API_KEYS_BLOCK_PATTERN.test(raw)) {
+      throw new Error(
+        `Could not locate [llm.api_keys] section in ${configPath} for rewrite. ` +
+          `Edit the file manually if it has unusual formatting.`
+      );
+    }
+    const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
+    const tierReplacement = `[llm.api_keys]\nprimary = "${current.primary}"\nfallback = [${fbStr}]\n`;
+    withTier = raw.replace(API_KEYS_BLOCK_PATTERN, tierReplacement);
   }
-  const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-  const tierReplacement = `[llm.api_keys]\nprimary = "${current.primary}"\nfallback = [${fbStr}]\n`;
-  const withTier = raw.replace(API_KEYS_BLOCK_PATTERN, tierReplacement);
 
   // Place the new sub-section adjacent to existing live `[llm.api_keys.<*>]`
   // sub-sections rather than at EOF. Find the last live sub-section header
@@ -813,108 +839,159 @@ export function removeKeyFromApiKeyProvider(
 
 // ─── Services: Brave Search ───────────────────────────────────────────────────
 
+// Live-section patterns retained for `removeBraveSearch`, which should only
+// act on a section that has a live key=value body (a header-only or
+// commented-only section is already inert; nothing to remove).
 const BRAVE_SECTION_PATTERN = /^\[services\.brave_search\][^\n]*\n(?:[^[#\s][^\n]*\n)+/m;
 const WEB_SEARCH_SECTION_PATTERN = /^\[tools\.web_search\][^\n]*\n(?:[^[#\s][^\n]*\n)+/m;
 
 /**
- * Set or replace the Brave Search API key. Always also enables `[tools.web_search]`
- * (Brave Search is useless without it). If `[tools.web_search]` already exists,
- * its content is preserved (we only add it when it doesn't exist).
+ * Find the line range [start, end) of a section by its header line text.
+ * Returns null if the header isn't found. Stops at the next section header
+ * (live OR commented) and rolls back past trailing blanks/comments that
+ * belong to the next section's gutter — so the section's "owned" body is
+ * what gets returned, not the next section's leading divider/comment block.
+ *
+ * This is what enables a single "section exists in some form" branch: it
+ * doesn't matter whether the body has live key=value lines, comment-only
+ * lines, or is empty — the range identifies the entire owned region.
+ */
+function findOwnedSectionLineRange(
+  lines: string[],
+  sectionHeader: string
+): [number, number] | null {
+  const start = lines.findIndex((l) => l.trim() === sectionHeader);
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (/^\[/.test(t) || /^#\s*\[/.test(t)) {
+      end = i;
+      break;
+    }
+  }
+  while (
+    end > start + 1 &&
+    (lines[end - 1].trim() === '' || lines[end - 1].trim().startsWith('#'))
+  ) {
+    end--;
+  }
+  return [start, end];
+}
+
+/**
+ * Set or replace the Brave Search API key. Always also enables
+ * `[tools.web_search]` (Brave Search is useless without it). If
+ * `[tools.web_search]` already exists, force `enabled = true` (preserving
+ * other fields like `max_results`).
+ *
+ * Section state is determined via TOML.parse + a line-based section finder
+ * rather than a stack of priority-ordered regex patterns. This collapses
+ * the four shapes a section can take (live with body, header-only,
+ * comment-only body, completely absent) into two branches: exists →
+ * rewrite/insert key in place; doesn't exist → stub-replace or EOF-append.
+ * Avoids duplicate-table bugs from edge cases like
+ * `[services.brave_search]\n# key = "..."` (valid TOML, empty table) where
+ * a stack of narrower regexes would all miss and the EOF-append branch
+ * would emit a second header.
  */
 export function setBraveSearchKey(configPath: string, apiKey: string): { changed: boolean } {
   if (!existsSync(configPath)) {
     throw new Error(`config.toml not found at ${configPath}`);
   }
   const raw = readFileSync(configPath, 'utf-8');
+  const parsed = TOML.parse(raw) as {
+    services?: { brave_search?: Record<string, unknown> };
+    tools?: { web_search?: Record<string, unknown> };
+  };
   let next = raw;
 
-  // Brave Search section. Three placements, in priority order:
-  //   1. Live `[services.brave_search]` exists → rewrite the key in place.
-  //   2. Commented stub `# [services.brave_search]\n# key = "..."` exists →
-  //      replace the stub with a live block (matches the OAuth/api-keys patcher
-  //      stub-replacement pattern; without this, the live block lands at EOF
-  //      and the commented stub stays put — confusing duplicate schema).
-  //   3. Neither exists → append at end.
-  const braveLiveBlock = `[services.brave_search]\nkey = "${escapeTomlString(apiKey)}"\n`;
-  // Header-only detection: a bare `[services.brave_search]` with no body
-  // bypasses BRAVE_SECTION_PATTERN (which requires at least one key=value
-  // line). Without this, we'd fall through to stub or EOF append and end up
-  // with two `[services.brave_search]` headers in the file — duplicate
-  // tables, parsers reject. Same class as the [llm.api_keys] header-only
-  // guard in addProviderToApiKeysTier.
-  const braveHeaderOnly = /^\[services\.brave_search\]\s*$/m;
-  if (BRAVE_SECTION_PATTERN.test(next)) {
-    next = next.replace(BRAVE_SECTION_PATTERN, braveLiveBlock);
-  } else if (braveHeaderOnly.test(next)) {
-    next = next.replace(braveHeaderOnly, braveLiveBlock.replace(/\n$/, ''));
+  // ─── [services.brave_search] ───────────────────────────────────────────
+  const escapedKey = escapeTomlString(apiKey);
+  const braveExists = parsed.services?.brave_search !== undefined;
+  if (braveExists) {
+    // Section exists in some form (live with key, header-only,
+    // comment-only body). Rewrite the live `key = …` line if present;
+    // otherwise insert one right after the header.
+    const lines = next.split('\n');
+    const range = findOwnedSectionLineRange(lines, '[services.brave_search]');
+    if (range) {
+      const [s, e] = range;
+      const sectionLines = lines.slice(s, e);
+      const keyLineIdx = sectionLines.findIndex((l) =>
+        /^key\s*=\s*"[^"]*"\s*(?:#[^\n]*)?$/.test(l)
+      );
+      if (keyLineIdx >= 0) {
+        sectionLines[keyLineIdx] = `key = "${escapedKey}"`;
+      } else {
+        sectionLines.splice(1, 0, `key = "${escapedKey}"`);
+      }
+      next = [...lines.slice(0, s), ...sectionLines, ...lines.slice(e)].join('\n');
+    }
+    // If !range, the parser saw the table but the line scanner didn't —
+    // that's a contradiction (e.g. `services.brave_search` set via
+    // dotted-key syntax without a header). Skip silently rather than
+    // double-write; the parsed shape says it's already there.
   } else {
+    // Section absent. Stub-replace or EOF-append.
+    const braveLiveBlock = `[services.brave_search]\nkey = "${escapedKey}"\n`;
     const braveStubPattern = /^# \[services\.brave_search\]\n# key\s*=\s*"[^"]*"\n/m;
-    const braveStubReplaced = next.replace(braveStubPattern, braveLiveBlock);
-    if (braveStubReplaced !== next) {
-      next = braveStubReplaced;
+    const stubReplaced = next.replace(braveStubPattern, braveLiveBlock);
+    if (stubReplaced !== next) {
+      next = stubReplaced;
     } else {
       const sep = next.endsWith('\n') ? '' : '\n';
       next = `${next}${sep}\n${braveLiveBlock}`;
     }
   }
 
-  // Header-only detection (mirror of the Brave guard above): a bare
-  // `[tools.web_search]` with no body would otherwise be treated as
-  // "missing" and we'd append a second header — duplicate-table bug.
-  const webSearchHeaderOnly = /^\[tools\.web_search\]\s*$/m;
-  if (webSearchHeaderOnly.test(next) && !WEB_SEARCH_SECTION_PATTERN.test(next)) {
-    next = next.replace(
-      webSearchHeaderOnly,
-      '[tools.web_search]\nenabled = true\n# max_results = 5'
-    );
-  } else if (WEB_SEARCH_SECTION_PATTERN.test(next)) {
+  // ─── [tools.web_search] ────────────────────────────────────────────────
+  // Re-parse on `next` since the brave write may have changed the file.
+  const reparsed = TOML.parse(next) as {
+    tools?: { web_search?: Record<string, unknown> };
+  };
+  const webSearchExists = reparsed.tools?.web_search !== undefined;
+  if (webSearchExists) {
     // Section exists: force enabled = true. Otherwise a pre-existing
-    // `enabled = false` would leave web search off even though the user just
-    // set a Brave key (and the caller logs "web search tool enabled").
-    // Match the section block, then rewrite its `enabled = …` line in place.
-    //
-    // The line-match regex tolerates an optional trailing `# comment`, so a
-    // line like `enabled = false  # disabled for now` rewrites cleanly. The
-    // value matcher is permissive (`[^\n#]+`) so hand-edited shapes the
-    // user might paste — `enabled = "false"` (string), `enabled = 0`
-    // (int), `enabled = nope` — all rewrite cleanly to a single canonical
-    // line. Without this, the rewrite would miss those shapes, the
-    // no-line branch would fire, and we'd insert a duplicate `enabled`
-    // key — producing invalid TOML (parsers reject duplicate keys).
-    const enabledLine = /^enabled\s*=\s*[^\n#]+(?:#[^\n]*)?$/m;
-    next = next.replace(WEB_SEARCH_SECTION_PATTERN, (block) => {
-      if (/^enabled\s*=\s*true\s*(?:#[^\n]*)?$/m.test(block)) return block;
-      if (enabledLine.test(block)) {
-        return block.replace(enabledLine, 'enabled = true');
+    // `enabled = false` would leave web search off even though the user
+    // just set a Brave key (and the caller logs "web search tool enabled").
+    // Same line-based section finder as Brave; collapses the four shapes
+    // into one branch.
+    const lines = next.split('\n');
+    const range = findOwnedSectionLineRange(lines, '[tools.web_search]');
+    if (range) {
+      const [s, e] = range;
+      const sectionLines = lines.slice(s, e);
+      // Permissive value matcher (`[^\n#]+`) so hand-edited shapes —
+      // `enabled = "false"` (string), `enabled = 0` (int), `enabled =
+      // nope` — all rewrite cleanly to a single canonical line. Without
+      // it, the rewrite would miss those, the insert branch would fire,
+      // and we'd produce duplicate `enabled` keys (TOML parsers reject).
+      const enabledLineIdx = sectionLines.findIndex((l) =>
+        /^enabled\s*=\s*[^\n#]+(?:#[^\n]*)?$/.test(l)
+      );
+      if (enabledLineIdx >= 0) {
+        sectionLines[enabledLineIdx] = 'enabled = true';
+      } else {
+        sectionLines.splice(1, 0, 'enabled = true');
       }
-      // No `enabled = …` line at all: insert one immediately after the header.
-      return block.replace(/^(\[tools\.web_search\][^\n]*\n)/, '$1enabled = true\n');
-    });
+      next = [...lines.slice(0, s), ...sectionLines, ...lines.slice(e)].join('\n');
+    }
   } else {
-    // No live `[tools.web_search]`. Two placements, mirrored from Brave above:
-    // try the commented stub first (header + commented enabled + commented
-    // max_results, as buildConfigToml emits it), fall through to EOF append.
-    //
-    // We deliberately PRESERVE the `# max_results = N` line as a commented
-    // hint so the user can still see/uncomment the tunable. Without this,
-    // stub replacement strips the line entirely and there's no visible
-    // reference to max_results in the file. Capturing the original commented
-    // line (rather than hard-coding `# max_results = 5`) keeps the value in
-    // sync with whatever buildConfigToml emitted at init time.
+    // Section absent. Stub-replace or EOF-append. Preserve the
+    // `# max_results = N` line from the stub as a visible commented hint
+    // so users still have a reference to the tunable (loader's default
+    // continues to apply since the line stays commented).
     const webSearchStubPattern =
       /^# \[tools\.web_search\]\n# enabled\s*=\s*[a-zA-Z]+\n(# max_results\s*=\s*\d+\n)/m;
-    const webSearchStubReplaced = next.replace(
+    const stubReplaced = next.replace(
       webSearchStubPattern,
       (_, commentedMaxResults: string) =>
         `[tools.web_search]\nenabled = true\n${commentedMaxResults}`
     );
-    if (webSearchStubReplaced !== next) {
-      next = webSearchStubReplaced;
+    if (stubReplaced !== next) {
+      next = stubReplaced;
     } else {
-      // No stub. Append a minimal live block at EOF. max_results is
-      // omitted (loader supplies the default); for parity with the stub-
-      // replace path, also include the commented hint so the user has a
-      // visible reference to the tunable.
       const sep = next.endsWith('\n') ? '' : '\n';
       next = `${next}${sep}\n[tools.web_search]\nenabled = true\n# max_results = 5\n`;
     }
