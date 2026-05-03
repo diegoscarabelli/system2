@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OAuth `onAuth` callback now reads `instructions` alongside `url` so device-flow user codes (Copilot) are surfaced in the terminal. The shared `formatOAuthAuthMessage` helper is used wherever OAuth flows are invoked from the CLI.
 - OAuth dispatcher API: `oauth.ts` exports `loginProvider(provider, callbacks)` and `refreshOAuthToken(provider, credentials)` (replacing `loginAnthropic` / `refreshAnthropic`). Refresh now operates on the full credential object, preserving provider-specific extras (e.g. Copilot's `enterpriseDomain`) through the round-trip. `AuthResolver.ensureFresh`'s `refresh` callback changed from `(refreshToken: string) => Promise<RefreshedTokens>` to `(provider, credentials: OAuthCredentials) => Promise<OAuthCredentials>` (the `RefreshedTokens` type is removed).
 - `validateAgentModels` signature simplified to take a flat `Record<role, Record<provider, modelId>>` instead of a wrapped `AgentsConfig`.
+- Split `~/.system2/config.toml` into two files: `config.toml` (user-edited operational settings: `[agents.*]`, `[databases.*]`, `[backup]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`, `[session]`, `[delivery]`, top-level `web_search_max_results`) and `auth/auth.toml` (machine-managed credentials and service toggles: `[llm.oauth]`, `[llm.api_keys]`, `[services.*]`, `[tools.web_search].enabled`, written exclusively by `system2 config`). The split eliminates an entire class of bugs from the regex-based patcher that previously merged the two ownership models in one file. `auth.toml` is created by `system2 config` on the first credential write; `system2 init` does not create it.
+- Renamed `~/.system2/oauth/` to `~/.system2/auth/` (now also holds `auth.toml` alongside the per-provider credential JSONs). Directory permissions are `0700`, files inside are `0600`.
+- Renamed `[tools.web_search].max_results` to a top-level `web_search_max_results` scalar in `config.toml`. The `[tools.web_search].enabled` flag now lives in `auth.toml` (managed via `system2 config`).
 
 ### Removed
 
@@ -38,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `system2 login` command. OAuth management moves to `system2 config` → OAuth providers.
 - Per-credential `label` field on OAuth credentials. OAuth credentials are stored one-per-provider (`~/.system2/oauth/<provider>.json`) and the runtime never disambiguated them by label, so the field was vestigial. Login flow no longer prompts for a label; the provider id is used everywhere it's referenced (logs, UI, `[llm.oauth]` patcher addresses). Existing on-disk JSON files containing `label` still load — the extra field is ignored.
 - `google-gemini-cli` and `google-antigravity` OAuth providers. Pi-ai 0.71.0 removed both because Google has been disabling user accounts that authenticate via these flows from third-party tools (pi-mono#4017, pi-mono#3999). System2 aligns to avoid the same user-safety risk. Existing `~/.system2/oauth/google-{gemini-cli,antigravity}.json` credential files are silently ignored at startup; safe to delete.
+- The 1100-line regex-based `toml-patchers.ts` is replaced by ~150 lines of parse-mutate-write via `@iarna/toml`. Eliminated bug classes: stub replacement, EOF placement, sub-section repair on hand-edit damage, control-char escaping in user input, and comment-preservation around managed blocks (auth state now lives in a separate file written end-to-end on every change, so comments around managed blocks are no longer a constraint).
+
+### Migration
+
+- 0.3.0 is a clean break with no migration code. Existing installs see "no credentials configured" on first start after upgrade and must re-run `system2 config` to repopulate `~/.system2/auth/auth.toml`. Existing 0.2.x credentials in `~/.system2/oauth/` are silently ignored; that directory is safe to delete.
 
 ### Dependencies
 

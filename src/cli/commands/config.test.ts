@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
@@ -30,6 +30,7 @@ vi.mock('@clack/prompts', async () => {
 describe('system2 config (main menu navigation)', () => {
   let dir: string;
   let configPath: string;
+  let authPath: string;
   // Spy is created per-suite and restored on teardown so the override doesn't
   // leak into other test files in the same Vitest run (other tests that call
   // process.exit would otherwise throw).
@@ -41,7 +42,14 @@ describe('system2 config (main menu navigation)', () => {
     }) as never);
     dir = mkdtempSync(join(tmpdir(), 'system2-config-test-'));
     configPath = join(dir, 'config.toml');
-    writeFileSync(configPath, `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n`);
+    // config.toml exists but is empty (no operational overrides); the install
+    // marker `system2 config` checks for is just configPath existence.
+    writeFileSync(configPath, '');
+    mkdirSync(join(dir, 'auth'), { mode: 0o700 });
+    authPath = join(dir, 'auth', 'auth.toml');
+    // Seed auth.toml with an OAuth tier so `system2 config` doesn't think
+    // the install is brand new (some tests assume the menu is operational).
+    writeFileSync(authPath, `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n`);
     vi.mocked(p.select).mockReset();
     vi.mocked(p.confirm).mockReset();
     vi.mocked(p.password).mockReset();
@@ -83,7 +91,8 @@ describe('system2 config (main menu navigation)', () => {
     await expect(config({ configFile: configPath, system2Dir: dir })).rejects.toThrow(
       /process.exit called/
     );
-    const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
+    // 0.3.0 split: brave_search + tools.web_search live in auth.toml, not config.toml.
+    const parsed = TOML.parse(readFileSync(authPath, 'utf-8')) as {
       services?: { brave_search?: { key?: string } };
       tools?: { web_search?: { enabled?: boolean } };
     };
@@ -98,11 +107,11 @@ describe('system2 config (main menu navigation)', () => {
       .mockResolvedValueOnce('__back__') // back to main menu
       .mockResolvedValueOnce('done'); // main menu again
     vi.mocked(p.password).mockResolvedValueOnce('' as unknown as symbol);
-    const before = readFileSync(configPath, 'utf-8');
+    const beforeAuth = readFileSync(authPath, 'utf-8');
     await expect(config({ configFile: configPath, system2Dir: dir })).rejects.toThrow(
       /process.exit called/
     );
-    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    expect(readFileSync(authPath, 'utf-8')).toBe(beforeAuth);
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 });

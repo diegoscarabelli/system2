@@ -33,19 +33,21 @@ src/
 
 ### `system2 init`
 
-One-shot scaffolder for a fresh install. Creates `~/.system2/` with subdirectories (`sessions/`, `projects/`, `artifacts/`) and writes a fully-commented `config.toml` template (permissions `0600`). On a fresh install it then auto-invokes `system2 config` so first-time users land directly in the credential-management menu, without needing a second command.
+One-shot scaffolder for a fresh install. Creates `~/.system2/` with subdirectories (`sessions/`, `projects/`, `artifacts/`, and `auth/` at `0700`) and writes a fully-commented `config.toml` template (permissions `0600`) containing operational settings only — no auth sections. Does NOT create `auth.toml`; that file is written by `system2 config` on first credential save. On a fresh install it then auto-invokes `system2 config` so first-time users land directly in the credential-management menu, without needing a second command.
 
-Refuses to overwrite an existing install: if `~/.system2/` is already present, `system2 init` prints a friendly message pointing at `system2 config` for re-configuration (and shows how to move the directory aside if you really want to start over). Run it once when first installing System2; afterwards, manage credentials with `system2 config`.
+Idempotent on re-run: invoking `system2 init` against an existing install does NOT clobber `auth.toml` or any credentials under `auth/`. This makes the config-recovery flow safe — `mv ~/.system2/config.toml ~/.system2/config.toml.bak && system2 init` regenerates a clean `config.toml` while preserving all auth state. Run it once when first installing System2; afterwards, manage credentials with `system2 config`.
 
 ### `system2 config`
 
 Re-entrant top-level menu for credentials and services. Built with [@clack/prompts](https://github.com/bombshell-dev/clack); takes no arguments. Refuses to run while the daemon is up, and refuses to run when `~/.system2/config.toml` is missing (it points at `system2 init` instead).
 
+Reads and writes ONLY `~/.system2/auth/auth.toml` (the machine-managed credentials file); it never touches `config.toml`. On the first credential write it creates `auth.toml` with permissions `0600` and a header comment: `# Managed by 'system2 config' — do not edit by hand.`. OAuth credential JSON files live alongside it under `~/.system2/auth/<provider>.json` (also `0600`).
+
 The main menu has three submenus:
 
-- **OAuth providers** — Anthropic (Claude Pro/Max), OpenAI Codex (ChatGPT), GitHub Copilot. Already-logged-in providers are annotated with their position in the failover chain (e.g. `✓ logged in (primary)`, `#2 ✓ logged in`). Per-provider actions: **Re-login** (replace credentials by re-running the browser flow), **Set as primary OAuth provider** (only shown when there's a different primary), **Remove** (delete `~/.system2/oauth/<provider>.json` and drop it from `[llm.oauth]`). Selecting a not-yet-logged-in provider runs the browser OAuth flow and auto-patches `[llm.oauth]`. A **Reorder fallbacks** entry appears when 2+ fallbacks are configured.
-- **API key providers** — Anthropic, Cerebras, Google, Groq, Mistral, OpenAI, OpenAI-compatible, OpenRouter, xAI. Per-provider actions: **Add another key** (additional labeled key for rotation), **Replace key**, **Set as primary**, **Remove provider** (drops all keys + the provider from `[llm.api_keys]`). Reorder fallbacks entry mirrors OAuth.
-- **Services** — Brave Search: set, replace, or remove the key. The `web_search` tool is auto-enabled when a key is set.
+- **OAuth providers** — Anthropic (Claude Pro/Max), OpenAI Codex (ChatGPT), GitHub Copilot. Already-logged-in providers are annotated with their position in the failover chain (e.g. `✓ logged in (primary)`, `#2 ✓ logged in`). Per-provider actions: **Re-login** (replace credentials by re-running the browser flow), **Set as primary OAuth provider** (only shown when there's a different primary), **Remove** (delete `~/.system2/auth/<provider>.json` and drop it from `[llm.oauth]` in `auth.toml`). Selecting a not-yet-logged-in provider runs the browser OAuth flow and auto-patches `[llm.oauth]` in `auth.toml`. A **Reorder fallbacks** entry appears when 2+ fallbacks are configured.
+- **API key providers** — Anthropic, Cerebras, Google, Groq, Mistral, OpenAI, OpenAI-compatible, OpenRouter, xAI. Per-provider actions: **Add another key** (additional labeled key for rotation), **Replace key**, **Set as primary**, **Remove provider** (drops all keys + the provider from `[llm.api_keys]` in `auth.toml`). Reorder fallbacks entry mirrors OAuth.
+- **Services** — Brave Search: set, replace, or remove the key. The `web_search` tool is auto-enabled when a key is set (the `web_search.enabled` flag lives in `auth.toml`; the `web_search_max_results` operational scalar lives in `config.toml`).
 
 **Cancel/back semantics.** Esc at the main menu exits cleanly. Esc inside a submenu (or the explicit `Back to main menu` entry) returns to the main menu. Inside a data-entry flow, Esc or empty submission on a required prompt returns to the enclosing submenu without writing anything; there is no global exit from inside a flow, and no infinite "API key is required" loop on empty input.
 
@@ -62,7 +64,7 @@ The daemon must be stopped before running it; restart afterward to pick up the c
 system2 stop && system2 config && system2 start
 ```
 
-The TOML schema is unchanged from previous releases: hand-editing `~/.system2/config.toml` continues to work for advanced tweaks. See [Auth Tiers](configuration.md#auth-tiers) in the configuration reference for how OAuth credentials interact with API key fallback and refresh behavior.
+`auth.toml` is machine-managed: never hand-edit it. For operational settings (agents, databases, scheduler, the `web_search_max_results` scalar, etc.) hand-edit `~/.system2/config.toml`; the daemon reads `config.toml` but never writes it. See [Auth Tiers](configuration.md#auth-tiers) in the configuration reference for how OAuth credentials interact with API key fallback and refresh behavior.
 
 ### `system2 start`
 
@@ -75,14 +77,18 @@ Starts the server process.
 | `--foreground` | Run in foreground (logs to stdout) |
 
 **Start sequence:**
-1. Load and validate `config.toml`
-2. Verify at least one tier is configured (`[llm.oauth].primary` or `[llm.api_keys].primary`). If neither is set, prints `No LLM credentials configured. Run \`system2 config\` to set up an OAuth provider or API key provider.` and exits 1 before forking the daemon.
-3. Rotate logs if size > 10MB
-4. Create automatic backup of `~/.system2/` (24h cooldown, max 3 backups)
-5. Check for existing PID file (prevent double-start)
-6. Spawn server as detached process (or run in foreground)
-7. Write PID file
-8. Open browser (unless `--no-browser`)
+1. Load and validate `config.toml` and `auth/auth.toml`, then run a four-state credential probe:
+   - `not_initialized` — `config.toml` is missing. Prints a message pointing at `system2 init` and exits 1.
+   - `malformed { file: 'config' }` — `config.toml` exists but fails to parse. Prints `Fix syntax in ~/.system2/config.toml` and exits 1.
+   - `missing` — `config.toml` is OK but `auth.toml` is missing or has no primary in either tier (`[llm.oauth].primary` / `[llm.api_keys].primary`). Prints `No LLM credentials configured. Run \`system2 config\` to set up an OAuth provider or API key provider.` and exits 1.
+   - `malformed { file: 'auth' }` — `auth.toml` exists but fails to parse. Prints `Fix syntax in ~/.system2/auth/auth.toml or run \`system2 config\` to reset it.` and exits 1.
+   - `configured` — both files load cleanly and a primary is set in at least one tier. Proceed.
+2. Rotate logs if size > 10MB
+3. Create automatic backup of `~/.system2/` (24h cooldown, max 3 backups)
+4. Check for existing PID file (prevent double-start)
+5. Spawn server as detached process (or run in foreground)
+6. Write PID file
+7. Open browser (unless `--no-browser`)
 
 ### `system2 stop`
 
@@ -95,13 +101,13 @@ Shows whether the server is running, its PID, log file size, and commands for ta
 ## Config Loading (`utils/config.ts`)
 
 The config utility handles:
-- Reading and parsing TOML from `~/.system2/config.toml`
+- Reading and parsing TOML from `~/.system2/config.toml` (operational settings) and `~/.system2/auth/auth.toml` (credentials)
 - Converting snake_case TOML keys to camelCase TypeScript interfaces
 - Deep-merging with defaults (backup cooldown: 24h, max backups: 3, etc.)
-- Validating required fields (at least one LLM provider with keys)
-- Building a `ServerConfig` object for the server
+- Running the four-state credential probe described under [`system2 start`](#system2-start) (file-specific `not_initialized` / `malformed` / `missing` / `configured` results)
+- Building a `ServerConfig` object for the server (with credentials from `auth.toml` overlaid onto operational config)
 
-See [Configuration](configuration.md) for the full config.toml reference.
+See [Configuration](configuration.md) for the full reference on both files.
 
 ## Utilities
 

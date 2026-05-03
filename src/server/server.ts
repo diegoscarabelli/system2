@@ -142,7 +142,7 @@ export class Server {
           oauthCredentials[provider] = creds;
         } else {
           log.warn(
-            `[server] [llm.oauth] declares ${provider} but ~/.system2/oauth/${provider}.json is missing — skipping`
+            `[server] [llm.oauth] declares ${provider} but ~/.system2/auth/${provider}.json is missing — skipping`
           );
         }
       }
@@ -160,7 +160,7 @@ export class Server {
       throw new Error(
         'No usable LLM credentials available. Either:\n' +
           '  - Run `system2 config` to authenticate via OAuth (interactive), or\n' +
-          '  - Add API keys to ~/.system2/config.toml under [llm.api_keys.<provider>].keys'
+          '  - Run `system2 config` to add API keys; auth.toml lives at ~/.system2/auth/auth.toml'
       );
     }
 

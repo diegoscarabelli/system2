@@ -13,48 +13,65 @@ import TOML from '@iarna/toml';
 import open from 'open';
 import pc from 'picocolors';
 import type { LlmConfig } from '../../shared/index.js';
+import { authFile } from '../utils/auth-config.js';
 import { backupIfNeeded } from '../utils/backup.js';
 import { CONFIG_FILE, loadConfig, SYSTEM2_DIR } from '../utils/config.js';
 import { rotateLogIfNeeded } from '../utils/log-rotation.js';
 
 /**
- * Tri-state credential probe. Returns:
- * - 'configured' when at least one of [llm.oauth].primary or [llm.api_keys].primary is set.
- * - 'missing' when the config file is absent or has no live primary in either tier.
- * - 'malformed' when TOML.parse fails (with the parse error attached).
- *
- * The tri-state lets `start()` print distinct messages for "you forgot to run
- * `system2 config`" vs "your config.toml has a syntax error", instead of
- * collapsing parse failures into a misleading "no credentials" message.
- *
- * `hasConfiguredCredentialTier` below is a boolean shim retained for the
- * existing test surface; it returns true only for the 'configured' state.
+ * Four-state credential probe. The split into `not_initialized` (config.toml
+ * missing) vs `missing` (config.toml present but no auth.toml or no primary
+ * in either tier) lets `start()` route the user to `system2 init` vs
+ * `system2 config` accurately. The two malformed states distinguish which
+ * file's TOML failed to parse, so the error message names the right path.
  */
 export type CredentialTierStatus =
   | { kind: 'configured' }
+  | { kind: 'not_initialized' }
   | { kind: 'missing' }
-  | { kind: 'malformed'; error: Error };
+  | { kind: 'malformed'; file: 'config' | 'auth'; error: Error };
 
-export function probeCredentialTier(configPath: string): CredentialTierStatus {
-  if (!existsSync(configPath)) return { kind: 'missing' };
-  let parsed: { llm?: { oauth?: { primary?: string }; api_keys?: { primary?: string } } };
+export function probeCredentialTier(configPath: string, authPath: string): CredentialTierStatus {
+  if (!existsSync(configPath)) return { kind: 'not_initialized' };
+
+  // config.toml must parse cleanly even though it no longer carries any
+  // primary fields — a syntax error here would crash the loader during
+  // start() with a less helpful message.
   try {
-    parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as typeof parsed;
+    TOML.parse(readFileSync(configPath, 'utf-8'));
   } catch (err) {
-    return { kind: 'malformed', error: err instanceof Error ? err : new Error(String(err)) };
+    return {
+      kind: 'malformed',
+      file: 'config',
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
   }
-  const oauthPrimary = parsed.llm?.oauth?.primary;
-  const apiKeysPrimary = parsed.llm?.api_keys?.primary;
+
+  if (!existsSync(authPath)) return { kind: 'missing' };
+
+  let auth: { llm?: { oauth?: { primary?: string }; api_keys?: { primary?: string } } };
+  try {
+    auth = TOML.parse(readFileSync(authPath, 'utf-8')) as typeof auth;
+  } catch (err) {
+    return {
+      kind: 'malformed',
+      file: 'auth',
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+  const oauthPrimary = auth.llm?.oauth?.primary;
+  const apiKeysPrimary = auth.llm?.api_keys?.primary;
   return oauthPrimary || apiKeysPrimary ? { kind: 'configured' } : { kind: 'missing' };
 }
 
 /**
  * Boolean shim retained for the existing test surface and any external callers.
- * Treats malformed configs as "not configured" — start() should call
- * probeCredentialTier directly to distinguish the two failure modes.
+ * Treats not_initialized/missing/malformed configs all as "not configured".
+ * Tests that need the four-state distinction should call probeCredentialTier
+ * directly.
  */
-export function hasConfiguredCredentialTier(configPath: string): boolean {
-  return probeCredentialTier(configPath).kind === 'configured';
+export function hasConfiguredCredentialTier(configPath: string, authPath: string): boolean {
+  return probeCredentialTier(configPath, authPath).kind === 'configured';
 }
 
 /**
@@ -91,28 +108,33 @@ const PID_FILE = join(SYSTEM2_DIR, 'server.pid');
 const LOG_FILE = join(LOGS_DIR, 'system2.log');
 const IS_WINDOWS = process.platform === 'win32';
 
+const AUTH_FILE = authFile(SYSTEM2_DIR);
+
 export async function start(options: {
   port?: number;
   noBrowser?: boolean;
   foreground?: boolean;
 }): Promise<void> {
-  // Step 1: install present?
-  if (!existsSync(CONFIG_FILE)) {
+  // Distinguish "init not run" / "no credentials" / "malformed file" so the
+  // error message points the user at the actual problem.
+  const tierStatus = probeCredentialTier(CONFIG_FILE, AUTH_FILE);
+  if (tierStatus.kind === 'not_initialized') {
     console.error('Error: System2 is not initialized.');
     console.error('Please run: system2 init');
     process.exit(1);
   }
-
-  // Step 2: at least one credential tier configured?
-  // (init writes a fully-commented template, so a brand-new install fails this
-  // check until `system2 config` adds an OAuth or API-key provider.)
-  // Distinguish "no credentials" from "config is malformed" so the error
-  // message points the user at the actual problem.
-  const tierStatus = probeCredentialTier(CONFIG_FILE);
   if (tierStatus.kind === 'malformed') {
-    console.error(pc.red('✗ config.toml could not be parsed:'));
+    const fileLabel = tierStatus.file === 'config' ? 'config.toml' : 'auth/auth.toml';
+    console.error(pc.red(`✗ ${fileLabel} could not be parsed:`));
     console.error(`  ${tierStatus.error.message}`);
-    console.error('Fix the syntax error, or run `system2 config` to manage credentials.');
+    if (tierStatus.file === 'config') {
+      console.error('Fix the syntax error in ~/.system2/config.toml manually.');
+    } else {
+      console.error(
+        'Fix the syntax error in ~/.system2/auth/auth.toml manually, or delete it and rerun ' +
+          '`system2 config` to recreate it.'
+      );
+    }
     process.exit(1);
   }
   if (tierStatus.kind === 'missing') {
@@ -121,13 +143,13 @@ export async function start(options: {
     process.exit(1);
   }
 
-  // Step 3: load + validate. By this point both checks above have passed, so
-  // config.llm should be present. Defensive guard in case the toml schema is
-  // malformed in a way the credential check missed (e.g. legacy 0.2.x layout).
+  // Load + validate. By this point the probe has passed, so config.llm should
+  // be present. Defensive guard in case the schema is malformed in a way the
+  // credential probe missed.
   const config = loadConfig();
   if (!config.llm) {
-    console.error('Error: config.toml has credentials but [llm] could not be parsed.');
-    console.error('Run `system2 config` to verify the schema, or edit config.toml manually.');
+    console.error('Error: auth.toml has credentials but [llm] could not be parsed.');
+    console.error('Run `system2 config` to verify the schema, or edit auth.toml manually.');
     process.exit(1);
   }
 

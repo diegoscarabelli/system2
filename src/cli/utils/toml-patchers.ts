@@ -1,1083 +1,481 @@
 /**
- * TOML patchers for `~/.system2/config.toml`.
+ * TOML patchers for `~/.system2/auth/auth.toml`.
  *
- * Each patcher reads the file, parses it with @iarna/toml to inspect current
- * state, then edits the raw text via line-anchored regex and writes back. The
- * regex approach preserves comments, blank lines, and section dividers that
- * `buildConfigToml` emits — round-tripping through a serializer would flatten
- * everything.
+ * Each patcher is a thin wrapper around `withAuth(authPath, mutate)`: read the
+ * file, parse it, mutate the in-memory object, stringify, and write atomically.
+ * No regex, no comment preservation, no boundary detection — all the bug
+ * classes that plagued the 0.2.x regex implementation (stub replacement, EOF
+ * placement, sub-section repair, control-char escaping) are gone because
+ * `@iarna/toml` round-trips structured data losslessly.
  *
- * All patchers return `{ changed: boolean }`. They throw when the file or a
- * required section is missing, or when the on-disk format is so unusual the
- * regex can't find what TOML.parse can.
+ * Comments are not preserved across writes; this is by design. `auth.toml` is
+ * machine-managed (`system2 config` writes it, never the user). The header
+ * line `# Managed by 'system2 config' — do not edit by hand.` is re-emitted
+ * on every write so the warning persists.
+ *
+ * Function signatures keep `{ changed: boolean }` returns where they did in
+ * 0.2.x so call-sites in src/cli/commands/config.ts don't churn beyond the
+ * `configPath → authPath` rename.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import TOML from '@iarna/toml';
 import type { LlmKey, LlmProvider } from '../../shared/index.js';
-
-/**
- * Escape a string for inclusion in a TOML basic (double-quoted) string. User
- * input (API keys, labels, URLs) can legitimately contain `\`, `"`, or control
- * characters; without escaping these would produce invalid TOML or, in
- * adversarial cases, let an attacker inject trailing TOML syntax. Provider IDs
- * come from a fixed enum (`LlmProvider`) and don't need escaping, but
- * labels/keys/urls do.
- *
- * Escape order matters: backslash MUST be replaced first or every later
- * substitution that introduces a `\` would be re-escaped on the next pass.
- *
- * Note: `/\b/g` in a regex is a word boundary, NOT the backspace control char.
- * Use the explicit character class `/[\b]/g` for the rare backspace case.
- */
-export function escapeTomlString(s: string): string {
-  return (
-    s
-      .replace(/\\/g, '\\\\')
-      .replace(/"/g, '\\"')
-      .replace(/[\b]/g, '\\b')
-      .replace(/\t/g, '\\t')
-      .replace(/\n/g, '\\n')
-      .replace(/\f/g, '\\f')
-      .replace(/\r/g, '\\r')
-      // Catch-all: any remaining C0 control char (U+0000..U+001F minus those
-      // handled above, plus DEL U+007F) is illegal in a TOML basic string per
-      // spec. Emit as a \\uXXXX escape rather than dropping or leaving raw, so
-      // escapeTomlString can never produce invalid TOML for any input. The
-      // control-char range in the regex is intentional; biome's
-      // noControlCharactersInRegex would otherwise flag both U+0000 and U+007F.
-      .replace(
-        // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control-char escape
-        /[\u0000-\u001f\u007f]/g,
-        (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
-      )
-  );
-}
+import { type AuthToml, loadAuthToml, withAuth } from './auth-config.js';
 
 // ─── OAuth tier ───────────────────────────────────────────────────────────────
 
 /**
- * Pattern matching the [llm.oauth] block: header line + immediate key=value
- * lines (typically primary + fallback), stopping at the first blank line,
- * comment line, or next `[`-section header.
- *
- * Prior versions used a wide pattern that ran to the next live `[`-section,
- * which silently consumed everything in between — fine when adjacent
- * sections were always live, but corrupting once buildConfigToml started
- * emitting commented templates and dividers between live sections. The
- * narrow pattern preserves those structural elements (and any
- * `[llm.oauth.<provider>]` sub-section model pins, which sit below a blank
- * line and so are now also preserved).
+ * Read the current `[llm.oauth]` tier. Returns null when the section is
+ * absent or has no primary set (matching 0.2.x semantics — both states
+ * meant "OAuth tier not usable").
  */
-const OAUTH_BLOCK_PATTERN = /^\[llm\.oauth\][^\n]*\n(?:[^[#\s][^\n]*\n)+/m;
-
-/**
- * Read the current `[llm.oauth]` tier from config.toml.
- * Returns null if the section is absent.
- */
-export function readOAuthTier(configPath: string): { primary: string; fallback: string[] } | null {
-  if (!existsSync(configPath)) return null;
-  const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
-    llm?: { oauth?: { primary?: string; fallback?: string[] } };
-  };
-  const oauth = parsed.llm?.oauth;
-  if (!oauth?.primary) return null;
-  return { primary: oauth.primary, fallback: oauth.fallback ?? [] };
+export function readOAuthTier(authPath: string): { primary: string; fallback: string[] } | null {
+  let result: { primary: string; fallback: string[] } | null = null;
+  withAuthRead(authPath, (auth) => {
+    const oauth = auth.llm?.oauth;
+    if (!oauth?.primary) return;
+    result = { primary: oauth.primary, fallback: oauth.fallback ?? [] };
+  });
+  return result;
 }
 
 /**
- * Patch config.toml to include `provider` in the OAuth tier (`[llm.oauth]`).
- * If the section is missing, create it with `provider` as primary and empty fallback.
- * If present with a different primary, append `provider` to fallback.
- * If `provider` is already in the tier, no-op.
- *
- * Returns { changed: boolean }.
+ * Add `provider` to the OAuth tier.
+ * - Empty tier: create with `provider` as primary.
+ * - Existing tier: append to fallback (no-op if already in tier).
  */
 export function addProviderToOAuthTier(
-  configPath: string,
+  authPath: string,
   provider: LlmProvider
 ): { changed: boolean } {
-  if (!existsSync(configPath)) {
-    throw new Error(`config.toml not found at ${configPath}`);
-  }
-  const raw = readFileSync(configPath, 'utf-8');
-  const parsed = TOML.parse(raw) as { llm?: { oauth?: { primary?: string; fallback?: string[] } } };
-  const oauth = parsed.llm?.oauth;
-
-  if (!oauth) {
-    const insertion = `[llm.oauth]\nprimary = "${provider}"\nfallback = []\n`;
-    // Preferred: replace the commented stub buildConfigToml emits when no
-    // OAuth is configured (the 3 lines `# [llm.oauth]\n# primary = "..."\n
-    // # fallback = [...]`). Without this, the live block lands at EOF (or
-    // after [llm]) and the commented stub stays put — leaving a confusing
-    // duplicate schema on first `system2 config` run.
-    const stubReplaced = raw.replace(
-      /^# \[llm\.oauth\]\n# primary\s*=\s*"[^"]*"\n# fallback\s*=\s*\[[^\]]*\]\n/m,
-      insertion
-    );
-    if (stubReplaced !== raw) {
-      writeFileSync(configPath, stubReplaced);
-      return { changed: true };
+  let changed = false;
+  withAuth(authPath, (auth) => {
+    if (!auth.llm) auth.llm = {};
+    if (!auth.llm.oauth) {
+      auth.llm.oauth = { primary: provider, fallback: [] };
+      changed = true;
+      return;
     }
-
-    const lines = raw.split('\n');
-    const llmHeaderIdx = lines.findIndex((l) => l.trim() === '[llm]');
-    if (llmHeaderIdx === -1) {
-      // No [llm] block and no commented stub. Append at end.
-      const sep = raw.endsWith('\n') ? '' : '\n';
-      writeFileSync(configPath, `${raw}${sep}\n${insertion}`);
-      return { changed: true };
+    if (!auth.llm.oauth.primary) {
+      auth.llm.oauth.primary = provider;
+      auth.llm.oauth.fallback = auth.llm.oauth.fallback ?? [];
+      changed = true;
+      return;
     }
-    let insertIdx = lines.length;
-    for (let i = llmHeaderIdx + 1; i < lines.length; i++) {
-      if (/^\[/.test(lines[i].trim())) {
-        insertIdx = i;
-        break;
-      }
-    }
-    while (insertIdx > llmHeaderIdx + 1 && lines[insertIdx - 1].trim() === '') {
-      insertIdx--;
-    }
-    lines.splice(insertIdx, 0, '', `[llm.oauth]`, `primary = "${provider}"`, 'fallback = []');
-    writeFileSync(configPath, lines.join('\n'));
-    return { changed: true };
-  }
-
-  // Defense against malformed OAuth tier (header present, primary missing).
-  // Mirrors the API-keys-tier guard. Without this, the fallback-rewrite below
-  // would interpolate `undefined` as the primary value and produce invalid
-  // TOML, or leave the tier in a no-primary state the runtime can't use.
-  if (!oauth.primary) {
-    throw new Error(
-      `[llm.oauth] section exists in ${configPath} but is malformed (missing primary?). ` +
-        'Edit the file manually to fix it before adding providers via system2 config.'
-    );
-  }
-
-  const inTier = oauth.primary === provider || (oauth.fallback ?? []).includes(provider);
-  if (inTier) return { changed: false };
-
-  // Append to fallback array. Capture ONLY the [llm.oauth] header + its
-  // immediate key=value lines, stopping at the first blank line, comment,
-  // or next `[`-section. A wider span would include intervening commented
-  // templates and section dividers (which buildConfigToml emits between
-  // tiers); replacing that span destroys structure.
-  const match = raw.match(OAUTH_BLOCK_PATTERN);
-  if (!match) {
-    // TOML.parse found [llm.oauth] but the regex doesn't match — likely an
-    // unusual on-disk format (leading whitespace before the header, key on
-    // same line as header, etc.). Throw rather than silently no-op: the
-    // credential file has already been written, so a silent miss here would
-    // leave the user logged in but not registered in [llm.oauth].
-    throw new Error(
-      `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
-        `Edit the file manually if it has unusual formatting.`
-    );
-  }
-  const newFallback = [...(oauth.fallback ?? []), provider];
-  const fallbackLine = `fallback = [${newFallback.map((f) => `"${f}"`).join(', ')}]`;
-  const replacedSection = match[0].replace(/fallback\s*=\s*\[[^\]]*\]/, fallbackLine);
-
-  // If regex didn't match an existing fallback line, the section is unchanged.
-  // We need to insert the fallback line after the primary line instead.
-  if (replacedSection === match[0]) {
-    const withFallback = match[0].replace(/(primary\s*=\s*"[^"]*"\s*\n)/, `$1${fallbackLine}\n`);
-    if (withFallback === match[0]) {
-      // No primary= line either — same partial-success risk as a regex miss.
-      throw new Error(
-        `Could not locate primary= line in [llm.oauth] section of ${configPath} ` +
-          `to anchor a fallback insertion. Edit the file manually.`
-      );
-    }
-    writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, withFallback));
-    return { changed: true };
-  }
-
-  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacedSection));
-  return { changed: true };
+    if (auth.llm.oauth.primary === provider) return;
+    const fallback = (auth.llm.oauth.fallback ?? []) as string[];
+    if (fallback.includes(provider)) return;
+    auth.llm.oauth.fallback = [...fallback, provider];
+    changed = true;
+  });
+  return { changed };
 }
 
 /**
- * Patch config.toml to remove `provider` from `[llm.oauth]`.
- * - If `provider` is the primary and there's a fallback: promote the first fallback to primary.
- * - If `provider` is the primary and no fallback: drop the `[llm.oauth]` section entirely.
- * - If `provider` is in fallback: remove it from the fallback list.
- * - If `provider` not in the tier: no-op.
+ * Remove `provider` from the OAuth tier.
+ * - Removes from primary (promoting first fallback if any) or fallback array.
+ * - Drops the [llm.oauth] section entirely when no providers remain.
  */
 export function removeProviderFromOAuthTier(
-  configPath: string,
+  authPath: string,
   provider: LlmProvider
 ): { changed: boolean } {
-  if (!existsSync(configPath)) {
-    throw new Error(`config.toml not found at ${configPath}`);
-  }
-  const raw = readFileSync(configPath, 'utf-8');
-  const parsed = TOML.parse(raw) as { llm?: { oauth?: { primary?: string; fallback?: string[] } } };
-  const oauth = parsed.llm?.oauth;
-  if (!oauth) return { changed: false };
+  let changed = false;
+  withAuth(authPath, (auth) => {
+    const oauth = auth.llm?.oauth;
+    if (!oauth) return;
 
-  // Guard against a malformed [llm.oauth] block (header present, primary
-  // absent). Without this, removing a fallback entry would leave newPrimary
-  // null → the section-deletion branch below fires and wipes the entire
-  // [llm.oauth] block, even though the user only asked to remove a fallback.
-  // Mirrors the addProviderToOAuthTier guard.
-  if (!oauth.primary) {
-    throw new Error(
-      `[llm.oauth] section exists in ${configPath} but is malformed (missing primary?). ` +
-        'Edit the file manually to fix it before removing providers via system2 config.'
-    );
-  }
+    const isPrimary = oauth.primary === provider;
+    const fallbackArr = (oauth.fallback ?? []) as string[];
+    const inFallback = fallbackArr.includes(provider);
+    if (!isPrimary && !inFallback) return;
 
-  const fallback = oauth.fallback ?? [];
-  const isPrimary = oauth.primary === provider;
-  const inFallback = fallback.includes(provider);
-  if (!isPrimary && !inFallback) return { changed: false };
+    if (isPrimary) {
+      const remaining = fallbackArr.filter((p) => p !== provider);
+      if (remaining.length === 0) {
+        delete auth.llm?.oauth;
+      } else {
+        oauth.primary = remaining[0];
+        oauth.fallback = remaining.slice(1);
+      }
+    } else {
+      oauth.fallback = fallbackArr.filter((p) => p !== provider);
+    }
 
-  let newPrimary: string | null = oauth.primary;
-  let newFallback = fallback.slice();
+    // Drop any leftover per-provider OAuth pin (e.g. [llm.oauth.<provider>]).
+    if (auth.llm?.oauth && provider in auth.llm.oauth) {
+      delete (auth.llm.oauth as Record<string, unknown>)[provider];
+    }
 
-  if (isPrimary) {
-    newPrimary = newFallback.length > 0 ? (newFallback.shift() ?? null) : null;
-  } else {
-    newFallback = newFallback.filter((f) => f !== provider);
-  }
-
-  if (!OAUTH_BLOCK_PATTERN.test(raw)) {
-    throw new Error(
-      `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
-        `Edit the file manually if it has unusual formatting.`
-    );
-  }
-
-  if (newPrimary === null) {
-    writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, ''));
-    return { changed: true };
-  }
-
-  const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-  const replacement = `[llm.oauth]\nprimary = "${newPrimary}"\nfallback = [${fbStr}]\n`;
-  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacement));
-  return { changed: true };
+    changed = true;
+  });
+  return { changed };
 }
 
 /**
- * Overwrite `[llm.oauth].fallback` with the supplied ordered list. Validates
- * that no entry equals the current primary (use `setProviderAsPrimary` to
- * change the primary). If the new order matches the current `fallback` exactly,
- * this is a no-op (no file write).
+ * Replace the OAuth fallback list verbatim. Order matters — index 0 is the
+ * second-tried provider, after `primary`.
  */
-export function setOAuthFallbackOrder(
-  configPath: string,
-  newFallback: LlmProvider[]
-): { changed: boolean } {
-  const current = readOAuthTier(configPath);
-  if (!current) {
-    throw new Error(`[llm.oauth] section not found in ${configPath}`);
-  }
-  if (newFallback.some((entry) => entry === current.primary)) {
-    throw new Error(`primary cannot appear in fallback: ${current.primary}`);
-  }
-  const same =
-    newFallback.length === current.fallback.length &&
-    newFallback.every((p, i) => p === current.fallback[i]);
-  if (same) return { changed: false };
-
-  const raw = readFileSync(configPath, 'utf-8');
-  if (!OAUTH_BLOCK_PATTERN.test(raw)) {
-    throw new Error(
-      `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
-        `Edit the file manually if it has unusual formatting.`
-    );
-  }
-  const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-  const replacement = `[llm.oauth]\nprimary = "${current.primary}"\nfallback = [${fbStr}]\n`;
-  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacement));
-  return { changed: true };
+export function setOAuthFallbackOrder(authPath: string, fallback: LlmProvider[]): void {
+  withAuth(authPath, (auth) => {
+    if (!auth.llm?.oauth?.primary) {
+      throw new Error('Cannot reorder OAuth fallbacks: [llm.oauth] is not configured');
+    }
+    auth.llm.oauth.fallback = [...fallback];
+  });
 }
 
 /**
- * Promote `provider` to primary in `[llm.oauth]`. The current primary becomes the
- * head of fallback (preserving the rest of fallback's order). If `provider` is
- * already primary, no-op.
+ * Promote `provider` to OAuth primary, demoting the existing primary to
+ * fallback[0]. No-op when `provider` is already primary.
  */
 export function setProviderAsPrimary(
-  configPath: string,
+  authPath: string,
   provider: LlmProvider
 ): { changed: boolean } {
-  const current = readOAuthTier(configPath);
-  if (!current) {
-    throw new Error(`[llm.oauth] section not found in ${configPath}`);
-  }
-  if (current.primary === provider) return { changed: false };
-
-  // Move current primary to head of fallback. Strip provider from fallback if
-  // it was there, then prepend the old primary.
-  const newFallback = [current.primary, ...current.fallback.filter((f) => f !== provider)];
-
-  const raw = readFileSync(configPath, 'utf-8');
-  if (!OAUTH_BLOCK_PATTERN.test(raw)) {
-    throw new Error(
-      `Could not locate [llm.oauth] section in ${configPath} for rewrite. ` +
-        `Edit the file manually if it has unusual formatting.`
-    );
-  }
-  const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-  const replacement = `[llm.oauth]\nprimary = "${provider}"\nfallback = [${fbStr}]\n`;
-  writeFileSync(configPath, raw.replace(OAUTH_BLOCK_PATTERN, replacement));
-  return { changed: true };
+  let changed = false;
+  withAuth(authPath, (auth) => {
+    const oauth = auth.llm?.oauth;
+    if (!oauth?.primary) {
+      throw new Error('Cannot set OAuth primary: [llm.oauth] is not configured');
+    }
+    if (oauth.primary === provider) return;
+    const oldPrimary = oauth.primary;
+    const fallbackArr = (oauth.fallback ?? []) as string[];
+    const newFallback = [oldPrimary, ...fallbackArr.filter((p) => p !== provider)];
+    oauth.primary = provider;
+    oauth.fallback = newFallback;
+    changed = true;
+  });
+  return { changed };
 }
 
-// ─── API-keys tier ────────────────────────────────────────────────────────────
+// ─── API keys tier ────────────────────────────────────────────────────────────
 
 /**
- * Mirrors OAUTH_BLOCK_PATTERN but for `[llm.api_keys]`. Matches the bare tier
- * header line (`[llm.api_keys]`) plus its key=value lines (primary, fallback),
- * stopping at the first blank line, comment line, or any next `[`-section
- * header (including the `[llm.api_keys.<provider>]` sub-sections that follow).
- *
- * The literal `]` after `api_keys` ensures we don't match a `[llm.api_keys.x]`
- * sub-section header by accident: the regex needs `]` next, sub-sections have
- * `.` next.
- */
-const API_KEYS_BLOCK_PATTERN = /^\[llm\.api_keys\][^\n]*\n(?:[^[#\s][^\n]*\n)+/m;
-
-/**
- * Read the current `[llm.api_keys]` tier from config.toml.
- * Returns null if the section is absent.
+ * Read the current `[llm.api_keys]` tier. Returns null when the section is
+ * absent or lacks a primary. The `providers` set lists all keys other than
+ * `primary` and `fallback` — i.e. each `[llm.api_keys.<provider>]` sub-table
+ * present.
  */
 export function readApiKeysTier(
-  configPath: string
+  authPath: string
 ): { primary: string; fallback: string[]; providers: Set<string> } | null {
-  if (!existsSync(configPath)) return null;
-  const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
-    llm?: {
-      api_keys?: Record<string, unknown> & { primary?: string; fallback?: string[] };
-    };
-  };
-  const tier = parsed.llm?.api_keys;
-  if (!tier?.primary) return null;
-  const providers = new Set<string>();
-  for (const k of Object.keys(tier)) {
-    if (k !== 'primary' && k !== 'fallback') providers.add(k);
-  }
-  return { primary: tier.primary, fallback: tier.fallback ?? [], providers };
+  let result: { primary: string; fallback: string[]; providers: Set<string> } | null = null;
+  withAuthRead(authPath, (auth) => {
+    const tier = auth.llm?.api_keys;
+    if (!tier?.primary) return;
+    const providers = new Set<string>();
+    for (const k of Object.keys(tier)) {
+      if (k !== 'primary' && k !== 'fallback') providers.add(k);
+    }
+    result = { primary: tier.primary, fallback: (tier.fallback ?? []) as string[], providers };
+  });
+  return result;
 }
 
 /**
- * Format a `keys = [...]` array as a multi-line block for inclusion in a
- * sub-section. Both `key` and `label` are user input — escape via
- * `escapeTomlString` so backslashes/quotes/control characters can't produce
- * invalid TOML or inject trailing syntax.
+ * Optional extras for openai-compatible. Other providers ignore them.
  */
-function formatKeysBlock(keys: LlmKey[]): string {
-  const lines = ['keys = ['];
-  for (const k of keys) {
-    lines.push(`  { key = "${escapeTomlString(k.key)}", label = "${escapeTomlString(k.label)}" },`);
-  }
-  lines.push(']');
-  return lines.join('\n');
+export interface ApiKeyProviderExtras {
+  base_url?: string;
+  model?: string;
+  compat_reasoning?: boolean;
 }
 
 /**
- * Add a new provider to the API-keys tier with its initial key list.
- * - If [llm.api_keys] is absent, create it with `provider` as primary, empty fallback.
- * - If [llm.api_keys] exists and `provider` is not in the tier, append to fallback.
- * - If `provider` is already in the tier, throw (use addKeyToApiKeyProvider to add more keys).
- *
- * Always writes a corresponding [llm.api_keys.<provider>] subsection with the supplied keys.
+ * Add a new API-key provider with its initial keys.
+ * - Empty tier: create with `provider` as primary, no fallback.
+ * - Existing tier with `provider` already in primary/fallback AND a sub-table
+ *   already present: throw (use addKeyToApiKeyProvider to add more keys).
+ * - Existing tier with `provider` in primary/fallback but no sub-table:
+ *   write the sub-table without touching tier order (repair case for
+ *   half-edited installs).
+ * - Otherwise: append to fallback and write the sub-table.
  */
 export function addProviderToApiKeysTier(
-  configPath: string,
+  authPath: string,
   provider: LlmProvider,
-  keys: LlmKey[]
+  keys: LlmKey[],
+  extras?: ApiKeyProviderExtras
 ): { changed: boolean } {
-  if (!existsSync(configPath)) {
-    throw new Error(`config.toml not found at ${configPath}`);
+  validateKeysArray(provider, keys);
+
+  let changed = false;
+  withAuth(authPath, (auth) => {
+    if (!auth.llm) auth.llm = {};
+    if (!auth.llm.api_keys) {
+      auth.llm.api_keys = { primary: provider, fallback: [] };
+    } else if (!auth.llm.api_keys.primary) {
+      auth.llm.api_keys.primary = provider;
+      auth.llm.api_keys.fallback = (auth.llm.api_keys.fallback ?? []) as string[];
+    }
+
+    const tier = auth.llm.api_keys;
+    const inTierList =
+      tier.primary === provider || ((tier.fallback ?? []) as string[]).includes(provider);
+    // `provider` is typed as LlmProvider, which is disjoint from 'primary' /
+    // 'fallback' — `provider in tier` is sufficient.
+    const hasSubTable = provider in tier;
+
+    if (inTierList && hasSubTable) {
+      throw new Error(`${provider} already in [llm.api_keys]`);
+    }
+
+    if (!inTierList) {
+      tier.fallback = [...((tier.fallback ?? []) as string[]), provider];
+    }
+
+    const subTable: Record<string, unknown> = { keys: keys.map((k) => ({ ...k })) };
+    if (extras?.base_url !== undefined) subTable.base_url = extras.base_url;
+    if (extras?.model !== undefined) subTable.model = extras.model;
+    if (extras?.compat_reasoning !== undefined) {
+      subTable.compat_reasoning = extras.compat_reasoning;
+    }
+    (tier as Record<string, unknown>)[provider] = subTable;
+
+    changed = true;
+  });
+  return { changed };
+}
+
+/**
+ * Remove `provider` from the API-keys tier entirely (sub-table + tier list).
+ * Drops [llm.api_keys] when the last provider is removed.
+ */
+export function removeProviderFromApiKeysTier(
+  authPath: string,
+  provider: LlmProvider
+): { changed: boolean } {
+  let changed = false;
+  withAuth(authPath, (auth) => {
+    const tier = auth.llm?.api_keys;
+    if (!tier) return;
+
+    const isPrimary = tier.primary === provider;
+    const fallbackArr = (tier.fallback ?? []) as string[];
+    const inFallback = fallbackArr.includes(provider);
+    // `provider` is typed as LlmProvider, which is disjoint from 'primary' /
+    // 'fallback' — `provider in tier` is sufficient.
+    const hasSubTable = provider in tier;
+    if (!isPrimary && !inFallback && !hasSubTable) return;
+
+    if (hasSubTable) {
+      delete (tier as Record<string, unknown>)[provider];
+    }
+
+    if (isPrimary) {
+      const remaining = fallbackArr.filter((p) => p !== provider);
+      if (remaining.length === 0) {
+        // No other providers in the tier — drop it entirely.
+        delete auth.llm?.api_keys;
+      } else {
+        tier.primary = remaining[0];
+        tier.fallback = remaining.slice(1);
+      }
+    } else {
+      tier.fallback = fallbackArr.filter((p) => p !== provider);
+    }
+
+    changed = true;
+  });
+  return { changed };
+}
+
+/**
+ * Promote `provider` to API-keys primary, demoting the existing primary to
+ * fallback[0]. No-op when already primary. Throws when provider has no
+ * sub-table (would create an unusable tier list pointing at nothing).
+ */
+export function setApiKeyProviderAsPrimary(
+  authPath: string,
+  provider: LlmProvider
+): { changed: boolean } {
+  let changed = false;
+  withAuth(authPath, (auth) => {
+    const tier = auth.llm?.api_keys;
+    if (!tier?.primary) {
+      throw new Error('Cannot set API-keys primary: [llm.api_keys] is not configured');
+    }
+    if (!(provider in tier)) {
+      throw new Error(`Cannot promote ${provider}: no [llm.api_keys.${provider}] sub-table`);
+    }
+    if (tier.primary === provider) return;
+    const oldPrimary = tier.primary;
+    const fallbackArr = (tier.fallback ?? []) as string[];
+    tier.primary = provider;
+    tier.fallback = [oldPrimary, ...fallbackArr.filter((p) => p !== provider)];
+    changed = true;
+  });
+  return { changed };
+}
+
+/**
+ * Replace the API-keys fallback list verbatim.
+ */
+export function setApiKeysFallbackOrder(authPath: string, fallback: LlmProvider[]): void {
+  withAuth(authPath, (auth) => {
+    if (!auth.llm?.api_keys?.primary) {
+      throw new Error('Cannot reorder API-keys fallbacks: [llm.api_keys] is not configured');
+    }
+    auth.llm.api_keys.fallback = [...fallback];
+  });
+}
+
+/**
+ * Append a key to an existing provider's `keys` array. Throws on duplicate
+ * label (later operations address keys by label).
+ */
+export function addKeyToApiKeyProvider(authPath: string, provider: LlmProvider, key: LlmKey): void {
+  if (!key.key) throw new Error(`addKeyToApiKeyProvider: empty key value for ${provider}`);
+  if (!key.label) throw new Error(`addKeyToApiKeyProvider: empty label for ${provider}`);
+
+  withAuth(authPath, (auth) => {
+    const tier = auth.llm?.api_keys;
+    const sub = tier?.[provider] as { keys?: LlmKey[] } | undefined;
+    if (!sub) {
+      throw new Error(`Cannot add key: [llm.api_keys.${provider}] is not configured`);
+    }
+    const keys = sub.keys ?? [];
+    if (keys.some((k) => k.label === key.label)) {
+      throw new Error(`Label "${key.label}" already exists for ${provider}`);
+    }
+    sub.keys = [...keys, { key: key.key, label: key.label }];
+  });
+}
+
+/**
+ * Remove a single key from a provider by label. When `label` is undefined,
+ * remove all keys for the provider. Removes the provider entirely (tier list
+ * + sub-table) when its last key is removed, to keep the runtime from
+ * tripping on a key-less provider.
+ */
+export function removeKeyFromApiKeyProvider(
+  authPath: string,
+  provider: LlmProvider,
+  label?: string
+): { changed: boolean } {
+  let changed = false;
+  let providerLeftEmpty = false;
+
+  withAuth(authPath, (auth) => {
+    const tier = auth.llm?.api_keys;
+    const sub = tier?.[provider] as { keys?: LlmKey[] } | undefined;
+    if (!sub?.keys || sub.keys.length === 0) return;
+
+    if (label === undefined) {
+      sub.keys = [];
+    } else {
+      const before = sub.keys.length;
+      sub.keys = sub.keys.filter((k) => k.label !== label);
+      if (sub.keys.length === before) return;
+    }
+
+    if (sub.keys.length === 0) providerLeftEmpty = true;
+    changed = true;
+  });
+
+  // If the provider is now key-less, remove it entirely (separate withAuth
+  // pass keeps the in-flight mutation simple and the empty-keys handling
+  // local to one branch).
+  if (providerLeftEmpty) {
+    removeProviderFromApiKeysTier(authPath, provider);
   }
-  // Validate the keys array up-front. Later operations (replace/remove by
-  // label) address keys by their `label`, so duplicate labels would leave
-  // the provider in an ambiguous state. Empty keys/labels would silently
-  // succeed at parse time but break runtime auth resolution. Surface these
-  // as clear errors here rather than letting them rot until first use.
+
+  return { changed };
+}
+
+/**
+ * Replace the value of an existing labeled key in place. Preserves order
+ * and the provider's primary/fallback position (no remove-then-add dance
+ * that could shuffle the tier).
+ */
+export function replaceKeyInApiKeyProvider(
+  authPath: string,
+  provider: LlmProvider,
+  label: string,
+  newKey: string
+): void {
+  if (!newKey) throw new Error(`replaceKeyInApiKeyProvider: empty new key for ${provider}`);
+  withAuth(authPath, (auth) => {
+    const tier = auth.llm?.api_keys;
+    const sub = tier?.[provider] as { keys?: LlmKey[] } | undefined;
+    if (!sub?.keys) {
+      throw new Error(`Cannot replace key: [llm.api_keys.${provider}] is not configured`);
+    }
+    const idx = sub.keys.findIndex((k) => k.label === label);
+    if (idx === -1) {
+      throw new Error(`Cannot replace key: no key labeled "${label}" for ${provider}`);
+    }
+    sub.keys[idx] = { key: newKey, label };
+  });
+}
+
+// ─── Brave Search + web_search ────────────────────────────────────────────────
+
+/**
+ * Set the Brave Search API key and enable the web_search tool.
+ *
+ * In 0.3.0, `[tools.web_search].enabled` lives in auth.toml (it's
+ * system-managed: enabled when Brave key is added, disabled when removed).
+ * `[tools.web_search].max_results` lives separately in config.toml as the
+ * top-level `web_search_max_results` scalar (operational tunable).
+ */
+export function setBraveSearchKey(authPath: string, apiKey: string): { changed: boolean } {
+  if (!apiKey) throw new Error('setBraveSearchKey: empty api key');
+  let changed = false;
+  withAuth(authPath, (auth) => {
+    if (!auth.services) auth.services = {};
+    const before = auth.services.brave_search?.key;
+    auth.services.brave_search = { key: apiKey };
+    if (!auth.tools) auth.tools = {};
+    auth.tools.web_search = { enabled: true };
+    changed = before !== apiKey;
+  });
+  return { changed };
+}
+
+/**
+ * Remove Brave Search and disable the web_search tool. Drops both
+ * [services.brave_search] and [tools.web_search] entirely (no leftover
+ * `enabled = false` line — the absence of the section is the disabled state).
+ */
+export function removeBraveSearch(authPath: string): { changed: boolean } {
+  let changed = false;
+  withAuth(authPath, (auth) => {
+    if (auth.services?.brave_search) {
+      delete auth.services.brave_search;
+      changed = true;
+    }
+    if (auth.tools?.web_search) {
+      delete auth.tools.web_search;
+      changed = true;
+    }
+  });
+  return { changed };
+}
+
+// ─── Internals ────────────────────────────────────────────────────────────────
+
+/**
+ * Read-only convenience wrapper. Reads the auth.toml without rewriting it.
+ * Used by the `read*` helpers so the read path mirrors the mutation path
+ * (both go through `loadAuthToml`'s missing-file handling).
+ */
+function withAuthRead(authPath: string, inspect: (auth: AuthToml) => void): void {
+  inspect(loadAuthToml(authPath));
+}
+
+function validateKeysArray(provider: LlmProvider, keys: LlmKey[]): void {
   if (keys.length === 0) {
     throw new Error(`addProviderToApiKeysTier: keys array is empty for ${provider}`);
   }
   const seenLabels = new Set<string>();
   for (const k of keys) {
-    if (!k.key) {
-      throw new Error(`addProviderToApiKeysTier: empty key value for ${provider}`);
-    }
-    if (!k.label) {
-      throw new Error(`addProviderToApiKeysTier: empty label for ${provider}`);
-    }
+    if (!k.key) throw new Error(`addProviderToApiKeysTier: empty key value for ${provider}`);
+    if (!k.label) throw new Error(`addProviderToApiKeysTier: empty label for ${provider}`);
     if (seenLabels.has(k.label)) {
       throw new Error(`addProviderToApiKeysTier: duplicate label "${k.label}" for ${provider}`);
     }
     seenLabels.add(k.label);
   }
-  const current = readApiKeysTier(configPath);
-  // "Already in [llm.api_keys]" check, with a recovery exception:
-  // if the provider IS in primary/fallback but its `[llm.api_keys.<provider>]`
-  // sub-section is MISSING (e.g. from a partial hand-edit that deleted the
-  // sub-section), allow this call to write the missing sub-section without
-  // touching tier order. Without this exception, the user gets stuck:
-  // handleApiKeyProvider routes them to addNewApiKeyProvider (because
-  // current.providers.has(provider) is false), which throws "already in
-  // [llm.api_keys]" — and the UI has no way to repair the broken state
-  // short of hand-editing config.toml.
-  if (current) {
-    const inTierList = current.primary === provider || current.fallback.includes(provider);
-    const hasSubsection = current.providers.has(provider);
-    if (inTierList && hasSubsection) {
-      throw new Error(`${provider} already in [llm.api_keys]`);
-    }
-    // inTierList && !hasSubsection is the repair case: continue to the
-    // sub-section-write path below, but skip the tier-rewrite (provider is
-    // already in primary/fallback, no order change needed).
-  }
-
-  const raw = readFileSync(configPath, 'utf-8');
-
-  // Defense against `readApiKeysTier`'s null-when-malformed conflation: it
-  // returns null both when [llm.api_keys] is absent AND when it exists but
-  // lacks `primary`. In the second case, falling through to the "create tier"
-  // branch below would append a second [llm.api_keys] block alongside the
-  // existing malformed one — duplicate `primary`/`fallback` assignments which
-  // make config.toml unparseable.
-  // Two regexes are needed: API_KEYS_BLOCK_PATTERN matches the header plus
-  // at least one key=value line (typical malformed: header + only fallback).
-  // API_KEYS_HEADER_ONLY_PATTERN matches a bare header with NO body lines
-  // (typical malformed: user typed `[llm.api_keys]` and nothing else). Either
-  // shape means the tier is present-but-malformed; refuse rather than append.
-  const headerOnly = /^\[llm\.api_keys\]\s*$/m;
-  if (!current && (API_KEYS_BLOCK_PATTERN.test(raw) || headerOnly.test(raw))) {
-    throw new Error(
-      `[llm.api_keys] section exists in ${configPath} but is malformed (missing primary?). ` +
-        'Edit the file manually to fix it before adding providers via system2 config.'
-    );
-  }
-
-  // Also guard the appended sub-section: TOML.parse will accept duplicate
-  // [llm.api_keys.<provider>] sections but our patchers can't reason about
-  // multiple of them, and they confuse readers. Detect via header regex.
-  const dupSubPattern = new RegExp(`^\\[llm\\.api_keys\\.${provider}\\]`, 'm');
-  if (dupSubPattern.test(raw)) {
-    throw new Error(
-      `[llm.api_keys.${provider}] sub-section already exists in ${configPath}. ` +
-        'This usually indicates a malformed file; edit manually to deduplicate before retrying.'
-    );
-  }
-
-  const subsection = `\n[llm.api_keys.${provider}]\n${formatKeysBlock(keys)}\n`;
-
-  if (!current) {
-    const tierBlock = `[llm.api_keys]\nprimary = "${provider}"\nfallback = []\n`;
-    // Preferred: replace the commented stub buildConfigToml emits when no
-    // API-keys provider is configured (the 3 lines `# [llm.api_keys]\n
-    // # primary = "..."\n# fallback = [...]`). Without this, the live tier
-    // block lands at EOF and the commented stub stays put — leaving a
-    // confusing duplicate schema on first `system2 config` run.
-    //
-    // The replacement bundles tier + sub-section together so the live
-    // sub-section lands directly after the live tier block (and ahead of
-    // the commented `# [llm.api_keys.anthropic]` example that stays in
-    // place as documentation), instead of getting appended at EOF far
-    // from its tier.
-    const stubReplaced = raw.replace(
-      /^# \[llm\.api_keys\]\n# primary\s*=\s*"[^"]*"\n# fallback\s*=\s*\[[^\]]*\]\n/m,
-      `${tierBlock}${subsection}`
-    );
-    if (stubReplaced !== raw) {
-      writeFileSync(configPath, stubReplaced);
-      return { changed: true };
-    }
-    // No stub. Append both at end.
-    const sep = raw.endsWith('\n') ? '' : '\n';
-    writeFileSync(configPath, `${raw}${sep}\n${tierBlock}${subsection}`);
-    return { changed: true };
-  }
-
-  // Determine whether the tier needs rewriting. In the repair case
-  // (provider already in primary/fallback but sub-section missing), the
-  // tier order is correct as-is — only the sub-section needs writing.
-  const inTierList = current.primary === provider || current.fallback.includes(provider);
-  let withTier: string;
-  if (inTierList) {
-    // Repair: skip tier rewrite, just write the missing sub-section.
-    withTier = raw;
-  } else {
-    // Normal: append provider to fallback, rewrite the tier block.
-    const newFallback = [...current.fallback, provider];
-    if (!API_KEYS_BLOCK_PATTERN.test(raw)) {
-      throw new Error(
-        `Could not locate [llm.api_keys] section in ${configPath} for rewrite. ` +
-          `Edit the file manually if it has unusual formatting.`
-      );
-    }
-    const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-    const tierReplacement = `[llm.api_keys]\nprimary = "${current.primary}"\nfallback = [${fbStr}]\n`;
-    withTier = raw.replace(API_KEYS_BLOCK_PATTERN, tierReplacement);
-  }
-
-  // Place the new sub-section adjacent to existing live `[llm.api_keys.<*>]`
-  // sub-sections rather than at EOF. Find the last live sub-section header
-  // and insert the new block immediately after that section's body. Falls
-  // back to EOF append only if no existing sub-section can be located
-  // (shouldn't happen given `current` is non-null and at least the primary
-  // has a sub-section, but the fallback keeps the patcher robust against
-  // a hand-edited config that lost its sub-sections).
-  const lines = withTier.split('\n');
-  let lastSubsectionEnd = -1;
-  // Match `[llm.api_keys.<word>]` but NOT deeper paths like `[llm.api_keys.<x>.models]`
-  // (we want the sub-section root, not its nested model-pin sub-sub-section).
-  const subHeaderPattern = /^\[llm\.api_keys\.[A-Za-z0-9_-]+\]\s*$/;
-  for (let i = 0; i < lines.length; i++) {
-    if (subHeaderPattern.test(lines[i])) {
-      // Find this section's end (next live `[`-section header, commented
-      // `# [...]` section header, or EOF). Treating commented section
-      // headers as boundaries matters because operational defaults emitted
-      // by buildConfigToml live as `# [backup]`, `# [logs]`, etc. — without
-      // recognising them, the scan would run past them all and `end` would
-      // land near EOF, putting the new sub-section after the operational
-      // commented sections instead of next to its api_keys siblings.
-      let end = lines.length;
-      for (let j = i + 1; j < lines.length; j++) {
-        const t = lines[j].trim();
-        if (/^\[/.test(t) || /^#\s*\[/.test(t)) {
-          end = j;
-          break;
-        }
-      }
-      // Roll back past trailing blanks AND comment lines (e.g. divider
-      // banners like `# ═══...`, prose comments) so they remain attached
-      // to the next section as its leading gutter, not consumed by the
-      // section we're identifying. Blank/comment trailing content rarely
-      // belongs to the api_keys sub-section's body (which ends with the
-      // `keys = [...]` array's closing `]`).
-      while (
-        end > i + 1 &&
-        (lines[end - 1].trim() === '' || lines[end - 1].trim().startsWith('#'))
-      ) {
-        end--;
-      }
-      lastSubsectionEnd = end;
-    }
-  }
-  let next: string;
-  if (lastSubsectionEnd >= 0) {
-    // `subsection` already starts with a leading `\n` (separates it from
-    // the preceding section's last line). Splice as a single block.
-    const before = lines.slice(0, lastSubsectionEnd).join('\n');
-    const after = lines.slice(lastSubsectionEnd).join('\n');
-    const sep = before.endsWith('\n') ? '' : '\n';
-    next = `${before}${sep}${subsection}${after.startsWith('\n') ? '' : '\n'}${after}`;
-  } else {
-    // No existing live `[llm.api_keys.<*>]` sub-section to anchor against
-    // (e.g. the user manually deleted the only sub-section, or this is the
-    // repair path where the provider was in the tier list but its sub-
-    // section was never present). Land the new sub-section immediately
-    // after the live `[llm.api_keys]` tier block — that's the canonical
-    // location for "first sub-section under this tier". Falls back to EOF
-    // append only if even the tier block can't be located, which would
-    // indicate a malformed file the patcher shouldn't be touching.
-    const tierRange = findOwnedSectionLineRange(lines, '[llm.api_keys]');
-    if (tierRange) {
-      const [, tierEnd] = tierRange;
-      const before = lines.slice(0, tierEnd).join('\n');
-      const after = lines.slice(tierEnd).join('\n');
-      const sep = before.endsWith('\n') ? '' : '\n';
-      next = `${before}${sep}${subsection}${after.startsWith('\n') ? '' : '\n'}${after}`;
-    } else {
-      const sep = withTier.endsWith('\n') ? '' : '\n';
-      next = `${withTier}${sep}${subsection}`;
-    }
-  }
-  writeFileSync(configPath, next);
-  return { changed: true };
-}
-
-/**
- * Find the line range [start, end) for a section starting with `headerLine`.
- * `end` is the index of the next section header line, or `lines.length`,
- * and is rolled back to skip any trailing blank lines that visually belong
- * to the next section (a divider's blank-line gutter). Removing this range
- * leaves the next section's leading blank lines intact, so dividers and
- * spacing aren't accidentally consumed.
- */
-function findSectionLineRange(lines: string[], headerLine: string): [number, number] | null {
-  const start = lines.findIndex((l) => l.trim() === headerLine);
-  if (start === -1) return null;
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i++) {
-    // Trim consistency: `start` matched against `l.trim()`; the next-header
-    // detection has to do the same so an indented `[next]` is recognised as a
-    // section boundary and we don't run past it deleting unrelated content.
-    if (/^\[/.test(lines[i].trim())) {
-      end = i;
-      break;
-    }
-  }
-  // Roll `end` back past any trailing blank lines so they STAY (they belong to
-  // the next section's leading gutter). Removing the section then leaves the
-  // next section's spacing intact.
-  while (end > start + 1 && lines[end - 1].trim() === '') end--;
-  return [start, end];
-}
-
-/**
- * Remove a provider from `[llm.api_keys]`:
- * - If `provider` is the primary and fallback is non-empty: promote head of fallback.
- * - If `provider` is the primary and fallback is empty: drop the entire `[llm.api_keys]` section.
- * - If `provider` is in fallback: remove from fallback list.
- * - If `provider` not in tier: no-op.
- *
- * In every changing case, also delete `[llm.api_keys.<provider>]` and any
- * `[llm.api_keys.<provider>.<sub>]` sub-sub-sections (e.g., `.models`, `.routing`).
- */
-export function removeProviderFromApiKeysTier(
-  configPath: string,
-  provider: LlmProvider
-): { changed: boolean } {
-  if (!existsSync(configPath)) {
-    throw new Error(`config.toml not found at ${configPath}`);
-  }
-  const current = readApiKeysTier(configPath);
-  if (!current) return { changed: false };
-
-  const isPrimary = current.primary === provider;
-  const inFallback = current.fallback.includes(provider);
-  if (!isPrimary && !inFallback) return { changed: false };
-
-  let newPrimary: string | null = current.primary;
-  let newFallback = current.fallback.slice();
-  if (isPrimary) {
-    newPrimary = newFallback.length > 0 ? (newFallback.shift() ?? null) : null;
-  } else {
-    newFallback = newFallback.filter((f) => f !== provider);
-  }
-
-  const raw = readFileSync(configPath, 'utf-8');
-
-  // First, rewrite or remove the [llm.api_keys] tier block.
-  let next = raw;
-  if (!API_KEYS_BLOCK_PATTERN.test(next)) {
-    throw new Error(
-      `Could not locate [llm.api_keys] section in ${configPath} for rewrite. ` +
-        `Edit the file manually if it has unusual formatting.`
-    );
-  }
-  if (newPrimary === null) {
-    next = next.replace(API_KEYS_BLOCK_PATTERN, '');
-  } else {
-    const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-    const replacement = `[llm.api_keys]\nprimary = "${newPrimary}"\nfallback = [${fbStr}]\n`;
-    next = next.replace(API_KEYS_BLOCK_PATTERN, replacement);
-  }
-
-  // Then remove [llm.api_keys.<provider>] and any [llm.api_keys.<provider>.<sub>] children.
-  // Line-based to handle multi-line keys arrays and nested sub-sections cleanly.
-  const lines = next.split('\n');
-  const headersToRemove: string[] = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (
-      trimmed === `[llm.api_keys.${provider}]` ||
-      trimmed.startsWith(`[llm.api_keys.${provider}.`)
-    ) {
-      headersToRemove.push(trimmed);
-    }
-  }
-  let workingLines = lines;
-  for (const header of headersToRemove) {
-    const range = findSectionLineRange(workingLines, header);
-    if (!range) continue;
-    workingLines = [...workingLines.slice(0, range[0]), ...workingLines.slice(range[1])];
-  }
-  next = workingLines.join('\n');
-
-  // Collapse runs of 3+ blank lines to 2 to avoid visual gaps from removed sections.
-  next = next.replace(/\n{3,}/g, '\n\n');
-
-  writeFileSync(configPath, next);
-  return { changed: true };
-}
-
-/**
- * Promote `provider` to primary in `[llm.api_keys]`. The current primary becomes
- * the head of fallback (preserving the rest of fallback's order). If `provider`
- * is already primary, no-op.
- */
-export function setApiKeyProviderAsPrimary(
-  configPath: string,
-  provider: LlmProvider
-): { changed: boolean } {
-  const current = readApiKeysTier(configPath);
-  if (!current) {
-    throw new Error(`[llm.api_keys] section not found in ${configPath}`);
-  }
-  if (current.primary === provider) return { changed: false };
-
-  const newFallback = [current.primary, ...current.fallback.filter((f) => f !== provider)];
-  const raw = readFileSync(configPath, 'utf-8');
-  if (!API_KEYS_BLOCK_PATTERN.test(raw)) {
-    throw new Error(
-      `Could not locate [llm.api_keys] section in ${configPath} for rewrite. ` +
-        `Edit the file manually if it has unusual formatting.`
-    );
-  }
-  const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-  const replacement = `[llm.api_keys]\nprimary = "${provider}"\nfallback = [${fbStr}]\n`;
-  writeFileSync(configPath, raw.replace(API_KEYS_BLOCK_PATTERN, replacement));
-  return { changed: true };
-}
-
-/**
- * Overwrite `[llm.api_keys].fallback` with the supplied ordered list. Validates
- * that no entry equals the current primary. No-op if order matches current.
- */
-export function setApiKeysFallbackOrder(
-  configPath: string,
-  newFallback: LlmProvider[]
-): { changed: boolean } {
-  const current = readApiKeysTier(configPath);
-  if (!current) {
-    throw new Error(`[llm.api_keys] section not found in ${configPath}`);
-  }
-  if (newFallback.some((entry) => entry === current.primary)) {
-    throw new Error(`primary cannot appear in fallback: ${current.primary}`);
-  }
-  const same =
-    newFallback.length === current.fallback.length &&
-    newFallback.every((p, i) => p === current.fallback[i]);
-  if (same) return { changed: false };
-
-  const raw = readFileSync(configPath, 'utf-8');
-  if (!API_KEYS_BLOCK_PATTERN.test(raw)) {
-    throw new Error(
-      `Could not locate [llm.api_keys] section in ${configPath} for rewrite. ` +
-        `Edit the file manually if it has unusual formatting.`
-    );
-  }
-  const fbStr = newFallback.map((f) => `"${f}"`).join(', ');
-  const replacement = `[llm.api_keys]\nprimary = "${current.primary}"\nfallback = [${fbStr}]\n`;
-  writeFileSync(configPath, raw.replace(API_KEYS_BLOCK_PATTERN, replacement));
-  return { changed: true };
-}
-
-/**
- * Match the multi-line `keys = [...]` block inside a `[llm.api_keys.<provider>]`
- * sub-section. Captures the assignment (`keys = `) so the caller can rebuild it,
- * then matches everything up to the closing `]` on its own line.
- */
-function buildKeysBlockPattern(provider: string): RegExp {
-  // Match the sub-section header, then capture the keys = [ ... ] block specifically.
-  return new RegExp(
-    `(\\[llm\\.api_keys\\.${provider}\\][\\s\\S]*?keys\\s*=\\s*)\\[[\\s\\S]*?\\n\\]`,
-    'm'
-  );
-}
-
-/**
- * Add a key (key + label) to an existing `[llm.api_keys.<provider>]` sub-section.
- * Throws if the sub-section doesn't exist or if the label collides.
- */
-export function addKeyToApiKeyProvider(
-  configPath: string,
-  provider: LlmProvider,
-  key: LlmKey
-): { changed: boolean } {
-  if (!existsSync(configPath)) {
-    throw new Error(`config.toml not found at ${configPath}`);
-  }
-  const raw = readFileSync(configPath, 'utf-8');
-  const parsed = TOML.parse(raw) as {
-    llm?: { api_keys?: Record<string, unknown> };
-  };
-  const sub = parsed.llm?.api_keys?.[provider] as { keys?: LlmKey[] } | undefined;
-  if (!sub) {
-    throw new Error(`[llm.api_keys.${provider}] not found in ${configPath}`);
-  }
-  const existing = sub.keys ?? [];
-  if (existing.some((k) => k.label === key.label)) {
-    throw new Error(`label "${key.label}" already exists for ${provider}`);
-  }
-  const newKeys = [...existing, key];
-  const pattern = buildKeysBlockPattern(provider);
-  if (!pattern.test(raw)) {
-    throw new Error(`Could not locate keys array for ${provider} in ${configPath}`);
-  }
-  writeFileSync(
-    configPath,
-    raw.replace(pattern, `$1${formatKeysBlock(newKeys).slice('keys = '.length)}`)
-  );
-  return { changed: true };
-}
-
-/**
- * Remove a key by label from `[llm.api_keys.<provider>]`. Throws if removing
- * would leave the provider with zero keys (caller should use
- * `removeProviderFromApiKeysTier` instead).
- */
-export function removeKeyFromApiKeyProvider(
-  configPath: string,
-  provider: LlmProvider,
-  label: string
-): { changed: boolean } {
-  if (!existsSync(configPath)) {
-    throw new Error(`config.toml not found at ${configPath}`);
-  }
-  const raw = readFileSync(configPath, 'utf-8');
-  const parsed = TOML.parse(raw) as {
-    llm?: { api_keys?: Record<string, unknown> };
-  };
-  const sub = parsed.llm?.api_keys?.[provider] as { keys?: LlmKey[] } | undefined;
-  if (!sub) {
-    throw new Error(`[llm.api_keys.${provider}] not found in ${configPath}`);
-  }
-  const existing = sub.keys ?? [];
-  const newKeys = existing.filter((k) => k.label !== label);
-  if (newKeys.length === existing.length) return { changed: false };
-  if (newKeys.length === 0) {
-    throw new Error(
-      `cannot remove the last key for ${provider}; use removeProviderFromApiKeysTier instead. ` +
-        'To swap the value while keeping the label, use replaceKeyInApiKeyProvider.'
-    );
-  }
-  const pattern = buildKeysBlockPattern(provider);
-  if (!pattern.test(raw)) {
-    throw new Error(`Could not locate keys array for ${provider} in ${configPath}`);
-  }
-  writeFileSync(
-    configPath,
-    raw.replace(pattern, `$1${formatKeysBlock(newKeys).slice('keys = '.length)}`)
-  );
-  return { changed: true };
-}
-
-// ─── Services: Brave Search ───────────────────────────────────────────────────
-
-// Live-section patterns retained for `removeBraveSearch`, which should only
-// act on a section that has a live key=value body (a header-only or
-// commented-only section is already inert; nothing to remove).
-const BRAVE_SECTION_PATTERN = /^\[services\.brave_search\][^\n]*\n(?:[^[#\s][^\n]*\n)+/m;
-const WEB_SEARCH_SECTION_PATTERN = /^\[tools\.web_search\][^\n]*\n(?:[^[#\s][^\n]*\n)+/m;
-
-/**
- * Find the line range [start, end) of a section by its header line text.
- * Returns null if the header isn't found. Stops at the next section header
- * (live OR commented) and rolls back past trailing blanks/comments that
- * belong to the next section's gutter — so the section's "owned" body is
- * what gets returned, not the next section's leading divider/comment block.
- *
- * This is what enables a single "section exists in some form" branch: it
- * doesn't matter whether the body has live key=value lines, comment-only
- * lines, or is empty — the range identifies the entire owned region.
- */
-function findOwnedSectionLineRange(
-  lines: string[],
-  sectionHeader: string
-): [number, number] | null {
-  const start = lines.findIndex((l) => l.trim() === sectionHeader);
-  if (start === -1) return null;
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i++) {
-    const t = lines[i].trim();
-    if (/^\[/.test(t) || /^#\s*\[/.test(t)) {
-      end = i;
-      break;
-    }
-  }
-  while (
-    end > start + 1 &&
-    (lines[end - 1].trim() === '' || lines[end - 1].trim().startsWith('#'))
-  ) {
-    end--;
-  }
-  return [start, end];
-}
-
-/**
- * Set or replace the Brave Search API key. Always also enables
- * `[tools.web_search]` (Brave Search is useless without it). If
- * `[tools.web_search]` already exists, force `enabled = true` (preserving
- * other fields like `max_results`).
- *
- * Section state is determined via TOML.parse + a line-based section finder
- * rather than a stack of priority-ordered regex patterns. This collapses
- * the four shapes a section can take (live with body, header-only,
- * comment-only body, completely absent) into two branches: exists →
- * rewrite/insert key in place; doesn't exist → stub-replace or EOF-append.
- * Avoids duplicate-table bugs from edge cases like
- * `[services.brave_search]\n# key = "..."` (valid TOML, empty table) where
- * a stack of narrower regexes would all miss and the EOF-append branch
- * would emit a second header.
- */
-export function setBraveSearchKey(configPath: string, apiKey: string): { changed: boolean } {
-  if (!existsSync(configPath)) {
-    throw new Error(`config.toml not found at ${configPath}`);
-  }
-  const raw = readFileSync(configPath, 'utf-8');
-  const parsed = TOML.parse(raw) as {
-    services?: { brave_search?: Record<string, unknown> };
-    tools?: { web_search?: Record<string, unknown> };
-  };
-  let next = raw;
-
-  // ─── [services.brave_search] ───────────────────────────────────────────
-  const escapedKey = escapeTomlString(apiKey);
-  const braveExists = parsed.services?.brave_search !== undefined;
-  if (braveExists) {
-    // Section exists in some form (live with key, header-only,
-    // comment-only body). Rewrite the live `key = …` line if present;
-    // otherwise insert one right after the header.
-    const lines = next.split('\n');
-    const range = findOwnedSectionLineRange(lines, '[services.brave_search]');
-    if (range) {
-      const [s, e] = range;
-      const sectionLines = lines.slice(s, e);
-      const keyLineIdx = sectionLines.findIndex((l) =>
-        /^key\s*=\s*"[^"]*"\s*(?:#[^\n]*)?$/.test(l)
-      );
-      if (keyLineIdx >= 0) {
-        sectionLines[keyLineIdx] = `key = "${escapedKey}"`;
-      } else {
-        sectionLines.splice(1, 0, `key = "${escapedKey}"`);
-      }
-      next = [...lines.slice(0, s), ...sectionLines, ...lines.slice(e)].join('\n');
-    }
-    // If !range, the parser saw the table but the line scanner didn't —
-    // that's a contradiction (e.g. `services.brave_search` set via
-    // dotted-key syntax without a header). Skip silently rather than
-    // double-write; the parsed shape says it's already there.
-  } else {
-    // Section absent. Stub-replace or EOF-append.
-    const braveLiveBlock = `[services.brave_search]\nkey = "${escapedKey}"\n`;
-    const braveStubPattern = /^# \[services\.brave_search\]\n# key\s*=\s*"[^"]*"\n/m;
-    const stubReplaced = next.replace(braveStubPattern, braveLiveBlock);
-    if (stubReplaced !== next) {
-      next = stubReplaced;
-    } else {
-      const sep = next.endsWith('\n') ? '' : '\n';
-      next = `${next}${sep}\n${braveLiveBlock}`;
-    }
-  }
-
-  // ─── [tools.web_search] ────────────────────────────────────────────────
-  // Re-parse on `next` since the brave write may have changed the file.
-  const reparsed = TOML.parse(next) as {
-    tools?: { web_search?: Record<string, unknown> };
-  };
-  const webSearchExists = reparsed.tools?.web_search !== undefined;
-  if (webSearchExists) {
-    // Section exists: force enabled = true. Otherwise a pre-existing
-    // `enabled = false` would leave web search off even though the user
-    // just set a Brave key (and the caller logs "web search tool enabled").
-    // Same line-based section finder as Brave; collapses the four shapes
-    // into one branch.
-    const lines = next.split('\n');
-    const range = findOwnedSectionLineRange(lines, '[tools.web_search]');
-    if (range) {
-      const [s, e] = range;
-      const sectionLines = lines.slice(s, e);
-      // Permissive value matcher (`[^\n#]+`) so hand-edited shapes —
-      // `enabled = "false"` (string), `enabled = 0` (int), `enabled =
-      // nope` — all rewrite cleanly to a single canonical line. Without
-      // it, the rewrite would miss those, the insert branch would fire,
-      // and we'd produce duplicate `enabled` keys (TOML parsers reject).
-      const enabledLineIdx = sectionLines.findIndex((l) =>
-        /^enabled\s*=\s*[^\n#]+(?:#[^\n]*)?$/.test(l)
-      );
-      if (enabledLineIdx >= 0) {
-        sectionLines[enabledLineIdx] = 'enabled = true';
-      } else {
-        sectionLines.splice(1, 0, 'enabled = true');
-      }
-      next = [...lines.slice(0, s), ...sectionLines, ...lines.slice(e)].join('\n');
-    }
-  } else {
-    // Section absent. Stub-replace or EOF-append. Preserve the
-    // `# max_results = N` line from the stub as a visible commented hint
-    // so users still have a reference to the tunable (loader's default
-    // continues to apply since the line stays commented).
-    const webSearchStubPattern =
-      /^# \[tools\.web_search\]\n# enabled\s*=\s*[a-zA-Z]+\n(# max_results\s*=\s*\d+\n)/m;
-    const stubReplaced = next.replace(
-      webSearchStubPattern,
-      (_, commentedMaxResults: string) =>
-        `[tools.web_search]\nenabled = true\n${commentedMaxResults}`
-    );
-    if (stubReplaced !== next) {
-      next = stubReplaced;
-    } else {
-      const sep = next.endsWith('\n') ? '' : '\n';
-      next = `${next}${sep}\n[tools.web_search]\nenabled = true\n# max_results = 5\n`;
-    }
-  }
-
-  if (next === raw) return { changed: false };
-  writeFileSync(configPath, next);
-  return { changed: true };
-}
-
-/**
- * Remove Brave Search and disable the web search tool by deleting both sections.
- * No-op if neither section exists.
- */
-export function removeBraveSearch(configPath: string): { changed: boolean } {
-  if (!existsSync(configPath)) {
-    throw new Error(`config.toml not found at ${configPath}`);
-  }
-  const raw = readFileSync(configPath, 'utf-8');
-  if (!BRAVE_SECTION_PATTERN.test(raw) && !WEB_SEARCH_SECTION_PATTERN.test(raw)) {
-    return { changed: false };
-  }
-  let next = raw.replace(BRAVE_SECTION_PATTERN, '').replace(WEB_SEARCH_SECTION_PATTERN, '');
-  next = next.replace(/\n{3,}/g, '\n\n');
-  writeFileSync(configPath, next);
-  return { changed: true };
-}
-
-/**
- * Replace a key (by label) in `[llm.api_keys.<provider>]` without touching the
- * tier ordering. Distinct from remove+add: the latter has to go through
- * `removeProviderFromApiKeysTier` + `addProviderToApiKeysTier` when the provider
- * has only one key, which mutates `[llm.api_keys].fallback` (and possibly
- * `primary`). This patcher rewrites the keys array in place atomically, so
- * tier order is preserved regardless of how many keys the provider has.
- *
- * Throws if the sub-section or label doesn't exist.
- */
-export function replaceKeyInApiKeyProvider(
-  configPath: string,
-  provider: LlmProvider,
-  label: string,
-  newKey: string
-): { changed: boolean } {
-  if (!existsSync(configPath)) {
-    throw new Error(`config.toml not found at ${configPath}`);
-  }
-  const raw = readFileSync(configPath, 'utf-8');
-  const parsed = TOML.parse(raw) as {
-    llm?: { api_keys?: Record<string, unknown> };
-  };
-  const sub = parsed.llm?.api_keys?.[provider] as { keys?: LlmKey[] } | undefined;
-  if (!sub) {
-    throw new Error(`[llm.api_keys.${provider}] not found in ${configPath}`);
-  }
-  const existing = sub.keys ?? [];
-  const target = existing.find((k) => k.label === label);
-  if (!target) {
-    throw new Error(`label "${label}" not found for ${provider}`);
-  }
-  if (target.key === newKey) return { changed: false };
-  const newKeys = existing.map((k) => (k.label === label ? { key: newKey, label } : k));
-  const pattern = buildKeysBlockPattern(provider);
-  if (!pattern.test(raw)) {
-    throw new Error(`Could not locate keys array for ${provider} in ${configPath}`);
-  }
-  writeFileSync(
-    configPath,
-    raw.replace(pattern, `$1${formatKeysBlock(newKeys).slice('keys = '.length)}`)
-  );
-  return { changed: true };
 }

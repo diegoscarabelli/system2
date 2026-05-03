@@ -2,12 +2,16 @@
  * Init Command
  *
  * Scaffolds ~/.system2/ on a fresh install: creates the directory + subdirs
- * and writes a fully-commented config.toml template (via buildConfigToml({})).
+ * (including auth/ at 0o700) and writes a fully-commented config.toml template
+ * (via buildConfigToml({})). The auth.toml file is NOT created here — it's
+ * created by `system2 config` on first credential write.
+ *
  * On a fresh install, auto-invokes `system2 config` so the user lands directly
  * in the credential-management menu without needing a second command.
  *
- * Refuses to overwrite an existing install: prints a friendly message pointing
- * at `system2 config` for re-configuration and exits cleanly.
+ * Refuses to overwrite an existing config.toml: prints a friendly message
+ * pointing at `system2 config` for re-configuration and exits cleanly. The
+ * auth/ directory and any auth.toml inside are left alone in all paths.
  */
 
 import { existsSync } from 'node:fs';
@@ -15,6 +19,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
+import { authDir } from '../utils/auth-config.js';
 import { buildConfigToml, CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
 import { config } from './config.js';
 
@@ -60,16 +65,20 @@ export async function init(options: InitOptions = {}): Promise<void> {
 
   p.intro('🧠 Welcome to System2, the AI multi-agent system for working with data.');
 
-  // mkdir is recursive + idempotent, so this works whether the directory
-  // already exists (config.toml-less recovery case) or is brand new.
+  // mkdir is recursive + idempotent, so all of these work whether the
+  // directory already exists (config.toml-less recovery case) or is brand new.
   await mkdir(dir, { recursive: true });
   await mkdir(join(dir, 'sessions'), { recursive: true });
   await mkdir(join(dir, 'projects'), { recursive: true });
   await mkdir(join(dir, 'artifacts'), { recursive: true });
+  // auth/ dir holds OAuth credential JSONs and (once `system2 config` writes
+  // the first credential) auth.toml. 0o700 ensures the dir + its contents are
+  // owner-readable only.
+  await mkdir(authDir(dir), { recursive: true, mode: 0o700 });
 
   await writeFile(configPath, buildConfigToml({}), { mode: 0o600 });
 
-  p.log.info(`✓ Created ${dir}/ with a templated config.toml.`);
+  p.log.info(`✓ Created ${dir}/ with a templated config.toml and an empty auth/ dir.`);
   p.log.info(
     'You need at least one LLM credential before System2 can run.\nLaunching configuration...'
   );

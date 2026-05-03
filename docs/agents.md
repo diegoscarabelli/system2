@@ -220,14 +220,14 @@ Auto-compaction is also configured to fire earlier (at ~50% of the context windo
 
 When `[llm.oauth]` is configured, `AuthResolver` walks credentials across two tiers. The OAuth tier supports any of: `anthropic`, `openai-codex`, `github-copilot`. Each provider hits a different endpoint with its own request shape; pi-ai routes each one through its own streaming provider (e.g., `openai-codex-responses`) selected via [getOAuthProvider(id)](../src/server/agents/oauth.ts).
 
-1. **OAuth tier** — providers listed in `[llm.oauth].primary` + `fallback`, each with one credential loaded from `~/.system2/oauth/<provider>.json` at startup.
-2. **API key tier** — providers listed in `[llm.api_keys].primary` + `fallback`, with keys at `[llm.api_keys.<provider>].keys`.
+1. **OAuth tier**: providers listed in `[llm.oauth].primary` + `fallback` (in `~/.system2/auth/auth.toml`), each with one credential loaded from `~/.system2/auth/<provider>.json` at startup.
+2. **API key tier**: providers listed in `[llm.api_keys].primary` + `fallback` (in `~/.system2/auth/auth.toml`), with keys at `[llm.api_keys.<provider>].keys`.
 
 `getActiveCredential()` returns a `{ tier, provider, keyIndex, label }` tuple where `tier` is `'oauth' | 'api_keys'`. Cooldown keys are namespaced as `${tier}:${provider}:${keyIndex}` so the same provider in both tiers (e.g., Anthropic OAuth and Anthropic API keys) doesn't collide. The OAuth tier is fully exhausted (every credential in cooldown) before the resolver returns an api_keys-tier credential.
 
 Three extra concerns over plain API keys:
 
-1. **Refresh.** `AuthResolver.ensureFresh()` is awaited before each session creation in `AgentHost.initialize()` and `reinitializeWithProvider()`. If an OAuth access token is within 5 minutes of expiry, the resolver dispatches to the correct provider-specific refresh handler via pi-ai's `getOAuthProvider(id)` registry ([refreshOAuthToken](../src/server/agents/oauth.ts) in `src/server/agents/oauth.ts`), updates in-memory state, and persists via the callback registered through `setPersistOAuth()`. The persist callback is keyed by `LlmProvider`, so each OAuth provider has its own `~/.system2/oauth/<provider>.json` file written back on refresh. Concurrent refreshes per provider are serialized via a Promise lock.
+1. **Refresh.** `AuthResolver.ensureFresh()` is awaited before each session creation in `AgentHost.initialize()` and `reinitializeWithProvider()`. If an OAuth access token is within 5 minutes of expiry, the resolver dispatches to the correct provider-specific refresh handler via pi-ai's `getOAuthProvider(id)` registry ([refreshOAuthToken](../src/server/agents/oauth.ts) in `src/server/agents/oauth.ts`), updates in-memory state, and persists via the callback registered through `setPersistOAuth()`. The persist callback is keyed by `LlmProvider`, so each OAuth provider has its own `~/.system2/auth/<provider>.json` file written back on refresh. Concurrent refreshes per provider are serialized via a Promise lock.
 2. **401 handling.** Normally `auth` errors trigger immediate failover. For OAuth-tier credentials, `AgentHost` first calls `ensureFresh()` and reinitializes the session before falling over — this catches expiry-related 401s without losing the credential. If refresh itself fails, the credential goes into cooldown via the standard path. The Anthropic path additionally relies on the SDK detecting OAuth tokens by substring match (`sk-ant-oat`) to switch authentication mode; this detection is Anthropic-specific. The other providers (Codex, Copilot) carry no equivalent token-shape signal and are dispatched purely through pi-ai's provider registry.
 3. **Per-provider apiKey wire format.** `createAuthStorage()` does not pass `credentials.access` directly. It calls `getOAuthProvider(id).getApiKey(creds)` so each provider gets the shape pi-ai's streaming code expects. For the supported OAuth providers (`anthropic`, `openai-codex`, `github-copilot`), this returns the bare access token.
 
@@ -244,7 +244,7 @@ api_keys_models:
   groq: llama-3.3-70b-versatile
 ```
 
-Users override per-role with `[llm.api_keys.<provider>.models][<role>]` in `config.toml` (see [Configuration](configuration.md#model-selection)). At startup, [validateAgentModels](../src/shared/agent-models.ts) cross-checks every frontmatter entry against pi-ai's `MODELS` catalog. Unknown model ids fail validation with did-you-mean suggestions computed by Levenshtein distance, so a typo like `claude-sonet-4-6` surfaces as a startup error pointing at the intended `claude-sonnet-4-6` rather than a runtime 404.
+Users override per-role with `[llm.api_keys.<provider>.models][<role>]` in `~/.system2/auth/auth.toml` (see [Configuration](configuration.md#model-selection)). At startup, [validateAgentModels](../src/shared/agent-models.ts) cross-checks every frontmatter entry against pi-ai's `MODELS` catalog. Unknown model ids fail validation with did-you-mean suggestions computed by Levenshtein distance, so a typo like `claude-sonet-4-6` surfaces as a startup error pointing at the intended `claude-sonnet-4-6` rather than a runtime 404.
 
 ## Session Persistence
 

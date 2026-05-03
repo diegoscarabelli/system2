@@ -39,7 +39,7 @@ pnpm add -g @diegoscarabelli/system2      # install System2 globally
 system2 init             # first-run setup (see below)
 ```
 
-`system2 init` creates `~/.system2/` and immediately hands off to `system2 config`, where you add at least one LLM credential and (optionally) the Brave Search key in the same flow.
+`system2 init` creates `~/.system2/` (with an empty `auth/` dir) and immediately hands off to `system2 config`, which creates `~/.system2/auth/auth.toml` with your first LLM credential and (optionally) the Brave Search key in the same flow.
 
 ```bash
 system2 start            # starts the server and opens the browser
@@ -75,9 +75,9 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**Credentials and services.** Use `system2 config` as the interactive menu for the managing credential and service sections of `config.toml`. The top-level menu has three submenus: **OAuth providers**, **API key providers**, and **Services**.
+**Credentials and services.** Use `system2 config` as the interactive menu for managing `~/.system2/auth/auth.toml` (OAuth, API keys, Brave Search, web search enablement). The top-level menu has three submenus: **OAuth providers**, **API key providers**, and **Services**. `auth.toml` is machine-managed; never hand-edit it. Operational settings (agent overrides, databases, scheduler, backup, logs, chat, knowledge, session, delivery) live in `~/.system2/config.toml` and are hand-edited.
 
-**Resetting `config.toml`.** Need a fresh template (e.g. to recover from a hand-edit you can't untangle)? `mv ~/.system2/config.toml ~/.system2/config.toml.bak` then re-run `system2 init` — it regenerates the template (and re-launches `system2 config`) without touching `app.db`, knowledge files, OAuth credentials, or anything else under `~/.system2/`.
+**Resetting `config.toml`.** Need a fresh template (e.g. to recover from a hand-edit you can't untangle)? `mv ~/.system2/config.toml ~/.system2/config.toml.bak` then re-run `system2 init` to regenerate the template (and re-launch `system2 config`) without touching `app.db`, knowledge files, auth state (which lives in the separate `~/.system2/auth/auth.toml`), or anything else under `~/.system2/`.
 
 ```bash
 system2 config           # interactive: manage OAuth, API keys, and services
@@ -109,7 +109,10 @@ pnpm update -g @diegoscarabelli/system2
 
 ## Configuration
 
-All settings live in `~/.system2/config.toml`, created by `system2 init`. Credential and service sections (`[llm.oauth]`, `[llm.api_keys]`, `[services.*]`, `[tools.web_search]`) are managed interactively by `system2 config`; everything else (`[agents.*]`, `[databases.*]`, `[scheduler]`, `[backup]`, etc.) is hand-edited.
+Settings are split across two files under `~/.system2/`:
+
+- `config.toml` (created by `system2 init`): user-edited operational settings only. Holds `[agents.*]`, `[databases.*]`, `[backup]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`, `[session]`, `[delivery]`, plus the top-level `web_search_max_results` scalar. The daemon reads this file but never writes it.
+- `auth/auth.toml` (created by `system2 config` on the first credential write): machine-managed credentials and service toggles (`[llm.oauth]`, `[llm.api_keys]`, `[services.*]`, `[tools.web_search].enabled`). Written exclusively by `system2 config`; never hand-edit.
 
 - **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
 - **`[llm.api_keys]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation.
@@ -147,9 +150,10 @@ System2's home directory is `~/.system2/`. It holds all system state: configurat
 ~/.system2/
 ├── .gitignore
 ├── app.db                           SQLite database (gitignored)
-├── config.toml                      Settings and API keys (0600, gitignored)
-├── oauth/                           OAuth credentials (0600, gitignored)
-│   └── {provider}.json              OAuth tokens (one file per logged-in provider, e.g. anthropic.json, openai-codex.json)
+├── config.toml                      Operational settings, hand-edited (0600, gitignored)
+├── auth/                            Machine-managed credentials (0700, gitignored)
+│   ├── auth.toml                    Auth + service config, written exclusively by `system2 config` (0600)
+│   └── {provider}.json              OAuth tokens (one file per logged-in provider, e.g. anthropic.json, openai-codex.json) (0600)
 ├── knowledge/                       Persistent knowledge (git-tracked)
 │   ├── conductor.md                 Conductor role-specific knowledge
 │   ├── daily_summaries/             Daily activity logs

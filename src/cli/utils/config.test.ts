@@ -1,6 +1,5 @@
 import TOML from '@iarna/toml';
 import { describe, expect, it, vi } from 'vitest';
-import type { LlmConfig } from '../../shared/index.js';
 import {
   buildConfigToml,
   convertTomlAgents,
@@ -16,47 +15,30 @@ import {
 } from './config.js';
 
 describe('buildConfigToml', () => {
-  it('generates valid TOML with LLM config', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'anthropic',
-        fallback: ['openai'],
-        providers: {
-          anthropic: {
-            keys: [{ key: 'sk-ant-123', label: 'main' }],
-          },
-        },
-      },
-    });
-    expect(result).toContain('[llm.api_keys]');
-    expect(result).toContain('primary = "anthropic"');
-    expect(result).toContain('fallback = ["openai"]');
-    expect(result).toContain('[llm.api_keys.anthropic]');
-    expect(result).toContain('sk-ant-123');
+  // 0.3.0 split: this emitter writes ONLY user-managed sections. Auth-managed
+  // sections (`[llm.*]`, `[services.*]`, `[tools.web_search]` enabled flag)
+  // live in auth.toml and are NEVER emitted here.
+  it('does not emit any auth-managed sections', () => {
+    const result = buildConfigToml({});
+    expect(result).not.toMatch(/^\[llm\./m);
+    expect(result).not.toMatch(/^\[services\./m);
+    expect(result).not.toMatch(/^\[tools\.web_search\]/m);
+    // Even commented stubs are gone — auth.toml owns those.
+    expect(result).not.toMatch(/^# \[llm\./m);
+    expect(result).not.toMatch(/^# \[services\./m);
   });
 
-  it('includes services section when brave_search configured', () => {
-    const result = buildConfigToml({
-      services: { brave_search: { key: 'brave-key-123' } },
-    });
-    expect(result).toContain('[services.brave_search]');
-    expect(result).toContain('brave-key-123');
+  it('header points the user to auth.toml for credentials', () => {
+    const result = buildConfigToml({});
+    expect(result).toMatch(/auth\.toml/);
+    expect(result).toMatch(/system2 config/);
   });
 
-  it('includes tools section when web_search configured (max_results emitted commented at code default)', () => {
-    // Same model as operational settings: tunable knobs are emitted commented
-    // at the code default so accidental edits can't silently change behavior.
-    // The live `enabled = true` reflects the user's onboarding choice;
-    // max_results is intentionally not accepted as input (callers cannot pass
-    // a non-default value — the emitter would silently ignore it). To tune,
-    // user uncomments the `# max_results = 5` line in config.toml.
-    const result = buildConfigToml({
-      tools: { web_search: { enabled: true } },
-    });
-    expect(result).toContain('[tools.web_search]');
-    expect(result).toContain('enabled = true');
-    expect(result).toContain(`# max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
-    expect(result).not.toMatch(/^max_results = /m);
+  it('emits commented web_search_max_results scalar at code default', () => {
+    const result = buildConfigToml({});
+    expect(result).toContain(`# web_search_max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
+    // Live (uncommented) scalar must NOT be present in default template.
+    expect(result).not.toMatch(/^web_search_max_results = /m);
   });
 
   // Operational settings are always emitted as commented templates
@@ -88,209 +70,6 @@ describe('buildConfigToml', () => {
     // No live (uncommented) operational headers.
     expect(result).not.toMatch(/^\[backup\]$/m);
     expect(result).not.toMatch(/^\[delivery\]$/m);
-  });
-
-  it('skips empty provider keys', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'anthropic',
-        fallback: [],
-        providers: {
-          anthropic: {
-            keys: [
-              { key: '', label: 'empty' },
-              { key: 'sk-real', label: 'real' },
-            ],
-          },
-        },
-      },
-    });
-    expect(result).not.toContain('empty');
-    expect(result).toContain('sk-real');
-  });
-
-  it('generates TOML with new providers (mistral, openrouter, xai, groq, cerebras)', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'mistral',
-        fallback: ['openrouter', 'groq'],
-        providers: {
-          mistral: { keys: [{ key: 'mist-key', label: 'default' }] },
-          openrouter: { keys: [{ key: 'sk-or-key', label: 'default' }] },
-          groq: { keys: [{ key: 'gsk-key', label: 'default' }] },
-        },
-      },
-    });
-    expect(result).toContain('primary = "mistral"');
-    expect(result).toContain('fallback = ["openrouter", "groq"]');
-    expect(result).toContain('[llm.api_keys.mistral]');
-    expect(result).toContain('mist-key');
-    expect(result).toContain('[llm.api_keys.openrouter]');
-    expect(result).toContain('sk-or-key');
-    expect(result).toContain('[llm.api_keys.groq]');
-    expect(result).toContain('gsk-key');
-  });
-
-  it('includes routing section for openrouter provider', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'openrouter',
-        fallback: [],
-        providers: {
-          openrouter: {
-            keys: [{ key: 'sk-or-key', label: 'default' }],
-            routing: {
-              google: ['google-vertex/global', 'google-vertex', 'google-ai-studio'],
-            },
-          },
-        },
-      },
-    });
-    expect(result).toContain('[llm.api_keys.openrouter]');
-    expect(result).toContain('[llm.api_keys.openrouter.routing]');
-    expect(result).toContain(
-      'google = ["google-vertex/global", "google-vertex", "google-ai-studio"]'
-    );
-  });
-
-  it('quotes routing keys containing special characters', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'openrouter',
-        fallback: [],
-        providers: {
-          openrouter: {
-            keys: [{ key: 'sk-or-key', label: 'default' }],
-            routing: { 'google/': ['google-vertex/global', 'google-ai-studio'] },
-          },
-        },
-      },
-    });
-    expect(result).toContain('"google/" = ["google-vertex/global", "google-ai-studio"]');
-  });
-
-  it('does not quote bare-safe routing keys', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'openrouter',
-        fallback: [],
-        providers: {
-          openrouter: {
-            keys: [{ key: 'sk-or-key', label: 'default' }],
-            routing: { google: ['google-vertex'] },
-          },
-        },
-      },
-    });
-    expect(result).toContain('google = ["google-vertex"]');
-    expect(result).not.toContain('"google"');
-  });
-
-  it('omits routing section when not set for openrouter', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'openrouter',
-        fallback: [],
-        providers: {
-          openrouter: { keys: [{ key: 'sk-or-key', label: 'default' }] },
-        },
-      },
-    });
-    expect(result).toContain('[llm.api_keys.openrouter]');
-    expect(result).not.toMatch(/^\[llm\.api_keys\.openrouter\.routing\]/m);
-  });
-
-  it('generates TOML with openai-compatible provider including base_url and model', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'openai-compatible',
-        fallback: [],
-        providers: {
-          'openai-compatible': {
-            keys: [{ key: 'proxy-key', label: 'local' }],
-            base_url: 'http://localhost:4000/v1',
-            model: 'my-model',
-          },
-        },
-      },
-    });
-    expect(result).toContain('primary = "openai-compatible"');
-    expect(result).toContain('[llm.api_keys.openai-compatible]');
-    expect(result).toContain('proxy-key');
-    expect(result).toContain('base_url = "http://localhost:4000/v1"');
-    expect(result).toContain('model = "my-model"');
-  });
-
-  it('includes compat_reasoning field for openai-compatible provider', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'openai-compatible',
-        fallback: [],
-        providers: {
-          'openai-compatible': {
-            keys: [{ key: 'proxy-key', label: 'local' }],
-            base_url: 'http://localhost:4000/v1',
-            model: 'my-model',
-            compat_reasoning: true,
-          },
-        },
-      },
-    });
-    expect(result).toContain('compat_reasoning = true');
-  });
-
-  it('emits compat_reasoning = false when explicitly set', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'openai-compatible',
-        fallback: [],
-        providers: {
-          'openai-compatible': {
-            keys: [{ key: 'proxy-key', label: 'local' }],
-            base_url: 'http://localhost:4000/v1',
-            model: 'my-model',
-            compat_reasoning: false,
-          },
-        },
-      },
-    });
-    expect(result).toContain('compat_reasoning = false');
-  });
-
-  it('omits compat_reasoning when undefined for openai-compatible', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'openai-compatible',
-        fallback: [],
-        providers: {
-          'openai-compatible': {
-            keys: [{ key: 'proxy-key', label: 'local' }],
-            base_url: 'http://localhost:4000/v1',
-            model: 'my-model',
-          },
-        },
-      },
-    });
-    expect(result).not.toContain('compat_reasoning');
-  });
-
-  it('omits base_url and model for non openai-compatible providers', () => {
-    const result = buildConfigToml({
-      llm: {
-        primary: 'xai',
-        fallback: [],
-        providers: {
-          xai: { keys: [{ key: 'xai-key', label: 'default' }] },
-        },
-      },
-    });
-    expect(result).toContain('[llm.api_keys.xai]');
-    expect(result).toContain('xai-key');
-    expect(result).not.toContain('base_url');
-    // model line shouldn't be emitted as actual TOML for non openai-compatible
-    // providers (only openai-compatible's [llm.api_keys.openai-compatible]
-    // section uses one). Comment-block examples are fine.
-    expect(result).not.toMatch(/^model = /m);
   });
 
   it('includes databases section when configured', () => {
@@ -618,190 +397,6 @@ describe('convertTomlAgents', () => {
       conductor: { compaction_depth: 8 },
       narrator: { thinking_level: 'off' },
     });
-  });
-});
-
-describe('buildConfigToml — [llm.oauth] tier', () => {
-  it('emits oauth section with primary and fallback', () => {
-    const llm: LlmConfig = {
-      primary: 'anthropic',
-      fallback: [],
-      providers: { anthropic: { keys: [] } },
-      oauth: { primary: 'anthropic', fallback: [], providers: {} },
-    };
-    const toml = buildConfigToml({ llm });
-    expect(toml).toMatch(/\[llm\.oauth\]\s*\nprimary\s*=\s*"anthropic"\s*\nfallback\s*=\s*\[\]/);
-  });
-
-  it('omits oauth section when undefined', () => {
-    const llm: LlmConfig = {
-      primary: 'anthropic',
-      fallback: [],
-      providers: { anthropic: { keys: [{ key: 'k', label: 'l' }] } },
-    };
-    const toml = buildConfigToml({ llm });
-    expect(toml).not.toMatch(/^\[llm\.oauth\]/m);
-  });
-
-  it('round-trips through TOML.parse and convertTomlLlm', () => {
-    const llm: LlmConfig = {
-      primary: 'openai',
-      fallback: ['google'],
-      providers: {
-        anthropic: { keys: [] },
-        openai: { keys: [{ key: 'oai-1', label: 'main' }] },
-      },
-      oauth: { primary: 'anthropic', fallback: [], providers: {} },
-    };
-    const toml = buildConfigToml({ llm });
-    const parsed = TOML.parse(toml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    const reconstructed = convertTomlLlm(llmSection);
-    expect(reconstructed.oauth?.primary).toBe('anthropic');
-    expect(reconstructed.oauth?.fallback).toEqual([]);
-    expect(reconstructed.primary).toBe('openai');
-    expect(reconstructed.providers.openai?.keys[0].key).toBe('oai-1');
-  });
-
-  it('emits [llm.oauth.<provider>] block when an OAuth model pin is set', () => {
-    const llm: LlmConfig = {
-      primary: 'anthropic',
-      fallback: [],
-      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
-      oauth: {
-        primary: 'anthropic',
-        fallback: [],
-        providers: { anthropic: { model: 'claude-opus-4-7' } },
-      },
-    };
-    const toml = buildConfigToml({ llm });
-    expect(toml).toContain('[llm.oauth.anthropic]');
-    expect(toml).toContain('model = "claude-opus-4-7"');
-  });
-
-  it('emits [llm.api_keys.<provider>.models] block for per-role pins', () => {
-    const llm: LlmConfig = {
-      primary: 'anthropic',
-      fallback: [],
-      providers: {
-        anthropic: {
-          keys: [{ key: 'sk-ant', label: 'main' }],
-          models: { narrator: 'claude-haiku-4-5-20251001', conductor: 'claude-sonnet-4-6' },
-        },
-      },
-    };
-    const toml = buildConfigToml({ llm });
-    expect(toml).toContain('[llm.api_keys.anthropic.models]');
-    expect(toml).toContain('narrator = "claude-haiku-4-5-20251001"');
-    expect(toml).toContain('conductor = "claude-sonnet-4-6"');
-  });
-
-  // Regression guard: when onboard skips the api-keys tier, it synthesizes
-  // a placeholder LlmConfig with primary set but no provider keys. The TOML
-  // should NOT emit a live [llm.api_keys] block — that would lie about the
-  // configuration. Instead emit a commented template the user can uncomment.
-  it('emits commented api-keys template (no live block) when no provider has keys', () => {
-    const llm: LlmConfig = {
-      primary: 'anthropic',
-      fallback: [],
-      providers: { anthropic: { keys: [] } },
-      oauth: { primary: 'anthropic', fallback: [], providers: {} },
-    };
-    const toml = buildConfigToml({ llm });
-    // No live [llm.api_keys] block at line start.
-    expect(toml).not.toMatch(/^\[llm\.api_keys\]/m);
-    expect(toml).not.toMatch(/^\[llm\.api_keys\.anthropic\]/m);
-    // But the section header divider is present, plus a commented template
-    // showing primary/fallback and per-provider keys shape.
-    expect(toml).toContain('LLM credentials — API keys tier');
-    expect(toml).toContain('# [llm.api_keys]');
-    expect(toml).toContain('# [llm.api_keys.anthropic]');
-    expect(toml).toMatch(/#\s+keys\s*=\s*\[/);
-  });
-
-  // OAuth section symmetry: when the user opts out of OAuth, emit the
-  // divider header + a commented hint instead of silently dropping the
-  // section. Discoverable affordance for "how do I enable OAuth later?".
-  it('emits OAuth section header + commented template when oauth is undefined', () => {
-    const llm: LlmConfig = {
-      primary: 'anthropic',
-      fallback: [],
-      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
-    };
-    const toml = buildConfigToml({ llm });
-    expect(toml).toContain('LLM credentials — OAuth tier');
-    expect(toml).not.toMatch(/^\[llm\.oauth\]/m);
-    expect(toml).toContain('# [llm.oauth]');
-    expect(toml).toContain('system2 config');
-  });
-
-  // Inline hints: per-role pins (api-keys) and per-provider model pins (OAuth)
-  // should be hinted next to their respective live blocks, not buried under
-  // [agents.<role>]. Reasoning: when a user wants to pin an OAuth model they
-  // look in the OAuth section, not the agents section.
-  it('emits commented api-keys per-role models hint inline when no pins exist', () => {
-    const llm: LlmConfig = {
-      primary: 'anthropic',
-      fallback: [],
-      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
-    };
-    const toml = buildConfigToml({ llm });
-    expect(toml).toContain('# [llm.api_keys.anthropic.models]');
-    // Hint must live in the api-keys section (above the agents divider).
-    const apiKeysIdx = toml.indexOf('# [llm.api_keys.anthropic.models]');
-    const agentsDividerIdx = toml.indexOf('Per-agent behavior overrides');
-    expect(apiKeysIdx).toBeGreaterThan(-1);
-    expect(agentsDividerIdx).toBeGreaterThan(apiKeysIdx);
-  });
-
-  it('emits commented OAuth model-pin hint inline when no pins exist', () => {
-    const llm: LlmConfig = {
-      primary: 'anthropic',
-      fallback: [],
-      providers: { anthropic: { keys: [{ key: 'sk-ant', label: 'main' }] } },
-      oauth: { primary: 'anthropic', fallback: [], providers: {} },
-    };
-    const toml = buildConfigToml({ llm });
-    expect(toml).toContain('# [llm.oauth.anthropic]');
-    expect(toml).toContain('# model = "claude-opus-4-7"');
-    const oauthHintIdx = toml.indexOf('# [llm.oauth.anthropic]');
-    const apiKeysHeaderIdx = toml.indexOf('LLM credentials — API keys tier');
-    expect(oauthHintIdx).toBeGreaterThan(-1);
-    expect(apiKeysHeaderIdx).toBeGreaterThan(oauthHintIdx);
-  });
-
-  it('omits the inline api-keys models hint when at least one role is pinned', () => {
-    const llm: LlmConfig = {
-      primary: 'anthropic',
-      fallback: [],
-      providers: {
-        anthropic: {
-          keys: [{ key: 'sk-ant', label: 'main' }],
-          models: { narrator: 'claude-haiku-4-5-20251001' },
-        },
-      },
-    };
-    const toml = buildConfigToml({ llm });
-    // Live block is present; no commented stand-in hint to avoid duplication.
-    expect(toml).toContain('[llm.api_keys.anthropic.models]');
-    expect(toml).not.toContain('# [llm.api_keys.anthropic.models]');
-  });
-
-  it('round-trips an api-keys-skipped (oauth-only) config through TOML.parse', () => {
-    const llm: LlmConfig = {
-      primary: 'anthropic',
-      fallback: [],
-      providers: { anthropic: { keys: [] } },
-      oauth: { primary: 'anthropic', fallback: [], providers: {} },
-    };
-    const toml = buildConfigToml({ llm });
-    const parsed = TOML.parse(toml) as Record<string, unknown>;
-    const llmSection = parsed.llm as Parameters<typeof convertTomlLlm>[0];
-    const reconstructed = convertTomlLlm(llmSection);
-    expect(reconstructed.oauth?.primary).toBe('anthropic');
-    // No live [llm.api_keys] in the toml → primary defaults to 'anthropic',
-    // providers map is empty (no provider had keys).
-    expect(reconstructed.providers).toEqual({});
   });
 });
 

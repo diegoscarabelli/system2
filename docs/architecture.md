@@ -61,9 +61,10 @@ All runtime state lives in `~/.system2/`:
 ~/.system2/
 ├── app.db                           SQLite database (gitignored)
 ├── artifacts/                       Project-free reports, dashboards, exports
-├── config.toml                      Settings and API keys (0600, gitignored)
-├── oauth/                           OAuth credentials (0600, gitignored)
-│   └── {provider}.json              OAuth tokens (one file per logged-in provider, e.g. anthropic.json, openai-codex.json)
+├── config.toml                      User-edited operational settings (0600, gitignored). Holds [agents.*], [databases.*], [backup], [logs], [scheduler], [chat], [knowledge], [session], [delivery], plus top-level web_search_max_results. Read but never written by the daemon.
+├── auth/                            Machine-managed credentials (0700, gitignored). Written exclusively by `system2 config`.
+│   ├── auth.toml                    API keys and OAuth state (0600). Holds [llm.oauth], [llm.api_keys], [services.brave_search], [tools.web_search].
+│   └── {provider}.json              OAuth tokens (0600, one file per logged-in provider, e.g. anthropic.json, openai-codex.json)
 ├── knowledge/                       Persistent knowledge (injected into prompts)
 │   ├── conductor.md                 Conductor role-specific knowledge
 │   ├── daily_summaries/             Daily activity logs
@@ -94,9 +95,9 @@ All runtime state lives in `~/.system2/`:
 └── venv/                            Shared Python environment (gitignored)
 ```
 
-Most content is git-tracked. `app.db`, `sessions/`, `logs/`, and `config.toml` are gitignored.
+Most content is git-tracked. `app.db`, `sessions/`, `logs/`, `config.toml`, and `auth/` are gitignored.
 
-See [Configuration](configuration.md) for `config.toml` settings and API keys.
+See [Configuration](configuration.md) for `config.toml` settings (operational) and `auth/auth.toml` (credentials).
 
 ## Project Structure
 

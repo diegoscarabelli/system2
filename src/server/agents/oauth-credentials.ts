@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { AUTH_DIRNAME } from '../../cli/utils/auth-config.js';
 import type { LlmProvider } from '../../shared/index.js';
 import { log } from '../utils/logger.js';
 
@@ -26,10 +27,8 @@ export interface PiAiOAuthCredentials {
  */
 export type OAuthCredentials = PiAiOAuthCredentials;
 
-const OAUTH_DIR = 'oauth';
-
 function credentialsPath(system2Dir: string, provider: LlmProvider): string {
-  return join(system2Dir, OAUTH_DIR, `${provider}.json`);
+  return join(system2Dir, AUTH_DIRNAME, `${provider}.json`);
 }
 
 export function loadOAuthCredentials(
@@ -60,7 +59,7 @@ export function saveOAuthCredentials(
   provider: LlmProvider,
   credentials: OAuthCredentials
 ): void {
-  const dir = join(system2Dir, OAUTH_DIR);
+  const dir = join(system2Dir, AUTH_DIRNAME);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
