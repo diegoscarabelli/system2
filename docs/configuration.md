@@ -116,93 +116,86 @@ compaction_depth = 5                # keep N auto-compactions in sliding window
 # narrator_message_excerpt_bytes = 16384
 ```
 
-### `~/.system2/auth/.auth.toml` (written by `system2 config` (credentials))
+### `~/.system2/auth/.auth.toml`
 
-Written exclusively by [`system2 config`](cli.md#system2-config). Do NOT hand-edit: every write rewrites the file via parse-mutate-stringify, so comments and key order are not preserved. Lives under a `0700` directory with file mode `0600`. Created on first credential write (not by `system2 init`).
+Written exclusively by [`system2 config`](cli.md#system2-config). Do NOT hand-edit: every write rewrites the file via parse-mutate-stringify, so comments and key order are not preserved. Lives under a `0700` directory with file mode `0600`. Created on first credential write (not by `system2 init`). The leading dot in the filename hides the file from `ls` and most editor file pickers, reinforcing the "managed by tooling" signal.
 
-The example below uses TOML's compact inline-table syntax for `keys = [{ ... }]` to keep the doc readable. The on-disk file actually uses the equivalent `[[llm.api_keys.<provider>.keys]]` array-of-tables syntax (the format `@iarna/toml` emits via `TOML.stringify`). Both parse to the same data; the difference is purely surface syntax.
+#### Schema
+
+**`[llm.oauth]`** — OAuth tier, tried first. `primary` and `fallback` accept any of `anthropic`, `openai-codex`, `github-copilot`. Per-provider OAuth tokens live in companion files at `~/.system2/auth/<provider>.json` (also `0600`), refreshed automatically by the daemon. The API-keys tier is only consulted after every OAuth credential in this tier is in cooldown.
+
+**`[llm.oauth.<provider>]`** (optional) — pins a specific model on that OAuth provider. When omitted, the resolver picks the family flagship from pi-ai's [model catalog](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts). Use the exact `id` field from the catalog when pinning.
+
+**`[llm.api_keys]`** — API-key tier (pay-per-token). `primary` plus an ordered `fallback` list. Used as failover after the OAuth tier exhausts, or as the only tier when `[llm.oauth]` is absent.
+
+**`[llm.api_keys.<provider>]`** — per-provider sub-table. Each provider holds an array of `{ key, label }` keys; labels are unique per provider and used as identifiers when rotating or removing individual keys via `system2 config`. Rotation across keys and providers happens automatically on failures (see [Automatic Failover](#automatic-failover)). The `openai-compatible` provider also takes `base_url`, `model`, and an optional `compat_reasoning` boolean (default `true`); use it for self-hosted endpoints (LiteLLM, vLLM, Ollama, etc.).
+
+**`[llm.api_keys.<provider>.models]`** (optional) — per-role model pins for the API-keys tier. Keys are role names (`guide`, `conductor`, `reviewer`, `narrator`, `worker`); each value overrides the default from the role's library frontmatter for that specific provider. Validated against the pi-ai catalog at startup.
+
+**`[llm.api_keys.openrouter.routing]`** (optional) — upstream provider routing for OpenRouter. Keys are model-ID prefixes (longest prefix wins; quote prefixes containing `/` or other special characters); values are arrays of OpenRouter provider slugs tried in order. See [Auth Tiers](#auth-tiers) for behavior.
+
+**`[services.brave_search]`** — Brave Search API key. Setting this also flips `[tools.web_search].enabled` to `true` in the same write; removing it flips it back.
+
+**`[tools.web_search]`** — only the `enabled` flag lives here. The result-count knob is a top-level `web_search_max_results` scalar in `config.toml` (operational tunable, hand-edited).
+
+#### Example on-disk format
+
+The actual file uses `@iarna/toml`'s array-of-tables format for arrays of inline tables (e.g. `keys`); not the more compact inline form. Both parse identically; this is just what's literally on disk:
 
 ```toml
 # Managed by 'system2 config' — do not edit by hand.
 # Comments and key order are not preserved across writes.
 
-# ─── LLM credentials — OAuth tier ────────────────────────────────────────
-# OAuth providers and failover order. Subscription tokens live in
-# ~/.system2/auth/<provider>.json (mode 0600), managed by `system2 config`.
-# This tier is tried first; the API-keys tier below is only used after
-# every OAuth credential is in cooldown.
-# Supported providers: anthropic, openai-codex, github-copilot.
-
 [llm.oauth]
 primary = "anthropic"
-fallback = []   # any of: anthropic, openai-codex, github-copilot
+fallback = []
 
-# Optional per-OAuth-provider model pin. When omitted, the resolver picks
-# the family flagship from pi-ai's catalog.
-# Catalog of model IDs (use the exact `id` field when pinning):
-# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts
 [llm.oauth.anthropic]
 model = "claude-opus-4-7"
-
-# ─── LLM credentials — API keys tier ─────────────────────────────────────
-# Pay-per-token. Each provider can hold multiple keys; rotation across keys
-# and providers happens automatically on failures.
 
 [llm.api_keys]
 primary = "anthropic"
 fallback = ["google", "openai"]
 
-[llm.api_keys.anthropic]
-keys = [{ key = "sk-ant-...", label = "personal" }, { key = "sk-ant-...", label = "work" }]
+[[llm.api_keys.anthropic.keys]]
+key = "sk-ant-..."
+label = "personal"
 
-# Optional per-role model pins for the API-keys tier. Keys are role names
-# (guide, conductor, reviewer, narrator, worker). Overrides the default
-# from the role's frontmatter for the matched provider.
+[[llm.api_keys.anthropic.keys]]
+key = "sk-ant-..."
+label = "work"
+
 [llm.api_keys.anthropic.models]
 narrator = "claude-haiku-4-5-20251001"
 conductor = "claude-sonnet-4-6"
 
-[llm.api_keys.cerebras]
-keys = [{ key = "csk-...", label = "default" }]
+[[llm.api_keys.google.keys]]
+key = "AIza..."
+label = "default"
 
-[llm.api_keys.google]
-keys = [{ key = "AIza...", label = "default" }]
+[[llm.api_keys.openai.keys]]
+key = "sk-..."
+label = "default"
 
-[llm.api_keys.groq]
-keys = [{ key = "gsk_...", label = "default" }]
+[[llm.api_keys.openrouter.keys]]
+key = "sk-or-..."
+label = "default"
 
-[llm.api_keys.mistral]
-keys = [{ key = "...", label = "default" }]
-
-[llm.api_keys.openai]
-keys = [{ key = "sk-...", label = "default" }]
-
-[llm.api_keys.openrouter]
-keys = [{ key = "sk-or-...", label = "default" }]
-
-# Upstream provider routing for OpenRouter models (optional).
-# Keys are model ID prefixes; quote them when they contain special characters (e.g. "/").
-# Values are provider order arrays.
 [llm.api_keys.openrouter.routing]
 google = ["google-vertex/global", "google-vertex", "google-ai-studio"]
 
-[llm.api_keys.xai]
-keys = [{ key = "xai-...", label = "default" }]
-
-# OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura, etc.)
 [llm.api_keys.openai-compatible]
-keys = [{ key = "sk-...", label = "default" }]
 base_url = "http://localhost:4000/v1"
 model = "my-model"
-compat_reasoning = true             # optional, default true
+compat_reasoning = true
 
-# ─── Services ────────────────────────────────────────────────────────────
+[[llm.api_keys.openai-compatible.keys]]
+key = "sk-..."
+label = "default"
+
 [services.brave_search]
 key = "BSA..."
 
-# ─── Tools ───────────────────────────────────────────────────────────────
-# Only `enabled` lives in .auth.toml. The `max_results` knob is a top-level
-# scalar `web_search_max_results` in config.toml.
 [tools.web_search]
 enabled = true
 ```
