@@ -19,7 +19,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import { authDir } from '../utils/auth-config.js';
+import { ensureAuthDir } from '../utils/auth-config.js';
 import { buildConfigToml, CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
 import { config } from './config.js';
 
@@ -72,9 +72,11 @@ export async function init(options: InitOptions = {}): Promise<void> {
   await mkdir(join(dir, 'projects'), { recursive: true });
   await mkdir(join(dir, 'artifacts'), { recursive: true });
   // auth/ dir holds OAuth credential JSONs and (once `system2 config` writes
-  // the first credential) auth.toml. 0o700 ensures the dir + its contents are
-  // owner-readable only.
-  await mkdir(authDir(dir), { recursive: true, mode: 0o700 });
+  // the first credential) auth.toml. ensureAuthDir creates it if missing AND
+  // chmods to 0o700 if it already exists with looser perms (defends against
+  // a stray `~/.system2/auth/` left at 0o755 from an interrupted install or
+  // hand-modification).
+  ensureAuthDir(dir);
 
   await writeFile(configPath, buildConfigToml({}), { mode: 0o600 });
 

@@ -373,12 +373,11 @@ export function removeKeyFromApiKeyProvider(
   label?: string
 ): { changed: boolean } {
   let changed = false;
-  let providerLeftEmpty = false;
 
   withAuth(authPath, (auth) => {
     const tier = auth.llm?.api_keys;
     const sub = tier?.[provider] as { keys?: LlmKey[] } | undefined;
-    if (!sub?.keys || sub.keys.length === 0) return;
+    if (!tier || !sub?.keys || sub.keys.length === 0) return;
 
     if (label === undefined) {
       sub.keys = [];
@@ -388,16 +387,28 @@ export function removeKeyFromApiKeyProvider(
       if (sub.keys.length === before) return;
     }
 
-    if (sub.keys.length === 0) providerLeftEmpty = true;
     changed = true;
-  });
 
-  // If the provider is now key-less, remove it entirely (separate withAuth
-  // pass keeps the in-flight mutation simple and the empty-keys handling
-  // local to one branch).
-  if (providerLeftEmpty) {
-    removeProviderFromApiKeysTier(authPath, provider);
-  }
+    // If the last key was removed, drop the provider in the same write to
+    // avoid an intermediate on-disk state where the tier list references a
+    // key-less provider (the runtime would surface that as "no usable keys"
+    // for that provider on every retry).
+    if (sub.keys.length === 0) {
+      delete (tier as Record<string, unknown>)[provider];
+      const fallbackArr = (tier.fallback ?? []) as string[];
+      if (tier.primary === provider) {
+        const remaining = fallbackArr.filter((p) => p !== provider);
+        if (remaining.length === 0) {
+          delete auth.llm?.api_keys;
+        } else {
+          tier.primary = remaining[0];
+          tier.fallback = remaining.slice(1);
+        }
+      } else if (fallbackArr.includes(provider)) {
+        tier.fallback = fallbackArr.filter((p) => p !== provider);
+      }
+    }
+  });
 
   return { changed };
 }
