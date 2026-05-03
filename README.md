@@ -39,7 +39,7 @@ pnpm add -g @diegoscarabelli/system2      # install System2 globally
 system2 init             # first-run setup (see below)
 ```
 
-`system2 init` creates `~/.system2/` (with an empty `auth/` dir) and immediately hands off to `system2 config`, which creates `~/.system2/auth/.auth.toml` with your first LLM credential and (optionally) the Brave Search key in the same flow.
+`system2 init` creates `~/.system2/` (with `config.toml` initialized from a template and an empty `auth/` dir) and immediately hands off to `system2 config`, which creates `~/.system2/auth/.auth.toml` with your LLM credentials (OAuth and/or API keys) and (optionally) the Brave Search key in the same flow.
 
 ```bash
 system2 start            # starts the server and opens the browser
@@ -77,7 +77,7 @@ system2 stop             # shut down gracefully
 
 **Credentials and services.** Use `system2 config` to add or remove OAuth providers, add or rotate API keys, set the Brave Search key, and reorder failover priority across credentials.
 
-**Operational parameters.** Hand-edit `~/.system2/config.toml` to tune per-agent behavior, register databases, or adjust operational defaults. `system2 init` initializes this file to a template if it isn't found; the Guide also edits it during onboarding (for example, to register databases you describe to it).
+**Operational parameters.** Hand-edit `~/.system2/config.toml` to tune per-agent behavior, register databases, or adjust operational defaults. `system2 init` initializes this file to a template if it isn't found; the Guide also edits it during onboarding (for example, to register database connection parameters of your data stack).
 
 ```bash
 system2 config           # interactive: manage OAuth, API keys, and services
