@@ -18,7 +18,10 @@ app.db-wal
 # Credentials
 config.toml
 
-# OAuth credentials (access + refresh tokens)
+# Auth state (.auth.toml + per-provider OAuth credential JSONs).
+# Note: legacy 0.2.x installs used oauth/; included here so any orphaned
+# pre-rename install doesn't accidentally commit credentials on first start.
+auth/
 oauth/
 
 # Runtime

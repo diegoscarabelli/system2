@@ -62,7 +62,7 @@ describe('oauth-credentials', () => {
     expect(mode).toBe(0o600);
   });
 
-  it('enforces 0700 on the oauth directory', async () => {
+  it('enforces 0700 on the auth directory', async () => {
     const { mkdirSync, statSync } = await import('node:fs');
     // Pre-create the directory with a looser mode
     mkdirSync(join(dir, 'auth'), { recursive: true, mode: 0o755 });

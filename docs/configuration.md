@@ -2,7 +2,7 @@
 
 System2 settings are split across two files in 0.3.0. `~/.system2/config.toml` holds user-edited operational settings only: per-agent behavior overrides, database connections, the `web_search_max_results` knob, and operational defaults (`[backup]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`, `[session]`, `[delivery]`). It is created by `system2 init` with `0600` permissions, read by the daemon, and never written by it.
 
-`~/.system2/auth/.auth.toml` holds written by `system2 config` (credentials): `[llm.oauth]`, `[llm.api_keys]`, `[services.brave_search]`, and the `[tools.web_search].enabled` flag. It lives under a `0700` directory with file mode `0600`, and is written exclusively by [`system2 config`](cli.md#system2-config). Do NOT hand-edit `.auth.toml`: every `system2 config` write rewrites the file via parse-mutate-stringify, so any user-added comments or hand-chosen key order are lost. The file is created on first credential write; `system2 init` does not create it.
+`~/.system2/auth/.auth.toml` holds credentials and service toggles: `[llm.oauth]`, `[llm.api_keys]`, `[services.brave_search]`, and the `[tools.web_search].enabled` flag. It lives under a `0700` directory with file mode `0600`, and is written exclusively by [`system2 config`](cli.md#system2-config). Do NOT hand-edit `.auth.toml`: every `system2 config` write rewrites the file via parse-mutate-stringify, so any user-added comments or hand-chosen key order are lost. The file is created on first credential write; `system2 init` does not create it.
 
 **Key source files:**
 
