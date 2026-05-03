@@ -35,9 +35,13 @@ It exists to help people think more clearly about complex questions and empower 
 Open a terminal and run:
 
 ```bash
+pnpm setup                                # one-time per machine: configures pnpm's global bin dir + PATH (skip if already done)
+# Close and reopen your terminal here so the new PATH is picked up.
 pnpm add -g @diegoscarabelli/system2      # install System2 globally
-system2 init             # first-run setup (see below)
+system2 init                              # first-run setup (see below)
 ```
+
+If `system2` isn't found after install, your pnpm global bin directory isn't on PATH. Run `pnpm setup` (it's idempotent), close and reopen your terminal, and try again. `pnpm bin -g` should print a directory that's on your shell's PATH. There's no need to clone this repo to install — npm has the package.
 
 `system2 init` creates `~/.system2/` (with `config.toml` initialized from a template and an empty `auth/` dir) and immediately hands off to `system2 config`, which creates `~/.system2/auth/.auth.toml` with your LLM credentials (OAuth and/or API keys) and (optionally) the Brave Search key in the same flow.
 
