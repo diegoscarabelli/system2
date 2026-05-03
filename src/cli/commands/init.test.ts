@@ -35,9 +35,9 @@ describe('system2 init', () => {
     expect(mode).toBe(0o700);
   });
 
-  it('does NOT create auth/auth.toml — that is created by `system2 config` on first credential', async () => {
+  it('does NOT create auth/.auth.toml — that is created by `system2 config` on first credential', async () => {
     await init({ system2Dir: dir, configFile: configPath, invokeConfig: vi.fn() });
-    expect(existsSync(join(dir, 'auth', 'auth.toml'))).toBe(false);
+    expect(existsSync(join(dir, 'auth', '.auth.toml'))).toBe(false);
   });
 
   it('writes a config.toml that holds only user-managed sections', async () => {
@@ -46,7 +46,7 @@ describe('system2 init', () => {
     const content = readFileSync(configPath, 'utf-8');
     expect(content).toContain('# System2 Configuration');
     // Auth-managed section headers must not appear as live TOML headers
-    // (they live in auth.toml). They may appear inside comment text — the
+    // (they live in .auth.toml). They may appear inside comment text — the
     // section labels are allowed to be referenced in informational comments.
     expect(content).not.toMatch(/^\[llm\./m);
     expect(content).not.toMatch(/^\[services\./m);
@@ -54,8 +54,8 @@ describe('system2 init', () => {
     // No commented stubs for auth-managed sections either (those are legacy).
     expect(content).not.toMatch(/^# \[llm\./m);
     expect(content).not.toMatch(/^# \[services\./m);
-    // Header points the user at auth.toml + system2 config.
-    expect(content).toContain('auth.toml');
+    // Header points the user at .auth.toml + system2 config.
+    expect(content).toContain('.auth.toml');
     expect(content).toContain('system2 config');
   });
 
@@ -73,16 +73,16 @@ describe('system2 init', () => {
     expect(invokeConfig).not.toHaveBeenCalled();
   });
 
-  it('does not clobber an existing auth.toml on re-run (idempotent)', async () => {
-    // First install + write a fake auth.toml (simulating `system2 config`).
+  it('does not clobber an existing .auth.toml on re-run (idempotent)', async () => {
+    // First install + write a fake .auth.toml (simulating `system2 config`).
     await init({ system2Dir: dir, configFile: configPath, invokeConfig: vi.fn() });
-    const authPath = join(dir, 'auth', 'auth.toml');
+    const authPath = join(dir, 'auth', '.auth.toml');
     const authContents = '# my creds\n[llm.oauth]\nprimary = "anthropic"\nfallback = []\n';
     writeFileSync(authPath, authContents);
     // Delete config.toml to trigger the recovery path on re-run.
     rmSync(configPath);
     await init({ system2Dir: dir, configFile: configPath, invokeConfig: vi.fn() });
-    // auth.toml survives untouched.
+    // .auth.toml survives untouched.
     expect(readFileSync(authPath, 'utf-8')).toBe(authContents);
   });
 });

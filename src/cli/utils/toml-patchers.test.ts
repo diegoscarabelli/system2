@@ -23,13 +23,14 @@ import {
 } from './toml-patchers.js';
 
 /**
- * Tests for `~/.system2/auth/auth.toml` patchers (0.3.0 split).
+ * Tests for `~/.system2/auth/.auth.toml` patchers (0.3.0 split).
  *
  * Each patcher is a parse → mutate → write cycle, so assertions check the
- * parsed structure of auth.toml after the call rather than text patterns.
+ * parsed structure of .auth.toml after the call rather than text patterns.
  * The previous regex-text assertions (comment preservation, header
- * placement, divider survival) no longer apply: auth.toml is machine-managed
- * and TOML.stringify always rewrites the entire file.
+ * placement, divider survival) no longer apply: .auth.toml is written
+ * exclusively by `system2 config`, and TOML.stringify rewrites the entire
+ * file on every write.
  */
 
 let dir: string;
@@ -37,7 +38,7 @@ let authPath: string;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'system2-auth-patchers-'));
-  authPath = join(dir, 'auth.toml');
+  authPath = join(dir, '.auth.toml');
 });
 
 afterEach(() => {

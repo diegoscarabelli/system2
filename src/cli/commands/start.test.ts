@@ -83,7 +83,7 @@ describe('probeCredentialTier (four-state)', () => {
     dir = mkdtempSync(join(tmpdir(), 'system2-start-test-'));
     configPath = join(dir, 'config.toml');
     mkdirSync(join(dir, 'auth'), { mode: 0o700 });
-    authPath = join(dir, 'auth', 'auth.toml');
+    authPath = join(dir, 'auth', '.auth.toml');
   });
 
   afterEach(() => {
@@ -94,12 +94,12 @@ describe('probeCredentialTier (four-state)', () => {
     expect(probeCredentialTier(configPath, authPath).kind).toBe('not_initialized');
   });
 
-  it('returns missing when config.toml exists but auth.toml does not', () => {
+  it('returns missing when config.toml exists but .auth.toml does not', () => {
     writeFileSync(configPath, '');
     expect(probeCredentialTier(configPath, authPath).kind).toBe('missing');
   });
 
-  it('returns missing when auth.toml has no primary in either tier', () => {
+  it('returns missing when .auth.toml has no primary in either tier', () => {
     writeFileSync(configPath, '');
     writeFileSync(authPath, '');
     expect(probeCredentialTier(configPath, authPath).kind).toBe('missing');
@@ -113,7 +113,7 @@ describe('probeCredentialTier (four-state)', () => {
     if (status.kind === 'malformed') expect(status.file).toBe('config');
   });
 
-  it('returns malformed (auth) when auth.toml is invalid TOML', () => {
+  it('returns malformed (auth) when .auth.toml is invalid TOML', () => {
     writeFileSync(configPath, '');
     writeFileSync(authPath, 'not valid = = =');
     const status = probeCredentialTier(configPath, authPath);
@@ -121,13 +121,13 @@ describe('probeCredentialTier (four-state)', () => {
     if (status.kind === 'malformed') expect(status.file).toBe('auth');
   });
 
-  it('returns configured when [llm.oauth].primary is set in auth.toml', () => {
+  it('returns configured when [llm.oauth].primary is set in .auth.toml', () => {
     writeFileSync(configPath, '');
     writeFileSync(authPath, `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n`);
     expect(probeCredentialTier(configPath, authPath).kind).toBe('configured');
   });
 
-  it('returns configured when [llm.api_keys].primary is set in auth.toml', () => {
+  it('returns configured when [llm.api_keys].primary is set in .auth.toml', () => {
     writeFileSync(configPath, '');
     writeFileSync(
       authPath,
@@ -146,7 +146,7 @@ describe('hasConfiguredCredentialTier (boolean shim)', () => {
     dir = mkdtempSync(join(tmpdir(), 'system2-start-test-'));
     configPath = join(dir, 'config.toml');
     mkdirSync(join(dir, 'auth'), { mode: 0o700 });
-    authPath = join(dir, 'auth', 'auth.toml');
+    authPath = join(dir, 'auth', '.auth.toml');
     writeFileSync(configPath, '');
   });
 
@@ -154,7 +154,7 @@ describe('hasConfiguredCredentialTier (boolean shim)', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('returns false when auth.toml is absent', () => {
+  it('returns false when .auth.toml is absent', () => {
     expect(hasConfiguredCredentialTier(configPath, authPath)).toBe(false);
   });
 

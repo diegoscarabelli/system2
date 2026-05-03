@@ -220,8 +220,8 @@ Auto-compaction is also configured to fire earlier (at ~50% of the context windo
 
 When `[llm.oauth]` is configured, `AuthResolver` walks credentials across two tiers. The OAuth tier supports any of: `anthropic`, `openai-codex`, `github-copilot`. Each provider hits a different endpoint with its own request shape; pi-ai routes each one through its own streaming provider (e.g., `openai-codex-responses`) selected via [getOAuthProvider(id)](../src/server/agents/oauth.ts).
 
-1. **OAuth tier**: providers listed in `[llm.oauth].primary` + `fallback` (in `~/.system2/auth/auth.toml`), each with one credential loaded from `~/.system2/auth/<provider>.json` at startup.
-2. **API key tier**: providers listed in `[llm.api_keys].primary` + `fallback` (in `~/.system2/auth/auth.toml`), with keys at `[llm.api_keys.<provider>].keys`.
+1. **OAuth tier**: providers listed in `[llm.oauth].primary` + `fallback` (in `~/.system2/auth/.auth.toml`), each with one credential loaded from `~/.system2/auth/<provider>.json` at startup.
+2. **API key tier**: providers listed in `[llm.api_keys].primary` + `fallback` (in `~/.system2/auth/.auth.toml`), with keys at `[llm.api_keys.<provider>].keys`.
 
 `getActiveCredential()` returns a `{ tier, provider, keyIndex, label }` tuple where `tier` is `'oauth' | 'api_keys'`. Cooldown keys are namespaced as `${tier}:${provider}:${keyIndex}` so the same provider in both tiers (e.g., Anthropic OAuth and Anthropic API keys) doesn't collide. The OAuth tier is fully exhausted (every credential in cooldown) before the resolver returns an api_keys-tier credential.
 
@@ -244,7 +244,7 @@ api_keys_models:
   groq: llama-3.3-70b-versatile
 ```
 
-Users override per-role with `[llm.api_keys.<provider>.models][<role>]` in `~/.system2/auth/auth.toml` (see [Configuration](configuration.md#model-selection)). At startup, [validateAgentModels](../src/shared/agent-models.ts) cross-checks every frontmatter entry against pi-ai's `MODELS` catalog. Unknown model ids fail validation with did-you-mean suggestions computed by Levenshtein distance, so a typo like `claude-sonet-4-6` surfaces as a startup error pointing at the intended `claude-sonnet-4-6` rather than a runtime 404.
+Users override per-role with `[llm.api_keys.<provider>.models][<role>]` in `~/.system2/auth/.auth.toml` (see [Configuration](configuration.md#model-selection)). At startup, [validateAgentModels](../src/shared/agent-models.ts) cross-checks every frontmatter entry against pi-ai's `MODELS` catalog. Unknown model ids fail validation with did-you-mean suggestions computed by Levenshtein distance, so a typo like `claude-sonet-4-6` surfaces as a startup error pointing at the intended `claude-sonnet-4-6` rather than a runtime 404.
 
 ## Session Persistence
 

@@ -111,7 +111,7 @@ export async function config(options: ConfigOptions = {}): Promise<void> {
     process.exit(1);
   }
 
-  // Upfront TOML validation for auth.toml: surface a clean parse error and
+  // Upfront TOML validation for .auth.toml: surface a clean parse error and
   // exit rather than letting any of the submenus / patchers crash mid-flow
   // with a stack trace. Skipped when the file doesn't exist (the post-init,
   // pre-config state) — patchers create it on first write.
@@ -121,7 +121,7 @@ export async function config(options: ConfigOptions = {}): Promise<void> {
     } catch (err) {
       p.intro('🧠 System2 configuration');
       p.cancel(
-        `auth.toml could not be parsed:\n  ${err instanceof Error ? err.message : String(err)}\n\n` +
+        `.auth.toml could not be parsed:\n  ${err instanceof Error ? err.message : String(err)}\n\n` +
           `Fix the syntax error in ${authPath} manually, or delete the file and rerun ` +
           'system2 config to recreate it.'
       );
@@ -295,7 +295,7 @@ async function handleOAuthProvider(
     return;
   }
 
-  // Auto-patch auth.toml. The credential is useless until [llm.oauth]
+  // Auto-patch .auth.toml. The credential is useless until [llm.oauth]
   // references it. We've already saved the credential file, so a throw here
   // would leave the user with a valid OAuth credential that the runtime can't
   // see — surface the error and return to the submenu instead of crashing.

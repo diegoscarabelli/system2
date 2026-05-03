@@ -5,13 +5,13 @@
  *
  *   ~/.system2/config.toml        — user-edited operational settings.
  *                                   Read by the daemon, never written.
- *   ~/.system2/auth/auth.toml     — machine-managed credentials (OAuth,
+ *   ~/.system2/auth/.auth.toml     — written by `system2 config` (credentials) (OAuth,
  *                                   API keys, services). Written by
  *                                   `system2 config`, never hand-edited.
  *
  * The split was introduced in 0.3.0 to eliminate the regex patcher
  * complexity that arose from mixing user-managed comments with
- * machine-managed sections in a single file.
+ * sections written by `system2 config` in a single file.
  *
  * Falls back to sensible defaults when values aren't specified.
  */
@@ -110,7 +110,7 @@ interface OAuthProviderToml {
 
 /**
  * On-disk shape of `config.toml` (the user-edited operational file). Holds
- * everything except auth-managed sections, which live in `auth.toml`.
+ * everything except auth-managed sections, which live in `.auth.toml`.
  */
 interface TomlConfigFile {
   agents?: Record<
@@ -168,12 +168,12 @@ interface TomlConfigFile {
   };
   /** Top-level scalar (no enclosing section). The web_search tool's
    *  `max_results` knob — promoted out of `[tools.web_search]` in 0.3.0
-   *  because the section now lives in auth.toml with just `enabled`. */
+   *  because the section now lives in .auth.toml with just `enabled`. */
   web_search_max_results?: number;
 }
 
 /**
- * On-disk shape of `auth.toml`. Mirrors the auth-owned subset of the 0.2.x
+ * On-disk shape of `.auth.toml`. Mirrors the auth-owned subset of the 0.2.x
  * config.toml schema. Sub-provider types are reused from the local
  * `ProviderKeysToml` / `OAuthProviderToml` interfaces.
  */
@@ -204,7 +204,7 @@ interface TomlAuthFile {
     brave_search?: { key?: string };
   };
   tools?: {
-    /** Only `enabled` lives in auth.toml. `max_results` lives as a top-level
+    /** Only `enabled` lives in .auth.toml. `max_results` lives as a top-level
      *  scalar in config.toml (`web_search_max_results`). */
     web_search?: { enabled?: boolean };
   };
@@ -465,7 +465,7 @@ function convertTomlServices(toml: NonNullable<TomlAuthFile['services']>): Servi
  */
 /**
  * Compose ToolsConfig from both files. `[tools.web_search].enabled` lives in
- * auth.toml (system-managed); `web_search_max_results` lives as a top-level
+ * .auth.toml (system-managed); `web_search_max_results` lives as a top-level
  * scalar in config.toml (user-tunable). The output preserves the legacy
  * `tools.web_search.{enabled, max_results}` consumer shape, so server code
  * doesn't need to know about the file split.
@@ -479,7 +479,7 @@ function convertTomlTools(
     // Default to true when [tools.web_search] is present without `enabled`:
     // matches the runtime semantic in src/server/agents/host.ts which gates
     // on `enabled !== false` (absence treated as opt-in). Defaulting to false
-    // here would silently disable web_search if a user hand-edited auth.toml
+    // here would silently disable web_search if a user hand-edited .auth.toml
     // and dropped the `enabled` line.
     tools.web_search = {
       enabled: authTools.web_search.enabled ?? true,
@@ -716,7 +716,7 @@ function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial
 /**
  * Load configuration from disk, merging defaults with whatever the two TOML
  * files contain. The split: `config.toml` holds operational settings (always
- * read), `auth/auth.toml` holds credentials (optional — absent on a brand-new
+ * read), `auth/.auth.toml` holds credentials (optional — absent on a brand-new
  * install).
  *
  * Each file fails loudly on parse error rather than silently falling back to
@@ -749,7 +749,7 @@ export function loadConfigFromPaths(configPath: string, authPath: string): Syste
     tomlAuth = loadAuthToml(authPath) as TomlAuthFile;
   } catch (err) {
     throw new Error(
-      `Failed to parse auth.toml at ${authPath}: ${err instanceof Error ? err.message : String(err)}`
+      `Failed to parse .auth.toml at ${authPath}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
@@ -795,7 +795,7 @@ export function loadConfigFromPaths(configPath: string, authPath: string): Syste
  * ONLY user-managed sections — per-agent overrides, databases, operational
  * defaults, and the `web_search_max_results` tunable. Auth-managed sections
  * (`[llm.oauth]`, `[llm.api_keys]`, `[services.brave_search]`,
- * `[tools.web_search].enabled`) live in `~/.system2/auth/auth.toml`,
+ * `[tools.web_search].enabled`) live in `~/.system2/auth/.auth.toml`,
  * written by `system2 config`.
  *
  * The `agents` and `databases` params are typically omitted by `system2 init`
@@ -817,7 +817,7 @@ export function buildConfigToml(options: {
     '# delivery, web_search_max_results).',
     '#',
     '# LLM credentials (OAuth + API keys) and service credentials live in a',
-    '# separate file: ~/.system2/auth/auth.toml, managed by `system2 config`.',
+    '# separate file: ~/.system2/auth/.auth.toml, managed by `system2 config`.',
     '# Do not put credentials here — the loader does not read them from this file.',
     '#',
     '# Changes apply on daemon restart.',
@@ -846,7 +846,7 @@ export function buildConfigToml(options: {
     lines.push('# Tier-agnostic: applied whether the OAuth or API-keys tier is active.');
     lines.push('# Uncomment and edit to customize.');
     lines.push('# Supported roles: guide, conductor, reviewer, narrator, worker');
-    lines.push('# Model pins live in auth.toml (managed by `system2 config`).');
+    lines.push('# Model pins live in .auth.toml (managed by `system2 config`).');
     lines.push('#');
     lines.push('# [agents.conductor]');
     lines.push('# thinking_level = "high"              # off | minimal | low | medium | high');
@@ -858,7 +858,7 @@ export function buildConfigToml(options: {
 
   lines.push(...sectionHeader('Tools'));
   lines.push('# Operational knobs for tool behavior. Tool credentials and the');
-  lines.push('# `[tools.web_search].enabled` flag live in auth.toml (managed by');
+  lines.push('# `[tools.web_search].enabled` flag live in .auth.toml (managed by');
   lines.push('# `system2 config`); only operational tunables live here.');
   lines.push('#');
   lines.push('# Maximum number of results returned by the web_search tool. Default');

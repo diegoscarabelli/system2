@@ -1,5 +1,5 @@
 /**
- * TOML patchers for `~/.system2/auth/auth.toml`.
+ * TOML patchers for `~/.system2/auth/.auth.toml`.
  *
  * Each patcher is a thin wrapper around `withAuth(authPath, mutate)`: read the
  * file, parse it, mutate the in-memory object, stringify, and write atomically.
@@ -8,8 +8,8 @@
  * placement, sub-section repair, control-char escaping) are gone because
  * `@iarna/toml` round-trips structured data losslessly.
  *
- * Comments are not preserved across writes; this is by design. `auth.toml` is
- * machine-managed (`system2 config` writes it, never the user). The header
+ * Comments are not preserved across writes; this is by design. `.auth.toml` is
+ * written by `system2 config` (never by the user). The header
  * line `# Managed by 'system2 config' — do not edit by hand.` is re-emitted
  * on every write so the warning persists.
  *
@@ -444,7 +444,7 @@ export function replaceKeyInApiKeyProvider(
 /**
  * Set the Brave Search API key and enable the web_search tool.
  *
- * In 0.3.0, `[tools.web_search].enabled` lives in auth.toml (it's
+ * In 0.3.0, `[tools.web_search].enabled` lives in .auth.toml (it's
  * system-managed: enabled when Brave key is added, disabled when removed).
  * `[tools.web_search].max_results` lives separately in config.toml as the
  * top-level `web_search_max_results` scalar (operational tunable).
@@ -486,7 +486,7 @@ export function removeBraveSearch(authPath: string): { changed: boolean } {
 // ─── Internals ────────────────────────────────────────────────────────────────
 
 /**
- * Read-only convenience wrapper. Reads the auth.toml without rewriting it.
+ * Read-only convenience wrapper. Reads the .auth.toml without rewriting it.
  * Used by the `read*` helpers so the read path mirrors the mutation path
  * (both go through `loadAuthToml`'s missing-file handling).
  */

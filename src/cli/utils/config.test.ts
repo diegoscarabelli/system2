@@ -17,18 +17,18 @@ import {
 describe('buildConfigToml', () => {
   // 0.3.0 split: this emitter writes ONLY user-managed sections. Auth-managed
   // sections (`[llm.*]`, `[services.*]`, `[tools.web_search]` enabled flag)
-  // live in auth.toml and are NEVER emitted here.
+  // live in .auth.toml and are NEVER emitted here.
   it('does not emit any auth-managed sections', () => {
     const result = buildConfigToml({});
     expect(result).not.toMatch(/^\[llm\./m);
     expect(result).not.toMatch(/^\[services\./m);
     expect(result).not.toMatch(/^\[tools\.web_search\]/m);
-    // Even commented stubs are gone — auth.toml owns those.
+    // Even commented stubs are gone — .auth.toml owns those.
     expect(result).not.toMatch(/^# \[llm\./m);
     expect(result).not.toMatch(/^# \[services\./m);
   });
 
-  it('header points the user to auth.toml for credentials', () => {
+  it('header points the user to .auth.toml for credentials', () => {
     const result = buildConfigToml({});
     expect(result).toMatch(/auth\.toml/);
     expect(result).toMatch(/system2 config/);

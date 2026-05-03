@@ -3,7 +3,7 @@
  *
  * Scaffolds ~/.system2/ on a fresh install: creates the directory + subdirs
  * (including auth/ at 0o700) and writes a fully-commented config.toml template
- * (via buildConfigToml({})). The auth.toml file is NOT created here — it's
+ * (via buildConfigToml({})). The .auth.toml file is NOT created here — it's
  * created by `system2 config` on first credential write.
  *
  * On a fresh install, auto-invokes `system2 config` so the user lands directly
@@ -11,7 +11,7 @@
  *
  * Refuses to overwrite an existing config.toml: prints a friendly message
  * pointing at `system2 config` for re-configuration and exits cleanly. The
- * auth/ directory and any auth.toml inside are left alone in all paths.
+ * auth/ directory and any .auth.toml inside are left alone in all paths.
  */
 
 import { existsSync } from 'node:fs';
@@ -72,7 +72,7 @@ export async function init(options: InitOptions = {}): Promise<void> {
   await mkdir(join(dir, 'projects'), { recursive: true });
   await mkdir(join(dir, 'artifacts'), { recursive: true });
   // auth/ dir holds OAuth credential JSONs and (once `system2 config` writes
-  // the first credential) auth.toml. ensureAuthDir creates it if missing AND
+  // the first credential) .auth.toml. ensureAuthDir creates it if missing AND
   // chmods to 0o700 if it already exists with looser perms (defends against
   // a stray `~/.system2/auth/` left at 0o755 from an interrupted install or
   // hand-modification).

@@ -1,7 +1,7 @@
 /**
  * Auth Configuration
  *
- * Manages `~/.system2/auth/auth.toml`: the machine-managed file that holds
+ * Manages `~/.system2/auth/.auth.toml`: the file written by `system2 config` that holds
  * LLM credentials (OAuth + API keys), services (Brave Search), and the
  * web_search.enabled flag. Edited exclusively by `system2 config`; never
  * touched by `system2 init` or hand-edited by the user.
@@ -22,7 +22,7 @@ import { AUTH_DIRNAME } from '../../shared/index.js';
 export { AUTH_DIRNAME };
 
 /**
- * On-disk shape of `auth.toml`. Distinct from the in-memory `System2Config`
+ * On-disk shape of `.auth.toml`. Distinct from the in-memory `System2Config`
  * the loader composes: this is just the auth-owned subset of fields.
  *
  * Provider sub-keys (`anthropic`, `openai`, etc.) are typed loosely as
@@ -53,9 +53,15 @@ export interface AuthToml {
   };
 }
 
-export const AUTH_FILENAME = 'auth.toml';
+/** Leading dot is intentional: hides the file from `ls` (without `-a`) and
+ *  from editor file pickers that respect dot-files, reinforcing the "do not
+ *  hand-edit" signal already conveyed by the 0600 perms and the file's
+ *  header comment. The per-provider OAuth JSONs in the same dir don't carry
+ *  the leading dot — they're credential blobs that look obviously
+ *  machine-generated and don't tempt editing. */
+export const AUTH_FILENAME = '.auth.toml';
 
-/** Header comment prepended on every write, signalling machine-managed. */
+/** Header comment prepended on every write, signalling that the file is written by `system2 config`. */
 const AUTH_HEADER =
   "# Managed by 'system2 config' — do not edit by hand.\n# Comments and key order are not preserved across writes.\n\n";
 
@@ -83,7 +89,7 @@ export function ensureAuthDir(system2Dir: string): void {
 }
 
 /**
- * Read and parse auth.toml. Returns an empty object when the file does not
+ * Read and parse .auth.toml. Returns an empty object when the file does not
  * exist (the post-init pre-config state) so callers don't need to special-case
  * the missing-file path. Throws on TOML parse errors so the user sees the
  * malformed-file message instead of silently falling back to defaults.
@@ -95,7 +101,7 @@ export function loadAuthToml(authPath: string): AuthToml {
 }
 
 /**
- * Atomically write auth.toml. Creates the parent dir if missing (with 0o700),
+ * Atomically write .auth.toml. Creates the parent dir if missing (with 0o700),
  * stringifies via @iarna/toml, prepends the header comment, and writes via
  * tmp-rename so partial writes can't leave a corrupt file.
  *
@@ -131,7 +137,7 @@ export function saveAuthToml(authPath: string, auth: AuthToml): void {
 
 /**
  * Read → parse → mutate → stringify → write. The single helper that powers
- * every auth.toml patcher.
+ * every .auth.toml patcher.
  *
  * The mutator is given the parsed object (or `{}` when the file doesn't yet
  * exist) and is free to mutate it in place. After the mutator returns, the

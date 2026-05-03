@@ -46,8 +46,8 @@ describe('system2 config (main menu navigation)', () => {
     // marker `system2 config` checks for is just configPath existence.
     writeFileSync(configPath, '');
     mkdirSync(join(dir, 'auth'), { mode: 0o700 });
-    authPath = join(dir, 'auth', 'auth.toml');
-    // Seed auth.toml with an OAuth tier so `system2 config` doesn't think
+    authPath = join(dir, 'auth', '.auth.toml');
+    // Seed .auth.toml with an OAuth tier so `system2 config` doesn't think
     // the install is brand new (some tests assume the menu is operational).
     writeFileSync(authPath, `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n`);
     vi.mocked(p.select).mockReset();
@@ -91,7 +91,7 @@ describe('system2 config (main menu navigation)', () => {
     await expect(config({ configFile: configPath, system2Dir: dir })).rejects.toThrow(
       /process.exit called/
     );
-    // 0.3.0 split: brave_search + tools.web_search live in auth.toml, not config.toml.
+    // 0.3.0 split: brave_search + tools.web_search live in .auth.toml, not config.toml.
     const parsed = TOML.parse(readFileSync(authPath, 'utf-8')) as {
       services?: { brave_search?: { key?: string } };
       tools?: { web_search?: { enabled?: boolean } };

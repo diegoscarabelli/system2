@@ -20,7 +20,7 @@ import { rotateLogIfNeeded } from '../utils/log-rotation.js';
 
 /**
  * Four-state credential probe. The split into `not_initialized` (config.toml
- * missing) vs `missing` (config.toml present but no auth.toml or no primary
+ * missing) vs `missing` (config.toml present but no .auth.toml or no primary
  * in either tier) lets `start()` route the user to `system2 init` vs
  * `system2 config` accurately. The two malformed states distinguish which
  * file's TOML failed to parse, so the error message names the right path.
@@ -124,14 +124,14 @@ export async function start(options: {
     process.exit(1);
   }
   if (tierStatus.kind === 'malformed') {
-    const fileLabel = tierStatus.file === 'config' ? 'config.toml' : 'auth/auth.toml';
+    const fileLabel = tierStatus.file === 'config' ? 'config.toml' : 'auth/.auth.toml';
     console.error(pc.red(`✗ ${fileLabel} could not be parsed:`));
     console.error(`  ${tierStatus.error.message}`);
     if (tierStatus.file === 'config') {
       console.error('Fix the syntax error in ~/.system2/config.toml manually.');
     } else {
       console.error(
-        'Fix the syntax error in ~/.system2/auth/auth.toml manually, or delete it and rerun ' +
+        'Fix the syntax error in ~/.system2/auth/.auth.toml manually, or delete it and rerun ' +
           '`system2 config` to recreate it.'
       );
     }
@@ -148,8 +148,8 @@ export async function start(options: {
   // credential probe missed.
   const config = loadConfig();
   if (!config.llm) {
-    console.error('Error: auth.toml has credentials but [llm] could not be parsed.');
-    console.error('Run `system2 config` to verify the schema, or edit auth.toml manually.');
+    console.error('Error: .auth.toml has credentials but [llm] could not be parsed.');
+    console.error('Run `system2 config` to verify the schema, or edit .auth.toml manually.');
     process.exit(1);
   }
 

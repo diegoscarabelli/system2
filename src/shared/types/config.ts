@@ -182,7 +182,7 @@ export const DEFAULT_SESSION_ROTATION_SIZE_BYTES = 10 * 1024 * 1024;
 export const DEFAULT_SESSION_ARCHIVE_KEEP_COUNT = 5;
 
 /** Name of the per-install auth directory under `~/.system2/`. Holds
- *  `auth.toml` plus per-provider OAuth credential JSONs. Lives in the shared
+ *  `.auth.toml` plus per-provider OAuth credential JSONs. Lives in the shared
  *  module so both the CLI (`src/cli/utils/auth-config.ts`) and the server
  *  (`src/server/agents/oauth-credentials.ts`) reference the same constant
  *  without the server having to import from CLI utility code. Permissions

@@ -161,7 +161,7 @@ export class Server {
       throw new Error(
         'No usable LLM credentials available. Either:\n' +
           '  - Run `system2 config` to authenticate via OAuth (interactive), or\n' +
-          `  - Run \`system2 config\` to add API keys; auth.toml lives at ~/.system2/${AUTH_DIRNAME}/auth.toml`
+          `  - Run \`system2 config\` to add API keys; .auth.toml lives at ~/.system2/${AUTH_DIRNAME}/.auth.toml`
       );
     }
 

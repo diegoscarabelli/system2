@@ -8,7 +8,7 @@ compaction_depth: 8
 # these — it auto-picks one model per provider via resolveOAuthModel for all
 # roles. Override per-role by setting `<role> = "<model-id>"` inside
 # [llm.api_keys.<provider>.models] in
-# ~/.system2/auth/auth.toml (managed by `system2 config`). Only api-keys-tier providers are listed; github-copilot and
+# ~/.system2/auth/.auth.toml (managed by `system2 config`). Only api-keys-tier providers are listed; github-copilot and
 # openai-codex are OAuth-only and intentionally absent.
 api_keys_models:
   anthropic: claude-sonnet-4-6
