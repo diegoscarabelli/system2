@@ -14,7 +14,7 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 The "API-keys tier defaults" column shows the per-role model picked for each api-keys-tier provider when no override is set. Model selection differs sharply between tiers:
 
-- **OAuth tier** (the primary tier — tried first): *one model per provider* applied to all roles. The resolver auto-picks the current family flagship from [pi-ai's catalog](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts): **Claude Opus** for `anthropic`, **GPT-5.x (codex variant)** for `openai-codex`, **GPT-5.x** for `github-copilot`. Override per provider with `[llm.oauth.<provider>] model = "..."` in `~/.system2/auth/.auth.toml`.
+- **OAuth tier** (the primary tier — tried first): *one model per provider* applied to all roles. The resolver auto-picks the current family flagship from [pi-ai's catalog](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts): **Claude Opus** for `anthropic`, **GPT-5.x** for `openai-codex` (codex specialty variants `-codex`, `-codex-max`, `-codex-spark` also matched if catalogued), **GPT-5.x** for `github-copilot` (excludes mini/codex/turbo). Override per provider in `~/.system2/auth/.auth.toml` with `[llm.oauth.<provider>] model = "..."`.
 - **API-keys tier** (failover): *per-role × per-provider matrix*. Defaults below; override per role with `[llm.api_keys.<provider>.models][<role>]` in `~/.system2/auth/.auth.toml`.
 
 | Agent | Role | Lifecycle | API-keys tier defaults |
