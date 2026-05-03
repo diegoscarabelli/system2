@@ -13,7 +13,7 @@
  */
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import TOML from '@iarna/toml';
 import { AUTH_DIRNAME } from '../../shared/index.js';
 
@@ -104,7 +104,7 @@ export function loadAuthToml(authPath: string): AuthToml {
  * uses a direct write fallback. Mirror that here.
  */
 export function saveAuthToml(authPath: string, auth: AuthToml): void {
-  const parent = join(authPath, '..');
+  const parent = dirname(authPath);
   if (!existsSync(parent)) {
     mkdirSync(parent, { recursive: true, mode: 0o700 });
   }

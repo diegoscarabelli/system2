@@ -14,20 +14,21 @@ import { type AgentSessionEvent, ModelRegistry } from '@mariozechner/pi-coding-a
 import express from 'express';
 import matter from 'gray-matter';
 import { WebSocket, WebSocketServer } from 'ws';
-import type {
-  AgentsConfig,
-  ChatConfig,
-  DatabasesConfig,
-  DeliveryConfig,
-  JobExecution,
-  KnowledgeConfig,
-  LlmConfig,
-  LlmProvider,
-  SchedulerConfig,
-  ServerMessage,
-  ServicesConfig,
-  SessionConfig,
-  ToolsConfig,
+import {
+  type AgentsConfig,
+  AUTH_DIRNAME,
+  type ChatConfig,
+  type DatabasesConfig,
+  type DeliveryConfig,
+  type JobExecution,
+  type KnowledgeConfig,
+  type LlmConfig,
+  type LlmProvider,
+  type SchedulerConfig,
+  type ServerMessage,
+  type ServicesConfig,
+  type SessionConfig,
+  type ToolsConfig,
 } from '../shared/index.js';
 import type { OAuthCredentialsMap } from './agents/auth-resolver.js';
 import { AuthResolver } from './agents/auth-resolver.js';
@@ -142,7 +143,7 @@ export class Server {
           oauthCredentials[provider] = creds;
         } else {
           log.warn(
-            `[server] [llm.oauth] declares ${provider} but ~/.system2/auth/${provider}.json is missing — skipping`
+            `[server] [llm.oauth] declares ${provider} but ~/.system2/${AUTH_DIRNAME}/${provider}.json is missing — skipping`
           );
         }
       }
@@ -160,7 +161,7 @@ export class Server {
       throw new Error(
         'No usable LLM credentials available. Either:\n' +
           '  - Run `system2 config` to authenticate via OAuth (interactive), or\n' +
-          '  - Run `system2 config` to add API keys; auth.toml lives at ~/.system2/auth/auth.toml'
+          `  - Run \`system2 config\` to add API keys; auth.toml lives at ~/.system2/${AUTH_DIRNAME}/auth.toml`
       );
     }
 
