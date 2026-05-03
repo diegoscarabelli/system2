@@ -34,7 +34,7 @@ Types for `config.toml` and `auth.toml` settings. Used by CLI (config loading) a
 
 ### Database Types (`types/database.ts`)
 
-TypeScript interfaces matching the SQLite schema. See [Database](../database.md) for the full schema.
+TypeScript interfaces matching the SQLite schema. See [Database](database.md) for the full schema.
 
 | Type | Description |
 |------|-------------|
@@ -47,7 +47,7 @@ TypeScript interfaces matching the SQLite schema. See [Database](../database.md)
 
 ### WebSocket Protocol Types (`types/messages.ts`)
 
-Types for the WebSocket protocol between UI and server. See [WebSocket Protocol](../websocket-protocol.md) for the full specification.
+Types for the WebSocket protocol between UI and server. See [WebSocket Protocol](websocket-protocol.md) for the full specification.
 
 | Type | Description |
 |------|-------------|
@@ -56,6 +56,6 @@ Types for the WebSocket protocol between UI and server. See [WebSocket Protocol]
 
 ## See Also
 
-- [Database](../database.md): schema that these types map to
-- [WebSocket Protocol](../websocket-protocol.md): protocol using these message types
+- [Database](database.md): schema that these types map to
+- [WebSocket Protocol](websocket-protocol.md): protocol using these message types
 - [Configuration](configuration.md): `config.toml` and `auth.toml` structure

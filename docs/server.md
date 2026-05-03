@@ -111,15 +111,15 @@ All broadcasts are debounced per message type (50ms) to coalesce rapid successiv
 
 Each subsystem has its own documentation page:
 
-- **Agents:** [AgentHost, AgentRegistry, AuthResolver](../agents.md)
-- **Tools:** [Agent tools](../tools.md)
-- **Database:** [SQLite database and client](../database.md)
-- **WebSocket:** [Protocol and handler](../websocket-protocol.md)
-- **Knowledge:** [Files, memory, git tracking](../knowledge-system.md)
-- **Scheduler:** [Croner jobs and pipelines](../scheduler.md)
+- **Agents:** [AgentHost, AgentRegistry, AuthResolver](agents.md)
+- **Tools:** [Agent tools](tools.md)
+- **Database:** [SQLite database and client](database.md)
+- **WebSocket:** [Protocol and handler](websocket-protocol.md)
+- **Knowledge:** [Files, memory, git tracking](knowledge-system.md)
+- **Scheduler:** [Croner jobs and pipelines](scheduler.md)
 
 ## See Also
 
-- [Architecture](../architecture.md): how the server fits in the overall system
+- [Architecture](architecture.md): how the server fits in the overall system
 - [CLI](cli.md): how `system2 start` launches the server
 - [Configuration](configuration.md): `ServerConfig` and the mapping across `config.toml` (operational) and `auth/auth.toml` (credentials)

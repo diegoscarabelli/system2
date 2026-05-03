@@ -248,7 +248,7 @@ Manages the WebSocket connection to the server with multi-agent routing:
 - On `ready_for_input`: clears `isStreaming` and `isWaitingForResponse` for that agent
 - On `chat_history`: merges committed messages but preserves in-progress streaming state (tool calls, thinking, partial text) for busy agents
 
-See [WebSocket Protocol](../websocket-protocol.md) for the full message specification.
+See [WebSocket Protocol](websocket-protocol.md) for the full message specification.
 
 ## Development
 
@@ -259,10 +259,10 @@ In development, Vite runs on port 3001 and proxies to the backend on port 4242:
 | `/ws` | `ws://localhost:4242` |
 | `/api` | `http://localhost:4242` |
 
-UI changes hot-reload instantly. See [Contributing](../../CONTRIBUTING.md) for the full workflow.
+UI changes hot-reload instantly. See [Contributing](../CONTRIBUTING.md) for the full workflow.
 
 ## See Also
 
-- [WebSocket Protocol](../websocket-protocol.md): message types handled by the WebSocket hook
+- [WebSocket Protocol](websocket-protocol.md): message types handled by the WebSocket hook
 - [Server](server.md): backend serving artifacts and handling WebSocket connections
-- [Architecture](../architecture.md): how the UI fits in the system
+- [Architecture](architecture.md): how the UI fits in the system
