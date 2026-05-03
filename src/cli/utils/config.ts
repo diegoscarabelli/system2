@@ -476,8 +476,13 @@ function convertTomlTools(
 ): ToolsConfig {
   const tools: ToolsConfig = {};
   if (authTools?.web_search) {
+    // Default to true when [tools.web_search] is present without `enabled`:
+    // matches the runtime semantic in src/server/agents/host.ts which gates
+    // on `enabled !== false` (absence treated as opt-in). Defaulting to false
+    // here would silently disable web_search if a user hand-edited auth.toml
+    // and dropped the `enabled` line.
     tools.web_search = {
-      enabled: authTools.web_search.enabled ?? false,
+      enabled: authTools.web_search.enabled ?? true,
       max_results: configMaxResults ?? DEFAULT_WEB_SEARCH_MAX_RESULTS,
     };
   }

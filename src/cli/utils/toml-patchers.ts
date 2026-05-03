@@ -13,9 +13,15 @@
  * line `# Managed by 'system2 config' — do not edit by hand.` is re-emitted
  * on every write so the warning persists.
  *
- * Function signatures keep `{ changed: boolean }` returns where they did in
- * 0.2.x so call-sites in src/cli/commands/config.ts don't churn beyond the
- * `configPath → authPath` rename.
+ * Function signatures keep the 0.2.x shape (just `configPath → authPath`)
+ * so call-sites in src/cli/commands/config.ts don't churn. Return types are
+ * mixed: most patchers return `{ changed: boolean }` (caller can detect
+ * no-ops), but the verbatim-replace patchers (`setOAuthFallbackOrder`,
+ * `setApiKeysFallbackOrder`, `replaceKeyInApiKeyProvider`,
+ * `addKeyToApiKeyProvider`) return `void` because they always write — the
+ * 0.2.x no-op detection (compare new vs current) didn't survive the rewrite
+ * and adding it back would buy nothing material since `withAuth`'s round-trip
+ * is fast and idempotent.
  */
 
 import type { LlmKey, LlmProvider } from '../../shared/index.js';

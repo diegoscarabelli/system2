@@ -1,7 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AUTH_DIRNAME } from '../../cli/utils/auth-config.js';
-import type { LlmProvider } from '../../shared/index.js';
+import { AUTH_DIRNAME, type LlmProvider } from '../../shared/index.js';
 import { log } from '../utils/logger.js';
 
 /**

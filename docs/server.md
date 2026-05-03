@@ -122,4 +122,4 @@ Each subsystem has its own documentation page:
 
 - [Architecture](../architecture.md): how the server fits in the overall system
 - [CLI](cli.md): how `system2 start` launches the server
-- [Configuration](../configuration.md): `ServerConfig` and the mapping across `config.toml` (operational) and `auth/auth.toml` (credentials)
+- [Configuration](configuration.md): `ServerConfig` and the mapping across `config.toml` (operational) and `auth/auth.toml` (credentials)

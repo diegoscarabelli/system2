@@ -15,6 +15,11 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import TOML from '@iarna/toml';
+import { AUTH_DIRNAME } from '../../shared/index.js';
+
+// Re-export so existing CLI consumers (and the rename-rather-than-rewrite
+// path in `src/cli/commands/init.ts`) keep importing it from auth-config.
+export { AUTH_DIRNAME };
 
 /**
  * On-disk shape of `auth.toml`. Distinct from the in-memory `System2Config`
@@ -48,7 +53,6 @@ export interface AuthToml {
   };
 }
 
-export const AUTH_DIRNAME = 'auth';
 export const AUTH_FILENAME = 'auth.toml';
 
 /** Header comment prepended on every write, signalling machine-managed. */

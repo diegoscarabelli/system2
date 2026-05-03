@@ -20,7 +20,7 @@ Types for chat messages displayed in the UI and persisted by the server.
 
 ### Configuration Types (`types/config.ts`)
 
-Types for `config.toml` and `auth.toml` settings. Used by CLI (config loading) and server (AuthResolver, AgentHost). LLM credentials and service keys live in `auth.toml`; operational knobs live in `config.toml`. See [Configuration](../configuration.md) for the file split.
+Types for `config.toml` and `auth.toml` settings. Used by CLI (config loading) and server (AuthResolver, AgentHost). LLM credentials and service keys live in `auth.toml`; operational knobs live in `config.toml`. See [Configuration](configuration.md) for the file split.
 
 | Type | Description |
 |------|-------------|
@@ -58,4 +58,4 @@ Types for the WebSocket protocol between UI and server. See [WebSocket Protocol]
 
 - [Database](../database.md): schema that these types map to
 - [WebSocket Protocol](../websocket-protocol.md): protocol using these message types
-- [Configuration](../configuration.md): `config.toml` and `auth.toml` structure
+- [Configuration](configuration.md): `config.toml` and `auth.toml` structure
