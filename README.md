@@ -77,11 +77,11 @@ system2 stop             # shut down gracefully
 
 **Credentials and services.** Use `system2 config` to add or remove OAuth providers, add or rotate API keys, set the Brave Search key, and reorder failover priority across credentials.
 
-**Operational parameters.** Hand-edit `~/.system2/config.toml` to tune per-agent behavior, register databases, or adjust operational defaults. `system2 init` initializes this file to a template if it isn't found; the Guide also edits it during onboarding (for example, to register database connection parameters of your data stack).
-
 ```bash
 system2 config           # interactive: manage OAuth, API keys, and services
 ```
+
+**Operational parameters.** Hand-edit `~/.system2/config.toml` to tune per-agent behavior, register databases, or adjust operational defaults. The Guide also edits this file during onboarding (for example, to register database connection parameters of your data stack). The command `system2 init` initializes this file to a template if it is not found.
 
 **Upgrading.** Pull the latest release from npm:
 
@@ -109,22 +109,14 @@ pnpm update -g @diegoscarabelli/system2
 
 ## Configuration
 
-Settings are split across two files under `~/.system2/`:
+Settings live in two files under `~/.system2/`:
 
-- `config.toml` (created by `system2 init`): user-edited operational settings only. Holds `[agents.*]`, `[databases.*]`, `[backup]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`, `[session]`, `[delivery]`, plus the top-level `web_search_max_results` scalar. The daemon reads this file but never writes it.
-- `auth/.auth.toml` (created by `system2 config` on the first credential write): credentials and service toggles (`[llm.oauth]`, `[llm.api_keys]`, `[services.*]`, `[tools.web_search].enabled`), written exclusively by `system2 config`. Never hand-edit.
+- **`config.toml`** — operational settings you hand-edit: per-agent overrides, database connections, scheduler cadence, backup policy, log rotation, and other tunables. Created by `system2 init`.
+- **`auth/.auth.toml`** — credentials and service toggles, written exclusively by `system2 config` (OAuth providers, API keys, Brave Search, web-search enablement).
 
-- **`[llm.oauth]`**: OAuth tier, subscription credentials (Anthropic, OpenAI Codex, or GitHub Copilot). Tried before API keys. See [Auth Tiers](docs/configuration.md#auth-tiers).
-- **`[llm.api_keys]`**: API key tier — primary provider, fallback order, per-provider API keys with automatic rotation.
-- **`[databases.*]`**: analytical database connections (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite) that agents and dashboard artifacts can query
-- **`[agents.*]`**: per-role behavior overrides for thinking level and context compaction depth. Per-role model pins live with their tier credentials: `[llm.api_keys.<provider>.models][<role>]` for the API-keys tier; `[llm.oauth.<provider>] model = "..."` for the OAuth tier (one model per provider, all roles).
-- **`[services.brave_search]`**: web search via Brave Search API (highly recommended)
-- **`[scheduler]`**: Narrator frequency (default: every 30 minutes)
-- **`[backup]`**: backup cooldown and retention (default: every 24 hours, keep 3)
+System2 supports an OAuth subscription tier (Anthropic, OpenAI Codex, GitHub Copilot, tried first) and an API key tier (Anthropic, Google Gemini, OpenAI, OpenRouter, Cerebras, Groq, Mistral, xAI, and any OpenAI-compatible endpoint, used as failover). Either tier alone is enough; combining them gives subscription-first with per-token failover.
 
-**Supported API-keys providers:** Anthropic, Google Gemini, OpenAI, OpenRouter, Cerebras, Groq, Mistral, xAI, and any OpenAI-compatible endpoint. (OAuth tier providers are listed separately under `[llm.oauth]` above.)
-
-See [docs/configuration.md](docs/configuration.md) for the full reference.
+See [docs/configuration.md](docs/configuration.md) for the full schema, model selection rules, and failover behavior.
 
 ---
 
