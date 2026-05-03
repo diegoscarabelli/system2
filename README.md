@@ -75,9 +75,9 @@ system2 status           # check whether the server is running
 system2 stop             # shut down gracefully
 ```
 
-**Credentials and services.** Use `system2 config` as the interactive menu for managing `~/.system2/auth/.auth.toml` (OAuth, API keys, Brave Search). Don't hand-edit `.auth.toml`: every `system2 config` invocation rewrites the file from scratch (comments and key order are not preserved), so any manual edits would silently disappear on the next run. The leading dot is intentional too: it hides the file from `ls` and most editor file pickers, reinforcing the "managed by tooling" signal. Operational settings (agent overrides, databases, scheduler, backup, logs, chat, knowledge, session, delivery) live in `~/.system2/config.toml` and are hand-edited.
+**Credentials and services.** Use `system2 config` to add or remove OAuth providers, add or rotate API keys, set the Brave Search key, and reorder failover priority across credentials.
 
-**Resetting `config.toml`.** Need a fresh template (e.g. to recover from a hand-edit you can't untangle)? `mv ~/.system2/config.toml ~/.system2/config.toml.bak` then re-run `system2 init` to regenerate the template (and re-launch `system2 config`) without touching `app.db`, knowledge files, auth state (which lives in the separate `~/.system2/auth/.auth.toml`), or anything else under `~/.system2/`.
+**Operational parameters.** Hand-edit `~/.system2/config.toml` to tune per-agent behavior, register databases, or adjust operational defaults. `system2 init` initializes this file to a template if it isn't found; the Guide also edits it during onboarding (for example, to register databases you describe to it).
 
 ```bash
 system2 config           # interactive: manage OAuth, API keys, and services
