@@ -35,9 +35,11 @@ System2 settings are split across two files in 0.3.0. `~/.system2/config.toml` h
 # Tier-agnostic: applied whether the OAuth or API-keys tier is active.
 # Supported roles: guide, conductor, reviewer, narrator, worker.
 # Model pins live in .auth.toml (managed by `system2 config`).
-[agents.guide]
-thinking_level = "medium"           # off | minimal | low | medium | high
-compaction_depth = 5                # keep N auto-compactions in sliding window
+# Uncomment and edit to customize.
+#
+# [agents.conductor]
+# thinking_level = "high"             # off | minimal | low | medium | high
+# compaction_depth = 8                # keep N auto-compactions in sliding window
 
 # ════════════════════════════════════════════════════════════════════════
 # Tools
