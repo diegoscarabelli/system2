@@ -44,7 +44,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Migration
 
-- 0.3.0 is a clean break with no migration code. Existing installs see "no credentials configured" on first start after upgrade and must re-run `system2 config` to repopulate `~/.system2/auth/.auth.toml`. Existing 0.2.x credentials in `~/.system2/oauth/` are silently ignored; that directory is safe to delete.
+0.3.0 is a clean break with no migration code. Existing 0.2.x installs must re-create `~/.system2/config.toml` and `~/.system2/auth/.auth.toml` by hand. The procedure (assumes you're upgrading from 0.2.x):
+
+1. **Stop the daemon.** `system2 stop`.
+2. **Snapshot your old config for reference.** `cp ~/.system2/config.toml ~/.system2/config.toml.0.2.x`.
+3. **Move the active config aside** so `system2 init` will write a fresh template. `mv ~/.system2/config.toml ~/.system2/config.toml.bak`.
+4. **Run `system2 init`.** It writes a fresh `config.toml` template and auto-launches `system2 config`.
+5. **Re-enter credentials in `system2 config`** by reading them out of `config.toml.0.2.x`:
+   - **OAuth providers** (Anthropic, OpenAI Codex, GitHub Copilot): pick "OAuth providers" → select each provider that was in `[llm.oauth]` → run the browser login. (`system2 config` writes `~/.system2/auth/.auth.toml` and saves the per-provider tokens at `~/.system2/auth/<provider>.json`.)
+   - **API keys**: pick "API key providers" → for each provider that had keys in 0.2.x's `[llm.<provider>]` (flat shape, no longer parsed) or `[llm.api_keys.<provider>]`, re-enter the key(s) and labels. Multiple labeled keys per provider are supported for rotation.
+   - **Brave Search**: pick "Services" → "Brave Search" → enter the key from `[services.brave_search]`. Setting it also flips `[tools.web_search].enabled = true` automatically.
+   - Reorder failover priority on either tier with the "Reorder fallbacks" entry if your `fallback = [...]` order matters.
+6. **Open the new `~/.system2/config.toml`** and copy across these operational sections from `config.toml.0.2.x` only if you had them customized (the new template has each section commented out at code defaults — uncomment AND copy the customized values):
+   - `[agents.<role>]` blocks: copy `thinking_level` and `compaction_depth` verbatim. **Do not copy a `model = "..."` field if your 0.2.x `[agents.<role>]` had one** — per-role model pins moved to `[llm.api_keys.<provider>.models]` in `.auth.toml` and are not exposed in the `system2 config` menu. To pin a per-role model in 0.3.0, hand-edit `.auth.toml` once after `system2 config` finishes; subsequent `system2 config` writes preserve the addition through parse-mutate-write.
+   - `[databases.<name>]` blocks: copy verbatim (schema unchanged).
+   - `[backup]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`, `[session]`, `[delivery]` blocks: copy verbatim (schemas unchanged).
+   - `[tools.web_search].max_results` (if customized): in 0.3.0 this is a top-level scalar in `config.toml` named `web_search_max_results = N` (no enclosing section).
+7. **Delete the orphaned 0.2.x credential dir.** `rm -rf ~/.system2/oauth/` — the JSONs there are silently ignored by 0.3.0.
+8. **Start the daemon.** `system2 start`. Verify it comes up cleanly and the Guide responds.
+9. **Clean up the references.** `rm ~/.system2/config.toml.0.2.x ~/.system2/config.toml.bak`.
+
+Other state is untouched by this upgrade: `app.db`, `~/.system2/sessions/`, `~/.system2/projects/`, `~/.system2/artifacts/`, `~/.system2/logs/`, and the git-tracked `~/.system2/knowledge/` files are all preserved through the procedure above.
 
 ### Dependencies
 
