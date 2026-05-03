@@ -174,6 +174,16 @@ describe('setOAuthFallbackOrder', () => {
   it('throws when [llm.oauth] is unconfigured', () => {
     expect(() => setOAuthFallbackOrder(authPath, ['openai-codex'])).toThrow(/not configured/);
   });
+
+  it('throws when fallback contains the current primary', () => {
+    // Without this guard the file would carry "anthropic" as both primary and
+    // a fallback entry — the runtime would try anthropic, fail it, and try
+    // anthropic again as the next fallback. Surface the misuse instead.
+    seed('[llm.oauth]\nprimary = "anthropic"\nfallback = ["openai-codex"]\n');
+    expect(() => setOAuthFallbackOrder(authPath, ['anthropic', 'openai-codex'])).toThrow(
+      /primary cannot appear in fallback/
+    );
+  });
 });
 
 // ─── API keys tier ────────────────────────────────────────────────────────────
@@ -335,6 +345,15 @@ describe('setApiKeysFallbackOrder', () => {
     setApiKeysFallbackOrder(authPath, ['google', 'openai']);
     expect(readApiKeysTier(authPath)?.fallback).toEqual(['google', 'openai']);
   });
+
+  it('throws when fallback contains the current primary', () => {
+    seed(
+      `[llm.api_keys]\nprimary = "anthropic"\nfallback = ["openai"]\n[llm.api_keys.anthropic]\nkeys = [{ key = "a", label = "m" }]\n`
+    );
+    expect(() => setApiKeysFallbackOrder(authPath, ['anthropic', 'openai'])).toThrow(
+      /primary cannot appear in fallback/
+    );
+  });
 });
 
 describe('addKeyToApiKeyProvider', () => {
@@ -392,17 +411,35 @@ describe('removeKeyFromApiKeyProvider', () => {
 });
 
 describe('replaceKeyInApiKeyProvider', () => {
-  it('replaces in place without touching tier order', () => {
+  it('replaces in place without touching tier order (multi-key provider)', () => {
     seed(
-      `[llm.api_keys]\nprimary = "anthropic"\nfallback = ["openai"]\n[llm.api_keys.anthropic]\nkeys = [{ key = "k1", label = "main" }]\n[llm.api_keys.openai]\nkeys = [{ key = "o", label = "m" }]\n`
+      `[llm.api_keys]\nprimary = "anthropic"\nfallback = ["openai"]\n[llm.api_keys.anthropic]\nkeys = [{ key = "k1", label = "main" }, { key = "k1b", label = "second" }]\n[llm.api_keys.openai]\nkeys = [{ key = "o", label = "m" }]\n`
     );
     replaceKeyInApiKeyProvider(authPath, 'anthropic', 'main', 'k2');
     const auth = readAuth();
     const sub = auth.llm?.api_keys?.anthropic as { keys: { key: string; label: string }[] };
-    expect(sub.keys).toEqual([{ key: 'k2', label: 'main' }]);
-    // Tier order untouched.
+    expect(sub.keys).toEqual([
+      { key: 'k2', label: 'main' },
+      { key: 'k1b', label: 'second' },
+    ]);
     expect(auth.llm?.api_keys?.primary).toBe('anthropic');
     expect(auth.llm?.api_keys?.fallback).toEqual(['openai']);
+  });
+
+  // Regression guard: PR #162's "remove + add" dance for replace caused
+  // the provider to be demoted/promoted when its sub-table briefly had zero
+  // keys. The dedicated replaceKeyInApiKeyProvider must preserve tier order
+  // even when the provider has only one key (no transient zero-keys state).
+  it('preserves tier order when the provider has only one key (single-key regression guard)', () => {
+    seed(
+      `[llm.api_keys]\nprimary = "openai"\nfallback = ["anthropic"]\n[llm.api_keys.openai]\nkeys = [{ key = "o", label = "m" }]\n[llm.api_keys.anthropic]\nkeys = [{ key = "k1", label = "only" }]\n`
+    );
+    replaceKeyInApiKeyProvider(authPath, 'anthropic', 'only', 'k2');
+    const auth = readAuth();
+    expect(auth.llm?.api_keys?.primary).toBe('openai');
+    expect(auth.llm?.api_keys?.fallback).toEqual(['anthropic']);
+    const sub = auth.llm?.api_keys?.anthropic as { keys: { key: string; label: string }[] };
+    expect(sub.keys).toEqual([{ key: 'k2', label: 'only' }]);
   });
 
   it('throws when label not found', () => {

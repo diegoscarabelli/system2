@@ -120,6 +120,8 @@ compaction_depth = 5                # keep N auto-compactions in sliding window
 
 Written exclusively by [`system2 config`](cli.md#system2-config). Do NOT hand-edit: every write rewrites the file via parse-mutate-stringify, so comments and key order are not preserved. Lives under a `0700` directory with file mode `0600`. Created on first credential write (not by `system2 init`).
 
+The example below uses TOML's compact inline-table syntax for `keys = [{ ... }]` to keep the doc readable. The on-disk file actually uses the equivalent `[[llm.api_keys.<provider>.keys]]` array-of-tables syntax (the format `@iarna/toml` emits via `TOML.stringify`). Both parse to the same data; the difference is purely surface syntax.
+
 ```toml
 # Managed by 'system2 config' — do not edit by hand.
 # Comments and key order are not preserved across writes.

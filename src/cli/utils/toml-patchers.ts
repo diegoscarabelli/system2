@@ -113,12 +113,18 @@ export function removeProviderFromOAuthTier(
 
 /**
  * Replace the OAuth fallback list verbatim. Order matters — index 0 is the
- * second-tried provider, after `primary`.
+ * second-tried provider, after `primary`. Rejects a fallback list that
+ * contains the current primary (would create an unusable duplicate-tier
+ * state); use `setProviderAsPrimary` first if the intent is a swap.
  */
 export function setOAuthFallbackOrder(authPath: string, fallback: LlmProvider[]): void {
   withAuth(authPath, (auth) => {
     if (!auth.llm?.oauth?.primary) {
       throw new Error('Cannot reorder OAuth fallbacks: [llm.oauth] is not configured');
+    }
+    const primary = auth.llm.oauth.primary;
+    if (fallback.some((p) => p === primary)) {
+      throw new Error(`primary cannot appear in fallback: ${primary}`);
     }
     auth.llm.oauth.fallback = [...fallback];
   });
@@ -310,12 +316,18 @@ export function setApiKeyProviderAsPrimary(
 }
 
 /**
- * Replace the API-keys fallback list verbatim.
+ * Replace the API-keys fallback list verbatim. Rejects a fallback list that
+ * contains the current primary; use `setApiKeyProviderAsPrimary` first if the
+ * intent is a swap.
  */
 export function setApiKeysFallbackOrder(authPath: string, fallback: LlmProvider[]): void {
   withAuth(authPath, (auth) => {
     if (!auth.llm?.api_keys?.primary) {
       throw new Error('Cannot reorder API-keys fallbacks: [llm.api_keys] is not configured');
+    }
+    const primary = auth.llm.api_keys.primary;
+    if (fallback.some((p) => p === primary)) {
+      throw new Error(`primary cannot appear in fallback: ${primary}`);
     }
     auth.llm.api_keys.fallback = [...fallback];
   });
