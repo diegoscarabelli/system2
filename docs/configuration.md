@@ -1,125 +1,56 @@
 # Configuration
 
-All System2 settings live in `~/.system2/config.toml`, created by `system2 init` with `0600` permissions (contains API keys). The recommended way to manage credentials and services is the interactive [`system2 config`](cli.md#system2-config) menu; hand-editing the file still works for advanced tweaks and per-agent overrides that aren't surfaced in the menu.
+System2 settings are split across two files in 0.3.0. `~/.system2/config.toml` holds user-edited operational settings only: per-agent behavior overrides, database connections, the `web_search_max_results` knob, and operational defaults (`[backup]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`, `[session]`, `[delivery]`). It is created by `system2 init` with `0600` permissions, read by the daemon, and never written by it.
+
+`~/.system2/auth/.auth.toml` holds credentials and service toggles: `[llm.oauth]`, `[llm.api_keys]`, `[services.brave_search]`, and the `[tools.web_search].enabled` flag. It lives under a `0700` directory with file mode `0600`, and is written exclusively by [`system2 config`](cli.md#system2-config). Do NOT hand-edit `.auth.toml`: every `system2 config` write rewrites the file via parse-mutate-stringify, so any user-added comments or hand-chosen key order are lost. The file is created on first credential write; `system2 init` does not create it.
 
 **Key source files:**
+
 - `src/shared/types/config.ts`: TypeScript types
-- `src/cli/utils/config.ts`: TOML loading and validation
+- `src/cli/utils/config.ts`: `loadConfig` reads BOTH files and composes the in-memory config; also emits the `config.toml` template
+- `src/cli/utils/auth-config.ts`: `.auth.toml` on-disk type and the `withAuth` parse-mutate-write helper
+- `src/cli/utils/toml-patchers.ts`: thin parse-mutate-write patchers driven by `system2 config`
 - `src/server/agents/auth-resolver.ts`: failover logic
 
-## config.toml Reference
+## File Reference
+
+### `~/.system2/config.toml` (user-edited operational settings)
 
 ```toml
 # System2 Configuration
-# All System2 settings: LLM credentials (OAuth + API keys), per-agent
-# overrides, services, databases, and operational defaults.
-# Edited both programmatically by System2 (e.g. `system2 config` updates
-# `[llm.oauth]`, `[llm.api_keys]`, and `[services.brave_search]`) and
-# manually by you. Changes apply on daemon restart.
-# Permissions: 0600 (owner read/write only — protects credentials).
-
-# ════════════════════════════════════════════════════════════════════════
-# LLM credentials — OAuth tier
-# ════════════════════════════════════════════════════════════════════════
-# OAuth providers and failover order. Subscription tokens live in
-# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 config`.
-# This tier is tried first; the API-keys tier below is only used after
-# every OAuth credential is in cooldown.
-# Supported providers: anthropic, openai-codex, github-copilot.
-
-[llm.oauth]
-primary = "anthropic"
-fallback = []   # any of: anthropic, openai-codex, github-copilot
-
-# Optional per-OAuth-provider model pin. When omitted, the resolver picks
-# the family flagship from pi-ai's catalog. Family rules:
-# https://github.com/diegoscarabelli/system2/blob/main/docs/configuration.md
-# Catalog of model IDs (use the exact `id` field when pinning):
-# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts
-[llm.oauth.anthropic]
-model = "claude-opus-4-7"
-
-# ════════════════════════════════════════════════════════════════════════
-# LLM credentials — API keys tier
-# ════════════════════════════════════════════════════════════════════════
-# Pay-per-token. Each provider can hold multiple keys; rotation across keys
-# and providers happens automatically on failures.
-
-[llm.api_keys]
-primary = "anthropic"
-fallback = ["google", "openai"]
-
-[llm.api_keys.anthropic]
-keys = [
-  { key = "sk-ant-...", label = "personal" },
-  { key = "sk-ant-...", label = "work" },
-]
-
-# Optional per-role model pins for the API-keys tier. Keys are role names
-# (guide, conductor, reviewer, narrator, worker). Overrides the default
-# from the role's frontmatter for the matched provider.
-# Catalog of model IDs (use the exact `id` field when pinning):
-# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts
-[llm.api_keys.anthropic.models]
-narrator = "claude-haiku-4-5-20251001"
-conductor = "claude-sonnet-4-6"
-
-[llm.api_keys.cerebras]
-keys = [{ key = "csk-...", label = "default" }]
-
-[llm.api_keys.google]
-keys = [{ key = "AIza...", label = "default" }]
-
-[llm.api_keys.groq]
-keys = [{ key = "gsk_...", label = "default" }]
-
-[llm.api_keys.mistral]
-keys = [{ key = "...", label = "default" }]
-
-[llm.api_keys.openai]
-keys = [{ key = "sk-...", label = "default" }]
-
-[llm.api_keys.openrouter]
-keys = [{ key = "sk-or-...", label = "default" }]
-
-# Upstream provider routing for OpenRouter models (optional).
-# Keys are model ID prefixes; quote them when they contain special characters (e.g. "/").
-# Values are provider order arrays.
-[llm.api_keys.openrouter.routing]
-google = ["google-vertex/global", "google-vertex", "google-ai-studio"]
-
-[llm.api_keys.xai]
-keys = [{ key = "xai-...", label = "default" }]
-
-# OpenAI-compatible endpoint (LiteLLM, vLLM, Ollama, Thaura, etc.)
-[llm.api_keys.openai-compatible]
-keys = [{ key = "sk-...", label = "default" }]
-base_url = "http://localhost:4000/v1"
-model = "my-model"
-compat_reasoning = true  # optional, default true
+# User-edited operational settings: per-agent overrides, databases, and
+# operational defaults (backup, logs, scheduler, chat, knowledge, session,
+# delivery, web_search_max_results).
+#
+# LLM credentials (OAuth + API keys) and service credentials live in a
+# separate file: ~/.system2/auth/.auth.toml, managed by `system2 config`.
+# Do not put credentials here — the loader does not read them from this file.
+#
+# Changes apply on daemon restart.
+# Permissions: 0600 (owner read/write only).
 
 # ════════════════════════════════════════════════════════════════════════
 # Per-agent behavior overrides
 # ════════════════════════════════════════════════════════════════════════
-# Tier-agnostic — applied whether the OAuth or API-keys tier is active.
-# For per-role MODEL pins, use [llm.api_keys.<provider>.models] (above).
-# For OAuth model pins, use [llm.oauth.<provider>] (above).
-[agents.guide]
-thinking_level = "medium"
-compaction_depth = 5
-
-# ════════════════════════════════════════════════════════════════════════
-# Services
-# ════════════════════════════════════════════════════════════════════════
-[services.brave_search]
-key = "BSA..."
+# Tier-agnostic: applied whether the OAuth or API-keys tier is active.
+# Supported roles: guide, conductor, reviewer, narrator, worker.
+# Model pins live in .auth.toml (managed by `system2 config`).
+# Uncomment and edit to customize.
+#
+# [agents.conductor]
+# thinking_level = "high"             # off | minimal | low | medium | high
+# compaction_depth = 8                # keep N auto-compactions in sliding window
 
 # ════════════════════════════════════════════════════════════════════════
 # Tools
 # ════════════════════════════════════════════════════════════════════════
-[tools.web_search]
-enabled = true
-# max_results = 5    # tunable knob; commented so accidental edits stay inert
+# Operational knobs for tool behavior. Tool credentials and the
+# `[tools.web_search].enabled` flag live in .auth.toml.
+#
+# Maximum number of results returned by the web_search tool. Top-level
+# scalar (no enclosing section). Default pinned in code
+# (DEFAULT_WEB_SEARCH_MAX_RESULTS = 5). Uncomment to override.
+# web_search_max_results = 5
 
 # ════════════════════════════════════════════════════════════════════════
 # Databases
@@ -187,25 +118,110 @@ enabled = true
 # narrator_message_excerpt_bytes = 16384
 ```
 
+### `~/.system2/auth/.auth.toml`
+
+Written exclusively by [`system2 config`](cli.md#system2-config). Do NOT hand-edit: every write rewrites the file via parse-mutate-stringify, so comments and key order are not preserved. Lives under a `0700` directory with file mode `0600`. Created on first credential write (not by `system2 init`). The leading dot in the filename hides the file from `ls` and most editor file pickers, reinforcing the "managed by tooling" signal.
+
+#### Schema
+
+**`[llm.oauth]`** — OAuth tier, tried first. `primary` and `fallback` accept any of `anthropic`, `openai-codex`, `github-copilot`. Per-provider OAuth tokens live in companion files at `~/.system2/auth/<provider>.json` (also `0600`), refreshed automatically by the daemon. The API-keys tier is only consulted after every OAuth credential in this tier is in cooldown.
+
+**`[llm.oauth.<provider>]`** (optional) — pins a specific model on that OAuth provider. When omitted, the resolver picks the family flagship from pi-ai's [model catalog](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts). Use the exact `id` field from the catalog when pinning.
+
+**`[llm.api_keys]`** — API-key tier (pay-per-token). `primary` plus an ordered `fallback` list. Used as failover after the OAuth tier exhausts, or as the only tier when `[llm.oauth]` is absent.
+
+**`[llm.api_keys.<provider>]`** — per-provider sub-table. Each provider holds an array of `{ key, label }` keys; labels are unique per provider and used as identifiers when rotating or removing individual keys via `system2 config`. Rotation across keys and providers happens automatically on failures (see [Automatic Failover](#automatic-failover)). The `openai-compatible` provider also takes `base_url`, `model`, and an optional `compat_reasoning` boolean (default `true`); use it for self-hosted endpoints (LiteLLM, vLLM, Ollama, etc.).
+
+**`[llm.api_keys.<provider>.models]`** (optional) — per-role model pins for the API-keys tier. Keys are role names (`guide`, `conductor`, `reviewer`, `narrator`, `worker`); each value overrides the default from the role's library frontmatter for that specific provider. Validated against the pi-ai catalog at startup.
+
+**`[llm.api_keys.openrouter.routing]`** (optional) — upstream provider routing for OpenRouter. Keys are model-ID prefixes (longest prefix wins; quote prefixes containing `/` or other special characters); values are arrays of OpenRouter provider slugs tried in order. See [Auth Tiers](#auth-tiers) for behavior.
+
+**`[services.brave_search]`** — Brave Search API key. Setting this also flips `[tools.web_search].enabled` to `true` in the same write; removing it flips it back.
+
+**`[tools.web_search]`** — only the `enabled` flag lives here. The result-count knob is a top-level `web_search_max_results` scalar in `config.toml` (operational tunable, hand-edited).
+
+#### Example on-disk format
+
+The actual file uses `@iarna/toml`'s array-of-tables format for arrays of inline tables (e.g. `keys`); not the more compact inline form. Both parse identically; this is just what's literally on disk:
+
+```toml
+# Managed by 'system2 config' — do not edit by hand.
+# Comments and key order are not preserved across writes.
+
+[llm.oauth]
+primary = "anthropic"
+fallback = []
+
+[llm.oauth.anthropic]
+model = "claude-opus-4-7"
+
+[llm.api_keys]
+primary = "anthropic"
+fallback = ["google", "openai"]
+
+[[llm.api_keys.anthropic.keys]]
+key = "sk-ant-..."
+label = "personal"
+
+[[llm.api_keys.anthropic.keys]]
+key = "sk-ant-..."
+label = "work"
+
+[llm.api_keys.anthropic.models]
+narrator = "claude-haiku-4-5-20251001"
+conductor = "claude-sonnet-4-6"
+
+[[llm.api_keys.google.keys]]
+key = "AIza..."
+label = "default"
+
+[[llm.api_keys.openai.keys]]
+key = "sk-..."
+label = "default"
+
+[[llm.api_keys.openrouter.keys]]
+key = "sk-or-..."
+label = "default"
+
+[llm.api_keys.openrouter.routing]
+google = ["google-vertex/global", "google-vertex", "google-ai-studio"]
+
+[llm.api_keys.openai-compatible]
+base_url = "http://localhost:4000/v1"
+model = "my-model"
+compat_reasoning = true
+
+[[llm.api_keys.openai-compatible.keys]]
+key = "sk-..."
+label = "default"
+
+[services.brave_search]
+key = "BSA..."
+
+[tools.web_search]
+enabled = true
+```
+
 ## Sections
 
-| Section | Description | TypeScript Type |
-|---------|-------------|-----------------|
-| `[llm.api_keys]` | API-key tier: primary provider, fallback order, per-provider keys | `LlmConfig` |
-| `[llm.api_keys.<provider>.models]` | Per-role model pins for the API-keys tier (keys are role names) | `LlmProviderConfig.models` |
-| `[llm.oauth]` | OAuth tier: primary + fallback subscription providers (tried first) | `LlmOAuthConfig` |
-| `[llm.oauth.<provider>]` | Optional per-OAuth-provider model pin (`model = "..."`) | `LlmOAuthProviderConfig` |
-| `[agents.*]` | Per-role behavior overrides (`thinking_level`, `compaction_depth`) | `AgentsConfig` |
-| `[services.*]` | External service credentials | `ServicesConfig` |
-| `[tools.*]` | Tool feature flags | `ToolsConfig` |
-| `[databases.*]` | External database connections | `DatabasesConfig` |
-| `[backup]` | Auto-backup frequency and retention | -- |
-| `[logs]` | Log rotation threshold and archive count | -- |
-| `[scheduler]` | Narrator job scheduling | `SchedulerConfig` |
-| `[chat]` | Chat history settings | `ChatConfig` |
-| `[knowledge]` | Knowledge file size budget | `KnowledgeConfig` |
-| `[session]` | Session JSONL rotation threshold | `SessionConfig` |
-| `[delivery]` | Inter-agent delivery size bounds | `DeliveryConfig` |
+| Section | File | Description | TypeScript Type |
+| ------- | ---- | ----------- | --------------- |
+| `[llm.api_keys]` | `.auth.toml` | API-key tier: primary provider, fallback order, per-provider keys | `LlmConfig` |
+| `[llm.api_keys.<provider>.models]` | `.auth.toml` | Per-role model pins for the API-keys tier (keys are role names) | `LlmProviderConfig.models` |
+| `[llm.oauth]` | `.auth.toml` | OAuth tier: primary + fallback subscription providers (tried first) | `LlmOAuthConfig` |
+| `[llm.oauth.<provider>]` | `.auth.toml` | Optional per-OAuth-provider model pin (`model = "..."`) | `LlmOAuthProviderConfig` |
+| `[services.*]` | `.auth.toml` | External service credentials | `ServicesConfig` |
+| `[tools.web_search]` | `.auth.toml` | `enabled` flag only (the `max_results` knob lives in `config.toml`) | `ToolsConfig.web_search.enabled` |
+| `[agents.*]` | `config.toml` | Per-role behavior overrides (`thinking_level`, `compaction_depth`) | `AgentsConfig` |
+| `web_search_max_results` | `config.toml` | Top-level scalar (no enclosing section). Tunable result cap for the `web_search` tool. | `ToolsConfig.web_search.max_results` |
+| `[databases.*]` | `config.toml` | External database connections | `DatabasesConfig` |
+| `[backup]` | `config.toml` | Auto-backup frequency and retention | -- |
+| `[logs]` | `config.toml` | Log rotation threshold and archive count | -- |
+| `[scheduler]` | `config.toml` | Narrator job scheduling | `SchedulerConfig` |
+| `[chat]` | `config.toml` | Chat history settings | `ChatConfig` |
+| `[knowledge]` | `config.toml` | Knowledge file size budget | `KnowledgeConfig` |
+| `[session]` | `config.toml` | Session JSONL rotation threshold | `SessionConfig` |
+| `[delivery]` | `config.toml` | Inter-agent delivery size bounds | `DeliveryConfig` |
 
 ## LLM Providers
 
@@ -294,11 +310,11 @@ The OAuth tier is fully exhausted before the system drops into the API key tier 
 
 System2 delegates OAuth provider behavior to pi-ai's provider registry. `getOAuthProvider(id)` returns a small adapter that knows how to run the browser login flow, refresh access tokens, and surface a usable bearer for each of the three providers (`anthropic`, `openai-codex`, `github-copilot`). The agent loop, custom tools, and multi-agent orchestration are unchanged across providers; only the auth path varies. The `[llm.oauth]` shape (`primary` + `fallback`) accepts any of the three provider IDs, in any order.
 
-> **Note:** pi-ai 0.71.0 (2026-04-30) removed `google-gemini-cli` and `google-antigravity` because Google has been disabling user accounts that authenticate via these flows from third-party tools (pi-mono#4017, pi-mono#3999). System2 aligns. If you have legacy `~/.system2/oauth/google-{gemini-cli,antigravity}.json` credential files, they are silently ignored at startup; safe to delete.
+> **Note:** pi-ai 0.71.0 (2026-04-30) removed `google-gemini-cli` and `google-antigravity` because Google has been disabling user accounts that authenticate via these flows from third-party tools (pi-mono#4017, pi-mono#3999). System2 aligns. If you have legacy `~/.system2/auth/google-{gemini-cli,antigravity}.json` credential files, they are silently ignored at startup; safe to delete.
 
-**Credential shape.** Credentials are written to `~/.system2/oauth/<provider>.json` (mode 0600). The `OAuthCredentials` type has an open shape: providers that need extra context store it alongside the access/refresh tokens. Copilot may record an `enterpriseDomain`. These extras are preserved across refreshes.
+**Credential shape.** Credentials are written to `~/.system2/auth/<provider>.json` (mode 0600). The `OAuthCredentials` type has an open shape: providers that need extra context store it alongside the access/refresh tokens. Copilot may record an `enterpriseDomain`. These extras are preserved across refreshes.
 
-**Setup:** Run `system2 config` and pick **OAuth providers**, then select one of Anthropic, OpenAI Codex, or GitHub Copilot. The chosen provider's browser flow runs; the resulting tokens are saved to `~/.system2/oauth/<provider>.json` and `[llm.oauth]` in `config.toml` is auto-patched. (On a fresh install, `system2 init` lands you in this menu automatically.)
+**Setup:** Run `system2 config` and pick **OAuth providers**, then select one of Anthropic, OpenAI Codex, or GitHub Copilot. The chosen provider's browser flow runs; the resulting tokens are saved to `~/.system2/auth/<provider>.json` and `[llm.oauth]` in `~/.system2/auth/.auth.toml` is auto-patched. (On a fresh install, `system2 init` lands you in this menu automatically.)
 
 **Refresh:** OAuth access tokens expire on each provider's own schedule (Anthropic roughly hourly; the others vary). The daemon refreshes them automatically before each agent session creation and on 401 errors. Refreshed tokens are persisted back to the same file.
 
@@ -324,10 +340,10 @@ Model selection differs between tiers, reflecting their cost models:
 
 ### Re-authenticating and managing credentials
 
-Use `system2 config` to manage credentials at any time. The command is re-entrant and fully interactive: pick **OAuth providers** from the main menu to see all three OAuth providers (Anthropic, OpenAI Codex, GitHub Copilot) with already-logged-in entries annotated by their position in the failover chain. Behavior depends on the selection:
+Use `system2 config` to manage credentials at any time. The command is re-entrant and fully interactive: pick **OAuth providers** from the main menu to see all three OAuth providers (Anthropic, OpenAI Codex, GitHub Copilot) with already-logged-in entries annotated by their position in the failover chain. All credential state lives in `~/.system2/auth/.auth.toml` (the auth tier tables) and `~/.system2/auth/<provider>.json` (per-provider OAuth tokens). Behavior depends on the selection:
 
-- **Not yet logged in.** The command runs the provider's browser OAuth flow, writes `~/.system2/oauth/<provider>.json`, and (if `[llm.oauth]` is missing or doesn't include the provider) auto-patches `config.toml` to enable the OAuth tier.
-- **Already logged in.** A contextual menu opens: **Re-login** (re-runs the OAuth flow; useful when a refresh token has been invalidated by signing out, password change, revoked grant, or idle-expiry), **Set as primary OAuth provider** (only shown when there's a different primary), **Remove** (deletes `~/.system2/oauth/<provider>.json` and removes the provider from `[llm.oauth]`), or **Cancel**. When two or more fallbacks are configured, a **Reorder fallbacks** entry appears in the OAuth submenu.
+- **Not yet logged in.** The command runs the provider's browser OAuth flow, writes `~/.system2/auth/<provider>.json`, and (if `[llm.oauth]` is missing or doesn't include the provider) auto-patches `~/.system2/auth/.auth.toml` to enable the OAuth tier.
+- **Already logged in.** A contextual menu opens: **Re-login** (re-runs the OAuth flow; useful when a refresh token has been invalidated by signing out, password change, revoked grant, or idle-expiry), **Set as primary OAuth provider** (only shown when there's a different primary), **Remove** (deletes `~/.system2/auth/<provider>.json` and removes the provider from `[llm.oauth]`), or **Cancel**. When two or more fallbacks are configured, a **Reorder fallbacks** entry appears in the OAuth submenu.
 
 API-key providers are managed from the **API key providers** submenu with parallel actions (add another key, replace key, set as primary, remove provider, reorder fallbacks). Brave Search lives under **Services**. Esc inside any flow returns to the enclosing submenu without writing anything.
 
@@ -335,10 +351,11 @@ If the daemon is running, restart it to pick up the change: `system2 stop && sys
 
 ### Changing primary provider or switching auth method
 
-System2 reads `~/.system2/config.toml` only at startup. To change the primary provider, swap which tier is preferred, add or remove a fallback provider, or edit any other LLM configuration:
+System2 reads both `~/.system2/config.toml` and `~/.system2/auth/.auth.toml` only at startup. The path you take depends on what you're changing:
 
-1. Use `system2 config` for OAuth credentials, API keys, and services (Brave Search). For everything else (per-agent overrides, model pins, database connections, operational defaults), edit `~/.system2/config.toml` directly.
-2. Restart the daemon: `system2 stop && system2 start`.
+1. **Use `system2 config`** for credentials and credential-adjacent settings: OAuth providers, API keys, primary/fallback ordering on either tier, services (Brave Search), and the `[tools.web_search].enabled` flag. It writes `~/.system2/auth/.auth.toml`. Never hand-edit that file: every `system2 config` write rewrites it, so any user-added comments or key reordering are lost.
+2. **Edit `~/.system2/config.toml` directly** for everything else: per-agent overrides (`[agents.<role>]`), database connections (`[databases.<name>]`), the `web_search_max_results` scalar, and operational tunables (`[backup]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`, `[session]`, `[delivery]`).
+3. Restart the daemon: `system2 stop && system2 start`.
 
 You do not need to switch auth methods manually for cost or rate-limit reasons — the two-tier failover handles that automatically. OAuth is tried first; once exhausted, the system drops to the API key tier without any user action. If a transient failure has put a credential into cooldown and you want to force the system to retry it sooner than the cooldown expiry, restart the daemon (which clears in-memory cooldowns).
 
@@ -362,11 +379,17 @@ Per-role model pins live elsewhere:
 
 ### Example
 
+In `~/.system2/config.toml`:
+
 ```toml
 [agents.guide]
 thinking_level = "medium"
 compaction_depth = 5
+```
 
+In `~/.system2/auth/.auth.toml` (written by `system2 config`):
+
+```toml
 # Per-role model pins (API-keys tier) — keys are role names.
 [llm.api_keys.anthropic.models]
 narrator = "claude-haiku-4-5-20251001"
@@ -381,7 +404,7 @@ Unknown provider IDs and model IDs are cross-checked against pi-ai's catalog at 
 
 ### How it works
 
-During agent initialization, `AgentHost` reads the library frontmatter first, then applies any matching `[agents.<role>]` overrides from config.toml. Model resolution branches by the active tier: OAuth picks one model per provider via the resolver (or `[llm.oauth.<p>].model`); API-keys reads `[llm.api_keys.<p>.models][<role>]` first, then frontmatter `api_keys_models[<provider>]`.
+During agent initialization, `AgentHost` reads the library frontmatter first, then applies any matching `[agents.<role>]` overrides from `config.toml`. Model resolution branches by the active tier: OAuth picks one model per provider via the resolver (or `[llm.oauth.<p>].model` from `.auth.toml`); API-keys reads `[llm.api_keys.<p>.models][<role>]` first (also from `.auth.toml`), then frontmatter `api_keys_models[<provider>]`.
 
 ## Databases
 
@@ -545,7 +568,12 @@ Config-relevant paths within `~/.system2/` (see [Architecture](architecture.md#r
 
 ```
 ~/.system2/
-├── config.toml            # Settings and credentials (0600, gitignored)
+├── config.toml            # User-edited operational settings (0600)
+├── auth/                  # Machine-managed credentials (0700)
+│   ├── .auth.toml          # Created by `system2 config` (0600)
+│   ├── anthropic.json     # OAuth credentials (0600, when present)
+│   ├── openai-codex.json
+│   └── github-copilot.json
 ├── app.db                 # SQLite database (gitignored)
 ├── server.pid             # PID file when server is running
 ├── sessions/              # Agent JSONL session files (gitignored)

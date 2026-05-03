@@ -29,5 +29,5 @@ For installation and usage, see the [project README](../README.md).
 
 ## Reference
 
-- [Configuration](configuration.md): All settings in `config.toml`, including LLM provider credentials, OAuth tier and re-auth, failover chains, database connections, per-role agent overrides, and operational settings.
+- [Configuration](configuration.md): All settings split between `config.toml` (operational settings: database connections, per-role agent overrides, scheduler, chat, knowledge, backup, logs) and `.auth.toml` (written by `system2 config` (credentials): LLM provider API keys and OAuth tier, Brave Search, `web_search.enabled`).
 - [Contributing](../CONTRIBUTING.md): Development setup, code standards, testing, and PR process.

@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime fallback hook for OAuth: when an auto-resolved model returns 403 or 404, the host steps that credential to a hardcoded fallback (`claude-sonnet-4-6`, `gpt-5.4`, `gpt-4.1`) for the rest of the session. Per-provider tracking so a step-down on one credential doesn't pre-emptively downgrade unrelated OAuth providers in the failover chain. Explicit user pins skip auto-fallback so misconfiguration surfaces loudly.
 - `[llm.api_keys.<provider>.models]` (table with `<role> = "..."` keys inside) per-role model pins for the API-keys tier. Pin scope is now self-evident from the TOML path.
 - Startup validation: `validateAgentModels` covers agent frontmatter, and `validateLlmModels` walks `llm.oauth.providers[*].model` and `llm.providers[*].models[*]` against pi-ai's catalog with Levenshtein-nearest "did you mean" hints, catching typos before a runtime API failure.
-- Visual section dividers (`# ═══...═══`) in the generated `config.toml` and the `docs/configuration.md` reference, around: OAuth tier, API keys tier, Per-agent behavior overrides, Services, Tools, Databases, Operational settings.
+- Visual section dividers (`# ═══...═══`) in the generated `config.toml`, around: Per-agent behavior overrides, Tools, Databases, Operational settings. (OAuth tier, API keys tier, and Services moved to `.auth.toml` later in this release; that file is emitted by `TOML.stringify` with only a do-not-edit header.)
 
 ### Changed
 
@@ -31,13 +31,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OAuth `onAuth` callback now reads `instructions` alongside `url` so device-flow user codes (Copilot) are surfaced in the terminal. The shared `formatOAuthAuthMessage` helper is used wherever OAuth flows are invoked from the CLI.
 - OAuth dispatcher API: `oauth.ts` exports `loginProvider(provider, callbacks)` and `refreshOAuthToken(provider, credentials)` (replacing `loginAnthropic` / `refreshAnthropic`). Refresh now operates on the full credential object, preserving provider-specific extras (e.g. Copilot's `enterpriseDomain`) through the round-trip. `AuthResolver.ensureFresh`'s `refresh` callback changed from `(refreshToken: string) => Promise<RefreshedTokens>` to `(provider, credentials: OAuthCredentials) => Promise<OAuthCredentials>` (the `RefreshedTokens` type is removed).
 - `validateAgentModels` signature simplified to take a flat `Record<role, Record<provider, modelId>>` instead of a wrapped `AgentsConfig`.
+- Split `~/.system2/config.toml` into two files: `config.toml` (user-edited operational settings: `[agents.*]`, `[databases.*]`, `[backup]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`, `[session]`, `[delivery]`, top-level `web_search_max_results`) and `auth/.auth.toml` (credentials and service toggles: `[llm.oauth]`, `[llm.api_keys]`, `[services.*]`, `[tools.web_search].enabled`, written exclusively by `system2 config`). With the auth state in its own file, the 1100-line regex-based `toml-patchers.ts` collapsed to ~150 lines of parse-mutate-write via `@iarna/toml`, eliminating an entire class of patcher bugs (stub replacement, EOF placement, sub-section repair on hand-edit damage, control-char escaping in user input, comment-preservation around managed blocks). `.auth.toml` is created by `system2 config` on the first credential write; `system2 init` does not create it.
+- Renamed `~/.system2/oauth/` to `~/.system2/auth/` (now also holds `.auth.toml` alongside the per-provider credential JSONs). Directory permissions are `0700`, files inside are `0600`.
+- Renamed `[tools.web_search].max_results` to a top-level `web_search_max_results` scalar in `config.toml`. The `[tools.web_search].enabled` flag now lives in `.auth.toml` (managed via `system2 config`).
 
 ### Removed
 
 - `system2 logout` command. The remove flow is now reached via `system2 config` → OAuth providers → select the provider → "Remove".
 - `system2 login` command. OAuth management moves to `system2 config` → OAuth providers.
-- Per-credential `label` field on OAuth credentials. OAuth credentials are stored one-per-provider (`~/.system2/oauth/<provider>.json`) and the runtime never disambiguated them by label, so the field was vestigial. Login flow no longer prompts for a label; the provider id is used everywhere it's referenced (logs, UI, `[llm.oauth]` patcher addresses). Existing on-disk JSON files containing `label` still load — the extra field is ignored.
+- Per-credential `label` field on OAuth credentials. OAuth credentials are stored one-per-provider (`~/.system2/auth/<provider>.json` in 0.3.0; was `~/.system2/oauth/<provider>.json` in 0.2.x) and the runtime never disambiguated them by label, so the field was vestigial. Login flow no longer prompts for a label; the provider id is used everywhere it's referenced (logs, UI, `[llm.oauth]` patcher addresses). Existing on-disk JSON files containing `label` still load — the extra field is ignored.
 - `google-gemini-cli` and `google-antigravity` OAuth providers. Pi-ai 0.71.0 removed both because Google has been disabling user accounts that authenticate via these flows from third-party tools (pi-mono#4017, pi-mono#3999). System2 aligns to avoid the same user-safety risk. Existing `~/.system2/oauth/google-{gemini-cli,antigravity}.json` credential files are silently ignored at startup; safe to delete.
+
+### Migration
+
+0.3.0 is a clean break with no migration code. Existing 0.2.x installs must re-create `~/.system2/config.toml` and `~/.system2/auth/.auth.toml` by hand. The procedure (assumes you're upgrading from 0.2.x):
+
+1. **Stop the daemon.** `system2 stop`.
+2. **Snapshot your old config for reference.** `cp ~/.system2/config.toml ~/.system2/config.toml.0.2.x`.
+3. **Move the active config aside** so `system2 init` will write a fresh template. `mv ~/.system2/config.toml ~/.system2/config.toml.bak`.
+4. **Run `system2 init`.** It writes a fresh `config.toml` template and auto-launches `system2 config`.
+5. **Re-enter credentials in `system2 config`** by reading them out of `config.toml.0.2.x`:
+   - **OAuth providers** (Anthropic, OpenAI Codex, GitHub Copilot): pick "OAuth providers" → select each provider that was in `[llm.oauth]` → run the browser login. (`system2 config` writes `~/.system2/auth/.auth.toml` and saves the per-provider tokens at `~/.system2/auth/<provider>.json`.)
+   - **API keys**: pick "API key providers" → for each provider that had keys in 0.2.x's `[llm.<provider>]` (flat shape, no longer parsed) or `[llm.api_keys.<provider>]`, re-enter the key(s) and labels. Multiple labeled keys per provider are supported for rotation.
+   - **Brave Search**: pick "Services" → "Brave Search" → enter the key from `[services.brave_search]`. Setting it also flips `[tools.web_search].enabled = true` automatically.
+   - Reorder failover priority on either tier with the "Reorder fallbacks" entry if your `fallback = [...]` order matters.
+6. **Open the new `~/.system2/config.toml`** and copy across these operational sections from `config.toml.0.2.x` only if you had them customized (the new template has each section commented out at code defaults — uncomment AND copy the customized values):
+   - `[agents.<role>]` blocks: copy `thinking_level` and `compaction_depth` verbatim. **Do not copy a `model = "..."` field if your 0.2.x `[agents.<role>]` had one** — per-role model pins moved to `[llm.api_keys.<provider>.models]` in `.auth.toml` and are not exposed in the `system2 config` menu. To pin a per-role model in 0.3.0, hand-edit `.auth.toml` once after `system2 config` finishes; subsequent `system2 config` writes preserve the addition through parse-mutate-write.
+   - `[databases.<name>]` blocks: copy verbatim (schema unchanged).
+   - `[backup]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`, `[session]`, `[delivery]` blocks: copy verbatim (schemas unchanged).
+   - `[tools.web_search].max_results` (if customized): in 0.3.0 this is a top-level scalar in `config.toml` named `web_search_max_results = N` (no enclosing section).
+7. **Delete the orphaned 0.2.x credential dir.** `rm -rf ~/.system2/oauth/` — the JSONs there are silently ignored by 0.3.0.
+8. **Start the daemon.** `system2 start`. Verify it comes up cleanly and the Guide responds.
+9. **Clean up the references.** `rm ~/.system2/config.toml.0.2.x ~/.system2/config.toml.bak`.
+
+Other state is untouched by this upgrade: `app.db`, `~/.system2/sessions/`, `~/.system2/projects/`, `~/.system2/artifacts/`, `~/.system2/logs/`, and the git-tracked `~/.system2/knowledge/` files are all preserved through the procedure above.
 
 ### Dependencies
 
@@ -137,7 +164,8 @@ First published release.
 - Unify knowledge file commits via `commitIfStateDir` ([#125](https://github.com/diegoscarabelli/system2/pull/125))
 - Fall back to Guide when persisted agent no longer exists ([#122](https://github.com/diegoscarabelli/system2/pull/122))
 
-[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/diegoscarabelli/system2/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/diegoscarabelli/system2/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/diegoscarabelli/system2/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/diegoscarabelli/system2/compare/v0.1.3...v0.2.0

@@ -188,9 +188,9 @@ Search the web via the Brave Search API.
 |-----------|------|-------------|
 | `query` | string | Search query |
 
-Returns structured results (title, URL, description). Requires a [Brave Search API](https://brave.com/search/api/) key in config.toml.
+Returns structured results (title, URL, description). Requires a [Brave Search API](https://brave.com/search/api/) key in `.auth.toml` (set via `system2 config`).
 
-**Conditional:** only registered when `[services.brave_search]` key exists AND `[tools.web_search].enabled` is not `false`. Max results configurable via `[tools.web_search].max_results`.
+**Conditional:** only registered when `[services.brave_search]` key exists in `.auth.toml` AND `[tools.web_search].enabled` (also in `.auth.toml`) is not `false`. Max results configurable via the top-level `web_search_max_results` scalar in `config.toml`.
 
 ### `set_reminder`
 

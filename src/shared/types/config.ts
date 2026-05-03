@@ -180,3 +180,11 @@ export const DEFAULT_SESSION_ROTATION_SIZE_BYTES = 10 * 1024 * 1024;
  *  `src/cli/utils/log-rotation.ts` (5 archives) and bounds long-running narrator deployments
  *  at ~5 × archive_size of disk per agent regardless of runtime. */
 export const DEFAULT_SESSION_ARCHIVE_KEEP_COUNT = 5;
+
+/** Name of the per-install auth directory under `~/.system2/`. Holds
+ *  `.auth.toml` plus per-provider OAuth credential JSONs. Lives in the shared
+ *  module so both the CLI (`src/cli/utils/auth-config.ts`) and the server
+ *  (`src/server/agents/oauth-credentials.ts`) reference the same constant
+ *  without the server having to import from CLI utility code. Permissions
+ *  are 0700 on the dir, 0600 on files inside. */
+export const AUTH_DIRNAME = 'auth';

@@ -1,9 +1,17 @@
 /**
  * Configuration Utility
  *
- * Manages all System2 settings stored in ~/.system2/config.toml.
- * This includes LLM provider keys, service credentials, tool settings,
- * and operational settings (backup, session, logs).
+ * Manages System2 settings split across two files:
+ *
+ *   ~/.system2/config.toml        — user-edited operational settings.
+ *                                   Read by the daemon, never written.
+ *   ~/.system2/auth/.auth.toml     — written by `system2 config` (credentials) (OAuth,
+ *                                   API keys, services). Written by
+ *                                   `system2 config`, never hand-edited.
+ *
+ * The split was introduced in 0.3.0 to eliminate the regex patcher
+ * complexity that arose from mixing user-managed comments with
+ * sections written by `system2 config` in a single file.
  *
  * Falls back to sensible defaults when values aren't specified.
  */
@@ -36,12 +44,14 @@ import {
   validateAgentModels,
   validateLlmModels,
 } from '../../shared/index.js';
+import { authFile, loadAuthToml } from './auth-config.js';
 
 // Re-export so existing CLI consumers (and tests) can import from this module.
 export { validateAgentModels, validateLlmModels };
 
 export const SYSTEM2_DIR = join(homedir(), '.system2');
 export const CONFIG_FILE = join(SYSTEM2_DIR, 'config.toml');
+export const AUTH_FILE = authFile(SYSTEM2_DIR);
 
 /**
  * Configuration schema with all available settings.
@@ -98,29 +108,11 @@ interface OAuthProviderToml {
   model?: string;
 }
 
-interface TomlConfig {
-  llm?: {
-    api_keys?: {
-      primary?: string;
-      fallback?: string[];
-      anthropic?: ProviderKeysToml;
-      cerebras?: ProviderKeysToml;
-      google?: ProviderKeysToml;
-      groq?: ProviderKeysToml;
-      mistral?: ProviderKeysToml;
-      openai?: ProviderKeysToml;
-      openrouter?: ProviderKeysToml;
-      xai?: ProviderKeysToml;
-      'openai-compatible'?: ProviderKeysToml;
-    };
-    oauth?: {
-      primary?: string;
-      fallback?: string[];
-      anthropic?: OAuthProviderToml;
-      'openai-codex'?: OAuthProviderToml;
-      'github-copilot'?: OAuthProviderToml;
-    };
-  };
+/**
+ * On-disk shape of `config.toml` (the user-edited operational file). Holds
+ * everything except auth-managed sections, which live in `.auth.toml`.
+ */
+interface TomlConfigFile {
   agents?: Record<
     string,
     {
@@ -128,12 +120,6 @@ interface TomlConfig {
       compaction_depth?: number;
     }
   >;
-  services?: {
-    brave_search?: { key?: string };
-  };
-  tools?: {
-    web_search?: { enabled?: boolean; max_results?: number };
-  };
   databases?: Record<
     string,
     {
@@ -179,6 +165,48 @@ interface TomlConfig {
     max_bytes?: number;
     catch_up_budget_bytes?: number;
     narrator_message_excerpt_bytes?: number;
+  };
+  /** Top-level scalar (no enclosing section). The web_search tool's
+   *  `max_results` knob — promoted out of `[tools.web_search]` in 0.3.0
+   *  because the section now lives in .auth.toml with just `enabled`. */
+  web_search_max_results?: number;
+}
+
+/**
+ * On-disk shape of `.auth.toml`. Mirrors the auth-owned subset of the 0.2.x
+ * config.toml schema. Sub-provider types are reused from the local
+ * `ProviderKeysToml` / `OAuthProviderToml` interfaces.
+ */
+interface TomlAuthFile {
+  llm?: {
+    api_keys?: {
+      primary?: string;
+      fallback?: string[];
+      anthropic?: ProviderKeysToml;
+      cerebras?: ProviderKeysToml;
+      google?: ProviderKeysToml;
+      groq?: ProviderKeysToml;
+      mistral?: ProviderKeysToml;
+      openai?: ProviderKeysToml;
+      openrouter?: ProviderKeysToml;
+      xai?: ProviderKeysToml;
+      'openai-compatible'?: ProviderKeysToml;
+    };
+    oauth?: {
+      primary?: string;
+      fallback?: string[];
+      anthropic?: OAuthProviderToml;
+      'openai-codex'?: OAuthProviderToml;
+      'github-copilot'?: OAuthProviderToml;
+    };
+  };
+  services?: {
+    brave_search?: { key?: string };
+  };
+  tools?: {
+    /** Only `enabled` lives in .auth.toml. `max_results` lives as a top-level
+     *  scalar in config.toml (`web_search_max_results`). */
+    web_search?: { enabled?: boolean };
   };
 }
 
@@ -229,7 +257,7 @@ const DEFAULT_OPERATIONAL: Pick<
   },
 };
 
-type ApiKeysTomlSource = NonNullable<NonNullable<TomlConfig['llm']>['api_keys']>;
+type ApiKeysTomlSource = NonNullable<NonNullable<TomlAuthFile['llm']>['api_keys']>;
 
 function buildProvidersFromSource(
   source: ApiKeysTomlSource
@@ -358,7 +386,7 @@ function validateProviderArray<T extends string>(
  * Convert TOML [llm] section to LlmConfig. Reads only the [llm.api_keys] and
  * [llm.oauth] shape; the previous flat [llm] layout is no longer parsed.
  */
-export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig {
+export function convertTomlLlm(toml: NonNullable<TomlAuthFile['llm']>): LlmConfig {
   const apiKeysSource: ApiKeysTomlSource = toml.api_keys ?? {};
   const providers = buildProvidersFromSource(apiKeysSource);
 
@@ -424,7 +452,7 @@ export function convertTomlLlm(toml: NonNullable<TomlConfig['llm']>): LlmConfig 
 /**
  * Convert TOML services section to ServicesConfig.
  */
-function convertTomlServices(toml: NonNullable<TomlConfig['services']>): ServicesConfig {
+function convertTomlServices(toml: NonNullable<TomlAuthFile['services']>): ServicesConfig {
   const services: ServicesConfig = {};
   if (toml.brave_search?.key) {
     services.brave_search = { key: toml.brave_search.key };
@@ -435,12 +463,27 @@ function convertTomlServices(toml: NonNullable<TomlConfig['services']>): Service
 /**
  * Convert TOML tools section to ToolsConfig.
  */
-function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
+/**
+ * Compose ToolsConfig from both files. `[tools.web_search].enabled` lives in
+ * .auth.toml (system-managed); `web_search_max_results` lives as a top-level
+ * scalar in config.toml (user-tunable). The output preserves the legacy
+ * `tools.web_search.{enabled, max_results}` consumer shape, so server code
+ * doesn't need to know about the file split.
+ */
+function convertTomlTools(
+  authTools: TomlAuthFile['tools'] | undefined,
+  configMaxResults: number | undefined
+): ToolsConfig {
   const tools: ToolsConfig = {};
-  if (toml.web_search) {
+  if (authTools?.web_search) {
+    // Default to true when [tools.web_search] is present without `enabled`:
+    // matches the runtime semantic in src/server/agents/host.ts which gates
+    // on `enabled !== false` (absence treated as opt-in). Defaulting to false
+    // here would silently disable web_search if a user hand-edited .auth.toml
+    // and dropped the `enabled` line.
     tools.web_search = {
-      enabled: toml.web_search.enabled ?? false,
-      max_results: toml.web_search.max_results ?? DEFAULT_WEB_SEARCH_MAX_RESULTS,
+      enabled: authTools.web_search.enabled ?? true,
+      max_results: configMaxResults ?? DEFAULT_WEB_SEARCH_MAX_RESULTS,
     };
   }
   return tools;
@@ -451,7 +494,7 @@ function convertTomlTools(toml: NonNullable<TomlConfig['tools']>): ToolsConfig {
  * Emits a warning and falls back to the default for any non-positive or non-integer value.
  * Also warns if catch_up_budget_bytes >= max_bytes (producer budget should be < transport cap).
  */
-export function convertTomlDelivery(toml: NonNullable<TomlConfig['delivery']>): DeliveryConfig {
+export function convertTomlDelivery(toml: NonNullable<TomlConfigFile['delivery']>): DeliveryConfig {
   function resolveField(key: keyof DeliveryConfig, raw: number | undefined): number {
     const def = DEFAULT_DELIVERY[key];
     if (raw === undefined) return def;
@@ -491,7 +534,7 @@ export function convertTomlDelivery(toml: NonNullable<TomlConfig['delivery']>): 
  * Convert TOML session section to SessionConfig, applying defaults for missing or invalid keys.
  * Emits a warning and falls back to the default for any non-positive or non-integer value.
  */
-export function convertTomlSession(toml: NonNullable<TomlConfig['session']>): SessionConfig {
+export function convertTomlSession(toml: NonNullable<TomlConfigFile['session']>): SessionConfig {
   function resolveField(key: keyof SessionConfig, raw: number | undefined): number {
     const def = DEFAULT_SESSION[key];
     if (raw === undefined) return def;
@@ -514,7 +557,9 @@ export function convertTomlSession(toml: NonNullable<TomlConfig['session']>): Se
  * Convert TOML databases section to DatabasesConfig.
  * Entries missing required fields (type, database) are skipped with a warning.
  */
-export function convertTomlDatabases(toml: NonNullable<TomlConfig['databases']>): DatabasesConfig {
+export function convertTomlDatabases(
+  toml: NonNullable<TomlConfigFile['databases']>
+): DatabasesConfig {
   const databases: DatabasesConfig = {};
 
   for (const [name, entry] of Object.entries(toml)) {
@@ -562,7 +607,7 @@ const VALID_THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', '
  * Convert TOML agents section to AgentsConfig.
  * Each entry is a role name with optional overrides for thinking_level and compaction_depth.
  */
-export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): AgentsConfig {
+export function convertTomlAgents(toml: NonNullable<TomlConfigFile['agents']>): AgentsConfig {
   const agents: AgentsConfig = {};
 
   for (const [role, entry] of Object.entries(toml)) {
@@ -601,7 +646,7 @@ export function convertTomlAgents(toml: NonNullable<TomlConfig['agents']>): Agen
  * Convert TOML operational sections (snake_case) to camelCase.
  */
 function convertTomlOperational(
-  toml: TomlConfig
+  toml: TomlConfigFile
 ): Partial<Pick<System2Config, 'backup' | 'logs' | 'scheduler' | 'chat' | 'knowledge'>> {
   const config: Partial<
     Pick<System2Config, 'backup' | 'logs' | 'scheduler' | 'chat' | 'knowledge'>
@@ -669,23 +714,43 @@ function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial
 }
 
 /**
- * Load configuration from disk, merging with defaults.
- * Missing operational values are filled in from defaults.
+ * Load configuration from disk, merging defaults with whatever the two TOML
+ * files contain. The split: `config.toml` holds operational settings (always
+ * read), `auth/.auth.toml` holds credentials (optional — absent on a brand-new
+ * install).
+ *
+ * Each file fails loudly on parse error rather than silently falling back to
+ * defaults. The loader returns defaults only when `config.toml` is entirely
+ * missing (which means `system2 init` hasn't run yet).
  */
 export function loadConfig(): System2Config {
-  if (!existsSync(CONFIG_FILE)) {
+  return loadConfigFromPaths(CONFIG_FILE, AUTH_FILE);
+}
+
+/**
+ * Path-injectable variant. Tests pass tmp files; production calls `loadConfig()`.
+ */
+export function loadConfigFromPaths(configPath: string, authPath: string): System2Config {
+  if (!existsSync(configPath)) {
     return { ...DEFAULT_OPERATIONAL };
   }
 
-  // Parse TOML. Only this step's failures fall back to defaults — validation
-  // errors below must propagate so the user sees a clear startup error rather
-  // than the system silently running with operational defaults.
-  let tomlConfig: TomlConfig;
+  let tomlConfig: TomlConfigFile;
   try {
-    tomlConfig = TOML.parse(readFileSync(CONFIG_FILE, 'utf-8')) as TomlConfig;
-  } catch (_error) {
-    console.warn('[Config] Failed to parse config.toml, using defaults');
-    return { ...DEFAULT_OPERATIONAL };
+    tomlConfig = TOML.parse(readFileSync(configPath, 'utf-8')) as TomlConfigFile;
+  } catch (err) {
+    throw new Error(
+      `Failed to parse config.toml at ${configPath}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  let tomlAuth: TomlAuthFile;
+  try {
+    tomlAuth = loadAuthToml(authPath) as TomlAuthFile;
+  } catch (err) {
+    throw new Error(
+      `Failed to parse .auth.toml at ${authPath}: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 
   const config: System2Config = deepMerge(
@@ -693,8 +758,8 @@ export function loadConfig(): System2Config {
     convertTomlOperational(tomlConfig)
   );
 
-  if (tomlConfig.llm) {
-    config.llm = convertTomlLlm(tomlConfig.llm);
+  if (tomlAuth.llm) {
+    config.llm = convertTomlLlm(tomlAuth.llm);
     validateLlmModels(config.llm);
   }
 
@@ -702,12 +767,12 @@ export function loadConfig(): System2Config {
     config.agents = convertTomlAgents(tomlConfig.agents);
   }
 
-  if (tomlConfig.services) {
-    config.services = convertTomlServices(tomlConfig.services);
+  if (tomlAuth.services) {
+    config.services = convertTomlServices(tomlAuth.services);
   }
 
-  if (tomlConfig.tools) {
-    config.tools = convertTomlTools(tomlConfig.tools);
+  if (tomlAuth.tools) {
+    config.tools = convertTomlTools(tomlAuth.tools, tomlConfig.web_search_max_results);
   }
 
   if (tomlConfig.databases) {
@@ -726,205 +791,39 @@ export function loadConfig(): System2Config {
 }
 
 /**
- * Build a human-readable config.toml string with comments.
+ * Build the user-edited `config.toml` template. As of 0.3.0, this file holds
+ * ONLY user-managed sections — per-agent overrides, databases, operational
+ * defaults, and the `web_search_max_results` tunable. Auth-managed sections
+ * (`[llm.oauth]`, `[llm.api_keys]`, `[services.brave_search]`,
+ * `[tools.web_search].enabled`) live in `~/.system2/auth/.auth.toml`,
+ * written by `system2 config`.
+ *
+ * The `agents` and `databases` params are typically omitted by `system2 init`
+ * (which scaffolds an empty template). They exist to support tooling that
+ * wants to seed config.toml with non-default values; the emitter falls back
+ * to commented templates when not supplied.
  */
 export function buildConfigToml(options: {
-  llm?: LlmConfig;
   agents?: AgentsConfig;
-  services?: ServicesConfig;
-  // tools.web_search.max_results is not accepted: the emitter always writes
-  // it commented at DEFAULT_WEB_SEARCH_MAX_RESULTS, mirroring the operational
-  // sections. Only `enabled` reflects a user choice (yes/no to web search via
-  // `system2 config`) and gets emitted live.
-  tools?: { web_search?: { enabled: boolean } };
   databases?: DatabasesConfig;
-  // Operational settings ([backup], [logs], [scheduler], [chat], [knowledge],
-  // [session], [delivery]) are not accepted as input. They are always emitted
-  // as commented templates whose values come from DEFAULT_OPERATIONAL,
-  // DEFAULT_SESSION, and DEFAULT_DELIVERY. Users edit ~/.system2/config.toml
-  // by hand to tune them; the emitter is not the path for customization.
 }): string {
   const HR = '═'.repeat(72);
   const sectionHeader = (label: string): string[] => [`# ${HR}`, `# ${label}`, `# ${HR}`];
 
   const lines: string[] = [
     '# System2 Configuration',
-    '# All System2 settings: LLM credentials (OAuth + API keys), per-agent',
-    '# overrides, services, databases, and operational defaults.',
-    '# Edited both programmatically by System2 (e.g. `system2 config` updates',
-    '# `[llm.oauth]` and `[llm.api_keys]`) and manually by you. Changes apply on daemon restart.',
-    '# Permissions: 0600 (owner read/write only — protects credentials).',
+    '# User-edited operational settings: per-agent overrides, databases, and',
+    '# operational defaults (backup, logs, scheduler, chat, knowledge, session,',
+    '# delivery, web_search_max_results).',
+    '#',
+    '# LLM credentials (OAuth + API keys) and service credentials live in a',
+    '# separate file: ~/.system2/auth/.auth.toml, managed by `system2 config`.',
+    '# Do not put credentials here — the loader does not read them from this file.',
+    '#',
+    '# Changes apply on daemon restart.',
+    '# Permissions: 0600 (owner read/write only).',
     '',
   ];
-
-  // Always emit the LLM section structure. When `options.llm` is omitted (e.g.
-  // `system2 init` writes an empty template), the live blocks fall through to
-  // commented stubs so the schema remains discoverable for hand-editing and so
-  // the file is patcher-ready for `system2 config`.
-  {
-    const fallback = options.llm?.fallback ?? [];
-    const providers = options.llm?.providers ?? {};
-
-    // OAuth tier: emit divider + (live block | commented template) so users
-    // who skipped OAuth in `system2 config` still see how to enable it later.
-    lines.push(...sectionHeader('LLM credentials — OAuth tier'));
-    lines.push('# OAuth providers and failover order. Subscription tokens live in');
-    lines.push('# ~/.system2/oauth/<provider>.json (mode 0600), managed by `system2 config`.');
-    lines.push('# This tier is tried first; the API-keys tier below is only used after');
-    lines.push('# every OAuth credential is in cooldown.');
-    lines.push('# Supported providers: anthropic, openai-codex, github-copilot.');
-    lines.push('');
-    if (options.llm?.oauth) {
-      lines.push('[llm.oauth]');
-      lines.push(`primary = "${options.llm.oauth.primary}"`);
-      const fb = options.llm.oauth.fallback.map((f) => `"${f}"`).join(', ');
-      lines.push(`fallback = [${fb}]`);
-      lines.push('');
-
-      // Per-provider OAuth model pins. Live entries first, then a commented
-      // hint so users see the override syntax inline with the section.
-      const liveOAuthPins: string[] = [];
-      for (const [provider, sub] of Object.entries(options.llm.oauth.providers)) {
-        if (!sub?.model) continue;
-        liveOAuthPins.push(provider);
-        lines.push(`[llm.oauth.${provider}]`);
-        lines.push(`model = "${sub.model}"`);
-        lines.push('');
-      }
-      if (liveOAuthPins.length === 0) {
-        lines.push('# Optional per-OAuth-provider model pin. When omitted, the resolver picks');
-        lines.push("# the family flagship from pi-ai's catalog. Family rules:");
-        lines.push('# https://github.com/diegoscarabelli/system2/blob/main/docs/configuration.md');
-        lines.push('# Catalog of model IDs (use the exact `id` field when pinning):');
-        lines.push(
-          '# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts'
-        );
-        lines.push('# [llm.oauth.anthropic]');
-        lines.push('# model = "claude-opus-4-7"');
-        lines.push('');
-      }
-    } else {
-      lines.push('# Run `system2 config` to enable OAuth, or uncomment the block below and');
-      lines.push('# add credentials manually.');
-      lines.push('# [llm.oauth]');
-      lines.push('# primary = "anthropic"');
-      lines.push('# fallback = []');
-      lines.push('');
-    }
-
-    // API-keys tier. "Configured" means at least one provider has keys; a
-    // bare primary/fallback with no provider entries is not configured.
-    const apiKeysConfigured = Object.values(providers).some((p) => p && p.keys.length > 0);
-
-    lines.push(...sectionHeader('LLM credentials — API keys tier'));
-    lines.push('# Pay-per-token. Each provider can hold multiple keys; rotation across keys');
-    lines.push('# and providers happens automatically on failures.');
-    lines.push('');
-
-    if (apiKeysConfigured && options.llm) {
-      lines.push('[llm.api_keys]');
-      lines.push(`primary = "${options.llm.primary}"`);
-      lines.push(`fallback = [${fallback.map((f) => `"${f}"`).join(', ')}]`);
-      lines.push('');
-
-      let anyModelsPinned = false;
-      for (const name of [
-        'anthropic',
-        'cerebras',
-        'google',
-        'groq',
-        'mistral',
-        'openai',
-        'openai-compatible',
-        'openrouter',
-        'xai',
-      ] as const) {
-        const provider = providers[name];
-        if (provider && provider.keys.length > 0) {
-          // Per-provider key sections are self-explanatory; the rotation/label
-          // semantics are documented once in the top-level comment block.
-          lines.push(`[llm.api_keys.${name}]`);
-          lines.push('keys = [');
-          for (const key of provider.keys) {
-            if (key.key) {
-              lines.push(`  { key = "${key.key}", label = "${key.label}" },`);
-            }
-          }
-          lines.push(']');
-
-          // openrouter has extra fields
-          if (name === 'openrouter' && provider.routing) {
-            lines.push('');
-            lines.push('[llm.api_keys.openrouter.routing]');
-            for (const [prefix, order] of Object.entries(provider.routing)) {
-              const key = /^[A-Za-z0-9_-]+$/.test(prefix) ? prefix : `"${prefix}"`;
-              lines.push(`${key} = [${order.map((s) => `"${s}"`).join(', ')}]`);
-            }
-          }
-
-          // openai-compatible has extra fields
-          if (name === 'openai-compatible') {
-            if (provider.base_url) {
-              lines.push(`base_url = "${provider.base_url}"`);
-            }
-            if (provider.model) {
-              lines.push(`model = "${provider.model}"`);
-            }
-            if (provider.compat_reasoning !== undefined) {
-              lines.push(`compat_reasoning = ${provider.compat_reasoning}`);
-            }
-          }
-
-          // Per-role model pins for this provider (api-keys tier).
-          if (provider.models && Object.keys(provider.models).length > 0) {
-            anyModelsPinned = true;
-            lines.push('');
-            lines.push(`[llm.api_keys.${name}.models]`);
-            for (const [role, modelId] of Object.entries(provider.models)) {
-              lines.push(`${role} = "${modelId}"`);
-            }
-          }
-
-          lines.push('');
-        }
-      }
-
-      // Inline hint for per-role model pins, when the user hasn't pinned any.
-      if (!anyModelsPinned) {
-        lines.push('# Optional per-role model pins for the API-keys tier. Keys are role names');
-        lines.push("# (guide, conductor, reviewer, narrator, worker). Overrides the role's");
-        lines.push('# library frontmatter default for the matched provider.');
-        lines.push('# Catalog of model IDs (use the exact `id` field when pinning):');
-        lines.push(
-          '# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts'
-        );
-        lines.push('# [llm.api_keys.anthropic.models]');
-        lines.push('# narrator = "claude-haiku-4-5-20251001"');
-        lines.push('# conductor = "claude-sonnet-4-6"');
-        lines.push('');
-      }
-    } else {
-      lines.push('# Add API keys to enable as failover when the OAuth tier is exhausted.');
-      lines.push('# Uncomment and edit:');
-      lines.push('# [llm.api_keys]');
-      lines.push('# primary = "anthropic"');
-      lines.push('# fallback = ["google", "openai"]');
-      lines.push('#');
-      lines.push('# [llm.api_keys.anthropic]');
-      lines.push('# keys = [');
-      lines.push('#   { key = "sk-ant-...", label = "default" },');
-      lines.push('# ]');
-      lines.push('#');
-      lines.push("# Optional per-role model pins (overrides each role's library default).");
-      lines.push('# Catalog of model IDs (use the exact `id` field when pinning):');
-      lines.push(
-        '# https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts'
-      );
-      lines.push('# [llm.api_keys.anthropic.models]');
-      lines.push('# narrator = "claude-haiku-4-5-20251001"');
-      lines.push('');
-    }
-  }
 
   lines.push(...sectionHeader('Per-agent behavior overrides'));
   // Agents section: per-role behavior overrides (thinking, compaction).
@@ -947,8 +846,7 @@ export function buildConfigToml(options: {
     lines.push('# Tier-agnostic: applied whether the OAuth or API-keys tier is active.');
     lines.push('# Uncomment and edit to customize.');
     lines.push('# Supported roles: guide, conductor, reviewer, narrator, worker');
-    lines.push('# Model pins live with their tier: see [llm.oauth.<provider>] /');
-    lines.push('# [llm.api_keys.<provider>.models] above.');
+    lines.push('# Model pins live in .auth.toml (managed by `system2 config`).');
     lines.push('#');
     lines.push('# [agents.conductor]');
     lines.push('# thinking_level = "high"              # off | minimal | low | medium | high');
@@ -958,33 +856,18 @@ export function buildConfigToml(options: {
     lines.push('');
   }
 
-  lines.push(...sectionHeader('Services'));
-  if (options.services?.brave_search) {
-    lines.push('[services.brave_search]');
-    lines.push(`key = "${options.services.brave_search.key}"`);
-    lines.push('');
-  } else {
-    lines.push('# Optional service credentials. Brave Search powers web_search/web_fetch.');
-    lines.push('# [services.brave_search]');
-    lines.push('# key = "BSA..."');
-    lines.push('');
-  }
-
   lines.push(...sectionHeader('Tools'));
-  if (options.tools?.web_search) {
-    lines.push('[tools.web_search]');
-    lines.push(`enabled = ${options.tools.web_search.enabled}`);
-    // max_results is a tunable with a code default; same model as operational
-    // settings — keep commented so accidental edits cannot silently change it.
-    lines.push(`# max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
-    lines.push('');
-  } else {
-    lines.push('# Optional tool feature flags.');
-    lines.push('# [tools.web_search]');
-    lines.push('# enabled = true');
-    lines.push(`# max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
-    lines.push('');
-  }
+  lines.push('# Operational knobs for tool behavior. Tool credentials and the');
+  lines.push('# `[tools.web_search].enabled` flag live in .auth.toml (managed by');
+  lines.push('# `system2 config`); only operational tunables live here.');
+  lines.push('#');
+  lines.push('# Maximum number of results returned by the web_search tool. Default');
+  lines.push(
+    `# pinned in code (DEFAULT_WEB_SEARCH_MAX_RESULTS = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}).`
+  );
+  lines.push('# Uncomment to override.');
+  lines.push(`# web_search_max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
+  lines.push('');
 
   lines.push(...sectionHeader('Databases'));
   if (options.databases && Object.keys(options.databases).length > 0) {

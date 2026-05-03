@@ -7,7 +7,7 @@ compaction_depth: 10
 # Default model per provider for the API-keys tier. The OAuth tier ignores
 # these — it auto-picks one model per provider via resolveOAuthModel for all
 # roles. Override per-role by setting `<role> = "<model-id>"` inside
-# [llm.api_keys.<provider>.models] in config.toml. Only api-keys-tier providers are listed; github-copilot and
+# [llm.api_keys.<provider>.models] in ~/.system2/auth/.auth.toml (managed by `system2 config`). Only api-keys-tier providers are listed; github-copilot and
 # openai-codex are OAuth-only and intentionally absent.
 api_keys_models:
   anthropic: claude-sonnet-4-6
@@ -142,7 +142,7 @@ These are living documents. Update them whenever relevant information surfaces: 
 
 ## Recovery
 
-System2 automatically backs up `~/.system2/` on every server start (with a configurable cooldown, default 24 hours). Backups are stored at `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/` with a retention limit (default: 3 most recent). When the user encounters data loss, corruption, or an irreversible mistake affecting files in `~/.system2/` (knowledge files, config.toml, project data, artifacts), check for available backups and offer to restore the affected files:
+System2 automatically backs up `~/.system2/` on every server start (with a configurable cooldown, default 24 hours). Backups are stored at `~/.system2-auto-backup-YYYY-MM-DDTHH-MM-SS/` with a retention limit (default: 3 most recent). When the user encounters data loss, corruption, or an irreversible mistake affecting files in `~/.system2/` (knowledge files, `config.toml`, `auth/.auth.toml` and `auth/<provider>.json` credential files, project data, artifacts), check for available backups and offer to restore the affected files:
 
 ```bash
 ls -dt ~/.system2-auto-backup-* | head -3   # list available backups

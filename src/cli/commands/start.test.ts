@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LlmConfig } from '../../shared/index.js';
-import { formatTierBanner, hasConfiguredCredentialTier } from './start.js';
+import { formatTierBanner, hasConfiguredCredentialTier, probeCredentialTier } from './start.js';
 
 describe('formatTierBanner', () => {
   it('shows only OAuth line when api-keys has no provider keys', () => {
@@ -74,34 +74,100 @@ describe('formatTierBanner', () => {
   });
 });
 
-describe('hasConfiguredCredentialTier', () => {
+describe('probeCredentialTier (four-state)', () => {
   let dir: string;
   let configPath: string;
+  let authPath: string;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'system2-start-test-'));
     configPath = join(dir, 'config.toml');
+    mkdirSync(join(dir, 'auth'), { mode: 0o700 });
+    authPath = join(dir, 'auth', '.auth.toml');
   });
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('returns false for empty (commented-template) config', () => {
-    writeFileSync(configPath, `# [llm.oauth]\n# primary = "anthropic"\n`);
-    expect(hasConfiguredCredentialTier(configPath)).toBe(false);
+  it('returns not_initialized when config.toml is missing', () => {
+    expect(probeCredentialTier(configPath, authPath).kind).toBe('not_initialized');
+  });
+
+  it('returns missing when config.toml exists but .auth.toml does not', () => {
+    writeFileSync(configPath, '');
+    expect(probeCredentialTier(configPath, authPath).kind).toBe('missing');
+  });
+
+  it('returns missing when .auth.toml has no primary in either tier', () => {
+    writeFileSync(configPath, '');
+    writeFileSync(authPath, '');
+    expect(probeCredentialTier(configPath, authPath).kind).toBe('missing');
+  });
+
+  it('returns malformed (config) when config.toml is invalid TOML', () => {
+    writeFileSync(configPath, 'not valid toml = = =');
+    writeFileSync(authPath, '');
+    const status = probeCredentialTier(configPath, authPath);
+    expect(status.kind).toBe('malformed');
+    if (status.kind === 'malformed') expect(status.file).toBe('config');
+  });
+
+  it('returns malformed (auth) when .auth.toml is invalid TOML', () => {
+    writeFileSync(configPath, '');
+    writeFileSync(authPath, 'not valid = = =');
+    const status = probeCredentialTier(configPath, authPath);
+    expect(status.kind).toBe('malformed');
+    if (status.kind === 'malformed') expect(status.file).toBe('auth');
+  });
+
+  it('returns configured when [llm.oauth].primary is set in .auth.toml', () => {
+    writeFileSync(configPath, '');
+    writeFileSync(authPath, `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n`);
+    expect(probeCredentialTier(configPath, authPath).kind).toBe('configured');
+  });
+
+  it('returns configured when [llm.api_keys].primary is set in .auth.toml', () => {
+    writeFileSync(configPath, '');
+    writeFileSync(
+      authPath,
+      `[llm.api_keys]\nprimary = "anthropic"\nfallback = []\n[llm.api_keys.anthropic]\nkeys = [{ key = "x", label = "y" }]\n`
+    );
+    expect(probeCredentialTier(configPath, authPath).kind).toBe('configured');
+  });
+});
+
+describe('hasConfiguredCredentialTier (boolean shim)', () => {
+  let dir: string;
+  let configPath: string;
+  let authPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'system2-start-test-'));
+    configPath = join(dir, 'config.toml');
+    mkdirSync(join(dir, 'auth'), { mode: 0o700 });
+    authPath = join(dir, 'auth', '.auth.toml');
+    writeFileSync(configPath, '');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('returns false when .auth.toml is absent', () => {
+    expect(hasConfiguredCredentialTier(configPath, authPath)).toBe(false);
   });
 
   it('returns true when [llm.oauth].primary is set', () => {
-    writeFileSync(configPath, `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n`);
-    expect(hasConfiguredCredentialTier(configPath)).toBe(true);
+    writeFileSync(authPath, `[llm.oauth]\nprimary = "anthropic"\nfallback = []\n`);
+    expect(hasConfiguredCredentialTier(configPath, authPath)).toBe(true);
   });
 
   it('returns true when [llm.api_keys].primary is set', () => {
     writeFileSync(
-      configPath,
+      authPath,
       `[llm.api_keys]\nprimary = "anthropic"\nfallback = []\n[llm.api_keys.anthropic]\nkeys = [{ key = "x", label = "y" }]\n`
     );
-    expect(hasConfiguredCredentialTier(configPath)).toBe(true);
+    expect(hasConfiguredCredentialTier(configPath, authPath)).toBe(true);
   });
 });

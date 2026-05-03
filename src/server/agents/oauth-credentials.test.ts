@@ -50,7 +50,7 @@ describe('oauth-credentials', () => {
 
   it('writes file with mode 0600', () => {
     saveOAuthCredentials(dir, 'anthropic', { access: 'a', refresh: 'b', expires: 1, label: 'l' });
-    const stats = statSync(join(dir, 'oauth', 'anthropic.json'));
+    const stats = statSync(join(dir, 'auth', 'anthropic.json'));
 
     if (process.platform === 'win32') {
       // POSIX mode bits aren't reliably supported on Windows
@@ -62,30 +62,30 @@ describe('oauth-credentials', () => {
     expect(mode).toBe(0o600);
   });
 
-  it('enforces 0700 on the oauth directory', async () => {
+  it('enforces 0700 on the auth directory', async () => {
     const { mkdirSync, statSync } = await import('node:fs');
     // Pre-create the directory with a looser mode
-    mkdirSync(join(dir, 'oauth'), { recursive: true, mode: 0o755 });
+    mkdirSync(join(dir, 'auth'), { recursive: true, mode: 0o755 });
     saveOAuthCredentials(dir, 'anthropic', { access: 'a', refresh: 'b', expires: 1, label: 'l' });
     if (process.platform === 'win32') {
-      expect(statSync(join(dir, 'oauth')).isDirectory()).toBe(true);
+      expect(statSync(join(dir, 'auth')).isDirectory()).toBe(true);
       return;
     }
-    const mode = statSync(join(dir, 'oauth')).mode & 0o777;
+    const mode = statSync(join(dir, 'auth')).mode & 0o777;
     expect(mode).toBe(0o700);
   });
 
   it('returns null when file is corrupt JSON', async () => {
     const { mkdirSync, writeFileSync } = await import('node:fs');
-    mkdirSync(join(dir, 'oauth'), { recursive: true });
-    writeFileSync(join(dir, 'oauth', 'anthropic.json'), '{not json');
+    mkdirSync(join(dir, 'auth'), { recursive: true });
+    writeFileSync(join(dir, 'auth', 'anthropic.json'), '{not json');
     expect(loadOAuthCredentials(dir, 'anthropic')).toBeNull();
   });
 
   it('returns null when file is missing required fields', async () => {
     const { mkdirSync, writeFileSync } = await import('node:fs');
-    mkdirSync(join(dir, 'oauth'), { recursive: true });
-    writeFileSync(join(dir, 'oauth', 'anthropic.json'), JSON.stringify({ access: 'a' }));
+    mkdirSync(join(dir, 'auth'), { recursive: true });
+    writeFileSync(join(dir, 'auth', 'anthropic.json'), JSON.stringify({ access: 'a' }));
     expect(loadOAuthCredentials(dir, 'anthropic')).toBeNull();
   });
 });

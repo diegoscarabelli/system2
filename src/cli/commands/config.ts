@@ -15,23 +15,22 @@
  *     loops.
  */
 
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { mkdir as mkdirAsync } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as p from '@clack/prompts';
-import TOML from '@iarna/toml';
 import open from 'open';
 import pc from 'picocolors';
 import { loginProvider } from '../../server/agents/oauth.js';
 import { saveOAuthCredentials } from '../../server/agents/oauth-credentials.js';
 import type { LlmKey, LlmProvider } from '../../shared/index.js';
+import { authDir, authFile, loadAuthToml } from '../utils/auth-config.js';
 import { CONFIG_FILE, SYSTEM2_DIR } from '../utils/config.js';
 import { formatOAuthAuthMessage } from '../utils/oauth-format.js';
 import {
   addKeyToApiKeyProvider,
   addProviderToApiKeysTier,
   addProviderToOAuthTier,
-  escapeTomlString,
   readApiKeysTier,
   readOAuthTier,
   removeBraveSearch,
@@ -98,6 +97,7 @@ function isDaemonRunning(system2Dir: string): boolean {
 export async function config(options: ConfigOptions = {}): Promise<void> {
   const configPath = options.configFile ?? CONFIG_FILE;
   const system2Dir = options.system2Dir ?? SYSTEM2_DIR;
+  const authPath = authFile(system2Dir);
 
   if (!existsSync(configPath)) {
     p.intro('🧠 System2 configuration');
@@ -111,19 +111,22 @@ export async function config(options: ConfigOptions = {}): Promise<void> {
     process.exit(1);
   }
 
-  // Upfront TOML validation: surface a clean parse error and exit, rather than
-  // letting any of the submenus / patchers / read* helpers crash mid-flow with
-  // a stack trace. Submenus all do their own TOML.parse calls; if any of them
-  // would fail, we'd rather catch it here at a single guarded entry point.
-  try {
-    TOML.parse(readFileSync(configPath, 'utf-8'));
-  } catch (err) {
-    p.intro('🧠 System2 configuration');
-    p.cancel(
-      `config.toml could not be parsed:\n  ${err instanceof Error ? err.message : String(err)}\n\n` +
-        'Fix the syntax error manually before running system2 config.'
-    );
-    process.exit(1);
+  // Upfront TOML validation for .auth.toml: surface a clean parse error and
+  // exit rather than letting any of the submenus / patchers crash mid-flow
+  // with a stack trace. Skipped when the file doesn't exist (the post-init,
+  // pre-config state) — patchers create it on first write.
+  if (existsSync(authPath)) {
+    try {
+      loadAuthToml(authPath);
+    } catch (err) {
+      p.intro('🧠 System2 configuration');
+      p.cancel(
+        `.auth.toml could not be parsed:\n  ${err instanceof Error ? err.message : String(err)}\n\n` +
+          `Fix the syntax error in ${authPath} manually, or delete the file and rerun ` +
+          'system2 config to recreate it.'
+      );
+      process.exit(1);
+    }
   }
 
   p.intro('🧠 System2 configuration');
@@ -149,9 +152,9 @@ export async function config(options: ConfigOptions = {}): Promise<void> {
 
     if (p.isCancel(choice) || choice === 'done') break;
 
-    if (choice === 'oauth') await oauthSubmenu(configPath, system2Dir);
-    else if (choice === 'api_keys') await apiKeysSubmenu(configPath);
-    else await servicesSubmenu(configPath);
+    if (choice === 'oauth') await oauthSubmenu(authPath, system2Dir);
+    else if (choice === 'api_keys') await apiKeysSubmenu(authPath);
+    else await servicesSubmenu(authPath);
   }
 
   p.outro(
@@ -166,11 +169,11 @@ export async function config(options: ConfigOptions = {}): Promise<void> {
 
 // ─── OAuth submenu ────────────────────────────────────────────────────────────
 
-async function oauthSubmenu(configPath: string, system2Dir: string): Promise<void> {
-  const oauthDir = join(system2Dir, 'oauth');
+async function oauthSubmenu(authPath: string, system2Dir: string): Promise<void> {
+  const oauthDir = authDir(system2Dir);
 
   while (true) {
-    const tier = readOAuthTier(configPath);
+    const tier = readOAuthTier(authPath);
     const showReorder = tier !== null && tier.fallback.length >= 2;
 
     const opts: Array<{ value: string; label: string; hint?: string }> = OAUTH_PROVIDERS.map(
@@ -197,24 +200,24 @@ async function oauthSubmenu(configPath: string, system2Dir: string): Promise<voi
 
     if (p.isCancel(target) || target === '__back__') return;
     if (target === '__reorder__') {
-      await reorderOAuthFallbacks(configPath);
+      await reorderOAuthFallbacks(authPath);
       continue;
     }
 
-    await handleOAuthProvider(configPath, system2Dir, target as LlmProvider);
+    await handleOAuthProvider(authPath, system2Dir, target as LlmProvider);
   }
 }
 
 async function handleOAuthProvider(
-  configPath: string,
+  authPath: string,
   system2Dir: string,
   target: LlmProvider
 ): Promise<void> {
-  const oauthDir = join(system2Dir, 'oauth');
+  const oauthDir = authDir(system2Dir);
   const isAlreadyLoggedIn = existsSync(join(oauthDir, `${target}.json`));
 
   if (isAlreadyLoggedIn) {
-    const tierBefore = readOAuthTier(configPath);
+    const tierBefore = readOAuthTier(authPath);
     const canPromote = tierBefore !== null && tierBefore.primary !== target;
     const action = (await p.select({
       message: `Already logged in to ${target}. What now?`,
@@ -238,15 +241,12 @@ async function handleOAuthProvider(
         p.log.info('Removal cancelled');
         return;
       }
-      await removeOAuthProviderCredentials(configPath, system2Dir, target);
+      await removeOAuthProviderCredentials(authPath, system2Dir, target);
       return;
     }
     if (action === 'promote') {
-      // Wrapped: setProviderAsPrimary throws when the on-disk [llm.oauth]
-      // shape is unusual enough that the line-anchored regex misses. An
-      // uncaught throw here would crash the interactive session.
       try {
-        const r = setProviderAsPrimary(configPath, target);
+        const r = setProviderAsPrimary(authPath, target);
         if (r.changed) p.log.info(`✓ Set ${target} as primary OAuth provider`);
         else p.log.info(`${target} was already primary — no changes`);
       } catch (err) {
@@ -295,17 +295,14 @@ async function handleOAuthProvider(
     return;
   }
 
-  // Auto-patch config.toml. The credential is useless until [llm.oauth]
-  // references it. Wrapped: addProviderToOAuthTier throws when the on-disk
-  // shape is unusual (regex misses what TOML.parse finds). We've already
-  // saved the credential file, so a throw here would leave the user with a
-  // valid OAuth credential that the runtime can't see — surface the error
-  // and return to the submenu so they can re-run after fixing config.toml,
-  // instead of crashing the whole interactive session.
+  // Auto-patch .auth.toml. The credential is useless until [llm.oauth]
+  // references it. We've already saved the credential file, so a throw here
+  // would leave the user with a valid OAuth credential that the runtime can't
+  // see — surface the error and return to the submenu instead of crashing.
   try {
-    const patchResult = addProviderToOAuthTier(configPath, target);
+    const patchResult = addProviderToOAuthTier(authPath, target);
     if (patchResult.changed) {
-      p.log.info(`✓ Updated [llm.oauth] in ${configPath}`);
+      p.log.info(`✓ Updated [llm.oauth] in ${authPath}`);
     }
   } catch (err) {
     p.log.error(err instanceof Error ? err.message : String(err));
@@ -313,7 +310,7 @@ async function handleOAuthProvider(
   }
 
   // Offer to promote, only when there's an existing different primary.
-  const tier = readOAuthTier(configPath);
+  const tier = readOAuthTier(authPath);
   if (tier && tier.primary !== target) {
     const promote = (await p.select({
       message: 'OAuth tier order:',
@@ -330,27 +327,27 @@ async function handleOAuthProvider(
       initialValue: 'keep',
     })) as 'keep' | 'promote' | symbol;
     if (!p.isCancel(promote) && promote === 'promote') {
-      const r = setProviderAsPrimary(configPath, target);
+      const r = setProviderAsPrimary(authPath, target);
       if (r.changed) p.log.info(`✓ Set ${target} as primary OAuth provider`);
     }
   }
 }
 
 async function removeOAuthProviderCredentials(
-  configPath: string,
+  authPath: string,
   system2Dir: string,
   provider: LlmProvider
 ): Promise<void> {
-  const credPath = join(system2Dir, 'oauth', `${provider}.json`);
+  const credPath = join(authDir(system2Dir), `${provider}.json`);
   if (existsSync(credPath)) {
     rmSync(credPath);
     p.log.info(`✓ Deleted ${credPath}`);
   } else {
     p.log.info(`No credentials file at ${credPath}`);
   }
-  const result = removeProviderFromOAuthTier(configPath, provider);
+  const result = removeProviderFromOAuthTier(authPath, provider);
   if (result.changed) {
-    p.log.info(`✓ Removed ${provider} from [llm.oauth] in ${configPath}`);
+    p.log.info(`✓ Removed ${provider} from [llm.oauth] in ${authPath}`);
   } else {
     p.log.info(`${provider} was not in [llm.oauth] — no config change`);
   }
@@ -358,9 +355,9 @@ async function removeOAuthProviderCredentials(
 
 // ─── API keys submenu ─────────────────────────────────────────────────────────
 
-async function apiKeysSubmenu(configPath: string): Promise<void> {
+async function apiKeysSubmenu(authPath: string): Promise<void> {
   while (true) {
-    const tier = readApiKeysTier(configPath);
+    const tier = readApiKeysTier(authPath);
     const showReorder = tier !== null && tier.fallback.length >= 2;
 
     const opts: Array<{ value: string; label: string }> = API_KEY_PROVIDERS.map((opt) => {
@@ -385,20 +382,20 @@ async function apiKeysSubmenu(configPath: string): Promise<void> {
 
     if (p.isCancel(target) || target === '__back__') return;
     if (target === '__reorder__') {
-      await reorderApiKeysFallbacks(configPath);
+      await reorderApiKeysFallbacks(authPath);
       continue;
     }
 
-    await handleApiKeyProvider(configPath, target as LlmProvider);
+    await handleApiKeyProvider(authPath, target as LlmProvider);
   }
 }
 
-async function handleApiKeyProvider(configPath: string, target: LlmProvider): Promise<void> {
-  const tier = readApiKeysTier(configPath);
+async function handleApiKeyProvider(authPath: string, target: LlmProvider): Promise<void> {
+  const tier = readApiKeysTier(authPath);
   const isConfigured = tier?.providers.has(target) ?? false;
 
   if (!isConfigured) {
-    await addNewApiKeyProvider(configPath, target);
+    await addNewApiKeyProvider(authPath, target);
     return;
   }
 
@@ -421,7 +418,7 @@ async function handleApiKeyProvider(configPath: string, target: LlmProvider): Pr
     const k = await promptForKeyAndLabel(target);
     if (!k) return;
     try {
-      addKeyToApiKeyProvider(configPath, target, k);
+      addKeyToApiKeyProvider(authPath, target, k);
       p.log.info(`✓ Added key "${k.label}" to ${target}`);
     } catch (err) {
       p.log.error(err instanceof Error ? err.message : String(err));
@@ -430,7 +427,7 @@ async function handleApiKeyProvider(configPath: string, target: LlmProvider): Pr
   }
 
   if (action === 'replace') {
-    const existingKeys = readApiKeyProviderKeys(configPath, target);
+    const existingKeys = readApiKeyProviderKeys(authPath, target);
     if (existingKeys.length === 0) return;
     const labelChoice = (await p.select({
       message: 'Which key (by label) do you want to replace?',
@@ -441,11 +438,8 @@ async function handleApiKeyProvider(configPath: string, target: LlmProvider): Pr
       message: `Enter the new key for "${labelChoice}":`,
     })) as string | symbol;
     if (p.isCancel(newKeyValue) || !newKeyValue) return;
-    // Replace in place via the dedicated patcher: works whether the provider
-    // has 1 key or many, and never mutates [llm.api_keys].primary/.fallback
-    // (the previous remove+add dance did, when only one key existed).
     try {
-      replaceKeyInApiKeyProvider(configPath, target, labelChoice as string, newKeyValue as string);
+      replaceKeyInApiKeyProvider(authPath, target, labelChoice as string, newKeyValue as string);
       p.log.info(`✓ Replaced key "${labelChoice}" for ${target}`);
     } catch (err) {
       p.log.error(err instanceof Error ? err.message : String(err));
@@ -455,7 +449,7 @@ async function handleApiKeyProvider(configPath: string, target: LlmProvider): Pr
 
   if (action === 'primary') {
     try {
-      const r = setApiKeyProviderAsPrimary(configPath, target);
+      const r = setApiKeyProviderAsPrimary(authPath, target);
       if (r.changed) p.log.info(`✓ Set ${target} as primary API-key provider`);
       else p.log.info(`${target} was already primary — no changes`);
     } catch (err) {
@@ -473,11 +467,8 @@ async function handleApiKeyProvider(configPath: string, target: LlmProvider): Pr
       p.log.info('Removal cancelled');
       return;
     }
-    // Wrapped: removeProviderFromApiKeysTier throws on unusual on-disk
-    // shapes (regex miss). An uncaught throw here would crash the
-    // interactive session right after the user confirmed.
     try {
-      const r = removeProviderFromApiKeysTier(configPath, target);
+      const r = removeProviderFromApiKeysTier(authPath, target);
       if (r.changed) p.log.info(`✓ Removed ${target} from [llm.api_keys]`);
     } catch (err) {
       p.log.error(err instanceof Error ? err.message : String(err));
@@ -485,7 +476,7 @@ async function handleApiKeyProvider(configPath: string, target: LlmProvider): Pr
   }
 }
 
-async function addNewApiKeyProvider(configPath: string, target: LlmProvider): Promise<void> {
+async function addNewApiKeyProvider(authPath: string, target: LlmProvider): Promise<void> {
   // openai-compatible needs base_url + model + compat_reasoning before the key.
   let extras: { base_url: string; model: string; compat_reasoning: boolean } | undefined;
   if (target === 'openai-compatible') {
@@ -532,34 +523,18 @@ async function addNewApiKeyProvider(configPath: string, target: LlmProvider): Pr
   }
 
   try {
-    addProviderToApiKeysTier(configPath, target, keys);
+    // Pass extras into the patcher so the provider lands atomically with
+    // base_url/model/compat_reasoning if openai-compatible. No rollback dance
+    // needed — it's a single parse → mutate → write.
+    addProviderToApiKeysTier(authPath, target, keys, extras);
   } catch (err) {
     p.log.error(err instanceof Error ? err.message : String(err));
     return;
   }
-  // openai-compatible: append base_url/model/compat_reasoning to the just-created
-  // sub-section. If the regex misses, roll back the provider add so the user
-  // doesn't end up with a half-configured openai-compatible entry.
-  if (extras) {
-    try {
-      writeOpenAICompatibleExtras(configPath, extras);
-    } catch (err) {
-      p.log.error(err instanceof Error ? err.message : String(err));
-      try {
-        removeProviderFromApiKeysTier(configPath, target);
-        p.log.info(`Rolled back partial ${target} configuration`);
-      } catch (rollbackErr) {
-        p.log.error(
-          `Failed to roll back: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`
-        );
-      }
-      return;
-    }
-  }
   p.log.info(`✓ Added ${target} to [llm.api_keys]`);
 
   // If a primary already exists, offer to promote.
-  const tier = readApiKeysTier(configPath);
+  const tier = readApiKeysTier(authPath);
   if (tier && tier.primary !== target) {
     const promote = (await p.select({
       message: 'API-key tier order:',
@@ -576,7 +551,7 @@ async function addNewApiKeyProvider(configPath: string, target: LlmProvider): Pr
       initialValue: 'keep',
     })) as 'keep' | 'promote' | symbol;
     if (!p.isCancel(promote) && promote === 'promote') {
-      const r = setApiKeyProviderAsPrimary(configPath, target);
+      const r = setApiKeyProviderAsPrimary(authPath, target);
       if (r.changed) p.log.info(`✓ Set ${target} as primary API-key provider`);
     }
   }
@@ -596,10 +571,8 @@ async function promptForKeyAndLabel(target: LlmProvider): Promise<LlmKey | null>
   return { key: key as string, label: (label as string) || 'default' };
 }
 
-function readApiKeyProviderKeys(configPath: string, provider: LlmProvider): LlmKey[] {
-  const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
-    llm?: { api_keys?: Record<string, unknown> };
-  };
+function readApiKeyProviderKeys(authPath: string, provider: LlmProvider): LlmKey[] {
+  const parsed = loadAuthToml(authPath);
   const sub = parsed.llm?.api_keys?.[provider] as { keys?: LlmKey[] } | undefined;
   return sub?.keys ?? [];
 }
@@ -639,34 +612,11 @@ async function collectOpenAICompatibleExtras(): Promise<
   };
 }
 
-function writeOpenAICompatibleExtras(
-  configPath: string,
-  extras: { base_url: string; model: string; compat_reasoning: boolean }
-): void {
-  const raw = readFileSync(configPath, 'utf-8');
-  const pattern = /(\[llm\.api_keys\.openai-compatible\][\s\S]*?keys\s*=\s*\[[\s\S]*?\n\])\n?/;
-  // base_url + model are user input; compat_reasoning is a typed boolean so it
-  // doesn't need escaping (booleans are bare TOML literals).
-  const insertion = `\nbase_url = "${escapeTomlString(extras.base_url)}"\nmodel = "${escapeTomlString(extras.model)}"\ncompat_reasoning = ${extras.compat_reasoning}\n`;
-  const match = raw.match(pattern);
-  if (!match) {
-    // Throw rather than silently return: addProviderToApiKeysTier just wrote
-    // the keys; missing extras would leave the user with a partially-configured
-    // openai-compatible provider that fails at runtime with a confusing error.
-    throw new Error(
-      `Could not locate keys array for openai-compatible in ${configPath} ` +
-        'to append base_url/model/compat_reasoning.'
-    );
-  }
-  const replacement = `${match[0].replace(/\n?$/, '')}${insertion}`;
-  writeFileSync(configPath, raw.replace(pattern, replacement));
-}
-
 // ─── Services (Brave Search) submenu ──────────────────────────────────────────
 
-async function servicesSubmenu(configPath: string): Promise<void> {
+async function servicesSubmenu(authPath: string): Promise<void> {
   while (true) {
-    const configured = isBraveSearchConfigured(configPath);
+    const configured = isBraveSearchConfigured(authPath);
     const choice = (await p.select({
       message: 'Select service:',
       options: [
@@ -678,25 +628,22 @@ async function servicesSubmenu(configPath: string): Promise<void> {
       ],
     })) as string | symbol;
     if (p.isCancel(choice) || choice === '__back__') return;
-    if (choice === 'brave') await handleBraveSearch(configPath, configured);
+    if (choice === 'brave') await handleBraveSearch(authPath, configured);
   }
 }
 
-function isBraveSearchConfigured(configPath: string): boolean {
-  if (!existsSync(configPath)) return false;
-  const parsed = TOML.parse(readFileSync(configPath, 'utf-8')) as {
-    services?: { brave_search?: { key?: string } };
-  };
+function isBraveSearchConfigured(authPath: string): boolean {
+  const parsed = loadAuthToml(authPath);
   return Boolean(parsed.services?.brave_search?.key);
 }
 
-async function handleBraveSearch(configPath: string, configured: boolean): Promise<void> {
+async function handleBraveSearch(authPath: string, configured: boolean): Promise<void> {
   if (!configured) {
     const key = (await p.password({
       message: 'Enter your Brave Search API key:',
     })) as string | symbol;
     if (p.isCancel(key) || !key) return;
-    setBraveSearchKey(configPath, key as string);
+    setBraveSearchKey(authPath, key as string);
     p.log.info('✓ Brave Search configured (web search tool enabled)');
     return;
   }
@@ -714,7 +661,7 @@ async function handleBraveSearch(configPath: string, configured: boolean): Promi
       message: 'Enter new Brave Search API key:',
     })) as string | symbol;
     if (p.isCancel(key) || !key) return;
-    setBraveSearchKey(configPath, key as string);
+    setBraveSearchKey(authPath, key as string);
     p.log.info('✓ Brave Search key replaced');
   }
   if (action === 'remove') {
@@ -723,7 +670,7 @@ async function handleBraveSearch(configPath: string, configured: boolean): Promi
       initialValue: false,
     });
     if (p.isCancel(confirmed) || !confirmed) return;
-    removeBraveSearch(configPath);
+    removeBraveSearch(authPath);
     p.log.info('✓ Brave Search removed');
   }
 }
@@ -794,24 +741,24 @@ async function reorderFallbacks(opts: ReorderOptions): Promise<void> {
   }
 }
 
-async function reorderOAuthFallbacks(configPath: string): Promise<void> {
-  const tier = readOAuthTier(configPath);
+async function reorderOAuthFallbacks(authPath: string): Promise<void> {
+  const tier = readOAuthTier(authPath);
   if (!tier) return;
   await reorderFallbacks({
     primary: tier.primary,
     fallback: tier.fallback,
     providerLabel: (id) => OAUTH_PROVIDERS.find((opt) => opt.value === id)?.label ?? id,
-    commit: (newFallback) => setOAuthFallbackOrder(configPath, newFallback as LlmProvider[]),
+    commit: (newFallback) => setOAuthFallbackOrder(authPath, newFallback as LlmProvider[]),
   });
 }
 
-async function reorderApiKeysFallbacks(configPath: string): Promise<void> {
-  const tier = readApiKeysTier(configPath);
+async function reorderApiKeysFallbacks(authPath: string): Promise<void> {
+  const tier = readApiKeysTier(authPath);
   if (!tier) return;
   await reorderFallbacks({
     primary: tier.primary,
     fallback: tier.fallback,
     providerLabel: (id) => API_KEY_PROVIDERS.find((opt) => opt.value === id)?.label ?? id,
-    commit: (newFallback) => setApiKeysFallbackOrder(configPath, newFallback as LlmProvider[]),
+    commit: (newFallback) => setApiKeysFallbackOrder(authPath, newFallback as LlmProvider[]),
   });
 }

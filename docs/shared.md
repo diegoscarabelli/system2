@@ -20,21 +20,21 @@ Types for chat messages displayed in the UI and persisted by the server.
 
 ### Configuration Types (`types/config.ts`)
 
-Types for `config.toml` settings. Used by CLI (config loading) and server (AuthResolver, AgentHost).
+Types for `config.toml` and `.auth.toml` settings. Used by CLI (config loading) and server (AuthResolver, AgentHost). LLM credentials and service keys live in `.auth.toml`; operational knobs live in `config.toml`. See [Configuration](configuration.md) for the file split.
 
 | Type | Description |
 |------|-------------|
 | `LlmProvider` | `'anthropic' \| 'openai' \| 'google'` |
 | `LlmKey` | `{ key: string, label: string }` |
-| `LlmConfig` | Primary provider, fallback order, and per-provider keys |
-| `ServicesConfig` | External service credentials (Brave Search) |
-| `ToolsConfig` | Tool feature flags (`web_search.enabled`, `web_search.max_results`) |
+| `LlmConfig` | Primary provider, fallback order, per-provider keys, and optional OAuth tier (sourced from `.auth.toml`) |
+| `ServicesConfig` | External service credentials, e.g. Brave Search (sourced from `.auth.toml`) |
+| `ToolsConfig` | Tool feature flags. `web_search.enabled` is sourced from `.auth.toml`; `web_search.max_results` is sourced from the top-level `web_search_max_results` scalar in `config.toml` |
 | `SchedulerConfig` | `daily_summary_interval_minutes` |
 | `ChatConfig` | `max_history_messages` |
 
 ### Database Types (`types/database.ts`)
 
-TypeScript interfaces matching the SQLite schema. See [Database](../database.md) for the full schema.
+TypeScript interfaces matching the SQLite schema. See [Database](database.md) for the full schema.
 
 | Type | Description |
 |------|-------------|
@@ -47,7 +47,7 @@ TypeScript interfaces matching the SQLite schema. See [Database](../database.md)
 
 ### WebSocket Protocol Types (`types/messages.ts`)
 
-Types for the WebSocket protocol between UI and server. See [WebSocket Protocol](../websocket-protocol.md) for the full specification.
+Types for the WebSocket protocol between UI and server. See [WebSocket Protocol](websocket-protocol.md) for the full specification.
 
 | Type | Description |
 |------|-------------|
@@ -56,6 +56,6 @@ Types for the WebSocket protocol between UI and server. See [WebSocket Protocol]
 
 ## See Also
 
-- [Database](../database.md): schema that these types map to
-- [WebSocket Protocol](../websocket-protocol.md): protocol using these message types
-- [Configuration](../configuration.md): config.toml structure
+- [Database](database.md): schema that these types map to
+- [WebSocket Protocol](websocket-protocol.md): protocol using these message types
+- [Configuration](configuration.md): `config.toml` and `.auth.toml` structure
