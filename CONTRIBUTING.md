@@ -109,17 +109,52 @@ Before submitting a PR, ensure:
 ### Prerequisites
 
 - Node.js >= 20
-- pnpm >= 8
-- System2 installed globally (`pnpm add -g @diegoscarabelli/system2`) and onboarded (`system2 onboard`)
+- pnpm >= 8 with its global bin dir on `PATH`. If `pnpm bin -g` errors with `ERR_PNPM_NO_GLOBAL_BIN_DIR`, run `pnpm setup` once and reopen your terminal. (Cross-platform; works on macOS/Linux/Windows.)
+- A populated `~/.system2/`. The simplest way to get this is to install the published package once and run through onboarding before working on the source:
+
+  ```bash
+  pnpm add -g @diegoscarabelli/system2
+  system2 init           # scaffolds ~/.system2/, auto-launches `system2 config`
+  system2 start          # at least once, so the daemon creates app.db, sessions/, etc.
+  system2 stop
+  ```
+
+  After this, swap the global `system2` binary for your local build (next section).
 
 ### Initial Setup
 
-Run once after cloning:
+From the repo root:
 
 ```bash
 pnpm install
 pnpm build
 ```
+
+`pnpm build` runs `tsup` (CLI/server/shared → `dist/`) and `vite build` (UI → `dist/ui/`).
+
+#### Pointing the `system2` command at your local build
+
+This is the most overlooked step for new contributors. After `pnpm build`, the published `system2` on your `PATH` is still pointing at the npm-installed 0.x.y version, not your build. You have two ways to test your changes:
+
+- **Option A — overwrite the global with your local build** (best for end-to-end testing):
+
+  ```bash
+  pnpm add -g .
+  system2 --help          # confirms it now resolves to your build
+  ```
+
+  Re-run `pnpm add -g .` after every `pnpm build` if you want the global `system2` to keep tracking your changes. (`pnpm link --global` works in principle but has known quirks where it warns "no binaries" on a freshly-built tree; `pnpm add -g .` is the more reliable path.)
+
+- **Option B — bypass the global install entirely** (simplest, no PATH coupling):
+
+  ```bash
+  node dist/cli/index.js start --foreground
+  node dist/cli/index.js init
+  node dist/cli/index.js config
+  # ...etc, prefix every command with `node dist/cli/index.js`
+  ```
+
+  Useful for ad-hoc testing without touching your global install. Note that `--foreground` runs the daemon attached to the terminal so logs stream to stdout, which is helpful while iterating.
 
 ### Development Workflow
 
