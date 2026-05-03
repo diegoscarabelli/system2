@@ -12,7 +12,12 @@ System2's agents are built on the [pi-coding-agent](https://github.com/badlogic/
 
 ## Agent Roles
 
-| Agent | Role | Lifecycle | Models |
+The "API-keys tier defaults" column shows the per-role model picked for each api-keys-tier provider when no override is set. Model selection differs sharply between tiers:
+
+- **OAuth tier** (the primary tier — tried first): *one model per provider* applied to all roles. The resolver auto-picks the current family flagship from [pi-ai's catalog](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/models.generated.ts): **Claude Opus** for `anthropic`, **GPT-5.x (codex variant)** for `openai-codex`, **GPT-5.x** for `github-copilot`. Override per provider with `[llm.oauth.<provider>] model = "..."` in `~/.system2/auth/.auth.toml`.
+- **API-keys tier** (failover): *per-role × per-provider matrix*. Defaults below; override per role with `[llm.api_keys.<provider>.models][<role>]` in `~/.system2/auth/.auth.toml`.
+
+| Agent | Role | Lifecycle | API-keys tier defaults |
 | --- | --- | --- | --- |
 | **Guide** | Primary user-facing agent. Helps brainstorm and plan, starts projects, interfaces with the multi-agent system, and relays updates. Users may also interact directly with other active agents; Guide mediation is preferred in most cases. | Singleton, persistent | claude-sonnet-4-6, gpt-4o, gemini-3.1-pro-preview |
 | **Narrator** | Maintains long-term memory: appends project logs and daily summaries, writes project stories on completion. [Schedule-driven](scheduler.md). | Singleton, persistent | claude-haiku-4-5-20251001, gpt-4o-mini, gemini-3.1-flash-lite-preview |
@@ -35,7 +40,7 @@ Each agent's identity and system instructions are defined as a Markdown file wit
 name: Guide
 description: User-facing agent
 version: "1.0"
-models:
+api_keys_models:
   anthropic: claude-sonnet-4-6
   openai: gpt-4o
   google: gemini-3.1-pro-preview
@@ -45,7 +50,13 @@ models:
 Instructions for the agent...
 ```
 
-The `models` map specifies which model to use for each LLM provider. These are defaults: users can override `models`, `thinking_level`, and `compaction_depth` per role via `[agents.<role>]` sections in config.toml. See [Configuration: Agent Overrides](configuration.md#agent-overrides).
+The `api_keys_models:` map declares the default model id per provider for the **API-keys tier only** — the OAuth tier ignores frontmatter and runs `resolveOAuthModel` (one model per provider, all roles). User overrides live in three places:
+
+- `[agents.<role>]` in `~/.system2/config.toml` for `thinking_level` and `compaction_depth` (tier-agnostic behavior knobs).
+- `[llm.api_keys.<provider>.models][<role>]` in `~/.system2/auth/.auth.toml` for per-role API-keys-tier model pins.
+- `[llm.oauth.<provider>] model = "..."` in `~/.system2/auth/.auth.toml` for an OAuth-tier model pin (one model per provider, all roles).
+
+See [Configuration: Agent Overrides](configuration.md#agent-overrides) and [Model selection](configuration.md#model-selection).
 
 ## System Prompt Construction
 
