@@ -26,6 +26,7 @@ oauth/
 
 # Runtime
 server.pid
+update-check.json
 logs/
 *.log
 
