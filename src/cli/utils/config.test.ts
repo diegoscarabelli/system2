@@ -102,6 +102,45 @@ describe('buildConfigToml', () => {
     expect(result).not.toMatch(/^\[databases\./m);
   });
 
+  it('default databases hint includes a commented password example', () => {
+    // The intro tells users db passwords belong here; the example must
+    // surface that as a supported field so users don't have to guess.
+    const result = buildConfigToml({});
+    expect(result).toMatch(/^# password = /m);
+  });
+
+  it('serializes password when provided in seeded databases', () => {
+    // Symmetric with `convertTomlDatabases`: if the loader reads `password`,
+    // the emitter must write it. Otherwise tooling that round-trips a config
+    // (load -> mutate -> emit) would silently strip the password.
+    const result = buildConfigToml({
+      databases: {
+        analytics: {
+          type: 'postgres',
+          database: 'analytics',
+          host: 'db.example.com',
+          user: 'readonly',
+          password: 's3cret',
+        },
+      },
+    });
+    expect(result).toContain('password = "s3cret"');
+  });
+
+  it('omits password line when not provided in seeded databases', () => {
+    const result = buildConfigToml({
+      databases: {
+        nopw: {
+          type: 'postgres',
+          database: 'analytics',
+          host: 'db.example.com',
+          user: 'readonly',
+        },
+      },
+    });
+    expect(result).not.toMatch(/^password = /m);
+  });
+
   it('serializes snowflake-specific fields (account, warehouse, role, schema)', () => {
     const result = buildConfigToml({
       databases: {

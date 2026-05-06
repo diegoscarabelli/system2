@@ -915,6 +915,7 @@ export function buildConfigToml(options: {
       if (conn.host !== undefined) lines.push(`host = "${conn.host}"`);
       if (conn.port !== undefined) lines.push(`port = ${conn.port}`);
       if (conn.user !== undefined) lines.push(`user = "${conn.user}"`);
+      if (conn.password !== undefined) lines.push(`password = "${conn.password}"`);
       if (conn.socket !== undefined) lines.push(`socket = "${conn.socket}"`);
       if (conn.ssl !== undefined) lines.push(`ssl = ${conn.ssl}`);
       if (conn.query_timeout !== undefined) lines.push(`query_timeout = ${conn.query_timeout}`);

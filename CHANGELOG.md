@@ -175,7 +175,8 @@ First published release.
 - Unify knowledge file commits via `commitIfStateDir` ([#125](https://github.com/diegoscarabelli/system2/pull/125))
 - Fall back to Guide when persisted agent no longer exists ([#122](https://github.com/diegoscarabelli/system2/pull/122))
 
-[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/diegoscarabelli/system2/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/diegoscarabelli/system2/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/diegoscarabelli/system2/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/diegoscarabelli/system2/compare/v0.2.0...v0.2.1
