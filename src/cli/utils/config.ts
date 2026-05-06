@@ -594,26 +594,25 @@ function levenshtein(a: string, b: string): number {
 
 /** Set of every field name that any adapter variant accepts. The loader uses
  *  this for the unknown-field warning: anything in the user's TOML that isn't
- *  in this set is reported as a typo with a did-you-mean hint. The set is
- *  derived once at module load from the broad runtime type, NOT hand-listed. */
-const KNOWN_DATABASE_FIELDS: ReadonlySet<string> = new Set([
-  'type',
-  'database',
-  'host',
-  'port',
-  'user',
-  'password',
-  'socket',
-  'ssl',
-  'query_timeout',
-  'max_rows',
-  'account',
-  'warehouse',
-  'role',
-  'schema',
-  'project',
-  'credentials_file',
-]);
+ *  in this set is reported as a typo with a did-you-mean hint. Derived once
+ *  at module load from the schema variants, so adding a field to a variant
+ *  automatically extends the recognised set. */
+const KNOWN_DATABASE_FIELDS: ReadonlySet<string> = (() => {
+  const fields = new Set<string>();
+  for (const variantSchema of Object.values(ADAPTER_SCHEMAS)) {
+    // Snowflake is `Type.Union([WithPassword, WithKeyPair])`; both variants
+    // are walked. Other variants are `Type.Object` with a `properties` map.
+    // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+    const s = variantSchema as any;
+    const variants = Array.isArray(s.anyOf) ? s.anyOf : [s];
+    for (const v of variants) {
+      if (v?.properties) {
+        for (const k of Object.keys(v.properties)) fields.add(k);
+      }
+    }
+  }
+  return fields;
+})();
 
 /**
  * Format a TypeBox validation error path + message into a single readable
@@ -646,12 +645,31 @@ function formatSchemaError(name: string, type: string | undefined, entry: object
       return `[Config] Skipping database "${name}": snowflake requires either "password" (basic auth) or "credentials_file" (key-pair auth)`;
     }
   }
-  // For non-union variants, validate against the specific variant schema so
-  // TypeBox reports the actual missing/wrong field instead of "expected
-  // union value" (which is what `Value.Errors` against the union returns).
+  // Validate against the specific variant schema so TypeBox reports the
+  // actual missing/wrong field instead of "expected union value" (which is
+  // what `Value.Errors` against the union returns). Snowflake's variant is
+  // itself a `Type.Union`; for non-special-cased snowflake errors we walk
+  // both inner variants and pick the one with the fewest errors (the
+  // closest match), so a wrong-type error on `warehouse` reports usefully
+  // instead of bottoming out at "expected union value" again.
   const variantSchema = ADAPTER_SCHEMAS[type as AdapterType];
-  const errors = Array.from(Value.Errors(variantSchema, entry));
-  const first = errors[0];
+  // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+  const variants = Array.isArray((variantSchema as any).anyOf)
+    ? // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+      ((variantSchema as any).anyOf as unknown[])
+    : [variantSchema];
+  type TbError = { path: string; message: string };
+  let bestErrors: TbError[] = [];
+  let bestCount = Number.POSITIVE_INFINITY;
+  for (const v of variants) {
+    // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+    const errors = [...Value.Errors(v as any, entry)] as unknown as TbError[];
+    if (errors.length < bestCount) {
+      bestCount = errors.length;
+      bestErrors = errors;
+    }
+  }
+  const first = bestErrors[0];
   if (first) {
     const path = first.path ? first.path.replace(/^\//, '').replace(/\//g, '.') : '<root>';
     // TypeBox reports missing required fields as "Expected required property"

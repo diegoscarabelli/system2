@@ -14,7 +14,8 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   applyToDocsSource,
@@ -22,7 +23,11 @@ import {
   generateDatabaseReference,
 } from './databases-reference-generator.js';
 
-const REPO_ROOT = join(import.meta.dirname, '..', '..', '..');
+// `import.meta.dirname` was added in Node 20.11; the repo declares
+// `engines.node >= 20`, so derive the directory from `import.meta.url`
+// instead — that path works on every Node 20.x release.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(HERE, '..', '..', '..');
 const SKILL_PATH = join(
   REPO_ROOT,
   'src',

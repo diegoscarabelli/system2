@@ -264,7 +264,7 @@ export const ADAPTER_CREDENTIAL_FALLBACKS: Record<AdapterType, string> = {
   clickhouse:
     'Server-side default credentials (driver defaults to user `default` with empty password).',
   snowflake:
-    'Either `password` (basic auth) or `credentials_file` pointing at a private key (key-pair auth) must be set. `SNOWFLAKE_PASSWORD` env var is also honoured by the SDK if neither is in the TOML.',
+    'Either `password` (basic auth) or `credentials_file` pointing at a private key (key-pair auth) must be set in the TOML. The schema rejects entries with neither at startup, so the snowflake-sdk `SNOWFLAKE_PASSWORD` env-var fallback is not reachable through this loader.',
   bigquery:
     'Application Default Credentials (ADC) via `gcloud auth application-default login`, or `GOOGLE_APPLICATION_CREDENTIALS` env var.',
   sqlite: 'No credentials needed (local file).',

@@ -314,7 +314,7 @@ database = "md:my_md_db"
 | `mysql` | `~/.my.cnf` `[client]` section, `MYSQL_PWD` env var |
 | `mssql` | No native fallback; `password` is required. |
 | `clickhouse` | Server-side default credentials (driver defaults to user `default` with empty password). |
-| `snowflake` | Either `password` (basic auth) or `credentials_file` pointing at a private key (key-pair auth) must be set. `SNOWFLAKE_PASSWORD` env var is also honoured by the SDK if neither is in the TOML. |
+| `snowflake` | Either `password` (basic auth) or `credentials_file` pointing at a private key (key-pair auth) must be set in the TOML. The schema rejects entries with neither at startup, so the snowflake-sdk `SNOWFLAKE_PASSWORD` env-var fallback is not reachable through this loader. |
 | `bigquery` | Application Default Credentials (ADC) via `gcloud auth application-default login`, or `GOOGLE_APPLICATION_CREDENTIALS` env var. |
 | `sqlite` | No credentials needed (local file). |
 | `duckdb` | No credentials needed (local file). For MotherDuck, set `MOTHERDUCK_TOKEN` env var. |
