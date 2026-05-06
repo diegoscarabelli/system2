@@ -383,6 +383,125 @@ describe('convertTomlDatabases', () => {
     });
     expect(result.pg?.password).toBe('');
   });
+
+  describe('schema-driven validation', () => {
+    // These tests cover the behaviors gained when the loader switched to
+    // TypeBox validation against `databases-schema.ts`. The diagnostics they
+    // exercise didn't exist on the imperative loader — pre-0.3.2 the entries
+    // would either silently load broken or fail later at adapter-connect.
+
+    it('rejects mssql entry missing user/password with a structured error', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        sqlserver: { type: 'mssql', database: 'app', host: 'sql.example.com' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Skipping database "sqlserver".*(user|password)/)
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('rejects bigquery entry missing project', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        bq: { type: 'bigquery', database: 'my_dataset' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Skipping database "bq".*project/)
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('rejects snowflake entry missing account with the snowflake-specific message', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        snow: { type: 'snowflake', user: 'analyst', password: 's3cret' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('missing required field "account" for type "snowflake"')
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('rejects snowflake entry with neither password nor credentials_file', () => {
+      // Snowflake's union of {password-required} | {credentials_file-required}
+      // is special-cased so users get a useful "missing one of" error instead
+      // of TypeBox's default "no variant matched".
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        snow: { type: 'snowflake', account: 'acct', user: 'analyst' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'snowflake requires either "password" (basic auth) or "credentials_file"'
+        )
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('accepts snowflake with password (basic auth variant)', () => {
+      const result = convertTomlDatabases({
+        snow: {
+          type: 'snowflake',
+          account: 'acct',
+          user: 'analyst',
+          password: 's3cret',
+        },
+      });
+      expect(result.snow?.account).toBe('acct');
+      expect(result.snow?.password).toBe('s3cret');
+    });
+
+    it('accepts snowflake with credentials_file (key-pair auth variant)', () => {
+      const result = convertTomlDatabases({
+        snow: {
+          type: 'snowflake',
+          account: 'acct',
+          user: 'analyst',
+          credentials_file: '/path/to/key.p8',
+        },
+      });
+      expect(result.snow?.account).toBe('acct');
+      expect(result.snow?.credentials_file).toBe('/path/to/key.p8');
+    });
+
+    it('warns on unknown fields with a did-you-mean hint', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        pg: { type: 'postgres', database: 'db', user: 'reader', passw: 's3cret' },
+      });
+      // Entry still loads (lax-on-extras), but the typo is logged.
+      expect(result.pg?.user).toBe('reader');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Unknown field "passw".*Did you mean "password"/)
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('rejects entries with non-string `type`', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        bad: { type: 42, database: 'x' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('rejects entries with unknown `type` value', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        bad: { type: 'mongodb', database: 'x' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Skipping database "bad"'));
+      warnSpy.mockRestore();
+    });
+  });
 });
 
 describe('convertTomlAgents', () => {

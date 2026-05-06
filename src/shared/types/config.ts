@@ -118,11 +118,29 @@ export interface KnowledgeConfig {
   budget_chars: number;
 }
 
+/**
+ * Database connection runtime type — broad union of all fields across all
+ * adapter variants. Adapters access this directly; fields they don't need
+ * are simply ignored.
+ *
+ * The TypeBox schema in `databases-schema.ts` is the **validation** source
+ * of truth (per-adapter required-vs-optional split, used by the loader to
+ * accept or reject TOML entries) and the **documentation** source of truth
+ * (per-adapter reference auto-generated for the agent skill and human docs).
+ * This interface mirrors the union of every variant's fields — see the
+ * compile-time guard near `convertTomlDatabases` in `src/cli/utils/config.ts`,
+ * which forces this interface to stay in sync with the schema.
+ */
 export interface DatabaseConnectionConfig {
   type: string;
   host?: string;
   port?: number;
-  database: string;
+  // `database` is optional at the broad-interface level because some adapter
+  // variants (snowflake) accept entries without it — the session can issue
+  // `USE database` per-query. Adapters whose drivers require `database` (e.g.
+  // postgres, mysql, sqlite, duckdb) enforce that via the schema; by the time
+  // a config reaches an adapter, schema validation has already accepted it.
+  database?: string;
   user?: string;
   password?: string;
   socket?: string;

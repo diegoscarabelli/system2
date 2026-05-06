@@ -12,4 +12,5 @@ export * from './oauth-models.js';
 export * from './types/chat.js';
 export * from './types/config.js';
 export * from './types/database.js';
+export * from './types/databases-schema.js';
 export * from './types/messages.js';
