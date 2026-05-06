@@ -450,37 +450,132 @@ When the `password` field is omitted, drivers fall back to their native credenti
 
 ### Configuration fields
 
-**Common fields** (all types):
+The per-adapter field tables and credential-fallback table below are auto-generated from `src/shared/types/databases-schema.ts` (the single source of truth for validation and documentation). Do not edit content between `<!-- BEGIN auto-generated:* -->` markers by hand — run `pnpm generate:db-reference` after a schema change. CI fails if the on-disk content drifts from the schema.
 
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `type` | yes | -- | Database type (see supported types table) |
-| `database` | yes | -- | Database name, file path (sqlite/duckdb), or dataset (bigquery) |
-| `host` | no | `localhost` | Server hostname or IP (postgres, mysql, mssql, clickhouse) |
-| `port` | no | Driver default | Server port (postgres: 5432, mysql: 3306, mssql: 1433, clickhouse: 8123) |
-| `user` | no | Current OS user | Authentication user |
-| `password` | no | -- | Authentication password (postgres, mysql, mssql, clickhouse) |
-| `socket` | no | -- | Unix domain socket path, overrides host/port (postgres, mysql) |
-| `ssl` | no | `false` | Enable SSL/TLS (postgres, mysql, mssql, clickhouse) |
-| `query_timeout` | no | `30` | Query timeout in seconds |
-| `max_rows` | no | `10000` | Maximum rows returned per query |
+<!-- BEGIN auto-generated:database-fields -->
 
-**Snowflake-specific fields:**
+**postgres:**
 
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `account` | yes | -- | Account identifier (e.g. `xy12345.us-east-1`) |
-| `warehouse` | no | -- | Compute warehouse |
-| `role` | no | -- | Security role |
-| `schema` | no | -- | Default schema |
-| `credentials_file` | no | -- | Path to private key file (key-pair auth) |
+| Field | Required | Notes |
+|-------|----------|-------|
+| `type` | yes |  |
+| `database` | yes | Database name |
+| `host` | no | Defaults to `localhost` |
+| `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
+| `password` | no | Falls back to `~/.pgpass`, `PGPASSWORD` env var |
+| `port` | no | Defaults to `5432` |
+| `query_timeout` | no | Seconds; defaults `30` |
+| `socket` | no | Unix domain socket path; overrides host/port |
+| `ssl` | no | Enable SSL/TLS; defaults `false` |
+| `user` | no | Defaults to current OS user |
 
-**BigQuery-specific fields:**
+**mysql:**
 
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `project` | yes | -- | GCP project ID |
-| `credentials_file` | no | -- | Path to service account JSON (falls back to ADC) |
+| Field | Required | Notes |
+|-------|----------|-------|
+| `type` | yes |  |
+| `database` | yes | Database name |
+| `host` | no | Defaults to `localhost` |
+| `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
+| `password` | no | Falls back to `~/.my.cnf` `[client]` section, `MYSQL_PWD` env var |
+| `port` | no | Defaults to `3306` |
+| `query_timeout` | no | Seconds; defaults `30` |
+| `socket` | no | Unix domain socket path |
+| `ssl` | no | Enable SSL/TLS; defaults `false` |
+| `user` | no | Defaults to current OS user |
+
+**mssql:**
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `type` | yes |  |
+| `database` | yes | Database name |
+| `password` | yes | Required (no native fallback for tedious) |
+| `user` | yes | Required (no native fallback for tedious) |
+| `host` | no | Defaults to `localhost` |
+| `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
+| `port` | no | Defaults to `1433` |
+| `query_timeout` | no | Seconds; defaults `30` |
+| `ssl` | no | Controls `encrypt`; defaults `false` |
+
+**clickhouse:**
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `type` | yes |  |
+| `database` | yes | Database name |
+| `host` | no | Defaults to `localhost` |
+| `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
+| `password` | no | Defaults to empty (the `default` user typically has empty password) |
+| `port` | no | Defaults to `8123` (HTTP) or `8443` (HTTPS) |
+| `query_timeout` | no | Seconds; defaults `30` |
+| `ssl` | no | Selects `https` protocol |
+| `user` | no | Defaults to `default` |
+
+**snowflake:**
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `type` | yes |  |
+| `database` | no | Default database (sessions can issue `USE database` per-query) |
+| `account` | yes | Account identifier (e.g. `xy12345.us-east-1`) |
+| `user` | yes | Authentication username |
+| `credentials_file` | one-of | Path to PEM private key (key-pair auth alternative to password) |
+| `password` | one-of | Basic auth password |
+| `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
+| `query_timeout` | no | Seconds; defaults `30` |
+| `role` | no | Default security role |
+| `schema` | no | Default schema |
+| `warehouse` | no | Default virtual warehouse |
+
+**bigquery:**
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `type` | yes |  |
+| `database` | yes | BigQuery dataset name |
+| `project` | yes | GCP project ID |
+| `credentials_file` | no | Path to service-account JSON. Falls back to ADC (`GOOGLE_APPLICATION_CREDENTIALS` env var or `gcloud auth application-default login`) |
+| `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
+| `query_timeout` | no | Seconds; defaults `30` |
+
+**sqlite:**
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `type` | yes |  |
+| `database` | yes | Filepath to the `.db`/`.sqlite`/`.sqlite3` file |
+| `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
+
+**duckdb:**
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `type` | yes |  |
+| `database` | yes | Filepath, or `:memory:`, or `md:<dbname>` for MotherDuck |
+| `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
+| `query_timeout` | no | Seconds; defaults `30` |
+
+<!-- END auto-generated:database-fields -->
+
+#### Credential handling
+
+When `password` (or its equivalent) is omitted, drivers fall back to native credential mechanisms:
+
+<!-- BEGIN auto-generated:credential-fallback -->
+
+| `type` | Credential fallback when `password` (or its equivalent) is omitted |
+|---|---|
+| `postgres` | `~/.pgpass`, `PGPASSWORD` env var |
+| `mysql` | `~/.my.cnf` `[client]` section, `MYSQL_PWD` env var |
+| `mssql` | No native fallback; `password` is required. |
+| `clickhouse` | Server-side default credentials (driver defaults to user `default` with empty password). |
+| `snowflake` | Either `password` (basic auth) or `credentials_file` pointing at a private key (key-pair auth) must be set. `SNOWFLAKE_PASSWORD` env var is also honoured by the SDK if neither is in the TOML. |
+| `bigquery` | Application Default Credentials (ADC) via `gcloud auth application-default login`, or `GOOGLE_APPLICATION_CREDENTIALS` env var. |
+| `sqlite` | No credentials needed (local file). |
+| `duckdb` | No credentials needed (local file). For MotherDuck, set `MOTHERDUCK_TOKEN` env var. |
+
+<!-- END auto-generated:credential-fallback -->
 
 For postgres and mysql, `host`, `port`, `database`, and `user` follow the same semantics as the native client tools (`psql`, `mysql`). For sqlite and duckdb, `database` is the file path. For bigquery, `database` is the dataset name.
 

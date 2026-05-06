@@ -23,40 +23,48 @@
 
 import { type Static, Type } from '@sinclair/typebox';
 
-/** Reusable optional-number fields used across adapters. The schema only
- *  enforces type (number); the loader applies range clamping for
- *  `max_rows` and discards out-of-range `query_timeout` / `port` so that a
- *  config with a typo (e.g. `port = 0`) loads with a warning rather than
- *  failing the whole entry. Range expectations are documented in the
- *  per-adapter reference. */
-const QueryTimeout = Type.Optional(Type.Number());
-const MaxRows = Type.Optional(Type.Number());
-const Port = Type.Optional(Type.Number());
+// (Numeric range constraints intentionally not in the schema. The loader
+// applies range clamping for `max_rows` and discards out-of-range
+// `query_timeout` / `port` so a typo'd `port = 0` doesn't reject the whole
+// entry. Range expectations are surfaced via per-field `description`
+// annotations and the auto-generated reference table.)
 
 const PostgresSchema = Type.Object({
   type: Type.Literal('postgres'),
-  database: Type.String(),
-  host: Type.Optional(Type.String()),
-  port: Port,
-  user: Type.Optional(Type.String()),
-  password: Type.Optional(Type.String()),
-  socket: Type.Optional(Type.String()),
-  ssl: Type.Optional(Type.Boolean()),
-  query_timeout: QueryTimeout,
-  max_rows: MaxRows,
+  database: Type.String({ description: 'Database name' }),
+  host: Type.Optional(Type.String({ description: 'Defaults to `localhost`' })),
+  port: Type.Optional(Type.Number({ description: 'Defaults to `5432`' })),
+  user: Type.Optional(Type.String({ description: 'Defaults to current OS user' })),
+  password: Type.Optional(
+    Type.String({ description: 'Falls back to `~/.pgpass`, `PGPASSWORD` env var' })
+  ),
+  socket: Type.Optional(
+    Type.String({ description: 'Unix domain socket path; overrides host/port' })
+  ),
+  ssl: Type.Optional(Type.Boolean({ description: 'Enable SSL/TLS; defaults `false`' })),
+  query_timeout: Type.Optional(Type.Number({ description: 'Seconds; defaults `30`' })),
+  max_rows: Type.Optional(
+    Type.Number({ description: 'Per-query row cap; defaults `10000`, max `1000000`' })
+  ),
 });
 
 const MysqlSchema = Type.Object({
   type: Type.Literal('mysql'),
-  database: Type.String(),
-  host: Type.Optional(Type.String()),
-  port: Port,
-  user: Type.Optional(Type.String()),
-  password: Type.Optional(Type.String()),
-  socket: Type.Optional(Type.String()),
-  ssl: Type.Optional(Type.Boolean()),
-  query_timeout: QueryTimeout,
-  max_rows: MaxRows,
+  database: Type.String({ description: 'Database name' }),
+  host: Type.Optional(Type.String({ description: 'Defaults to `localhost`' })),
+  port: Type.Optional(Type.Number({ description: 'Defaults to `3306`' })),
+  user: Type.Optional(Type.String({ description: 'Defaults to current OS user' })),
+  password: Type.Optional(
+    Type.String({
+      description: 'Falls back to `~/.my.cnf` `[client]` section, `MYSQL_PWD` env var',
+    })
+  ),
+  socket: Type.Optional(Type.String({ description: 'Unix domain socket path' })),
+  ssl: Type.Optional(Type.Boolean({ description: 'Enable SSL/TLS; defaults `false`' })),
+  query_timeout: Type.Optional(Type.Number({ description: 'Seconds; defaults `30`' })),
+  max_rows: Type.Optional(
+    Type.Number({ description: 'Per-query row cap; defaults `10000`, max `1000000`' })
+  ),
 });
 
 /** mssql requires `user` and `password` because tedious has no native
@@ -65,26 +73,34 @@ const MysqlSchema = Type.Object({
  *  the typical local-development case. */
 const MssqlSchema = Type.Object({
   type: Type.Literal('mssql'),
-  database: Type.String(),
-  user: Type.String(),
-  password: Type.String(),
-  host: Type.Optional(Type.String()),
-  port: Port,
-  ssl: Type.Optional(Type.Boolean()),
-  query_timeout: QueryTimeout,
-  max_rows: MaxRows,
+  database: Type.String({ description: 'Database name' }),
+  user: Type.String({ description: 'Required (no native fallback for tedious)' }),
+  password: Type.String({ description: 'Required (no native fallback for tedious)' }),
+  host: Type.Optional(Type.String({ description: 'Defaults to `localhost`' })),
+  port: Type.Optional(Type.Number({ description: 'Defaults to `1433`' })),
+  ssl: Type.Optional(Type.Boolean({ description: 'Controls `encrypt`; defaults `false`' })),
+  query_timeout: Type.Optional(Type.Number({ description: 'Seconds; defaults `30`' })),
+  max_rows: Type.Optional(
+    Type.Number({ description: 'Per-query row cap; defaults `10000`, max `1000000`' })
+  ),
 });
 
 const ClickhouseSchema = Type.Object({
   type: Type.Literal('clickhouse'),
-  database: Type.String(),
-  host: Type.Optional(Type.String()),
-  port: Port,
-  user: Type.Optional(Type.String()),
-  password: Type.Optional(Type.String()),
-  ssl: Type.Optional(Type.Boolean()),
-  query_timeout: QueryTimeout,
-  max_rows: MaxRows,
+  database: Type.String({ description: 'Database name' }),
+  host: Type.Optional(Type.String({ description: 'Defaults to `localhost`' })),
+  port: Type.Optional(Type.Number({ description: 'Defaults to `8123` (HTTP) or `8443` (HTTPS)' })),
+  user: Type.Optional(Type.String({ description: 'Defaults to `default`' })),
+  password: Type.Optional(
+    Type.String({
+      description: 'Defaults to empty (the `default` user typically has empty password)',
+    })
+  ),
+  ssl: Type.Optional(Type.Boolean({ description: 'Selects `https` protocol' })),
+  query_timeout: Type.Optional(Type.Number({ description: 'Seconds; defaults `30`' })),
+  max_rows: Type.Optional(
+    Type.Number({ description: 'Per-query row cap; defaults `10000`, max `1000000`' })
+  ),
 });
 
 /** Snowflake enforces "at least one of password or credentials_file" via a
@@ -96,54 +112,79 @@ const ClickhouseSchema = Type.Object({
  *  the default "no variant matched". */
 const SnowflakeWithPassword = Type.Object({
   type: Type.Literal('snowflake'),
-  account: Type.String(),
-  user: Type.String(),
-  password: Type.String(),
-  database: Type.Optional(Type.String()),
-  warehouse: Type.Optional(Type.String()),
-  role: Type.Optional(Type.String()),
-  schema: Type.Optional(Type.String()),
-  credentials_file: Type.Optional(Type.String()),
-  query_timeout: QueryTimeout,
-  max_rows: MaxRows,
+  account: Type.String({ description: 'Account identifier (e.g. `xy12345.us-east-1`)' }),
+  user: Type.String({ description: 'Authentication username' }),
+  password: Type.String({ description: 'Basic auth password' }),
+  database: Type.Optional(
+    Type.String({ description: 'Default database (sessions can issue `USE database` per-query)' })
+  ),
+  warehouse: Type.Optional(Type.String({ description: 'Default virtual warehouse' })),
+  role: Type.Optional(Type.String({ description: 'Default security role' })),
+  schema: Type.Optional(Type.String({ description: 'Default schema' })),
+  credentials_file: Type.Optional(
+    Type.String({ description: 'Path to PEM private key (key-pair auth alternative to password)' })
+  ),
+  query_timeout: Type.Optional(Type.Number({ description: 'Seconds; defaults `30`' })),
+  max_rows: Type.Optional(
+    Type.Number({ description: 'Per-query row cap; defaults `10000`, max `1000000`' })
+  ),
 });
 
 const SnowflakeWithKeyPair = Type.Object({
   type: Type.Literal('snowflake'),
-  account: Type.String(),
-  user: Type.String(),
-  credentials_file: Type.String(),
-  password: Type.Optional(Type.String()),
-  database: Type.Optional(Type.String()),
-  warehouse: Type.Optional(Type.String()),
-  role: Type.Optional(Type.String()),
-  schema: Type.Optional(Type.String()),
-  query_timeout: QueryTimeout,
-  max_rows: MaxRows,
+  account: Type.String({ description: 'Account identifier (e.g. `xy12345.us-east-1`)' }),
+  user: Type.String({ description: 'Authentication username' }),
+  credentials_file: Type.String({
+    description: 'Path to PEM private key (sets `authenticator = "SNOWFLAKE_JWT"`)',
+  }),
+  password: Type.Optional(Type.String({ description: 'Basic auth alternative to key-pair' })),
+  database: Type.Optional(
+    Type.String({ description: 'Default database (sessions can issue `USE database` per-query)' })
+  ),
+  warehouse: Type.Optional(Type.String({ description: 'Default virtual warehouse' })),
+  role: Type.Optional(Type.String({ description: 'Default security role' })),
+  schema: Type.Optional(Type.String({ description: 'Default schema' })),
+  query_timeout: Type.Optional(Type.Number({ description: 'Seconds; defaults `30`' })),
+  max_rows: Type.Optional(
+    Type.Number({ description: 'Per-query row cap; defaults `10000`, max `1000000`' })
+  ),
 });
 
 const SnowflakeSchema = Type.Union([SnowflakeWithPassword, SnowflakeWithKeyPair]);
 
 const BigQuerySchema = Type.Object({
   type: Type.Literal('bigquery'),
-  project: Type.String(),
-  database: Type.String(),
-  credentials_file: Type.Optional(Type.String()),
-  query_timeout: QueryTimeout,
-  max_rows: MaxRows,
+  project: Type.String({ description: 'GCP project ID' }),
+  database: Type.String({ description: 'BigQuery dataset name' }),
+  credentials_file: Type.Optional(
+    Type.String({
+      description:
+        'Path to service-account JSON. Falls back to ADC (`GOOGLE_APPLICATION_CREDENTIALS` env var or `gcloud auth application-default login`)',
+    })
+  ),
+  query_timeout: Type.Optional(Type.Number({ description: 'Seconds; defaults `30`' })),
+  max_rows: Type.Optional(
+    Type.Number({ description: 'Per-query row cap; defaults `10000`, max `1000000`' })
+  ),
 });
 
 const SqliteSchema = Type.Object({
   type: Type.Literal('sqlite'),
-  database: Type.String(),
-  max_rows: MaxRows,
+  database: Type.String({ description: 'Filepath to the `.db`/`.sqlite`/`.sqlite3` file' }),
+  max_rows: Type.Optional(
+    Type.Number({ description: 'Per-query row cap; defaults `10000`, max `1000000`' })
+  ),
 });
 
 const DuckDbSchema = Type.Object({
   type: Type.Literal('duckdb'),
-  database: Type.String(),
-  query_timeout: QueryTimeout,
-  max_rows: MaxRows,
+  database: Type.String({
+    description: 'Filepath, or `:memory:`, or `md:<dbname>` for MotherDuck',
+  }),
+  query_timeout: Type.Optional(Type.Number({ description: 'Seconds; defaults `30`' })),
+  max_rows: Type.Optional(
+    Type.Number({ description: 'Per-query row cap; defaults `10000`, max `1000000`' })
+  ),
 });
 
 /** Union of all adapter variants. Validation against this union picks the
