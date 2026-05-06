@@ -555,6 +555,23 @@ export function convertTomlSession(toml: NonNullable<TomlConfigFile['session']>)
 }
 
 /**
+ * Compile-time coverage guard: `TomlConfigFile['databases'][string]` must list
+ * every key of `DatabaseConnectionConfig`. Adding a field to the runtime type
+ * without also adding it to the TOML interface (and copying it in
+ * `convertTomlDatabases` below) will fail to compile here, preventing the
+ * silent-drop class that produced the 0.3.1 `password` fix.
+ *
+ * This guard does NOT verify the body of `convertTomlDatabases`. A
+ * schema-driven loader is the architecturally complete fix and is tracked
+ * separately; until then, reviewers must also check that any new field is
+ * copied imperatively in the loop below.
+ */
+type _DatabaseTomlEntry = NonNullable<TomlConfigFile['databases']>[string];
+type _MissingDatabaseTomlFields = Exclude<keyof DatabaseConnectionConfig, keyof _DatabaseTomlEntry>;
+const _databaseTomlCoverage: [_MissingDatabaseTomlFields] extends [never] ? true : never = true;
+void _databaseTomlCoverage;
+
+/**
  * Convert TOML databases section to DatabasesConfig.
  * Entries missing required fields (type, database) are skipped with a warning.
  */
