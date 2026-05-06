@@ -546,16 +546,29 @@ export function convertTomlSession(toml: NonNullable<TomlConfigFile['session']>)
 }
 
 /**
- * Compile-time coverage guard: every value the schema validator accepts must
- * be assignable to the broad `DatabaseConnectionConfig` interface. If a field
- * is added to a schema variant without also being added to the broad
- * interface, this fails to compile, since adapters and the emitter consume
- * the broad interface and would otherwise lose type access to the new field.
+ * Compile-time coverage guard: every key that appears on any schema variant
+ * must also be a key on the broad `DatabaseConnectionConfig` interface.
+ * Adapters and the emitter consume the broad interface; if a new schema
+ * field is introduced without exposing it on the interface, code that tries
+ * to read it ends up with a `TS2339 Property '...' does not exist` error
+ * downstream — and the structural cause goes uncaught. This guard surfaces
+ * it at the schema's site instead.
+ *
+ * Implementation note: a naive
+ * `ValidatedDatabaseConnection extends DatabaseConnectionConfig` check
+ * does NOT work, because TypeScript's `extends` only enforces that the
+ * subtype has every required property of the supertype — extra properties
+ * on the subtype are accepted, so a schema field missing from the broad
+ * interface would slip through silently. The distributive `_AllSchemaKeys`
+ * collects every key across every union variant; the `Exclude` then names
+ * any key that's missing from the interface.
  */
-type _DatabaseSchemaCoverage = ValidatedDatabaseConnection extends DatabaseConnectionConfig
-  ? true
-  : never;
-const _databaseSchemaCoverage: _DatabaseSchemaCoverage = true;
+type _AllSchemaKeys<T> = T extends unknown ? keyof T : never;
+type _MissingFromDatabaseConfig = Exclude<
+  _AllSchemaKeys<ValidatedDatabaseConnection>,
+  keyof DatabaseConnectionConfig
+>;
+const _databaseSchemaCoverage: [_MissingFromDatabaseConfig] extends [never] ? true : never = true;
 void _databaseSchemaCoverage;
 
 /** Levenshtein edit distance for did-you-mean suggestions on field-name typos.
