@@ -171,14 +171,16 @@ function isContextOverflow(message: string): boolean {
  *
  * See: https://docs.anthropic.com/en/api/errors
  */
-const ANTHROPIC_ERROR_TYPE_TO_STATUS: Record<string, number> = {
+const ANTHROPIC_ERROR_TYPE_TO_STATUS: Partial<Record<string, number>> = {
   invalid_request_error: 400,
   authentication_error: 401,
+  billing_error: 402,
   permission_error: 403,
   not_found_error: 404,
   request_too_large: 413,
   rate_limit_error: 429,
   api_error: 500,
+  timeout_error: 504,
   overloaded_error: 529,
 };
 

@@ -237,6 +237,22 @@ describe('categorizeError', () => {
       expect(categorizeError({ message: body })).toBe('client');
     });
 
+    it('returns "client" for billing_error envelope (HTTP 402 equivalent)', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'billing_error', message: 'Billing issue' },
+      });
+      expect(categorizeError({ message: body })).toBe('client');
+    });
+
+    it('returns "transient" for timeout_error envelope (HTTP 504 equivalent)', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'timeout_error', message: 'Request timed out' },
+      });
+      expect(categorizeError({ message: body })).toBe('transient');
+    });
+
     it('regression: real Anthropic 500 envelope classifies as transient (not unknown)', () => {
       // Verbatim shape captured from the SDK in 2026-05-06 incident.
       const body =
