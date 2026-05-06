@@ -825,7 +825,7 @@ export function buildConfigToml(options: {
     '#',
     '# LLM credentials (OAuth + API keys) and service credentials live in a',
     '# separate file: ~/.system2/auth/.auth.toml, managed by `system2 config`.',
-    '# Do not put credentials here — the loader does not read them from this file.',
+    '# Do not put credentials here: the loader does not read them from this file.',
     '#',
     '# Changes apply on daemon restart.',
     '# Permissions: 0600 (owner read/write only).',
