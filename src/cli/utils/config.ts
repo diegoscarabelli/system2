@@ -128,6 +128,7 @@ interface TomlConfigFile {
       port?: number;
       database?: string;
       user?: string;
+      password?: string;
       socket?: string;
       ssl?: boolean;
       query_timeout?: number;
@@ -578,6 +579,7 @@ export function convertTomlDatabases(
     if (entry.host !== undefined) conn.host = entry.host;
     if (entry.port !== undefined) conn.port = entry.port;
     if (entry.user !== undefined) conn.user = entry.user;
+    if (entry.password !== undefined) conn.password = entry.password;
     if (entry.socket !== undefined) conn.socket = entry.socket;
     if (entry.ssl !== undefined) conn.ssl = entry.ssl;
     if (entry.query_timeout !== undefined) {
@@ -816,9 +818,16 @@ export function buildConfigToml(options: {
     '# operational defaults (backup, logs, scheduler, chat, knowledge, session,',
     '# delivery, web_search_max_results).',
     '#',
-    '# LLM credentials (OAuth + API keys) and service credentials live in a',
-    '# separate file: ~/.system2/auth/.auth.toml, managed by `system2 config`.',
-    '# Do not put credentials here — the loader does not read them from this file.',
+    '# LLM credentials (OAuth tokens, API keys) and service credentials (e.g.',
+    '# Brave Search) live in a separate file: ~/.system2/auth/.auth.toml,',
+    '# managed by `system2 config`. Do not put LLM or service credentials here',
+    '# — the loader does not read them from this file.',
+    '#',
+    '# Database passwords are an exception: they belong here, on the matching',
+    '# `[databases.<name>].password` field. This file is created with 0600',
+    '# permissions and ~/.system2/ is git-ignored, so personal-use storage is',
+    '# safe. If you prefer, leave `password` unset and rely on each driver’s',
+    '# native fallback (e.g. ~/.pgpass, ~/.my.cnf, MYSQL_PWD).',
     '#',
     '# Changes apply on daemon restart.',
     '# Permissions: 0600 (owner read/write only).',
@@ -903,6 +912,9 @@ export function buildConfigToml(options: {
     lines.push('# port = 5432');
     lines.push('# database = "mydb"');
     lines.push('# user = "readonly"');
+    lines.push(
+      '# password = "..."               # optional; if omitted, drivers fall back to ~/.pgpass, ~/.my.cnf, MYSQL_PWD, etc.'
+    );
     lines.push('');
   }
 

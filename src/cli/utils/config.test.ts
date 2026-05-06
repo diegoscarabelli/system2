@@ -323,6 +323,27 @@ describe('convertTomlDatabases', () => {
     expect(conn?.project).toBe('p');
     expect(conn?.credentials_file).toBe('/path/to/creds.json');
   });
+
+  it('passes through the password field', () => {
+    const result = convertTomlDatabases({
+      pg: { type: 'postgres', database: 'db', user: 'reader', password: 's3cret' },
+    });
+    expect(result.pg?.password).toBe('s3cret');
+  });
+
+  it('omits password when not set, leaving driver native fallbacks (e.g. ~/.pgpass) in charge', () => {
+    const result = convertTomlDatabases({
+      pg: { type: 'postgres', database: 'db', user: 'reader' },
+    });
+    expect(result.pg?.password).toBeUndefined();
+  });
+
+  it('preserves empty-string password (driver decides whether to treat as missing)', () => {
+    const result = convertTomlDatabases({
+      pg: { type: 'postgres', database: 'db', user: 'reader', password: '' },
+    });
+    expect(result.pg?.password).toBe('');
+  });
 });
 
 describe('convertTomlAgents', () => {
