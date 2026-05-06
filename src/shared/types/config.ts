@@ -141,7 +141,7 @@ export interface DatabasesConfig {
   [name: string]: DatabaseConnectionConfig;
 }
 
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high';
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export interface AgentOverrideConfig {
   thinking_level?: ThinkingLevel;

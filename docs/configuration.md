@@ -24,7 +24,7 @@ System2 settings are split across two files in 0.3.0. `~/.system2/config.toml` h
 #
 # LLM credentials (OAuth + API keys) and service credentials live in a
 # separate file: ~/.system2/auth/.auth.toml, managed by `system2 config`.
-# Do not put credentials here — the loader does not read them from this file.
+# Do not put credentials here: the loader does not read them from this file.
 #
 # Changes apply on daemon restart.
 # Permissions: 0600 (owner read/write only).
@@ -38,7 +38,7 @@ System2 settings are split across two files in 0.3.0. `~/.system2/config.toml` h
 # Uncomment and edit to customize.
 #
 # [agents.conductor]
-# thinking_level = "high"             # off | minimal | low | medium | high
+# thinking_level = "high"             # off | minimal | low | medium | high | xhigh
 # compaction_depth = 8                # keep N auto-compactions in sliding window
 
 # ════════════════════════════════════════════════════════════════════════
@@ -367,7 +367,7 @@ Each agent role (guide, conductor, narrator, reviewer, worker) has default setti
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `thinking_level` | `off`, `minimal`, `low`, `medium`, `high` | Extended-thinking depth for the agent's LLM calls. Tier-agnostic. |
+| `thinking_level` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` | Extended-thinking depth for the agent's LLM calls. Tier-agnostic. `xhigh` is gracefully degraded by pi-ai on models that don't support it (Sonnet 4.6 and earlier Claude, older OpenAI/Bedrock targets clamp to `high`); on Opus 4.6+ and gpt-5.2+ it unlocks the model's adaptive `max`/`xhigh` reasoning effort. |
 | `compaction_depth` | integer >= 0 | Number of auto-compactions before pruning old context (0 disables). Tier-agnostic. |
 
 All fields are optional. Only specified fields override the library defaults.
