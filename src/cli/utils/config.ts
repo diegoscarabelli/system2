@@ -601,7 +601,14 @@ export function convertTomlDatabases(
   return databases;
 }
 
-const VALID_THINKING_LEVELS = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high']);
+const VALID_THINKING_LEVELS = new Set<ThinkingLevel>([
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
 
 /**
  * Convert TOML agents section to AgentsConfig.
@@ -849,7 +856,9 @@ export function buildConfigToml(options: {
     lines.push('# Model pins live in .auth.toml (managed by `system2 config`).');
     lines.push('#');
     lines.push('# [agents.conductor]');
-    lines.push('# thinking_level = "high"              # off | minimal | low | medium | high');
+    lines.push(
+      '# thinking_level = "high"              # off | minimal | low | medium | high | xhigh'
+    );
     lines.push(
       '# compaction_depth = 8                 # keep N auto-compactions in sliding window'
     );
