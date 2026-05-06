@@ -361,6 +361,13 @@ describe('convertTomlAgents', () => {
     expect(result).toEqual({ conductor: { thinking_level: 'low' } });
   });
 
+  it('accepts xhigh thinking_level', () => {
+    const result = convertTomlAgents({
+      guide: { thinking_level: 'xhigh' },
+    });
+    expect(result).toEqual({ guide: { thinking_level: 'xhigh' } });
+  });
+
   it('ignores invalid thinking_level with warning', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = convertTomlAgents({

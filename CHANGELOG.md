@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.1] - 2026-05-06
 
+### Added
+
+- `xhigh` is now a valid `thinking_level` for `[agents.<role>]` overrides in `config.toml`. Routes through pi-ai's adaptive thinking: on Opus 4.7 it maps to native `xhigh`, on Opus 4.6 to `max`, on gpt-5.2+ to `max`; on models without an extended tier (Sonnet 4.6 and earlier Claude, older OpenAI/Bedrock) it gracefully degrades to `high`. Library defaults are unchanged; opt in per role.
+
 ### Fixed
 
 - Anthropic 5xx errors (`api_error`, `overloaded_error`) were classified as `unknown` instead of `transient` because the Pi SDK surfaces them as a JSON-stringified body with no numeric HTTP status (e.g. `{"type":"error","error":{"type":"api_error","message":"Internal Server Error"},"request_id":"..."}`), and the loose `\b(4\d{2}|5\d{2})\b` regex in `extractStatusCode` had nothing to match. `extractStatusCode` now parses the JSON envelope and maps Anthropic's documented `error.type` values back to HTTP status codes (`api_error` → 500, `overloaded_error` → 529, `authentication_error` → 401, etc.), so all error.type variants flow through the existing status-code switch in `categorizeError`. This restores the expected retry budget on a transient brownout: same-provider retries are attempted before falling over to the next credential.
