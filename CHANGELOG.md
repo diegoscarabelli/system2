@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-06
+
 ### Added
 
 - `xhigh` is now a valid `thinking_level` for `[agents.<role>]` overrides in `config.toml`. Routes through pi-ai's adaptive thinking: on Opus 4.7 it maps to native `xhigh`, on Opus 4.6 to `max`, on gpt-5.2+ to `max`; on models without an extended tier (Sonnet 4.6 and earlier Claude, older OpenAI/Bedrock) it gracefully degrades to `high`. Library defaults are unchanged; opt in per role.
+
+### Fixed
+
+- Anthropic 5xx errors (`api_error`, `overloaded_error`) were classified as `unknown` instead of `transient` because the Pi SDK surfaces them as a JSON-stringified body with no numeric HTTP status (e.g. `{"type":"error","error":{"type":"api_error","message":"Internal Server Error"},"request_id":"..."}`), and the loose `\b(4\d{2}|5\d{2})\b` regex in `extractStatusCode` had nothing to match. `extractStatusCode` now parses the JSON envelope and maps Anthropic's documented `error.type` values back to HTTP status codes (`api_error` → 500, `overloaded_error` → 529, `authentication_error` → 401, etc.), so all error.type variants flow through the existing status-code switch in `categorizeError`. This restores the expected retry budget on a transient brownout: same-provider retries are attempted before falling over to the next credential.
+- Database passwords set in `~/.system2/config.toml` (e.g. `[databases.<name>] password = "..."`) were silently dropped by the loader. The `TomlConfigFile.databases` interface didn't list `password`, and `convertTomlDatabases` didn't copy it into the runtime `DatabaseConnectionConfig` — even though the runtime types and every adapter (postgres, mysql, mssql, clickhouse) expect it. Symptom: a user followed `docs/configuration.md` (which documents `password` as the primary credential source), saw their dashboard fail to authenticate, and had no log line explaining why. Now `password` is read from TOML and forwarded to the adapter. When the field is omitted, drivers continue to fall back to their native credential mechanisms (e.g. `~/.pgpass`, `~/.my.cnf`, `MYSQL_PWD`, `MSSQL_PASSWORD`) as documented. The `config.toml` template intro and `[databases.mydb]` example were updated to clarify that LLM/service credentials live in `.auth.toml` while database passwords belong here. A compile-time coverage guard was added to `convertTomlDatabases`: any field added to `DatabaseConnectionConfig` without also being added to `TomlConfigFile.databases` will now fail `tsc`, preventing the same silent-drop class from recurring.
 
 ## [0.3.0] - 2026-05-01
 
@@ -168,7 +175,8 @@ First published release.
 - Unify knowledge file commits via `commitIfStateDir` ([#125](https://github.com/diegoscarabelli/system2/pull/125))
 - Fall back to Guide when persisted agent no longer exists ([#122](https://github.com/diegoscarabelli/system2/pull/122))
 
-[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/diegoscarabelli/system2/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/diegoscarabelli/system2/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/diegoscarabelli/system2/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/diegoscarabelli/system2/compare/v0.2.0...v0.2.1

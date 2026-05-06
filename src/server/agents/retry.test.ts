@@ -182,6 +182,96 @@ describe('categorizeError', () => {
       'context_overflow'
     );
   });
+
+  describe('Anthropic structured error.type bodies', () => {
+    // Pi SDK surfaces Anthropic errors as a JSON-stringified body without an HTTP
+    // status code. The body's `error.type` field is the documented API contract
+    // and must drive classification when no numeric status is present.
+
+    it('returns "transient" for api_error envelope (HTTP 500 equivalent)', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'api_error', message: 'Internal Server Error' },
+        request_id: 'req_abc',
+      });
+      expect(categorizeError({ message: body })).toBe('transient');
+    });
+
+    it('returns "transient" for overloaded_error envelope (HTTP 529 equivalent)', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'overloaded_error', message: 'Overloaded' },
+      });
+      expect(categorizeError({ message: body })).toBe('transient');
+    });
+
+    it('returns "auth" for authentication_error envelope (HTTP 401 equivalent)', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'authentication_error', message: 'Invalid authentication credentials' },
+      });
+      expect(categorizeError({ message: body })).toBe('auth');
+    });
+
+    it('returns "auth" for permission_error envelope (HTTP 403 equivalent)', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'permission_error', message: 'Permission denied' },
+      });
+      expect(categorizeError({ message: body })).toBe('auth');
+    });
+
+    it('returns "rate_limit" for rate_limit_error envelope (HTTP 429 equivalent)', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'rate_limit_error', message: 'Rate limit exceeded' },
+      });
+      expect(categorizeError({ message: body })).toBe('rate_limit');
+    });
+
+    it('returns "client" for invalid_request_error envelope (HTTP 400 equivalent)', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'invalid_request_error', message: 'Invalid request' },
+      });
+      expect(categorizeError({ message: body })).toBe('client');
+    });
+
+    it('returns "client" for billing_error envelope (HTTP 402 equivalent)', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'billing_error', message: 'Billing issue' },
+      });
+      expect(categorizeError({ message: body })).toBe('client');
+    });
+
+    it('returns "transient" for timeout_error envelope (HTTP 504 equivalent)', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'timeout_error', message: 'Request timed out' },
+      });
+      expect(categorizeError({ message: body })).toBe('transient');
+    });
+
+    it('regression: real Anthropic 500 envelope classifies as transient (not unknown)', () => {
+      // Verbatim shape captured from the SDK in 2026-05-06 incident.
+      const body =
+        '{"type":"error","error":{"details":{"error_visibility":"user_facing"},"type":"api_error","message":"Internal Server Error"},"request_id":"req_011Camdga25FvhTDmAVuFhKo"       }';
+      expect(categorizeError({ message: body })).toBe('transient');
+    });
+
+    it('returns "unknown" for unrecognized error.type values', () => {
+      const body = JSON.stringify({
+        type: 'error',
+        error: { type: 'unrecognised_future_error', message: 'something new' },
+      });
+      expect(categorizeError({ message: body })).toBe('unknown');
+    });
+
+    it('ignores malformed JSON in the message body', () => {
+      expect(categorizeError({ message: '{not valid json' })).toBe('unknown');
+    });
+  });
 });
 
 describe('isWireSizeOverflow', () => {

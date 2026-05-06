@@ -128,6 +128,7 @@ interface TomlConfigFile {
       port?: number;
       database?: string;
       user?: string;
+      password?: string;
       socket?: string;
       ssl?: boolean;
       query_timeout?: number;
@@ -554,6 +555,23 @@ export function convertTomlSession(toml: NonNullable<TomlConfigFile['session']>)
 }
 
 /**
+ * Compile-time coverage guard: `TomlConfigFile['databases'][string]` must list
+ * every key of `DatabaseConnectionConfig`. Adding a field to the runtime type
+ * without also adding it to the TOML interface (and copying it in
+ * `convertTomlDatabases` below) will fail to compile here, preventing the
+ * silent-drop class that produced the 0.3.1 `password` fix.
+ *
+ * This guard does NOT verify the body of `convertTomlDatabases`. A
+ * schema-driven loader is the architecturally complete fix and is tracked
+ * separately; until then, reviewers must also check that any new field is
+ * copied imperatively in the loop below.
+ */
+type _DatabaseTomlEntry = NonNullable<TomlConfigFile['databases']>[string];
+type _MissingDatabaseTomlFields = Exclude<keyof DatabaseConnectionConfig, keyof _DatabaseTomlEntry>;
+const _databaseTomlCoverage: [_MissingDatabaseTomlFields] extends [never] ? true : never = true;
+void _databaseTomlCoverage;
+
+/**
  * Convert TOML databases section to DatabasesConfig.
  * Entries missing required fields (type, database) are skipped with a warning.
  */
@@ -578,6 +596,7 @@ export function convertTomlDatabases(
     if (entry.host !== undefined) conn.host = entry.host;
     if (entry.port !== undefined) conn.port = entry.port;
     if (entry.user !== undefined) conn.user = entry.user;
+    if (entry.password !== undefined) conn.password = entry.password;
     if (entry.socket !== undefined) conn.socket = entry.socket;
     if (entry.ssl !== undefined) conn.ssl = entry.ssl;
     if (entry.query_timeout !== undefined) {
@@ -823,9 +842,18 @@ export function buildConfigToml(options: {
     '# operational defaults (backup, logs, scheduler, chat, knowledge, session,',
     '# delivery, web_search_max_results).',
     '#',
-    '# LLM credentials (OAuth + API keys) and service credentials live in a',
-    '# separate file: ~/.system2/auth/.auth.toml, managed by `system2 config`.',
-    '# Do not put credentials here: the loader does not read them from this file.',
+    '# LLM credentials (OAuth tokens, API keys) and service credentials (e.g.',
+    '# Brave Search) live in a separate file: ~/.system2/auth/.auth.toml,',
+    '# managed by `system2 config`. Do not put LLM or service credentials here:',
+    '# the loader does not read them from this file.',
+    '#',
+    '# Database passwords are an exception: they belong here, on the matching',
+    '# `[databases.<name>].password` field. This file is created with 0600',
+    '# permissions and `config.toml` is listed in `~/.system2/.gitignore` (the',
+    '# git repo System2 initializes inside its own data directory), so',
+    '# personal-use storage is safe. If you prefer, leave `password` unset and',
+    '# rely on each driver native fallback (e.g. ~/.pgpass, ~/.my.cnf,',
+    '# MYSQL_PWD).',
     '#',
     '# Changes apply on daemon restart.',
     '# Permissions: 0600 (owner read/write only).',
@@ -887,6 +915,7 @@ export function buildConfigToml(options: {
       if (conn.host !== undefined) lines.push(`host = "${conn.host}"`);
       if (conn.port !== undefined) lines.push(`port = ${conn.port}`);
       if (conn.user !== undefined) lines.push(`user = "${conn.user}"`);
+      if (conn.password !== undefined) lines.push(`password = "${conn.password}"`);
       if (conn.socket !== undefined) lines.push(`socket = "${conn.socket}"`);
       if (conn.ssl !== undefined) lines.push(`ssl = ${conn.ssl}`);
       if (conn.query_timeout !== undefined) lines.push(`query_timeout = ${conn.query_timeout}`);
@@ -912,6 +941,9 @@ export function buildConfigToml(options: {
     lines.push('# port = 5432');
     lines.push('# database = "mydb"');
     lines.push('# user = "readonly"');
+    lines.push(
+      '# password = "..."               # optional; if omitted, drivers fall back to ~/.pgpass, ~/.my.cnf, MYSQL_PWD, etc.'
+    );
     lines.push('');
   }
 

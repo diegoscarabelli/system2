@@ -159,6 +159,52 @@ function isContextOverflow(message: string): boolean {
 }
 
 /**
+ * Anthropic error.type → HTTP status code mapping.
+ *
+ * The Pi SDK surfaces Anthropic API errors as a JSON-stringified body without
+ * an accompanying status code, e.g.
+ * `{"type":"error","error":{"type":"api_error","message":"Internal Server Error"},"request_id":"..."}`.
+ * The body's `error.type` field is part of Anthropic's documented API contract,
+ * so we map it back to the HTTP status code the response would have carried.
+ * Relying on the structured field is more resilient than text-matching the
+ * human-readable message string.
+ *
+ * See: https://docs.anthropic.com/en/api/errors
+ */
+const ANTHROPIC_ERROR_TYPE_TO_STATUS: Partial<Record<string, number>> = {
+  invalid_request_error: 400,
+  authentication_error: 401,
+  billing_error: 402,
+  permission_error: 403,
+  not_found_error: 404,
+  request_too_large: 413,
+  rate_limit_error: 429,
+  api_error: 500,
+  timeout_error: 504,
+  overloaded_error: 529,
+};
+
+/**
+ * Try to extract an HTTP status code from a structured error envelope embedded
+ * in a string. Currently recognizes Anthropic-style
+ * `{"error":{"type":"<error_type>"}}` JSON bodies.
+ */
+function extractStatusFromErrorBody(message: string): number | undefined {
+  const jsonStart = message.indexOf('{');
+  if (jsonStart === -1) return undefined;
+  try {
+    const parsed = JSON.parse(message.slice(jsonStart));
+    const errorType = (parsed as { error?: { type?: unknown } } | null)?.error?.type;
+    if (typeof errorType === 'string') {
+      return ANTHROPIC_ERROR_TYPE_TO_STATUS[errorType];
+    }
+  } catch {
+    // Not a JSON body, fall through.
+  }
+  return undefined;
+}
+
+/**
  * Extract HTTP status code from various error formats.
  */
 export function extractStatusCode(error: unknown): number | undefined {
@@ -179,6 +225,13 @@ export function extractStatusCode(error: unknown): number | undefined {
 
   // Parse from error message (common in API errors)
   const message = extractErrorMessage(error);
+
+  // Structured envelope (e.g. Anthropic's `{"error":{"type":"api_error"}}`)
+  // before the loose 4xx/5xx regex: a JSON-stringified body with no numeric
+  // prefix would otherwise fall through to "unknown".
+  const fromBody = extractStatusFromErrorBody(message);
+  if (fromBody) return fromBody;
+
   const match = message.match(/\b(4\d{2}|5\d{2})\b/);
   if (match) return parseInt(match[1], 10);
 
