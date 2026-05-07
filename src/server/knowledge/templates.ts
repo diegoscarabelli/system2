@@ -49,8 +49,8 @@ export const INFRASTRUCTURE_TEMPLATE = `# Infrastructure
 > gotchas, and how System2 typically queries it.
 >
 > **Roles:**
-> - \`read_only\` (password): read-only access for System2 queries and dashboards. Credentials in \`~/.system2/config.toml [databases.example]\`.
-> - \`app_writer\` (password): read-write access for ETL pipelines. Credentials in \`~/repos/my_pipelines/.env\`.
+> - \`read_only\` (password): read-only access for System2 queries and dashboards. Credentials in \`~/.system2/config.toml [databases.example]\` (set the \`password\` field directly there).
+> - \`app_writer\` (password): read-write access for ETL pipelines. Credentials managed by the pipeline framework — record the actual location here when known (e.g. a credentials JSON in the IaC repo, a secret manager, or a per-pipeline \`.env\` if used).
 
 ## Data Repositories
 
