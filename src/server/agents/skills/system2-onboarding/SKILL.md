@@ -123,61 +123,7 @@ psql -U postgres -c "SELECT extversion FROM pg_extension WHERE extname = 'timesc
 
 **After install**: verify the connection works (`psql -U postgres -c "SELECT 1;"`) and note the version in `infrastructure.md`. Database creation, schema initialization, and IAM configuration happen in step 7c after the pipeline repository is cloned, using the scaffold's DDL scripts (`database.ddl`, `schemas.ddl`, `iam.sql`).
 
-For each database discovered or installed, perform two additional actions:
-
-**Install the database driver** into `~/.system2/node_modules/` so the server can connect at runtime. One command per database type in the stack:
-```bash
-npm install --prefix ~/.system2 pg                    # PostgreSQL, TimescaleDB, CockroachDB
-npm install --prefix ~/.system2 mysql2                 # MySQL, MariaDB
-npm install --prefix ~/.system2 mssql                  # SQL Server, Azure SQL
-npm install --prefix ~/.system2 @clickhouse/client     # ClickHouse
-npm install --prefix ~/.system2 duckdb                 # DuckDB, MotherDuck
-npm install --prefix ~/.system2 snowflake-sdk          # Snowflake
-npm install --prefix ~/.system2 @google-cloud/bigquery # BigQuery
-# SQLite: no install needed (built-in)
-```
-
-**Write a config entry** to `~/.system2/config.toml` for each database in the data stack (generally one). These entries are used by System2's server for read-only querying: agents use them via the `query_database` tool, and HTML dashboard artifacts query through them. Pipelines manage their own database connections independently. Because System2 only reads, use a read-only database user (not the pipeline's write user). Database connections live in `config.toml` (the operational file), not in `auth/.auth.toml` (which is reserved for `system2 config`-managed LLM and service credentials). Read `~/.system2/config.toml` first, then use the `edit` tool to insert a `[databases.<name>]` section immediately after the commented-out `[databases.mydb]` example block, keeping database entries grouped together. Do NOT use `append: true` (it dumps entries at the bottom, far from the databases section header). NEVER use the `write` tool on config.toml as it replaces the entire file and will destroy existing sections (per-agent overrides, other database entries, operational defaults). Use the database name directly as the section key (e.g. `[databases.lens]`), not prefixed with `system2_` or any other namespace. Note: the name `system2` is reserved for the built-in app database; never create a `[databases.system2]` section (it will be silently ignored). Passwords can be included directly in config.toml. Examples:
-
-```toml
-[databases.my_postgres]
-type = "postgres"
-host = "localhost"
-port = 5432
-database = "analytics"
-user = "readonly"
-password = "secret"
-
-# Cloud services use account/project instead of host/port
-[databases.my_snowflake]
-type = "snowflake"
-account = "xy12345.us-east-1"   # resolves to xy12345.us-east-1.snowflakecomputing.com
-database = "ANALYTICS"
-warehouse = "COMPUTE_WH"
-user = "analyst"
-role = "ANALYST"
-# password via SNOWFLAKE_PASSWORD env var, or use credentials_file for key-pair auth
-
-[databases.my_bigquery]
-type = "bigquery"
-project = "my-project-123"
-database = "my_dataset"          # BigQuery dataset name
-credentials_file = "/path/to/service-account.json"  # or use gcloud ADC
-```
-
-For SQLite and DuckDB, only `type` and `database` (the file path) are needed:
-
-```toml
-[databases.my_sqlite]
-type = "sqlite"
-database = "/path/to/data.db"
-
-[databases.my_duckdb]
-type = "duckdb"
-database = "/path/to/analysis.duckdb"
-```
-
-After writing the config entries, verify each connection works by using the `bash` tool to run a simple test query (e.g. `SELECT 1`). If a connection fails, troubleshoot with the user before moving on.
+For each database discovered or installed, install its driver and write a `[databases.<name>]` config entry. **REQUIRED SUB-SKILL: `editing-config-toml`** for the per-adapter required/optional fields, the editing protocol (read-then-edit, never `write`), the driver install commands, and per-adapter TOML examples. After writing each entry, restart the daemon (`system2 restart`) and verify with a simple test query (e.g. `SELECT 1`).
 
 #### 7b. Pipeline repository
 

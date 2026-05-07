@@ -15,7 +15,9 @@ import { commitIfStateDir } from './git-commit.js';
 
 const mockHomedir = vi.mocked(homedir);
 
-describe('commitIfStateDir', () => {
+// Synchronous git operations against a tempdir; Windows runners can exceed
+// the 5s default under load. Bumped block-wide so any test in here is safe.
+describe('commitIfStateDir', { timeout: 15000 }, () => {
   let fakeHome: string;
   let system2Dir: string;
 

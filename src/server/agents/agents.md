@@ -290,17 +290,16 @@ For ad-hoc SQL not covered by the named operations above (bulk updates, complex 
 
 Most content is git-tracked. `app.db`, `sessions/`, `logs/`, `venv/`, and `config.toml` are gitignored.
 
-### Configuration (`config.toml`)
+### Configuration (`config.toml` and `auth/.auth.toml`)
 
-`~/.system2/config.toml` is the single configuration file for System2. It contains API keys, so it has `0600` permissions and is gitignored. Sections, in order:
+System2 settings live in two files under `~/.system2/`:
 
-- **`[llm]` and `[llm.<provider>]`**: LLM providers, API keys, primary/fallback order, and provider-specific settings (e.g. OpenRouter routing, OpenAI-compatible endpoint).
-- **`[agents.<role>]`**: Per-role overrides for `thinking_level` and `compaction_depth`. Per-role model pins live separately in `[llm.api_keys.<provider>.models]` (api-keys tier) or `[llm.oauth.<provider>] model = "..."` (OAuth tier). These take precedence over the defaults in agent library frontmatter (`api_keys_models:`).
-- **`[services.*]` and `[tools.*]`**: Service credentials (Brave Search) and tool settings (web search).
-- **`[databases.<name>]`**: External database connections. Each entry declares a `type` (postgres, mysql, sqlite, mssql, clickhouse, duckdb, snowflake, bigquery), connection parameters (`host`, `port`, `database`, `user`, etc.), and optional settings (`query_timeout`, `max_rows`, `ssl`). Credentials are not stored here; they go in native credential files (e.g. `~/.pgpass`). The `<name>` key is the identifier used everywhere in System2: in the postMessage bridge's `database` field for HTML artifact live queries, and in `infrastructure.md` where the Guide documents the user's data stack. These must match. Each configured database also needs its Node.js driver package installed in `~/.system2/node_modules/` (e.g. `npm install --prefix ~/.system2 pg` for postgres). If the user adds a new database after onboarding, the Guide should confirm the connection details with the user, write the `[databases.<name>]` entry in `config.toml`, install the driver, and update `infrastructure.md`.
-- **Operational sections** (`[backup]`, `[session]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`): Housekeeping defaults that rarely need adjustment.
+- **`config.toml`** holds operational settings — `[agents.<role>]` behavior overrides, `[databases.<name>]` external database connections, and operational tunables. The `[databases.<name>]` blocks are for **read-only analytical access**: the postMessage bridge and the `query_database` tool reject mutations, so the credentials configured here belong to the database's read-only role (never the pipeline's write user). The `password` field in `[databases.<name>]` IS read by the loader and passed to the adapter; storing the read-only password there is the standard path. Pipeline write credentials live elsewhere (managed by the pipeline framework). Hand-edited; agents touch the database section via the **`editing-config-toml`** skill (per-adapter schema, editing protocol, troubleshooting).
+- **`auth/.auth.toml`** holds LLM credentials (OAuth + API keys), service credentials, and the web-search toggle. Written exclusively by `system2 config`; never hand-edit it.
 
-Agents do not read `config.toml` directly. The server parses it at startup and threads the resolved configuration to AgentHost, AuthResolver, and the query bridge. Agents learn about the user's databases from `infrastructure.md`, which is refreshed into the system prompt on every LLM call.
+Agents don't read either file directly — the server parses them at startup. Agents learn about the user's databases from `infrastructure.md`, which is refreshed into the system prompt every LLM call. The `[databases.<name>]` key in `config.toml` and the `<name>` heading in `infrastructure.md` must match: the postMessage bridge and `query_database` tool both look up by that name.
+
+When a new database is added, the workflow is: write the `[databases.<name>]` block (editing-config-toml skill), install the Node.js driver in `~/.system2/node_modules/` (e.g. `npm install --prefix ~/.system2 pg`), and update `infrastructure.md`. The Guide is the primary curator of `infrastructure.md`, but the Conductor edits it too whenever project work surfaces new stack or credential information.
 
 ### Artifacts
 
@@ -452,9 +451,40 @@ Daily summaries are append-only files covering all system activity. Project logs
 
 Three knowledge files are injected into every agent's context and re-read from disk on every LLM call. Changes take effect immediately.
 
-- **`infrastructure.md`**: the user's technical environment: databases, servers, pipeline orchestrators, repositories, deployed services, credentials layout. Curated by the Guide during onboarding and updated as infrastructure evolves.
+- **`infrastructure.md`**: the user's technical environment: databases, servers, pipeline orchestrators, repositories, deployed services, credentials layout. Curated by the Guide during onboarding and updated as infrastructure evolves. The Conductor co-edits when project work surfaces new stack components.
 - **`user.md`**: the user profile: background, technical expertise, domain knowledge, goals, communication preferences, working patterns. Curated by the Guide.
 - **`memory.md`**: general-purpose long-term memory for knowledge that does not belong in `infrastructure.md`, `user.md`, a role-specific file, or a skill. This is the **last place** to consider, not the first. The Narrator maintains the bulk of the file, consolidating observations during the scheduled `memory-update` job. Non-Narrator agents must limit their edits to appending entries under the `## Latest Learnings` section, which acts as a buffer. The Narrator is the sole curator of the file as a whole: during memory-update it incorporates buffered entries into the main body, clears `## Latest Learnings`, and restructures for clarity. A YAML frontmatter tracks `last_narrator_update_ts`.
+
+**Editing convention for `infrastructure.md` and `user.md`** (the templated shared files):
+
+The templates use `>` blockquotes as **section instructions** — they describe how to fill that section, what fields are useful, and what shape the content should take. Treat blockquotes as durable scaffolding for future agents, not as placeholder text to be replaced. Concretely:
+
+- **Keep the blockquote intact.** Never delete it. A future agent extending the section needs to see the same instruction you saw.
+- **Put content BELOW the blockquote, in normal markdown.** Not inside it. Not jammed up against it.
+- **Separate with a blank line.** The blockquote is the instruction; what follows is the content. The blank line makes the boundary visible at a glance.
+
+Example of the right shape:
+
+```markdown
+## Databases
+
+> One subsection per database. Each starts with a JSON block describing the
+> database itself (engine, version, deployment, connection fields), followed
+> by prose covering what lives in it, schemas, retention, and quirks.
+
+### lens
+
+```json
+{ "engine": "postgresql + timescaledb", "version": "17.5", ... }
+```
+
+Prose describing the lens database: what it stores, retention, quirks.
+```
+
+Wrong shapes to avoid:
+- Putting content *inside* the blockquote (turns the instruction into prose, then it reads as content and gets corrupted on the next edit).
+- Replacing the blockquote with content (loses the instruction; future agents have nothing to anchor on when extending).
+- No blank line between blockquote and content (visually ambiguous; the next editor can't tell where instruction ends and content starts).
 
 ### Role-Specific Knowledge Files
 

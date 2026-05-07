@@ -163,6 +163,25 @@ describe('buildConfigToml', () => {
     expect(result).toContain('schema = "PUBLIC"');
   });
 
+  it('omits the database line when not provided (snowflake without default DB)', () => {
+    // Regression: previously emitted `database = "undefined"` because
+    // `database` is optional on the broad runtime interface (snowflake
+    // can omit it and rely on `USE database` per query) but the emitter
+    // unconditionally interpolated `${conn.database}`.
+    const result = buildConfigToml({
+      databases: {
+        snow: {
+          type: 'snowflake',
+          account: 'xy12345.us-east-1',
+          user: 'analyst',
+          warehouse: 'COMPUTE_WH',
+        },
+      },
+    });
+    expect(result).not.toContain('database =');
+    expect(result).not.toContain('undefined');
+  });
+
   it('serializes bigquery-specific fields (project, credentials_file)', () => {
     const result = buildConfigToml({
       databases: {
@@ -333,9 +352,9 @@ describe('convertTomlDatabases', () => {
     expect(result.ok?.max_rows).toBe(500);
   });
 
-  it('passes through optional fields (socket, ssl, snowflake, bigquery)', () => {
+  it('passes through postgres-valid optional fields (socket, ssl)', () => {
     const result = convertTomlDatabases({
-      full: {
+      pg: {
         type: 'postgres',
         database: 'db',
         host: 'h',
@@ -343,24 +362,76 @@ describe('convertTomlDatabases', () => {
         user: 'u',
         socket: '/tmp/.s.PGSQL.5432',
         ssl: true,
+      },
+    });
+    const conn = result.pg;
+    expect(conn).toBeDefined();
+    expect(conn?.socket).toBe('/tmp/.s.PGSQL.5432');
+    expect(conn?.ssl).toBe(true);
+  });
+
+  it('strips fields that belong to other adapters from a postgres entry', () => {
+    // Pre-0.3.2 the imperative loader copied any "known on some adapter"
+    // field through regardless of the entry's `type`, so a postgres entry
+    // with `account = "..."` would carry a snowflake-only field into the
+    // runtime DatabaseConnectionConfig. The schema-driven loader matches
+    // the entry against postgres specifically and strips fields not on
+    // that variant, so adapters never see unexpected keys.
+    const result = convertTomlDatabases({
+      pg: {
+        type: 'postgres',
+        database: 'db',
+        host: 'h',
+        port: 5432,
+        // Fields that belong to other adapter variants:
         account: 'acct',
         warehouse: 'wh',
-        role: 'r',
-        schema: 's',
         project: 'p',
         credentials_file: '/path/to/creds.json',
       },
     });
-    const conn = result.full;
+    const conn = result.pg;
     expect(conn).toBeDefined();
-    expect(conn?.socket).toBe('/tmp/.s.PGSQL.5432');
-    expect(conn?.ssl).toBe(true);
+    expect(conn?.host).toBe('h');
+    expect(conn?.port).toBe(5432);
+    // Other-adapter fields are absent on the runtime object:
+    expect(conn?.account).toBeUndefined();
+    expect(conn?.warehouse).toBeUndefined();
+    expect(conn?.project).toBeUndefined();
+    expect(conn?.credentials_file).toBeUndefined();
+  });
+
+  it('passes through snowflake-valid fields on a snowflake entry', () => {
+    const result = convertTomlDatabases({
+      snow: {
+        type: 'snowflake',
+        account: 'acct',
+        user: 'analyst',
+        password: 'secret',
+        warehouse: 'wh',
+        role: 'r',
+        schema: 's',
+      },
+    });
+    const conn = result.snow;
+    expect(conn).toBeDefined();
     expect(conn?.account).toBe('acct');
     expect(conn?.warehouse).toBe('wh');
     expect(conn?.role).toBe('r');
     expect(conn?.schema).toBe('s');
-    expect(conn?.project).toBe('p');
-    expect(conn?.credentials_file).toBe('/path/to/creds.json');
+  });
+
+  it('passes through bigquery credentials_file', () => {
+    const result = convertTomlDatabases({
+      bq: {
+        type: 'bigquery',
+        project: 'my-project',
+        database: 'my_dataset',
+        credentials_file: '/path/to/creds.json',
+      },
+    });
+    expect(result.bq?.project).toBe('my-project');
+    expect(result.bq?.credentials_file).toBe('/path/to/creds.json');
   });
 
   it('passes through the password field', () => {
@@ -382,6 +453,125 @@ describe('convertTomlDatabases', () => {
       pg: { type: 'postgres', database: 'db', user: 'reader', password: '' },
     });
     expect(result.pg?.password).toBe('');
+  });
+
+  describe('schema-driven validation', () => {
+    // These tests cover the behaviors gained when the loader switched to
+    // TypeBox validation against `databases-schema.ts`. The diagnostics they
+    // exercise didn't exist on the imperative loader — pre-0.3.2 the entries
+    // would either silently load broken or fail later at adapter-connect.
+
+    it('rejects mssql entry missing user/password with a structured error', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        sqlserver: { type: 'mssql', database: 'app', host: 'sql.example.com' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Skipping database "sqlserver".*(user|password)/)
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('rejects bigquery entry missing project', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        bq: { type: 'bigquery', database: 'my_dataset' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Skipping database "bq".*project/)
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('rejects snowflake entry missing account with the snowflake-specific message', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        snow: { type: 'snowflake', user: 'analyst', password: 's3cret' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('missing required field "account" for type "snowflake"')
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('rejects snowflake entry with neither password nor credentials_file', () => {
+      // Snowflake's union of {password-required} | {credentials_file-required}
+      // is special-cased so users get a useful "missing one of" error instead
+      // of TypeBox's default "no variant matched".
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        snow: { type: 'snowflake', account: 'acct', user: 'analyst' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'snowflake requires either "password" (basic auth) or "credentials_file"'
+        )
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('accepts snowflake with password (basic auth variant)', () => {
+      const result = convertTomlDatabases({
+        snow: {
+          type: 'snowflake',
+          account: 'acct',
+          user: 'analyst',
+          password: 's3cret',
+        },
+      });
+      expect(result.snow?.account).toBe('acct');
+      expect(result.snow?.password).toBe('s3cret');
+    });
+
+    it('accepts snowflake with credentials_file (key-pair auth variant)', () => {
+      const result = convertTomlDatabases({
+        snow: {
+          type: 'snowflake',
+          account: 'acct',
+          user: 'analyst',
+          credentials_file: '/path/to/key.p8',
+        },
+      });
+      expect(result.snow?.account).toBe('acct');
+      expect(result.snow?.credentials_file).toBe('/path/to/key.p8');
+    });
+
+    it('warns on unknown fields with a did-you-mean hint', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        pg: { type: 'postgres', database: 'db', user: 'reader', passw: 's3cret' },
+      });
+      // Entry still loads (lax-on-extras), but the typo is logged.
+      expect(result.pg?.user).toBe('reader');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Unknown field "passw".*Did you mean "password"/)
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('rejects entries with non-string `type`', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        bad: { type: 42, database: 'x' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('rejects entries with unknown `type` value', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const result = convertTomlDatabases({
+        bad: { type: 'mongodb', database: 'x' },
+      });
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Skipping database "bad"'));
+      warnSpy.mockRestore();
+    });
   });
 });
 

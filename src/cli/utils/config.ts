@@ -20,7 +20,9 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import TOML from '@iarna/toml';
+import { Value } from '@sinclair/typebox/value';
 import type {
+  AdapterType,
   AgentOverrideConfig,
   AgentsConfig,
   ApiKeysProvider,
@@ -35,9 +37,13 @@ import type {
   SessionConfig,
   ThinkingLevel,
   ToolsConfig,
+  ValidatedDatabaseConnection,
 } from '../../shared/index.js';
 import {
+  ADAPTER_SCHEMAS,
+  ADAPTER_TYPES,
   API_KEYS_PROVIDER_IDS,
+  DatabaseConnectionSchema,
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
   DEFAULT_SESSION_ROTATION_SIZE_BYTES,
   OAUTH_PROVIDER_IDS,
@@ -120,27 +126,12 @@ interface TomlConfigFile {
       compaction_depth?: number;
     }
   >;
-  databases?: Record<
-    string,
-    {
-      type?: string;
-      host?: string;
-      port?: number;
-      database?: string;
-      user?: string;
-      password?: string;
-      socket?: string;
-      ssl?: boolean;
-      query_timeout?: number;
-      max_rows?: number;
-      account?: string;
-      warehouse?: string;
-      role?: string;
-      schema?: string;
-      project?: string;
-      credentials_file?: string;
-    }
-  >;
+  // Database entries are validated by the TypeBox schema in
+  // `databases-schema.ts`, not by this interface. The TOML parser returns
+  // each entry as an arbitrary record; the schema-driven loader
+  // (`convertTomlDatabases`) validates structure, types, and per-adapter
+  // required fields.
+  databases?: Record<string, unknown>;
   backup?: {
     cooldown_hours?: number;
     max_backups?: number;
@@ -555,66 +546,248 @@ export function convertTomlSession(toml: NonNullable<TomlConfigFile['session']>)
 }
 
 /**
- * Compile-time coverage guard: `TomlConfigFile['databases'][string]` must list
- * every key of `DatabaseConnectionConfig`. Adding a field to the runtime type
- * without also adding it to the TOML interface (and copying it in
- * `convertTomlDatabases` below) will fail to compile here, preventing the
- * silent-drop class that produced the 0.3.1 `password` fix.
+ * Compile-time coverage guard: every key that appears on any schema variant
+ * must also be a key on the broad `DatabaseConnectionConfig` interface.
+ * Adapters and the emitter consume the broad interface; if a new schema
+ * field is introduced without exposing it on the interface, code that tries
+ * to read it ends up with a `TS2339 Property '...' does not exist` error
+ * downstream — and the structural cause goes uncaught. This guard surfaces
+ * it at the schema's site instead.
  *
- * This guard does NOT verify the body of `convertTomlDatabases`. A
- * schema-driven loader is the architecturally complete fix and is tracked
- * separately; until then, reviewers must also check that any new field is
- * copied imperatively in the loop below.
+ * Implementation note: a naive
+ * `ValidatedDatabaseConnection extends DatabaseConnectionConfig` check
+ * does NOT work, because TypeScript's `extends` only enforces that the
+ * subtype has every required property of the supertype — extra properties
+ * on the subtype are accepted, so a schema field missing from the broad
+ * interface would slip through silently. The distributive `_AllSchemaKeys`
+ * collects every key across every union variant; the `Exclude` then names
+ * any key that's missing from the interface.
  */
-type _DatabaseTomlEntry = NonNullable<TomlConfigFile['databases']>[string];
-type _MissingDatabaseTomlFields = Exclude<keyof DatabaseConnectionConfig, keyof _DatabaseTomlEntry>;
-const _databaseTomlCoverage: [_MissingDatabaseTomlFields] extends [never] ? true : never = true;
-void _databaseTomlCoverage;
+type _AllSchemaKeys<T> = T extends unknown ? keyof T : never;
+type _MissingFromDatabaseConfig = Exclude<
+  _AllSchemaKeys<ValidatedDatabaseConnection>,
+  keyof DatabaseConnectionConfig
+>;
+const _databaseSchemaCoverage: [_MissingFromDatabaseConfig] extends [never] ? true : never = true;
+void _databaseSchemaCoverage;
+
+/** Levenshtein edit distance for did-you-mean suggestions on field-name typos.
+ *  Self-contained to avoid depending on internal helpers in `agent-models.ts`. */
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp: number[] = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+/** Set of every field name that any adapter variant accepts. The loader uses
+ *  this for the unknown-field warning: anything in the user's TOML that isn't
+ *  in this set is reported as a typo with a did-you-mean hint. Derived once
+ *  at module load from the schema variants, so adding a field to a variant
+ *  automatically extends the recognised set. */
+const KNOWN_DATABASE_FIELDS: ReadonlySet<string> = (() => {
+  const fields = new Set<string>();
+  for (const variantSchema of Object.values(ADAPTER_SCHEMAS)) {
+    // Snowflake is `Type.Union([WithPassword, WithKeyPair])`; both variants
+    // are walked. Other variants are `Type.Object` with a `properties` map.
+    // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+    const s = variantSchema as any;
+    const variants = Array.isArray(s.anyOf) ? s.anyOf : [s];
+    for (const v of variants) {
+      if (v?.properties) {
+        for (const k of Object.keys(v.properties)) fields.add(k);
+      }
+    }
+  }
+  return fields;
+})();
 
 /**
- * Convert TOML databases section to DatabasesConfig.
- * Entries missing required fields (type, database) are skipped with a warning.
+ * Format a TypeBox validation error path + message into a single readable
+ * line. Snowflake `Type.Union` rejection produces useless "expected variant
+ * A OR variant B" messages; we special-case it to a clear "missing one of
+ * password / credentials_file" hint.
  */
-export function convertTomlDatabases(
-  toml: NonNullable<TomlConfigFile['databases']>
-): DatabasesConfig {
+function formatSchemaError(name: string, type: string | undefined, entry: object): string {
+  // Discriminator failures, in priority order:
+  //   - `type` field absent entirely → missing
+  //   - `type` present but not a string → wrong type
+  //   - `type` is a string but not a recognised adapter → unknown
+  const rawType = (entry as Record<string, unknown>).type;
+  if (rawType === undefined) {
+    return `[Config] Skipping database "${name}": missing required field "type"`;
+  }
+  if (typeof rawType !== 'string') {
+    return `[Config] Skipping database "${name}": field "type" must be a string (got ${typeof rawType})`;
+  }
+  if (!type || !ADAPTER_TYPES.includes(type as AdapterType)) {
+    return `[Config] Skipping database "${name}": unknown type "${rawType}". Valid types: ${ADAPTER_TYPES.join(', ')}`;
+  }
+  // Snowflake special case: the Type.Union of password vs key-pair variants
+  // produces an opaque "expected union value" diagnostic. Diagnose directly.
+  if (type === 'snowflake') {
+    const e = entry as Record<string, unknown>;
+    if (typeof e.account !== 'string' || e.account === '') {
+      return `[Config] Skipping database "${name}": missing required field "account" for type "snowflake"`;
+    }
+    if (typeof e.user !== 'string' || e.user === '') {
+      return `[Config] Skipping database "${name}": missing required field "user" for type "snowflake"`;
+    }
+    if (
+      (typeof e.password !== 'string' || e.password === '') &&
+      (typeof e.credentials_file !== 'string' || e.credentials_file === '')
+    ) {
+      return `[Config] Skipping database "${name}": snowflake requires either "password" (basic auth) or "credentials_file" (key-pair auth)`;
+    }
+  }
+  // Validate against the specific variant schema so TypeBox reports the
+  // actual missing/wrong field instead of "expected union value" (which is
+  // what `Value.Errors` against the union returns). Snowflake's variant is
+  // itself a `Type.Union`; for non-special-cased snowflake errors we walk
+  // both inner variants and pick the one with the fewest errors (the
+  // closest match), so a wrong-type error on `warehouse` reports usefully
+  // instead of bottoming out at "expected union value" again.
+  const variantSchema = ADAPTER_SCHEMAS[type as AdapterType];
+  // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+  const variants = Array.isArray((variantSchema as any).anyOf)
+    ? // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+      ((variantSchema as any).anyOf as unknown[])
+    : [variantSchema];
+  type TbError = { path: string; message: string };
+  let bestErrors: TbError[] = [];
+  let bestCount = Number.POSITIVE_INFINITY;
+  for (const v of variants) {
+    // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+    const errors = [...Value.Errors(v as any, entry)] as unknown as TbError[];
+    if (errors.length < bestCount) {
+      bestCount = errors.length;
+      bestErrors = errors;
+    }
+  }
+  const first = bestErrors[0];
+  if (first) {
+    const path = first.path ? first.path.replace(/^\//, '').replace(/\//g, '.') : '<root>';
+    // TypeBox reports missing required fields as "Expected required property"
+    // at the field path. Normalize to a human-friendly message.
+    if (/required/i.test(first.message) && path && path !== '<root>') {
+      return `[Config] Skipping database "${name}": missing required field "${path}" for type "${type}"`;
+    }
+    return `[Config] Skipping database "${name}": ${path}: ${first.message}`;
+  }
+  return `[Config] Skipping database "${name}": invalid configuration for type "${type}"`;
+}
+
+/**
+ * Validate and convert TOML `[databases.<name>]` entries against the schema
+ * in `databases-schema.ts`. Each entry is validated as a discriminated union
+ * by the `type` field. Entries that fail validation are skipped with a
+ * structured warning. Unknown fields (e.g. typos) are ignored but logged
+ * with a Levenshtein "did you mean" hint.
+ */
+export function convertTomlDatabases(toml: Record<string, unknown>): DatabasesConfig {
   const databases: DatabasesConfig = {};
 
-  for (const [name, entry] of Object.entries(toml)) {
-    if (!entry.type || !entry.database) {
-      console.warn(
-        `[Config] Skipping database "${name}": missing required field "type" or "database"`
-      );
+  for (const [name, raw] of Object.entries(toml)) {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      console.warn(`[Config] Skipping database "${name}": entry must be a TOML table`);
       continue;
     }
 
-    const conn: DatabaseConnectionConfig = {
-      type: entry.type,
-      database: entry.database,
-    };
+    // Mutable working copy so we can clamp/drop out-of-range numeric fields
+    // before schema validation, preserving today's lenient behavior on bad
+    // values (a typo'd `port = 0` shouldn't reject the whole entry).
+    const entry: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
+    const declaredType = typeof entry.type === 'string' ? entry.type : undefined;
 
-    if (entry.host !== undefined) conn.host = entry.host;
-    if (entry.port !== undefined) conn.port = entry.port;
-    if (entry.user !== undefined) conn.user = entry.user;
-    if (entry.password !== undefined) conn.password = entry.password;
-    if (entry.socket !== undefined) conn.socket = entry.socket;
-    if (entry.ssl !== undefined) conn.ssl = entry.ssl;
-    if (entry.query_timeout !== undefined) {
-      const t = Number(entry.query_timeout);
-      if (Number.isFinite(t) && t > 0) conn.query_timeout = t;
+    if (typeof entry.query_timeout === 'number') {
+      const t = entry.query_timeout;
+      if (!Number.isFinite(t) || t <= 0) delete entry.query_timeout;
     }
-    if (entry.max_rows !== undefined) {
-      const m = Number(entry.max_rows);
-      if (Number.isFinite(m) && m > 0) conn.max_rows = Math.min(m, 1_000_000);
+    if (typeof entry.max_rows === 'number') {
+      const m = entry.max_rows;
+      if (!Number.isFinite(m) || m <= 0) {
+        delete entry.max_rows;
+      } else {
+        entry.max_rows = Math.min(m, 1_000_000);
+      }
     }
-    if (entry.account !== undefined) conn.account = entry.account;
-    if (entry.warehouse !== undefined) conn.warehouse = entry.warehouse;
-    if (entry.role !== undefined) conn.role = entry.role;
-    if (entry.schema !== undefined) conn.schema = entry.schema;
-    if (entry.project !== undefined) conn.project = entry.project;
-    if (entry.credentials_file !== undefined) conn.credentials_file = entry.credentials_file;
+    if (typeof entry.port === 'number') {
+      const p = entry.port;
+      if (!Number.isFinite(p) || p < 1 || p > 65_535) delete entry.port;
+    }
 
-    databases[name] = conn;
+    if (!Value.Check(DatabaseConnectionSchema, entry)) {
+      console.warn(formatSchemaError(name, declaredType, entry));
+      continue;
+    }
+
+    // Walk the entry's keys and warn on unknown fields (typos). Validation
+    // already enforces the per-adapter required-fields contract; this is a
+    // separate, additive diagnostic for fields that don't belong on any
+    // adapter.
+    for (const key of Object.keys(entry)) {
+      if (!KNOWN_DATABASE_FIELDS.has(key)) {
+        let nearest: string | undefined;
+        let nearestDist = Number.POSITIVE_INFINITY;
+        for (const known of KNOWN_DATABASE_FIELDS) {
+          const d = levenshtein(key, known);
+          if (d < nearestDist) {
+            nearest = known;
+            nearestDist = d;
+          }
+        }
+        const hint = nearest && nearestDist <= 3 ? ` Did you mean "${nearest}"?` : '';
+        console.warn(`[Config] Unknown field "${key}" on databases.${name} — ignored.${hint}`);
+      }
+    }
+
+    // After Value.Check, `entry` conforms to one of the schema variants.
+    // Strip any keys that aren't part of the matched variant before storing
+    // — without this step the full TOML table (including warned-but-ignored
+    // typo keys) would leak into the runtime DatabaseConnectionConfig and
+    // potentially confuse downstream code that walks Object.keys. The pre-
+    // 0.3.2 imperative loader only copied known fields; the schema-driven
+    // loader has to do the same explicitly.
+    const variantSchemaForType = ADAPTER_SCHEMAS[declaredType as AdapterType];
+    // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+    const variantSchemaAny = variantSchemaForType as any;
+    const variantOptions: unknown[] = Array.isArray(variantSchemaAny.anyOf)
+      ? (variantSchemaAny.anyOf as unknown[])
+      : [variantSchemaForType];
+    let matchedVariant: { properties: Record<string, unknown> } | undefined;
+    for (const v of variantOptions) {
+      // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+      if (Value.Check(v as any, entry)) {
+        matchedVariant = v as { properties: Record<string, unknown> };
+        break;
+      }
+    }
+    const allowedKeys = new Set(Object.keys(matchedVariant?.properties ?? {}));
+    const sanitized: Record<string, unknown> = {};
+    // After Value.Check, `entry` is narrowed to the discriminated-union type
+    // and TS won't allow generic string indexing; cast to a record for the
+    // sanitization copy.
+    const entryAsRecord = entry as unknown as Record<string, unknown>;
+    for (const key of allowedKeys) {
+      if (entryAsRecord[key] !== undefined) sanitized[key] = entryAsRecord[key];
+    }
+    databases[name] = sanitized as unknown as DatabaseConnectionConfig;
+    // Reference the per-variant type so the import isn't dead — the cast
+    // above is the runtime narrowing point, but the validated value is also
+    // structurally a `ValidatedDatabaseConnection`.
+    void (sanitized as unknown as ValidatedDatabaseConnection);
   }
 
   return databases;
@@ -911,7 +1084,11 @@ export function buildConfigToml(options: {
     for (const [name, conn] of Object.entries(options.databases)) {
       lines.push(`[databases.${name}]`);
       lines.push(`type = "${conn.type}"`);
-      lines.push(`database = "${conn.database}"`);
+      // `database` is required for every adapter except snowflake (which can
+      // accept entries without a default DB and rely on `USE database` per
+      // query). Emit only when the value is set so we don't write the
+      // literal string "undefined".
+      if (conn.database !== undefined) lines.push(`database = "${conn.database}"`);
       if (conn.host !== undefined) lines.push(`host = "${conn.host}"`);
       if (conn.port !== undefined) lines.push(`port = ${conn.port}`);
       if (conn.user !== undefined) lines.push(`user = "${conn.user}"`);

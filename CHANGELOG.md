@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-06
+
+### Added
+
+- New agent skill `editing-config-toml` (`src/server/agents/skills/editing-config-toml/SKILL.md`). Covers the whole `~/.system2/config.toml` editing flow: file purpose, what lives in `.auth.toml` instead, editing protocol (`read`-then-`edit`, never `write`, daemon restart, gitignore behavior), the per-adapter database reference (auto-generated from the schema), credential-fallback table (auto-generated), and short reference for non-database sections. Available to `guide`, `conductor`, and `worker` roles.
+- Build-time generator `pnpm generate:db-reference` derives the per-adapter field tables and credential-fallback table for both the new skill and `docs/configuration.md` from the schema. Each rendered region lives between `<!-- BEGIN auto-generated:* -->` / `<!-- END auto-generated:* -->` markers; everything outside the markers stays hand-written. A vitest drift test (`databases-reference-generator.test.ts`) re-runs the generator and fails CI if the on-disk content diverges, prompting the developer to run the generator and commit the regenerated content.
+
+### Changed
+
+- `[databases.<name>]` entries in `~/.system2/config.toml` are now validated against a TypeBox schema (`src/shared/types/databases-schema.ts`) instead of a hand-maintained loader. Each of the 8 supported adapters (postgres, mysql, mssql, clickhouse, snowflake, bigquery, sqlite, duckdb) has its own sub-schema, with required-vs-optional fields verified against each driver's official connection contract.
+- Validation rejects misconfigured entries at startup with a precise per-field diagnostic instead of silently loading and failing later at adapter-connect. Notable behaviour changes vs 0.3.1: snowflake without `account` is rejected at startup with `missing required field "account" for type "snowflake"`; bigquery without `project` is rejected; mssql without `user` or `password` is rejected; snowflake without either `password` or `credentials_file` produces a snowflake-specific error explaining the basic-auth vs key-pair-auth choice. No migration required.
+- Snowflake validation errors that fall outside the special cases above (e.g. wrong type for `warehouse`) are now reported against the closest-matching inner variant of the `Type.Union`, instead of bottoming out at TypeBox's opaque "expected union value" diagnostic.
+- The `type` discriminator now distinguishes "missing" from "wrong type": `type = 42` reports `field "type" must be a string (got number)` instead of "missing required field". Truly missing `type` and unknown string types continue to report their own messages.
+- Unknown fields in `[databases.<name>]` blocks (e.g. typos like `passw = "..."`) are still accepted (lax behaviour preserved) but now logged as warnings with a Levenshtein "did you mean" hint, mirroring `validateLlmModels`.
+- Numeric range handling for `query_timeout`, `port`, and `max_rows` matches 0.3.1: out-of-range values are dropped (entry still loads with the field unset) instead of rejecting the entry. The schema's range expectations are documented via per-field annotations and surfaced in the auto-generated reference table.
+- The 0.3.1 `_databaseTomlCoverage` compile-time guard is replaced with `_databaseSchemaCoverage`, which checks that every property key appearing on any schema variant is also a key on the broad `DatabaseConnectionConfig` runtime interface. Adding a field to a schema variant without also exposing it on the interface now fails `tsc`. (The guard checks key coverage, not property-type assignability — the latter would require richer schema introspection. The class problem behind the 0.3.1 `password`-drop bug, where a schema field was structurally absent from the interface, is now caught.)
+
+### Fixed
+
+- `buildConfigToml()` no longer emits `database = "undefined"` for adapter configs without a `database` field (snowflake can omit it and rely on `USE database` per-query). The line is now only emitted when `conn.database !== undefined`.
+
+### Removed
+
+- The inline database-setup section in `system2-onboarding/SKILL.md` (~30 lines of TOML examples and editing protocol) is replaced with a single `REQUIRED SUB-SKILL: editing-config-toml` cross-reference. The Guide pulls up the editing skill on demand during onboarding instead of inlining the per-adapter examples, eliminating the partial duplication that would otherwise drift from the schema.
+- The hand-written `### Credentials` table in `docs/configuration.md` (carry-over from before this PR). The auto-generated credential-fallback table further down the same file is now the single source.
+
 ## [0.3.1] - 2026-05-06
 
 ### Added
@@ -175,7 +201,8 @@ First published release.
 - Unify knowledge file commits via `commitIfStateDir` ([#125](https://github.com/diegoscarabelli/system2/pull/125))
 - Fall back to Guide when persisted agent no longer exists ([#122](https://github.com/diegoscarabelli/system2/pull/122))
 
-[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/diegoscarabelli/system2/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/diegoscarabelli/system2/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/diegoscarabelli/system2/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/diegoscarabelli/system2/compare/v0.2.1...v0.2.2

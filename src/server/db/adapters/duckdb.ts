@@ -29,7 +29,9 @@ export const createAdapter: AdapterFactory = (
 
   const timeoutMs = (config.query_timeout ?? 30) * 1000;
   const maxRows = config.max_rows ?? 10_000;
-  const isMotherDuck = config.database.startsWith('md:');
+  // The duckdb schema requires `database`; the broad interface marks it
+  // optional only because snowflake (alone) accepts entries without it.
+  const isMotherDuck = (config.database ?? '').startsWith('md:');
 
   function resetIdleTimer(): void {
     if (idleTimer) clearTimeout(idleTimer);
