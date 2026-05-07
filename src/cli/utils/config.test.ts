@@ -163,6 +163,25 @@ describe('buildConfigToml', () => {
     expect(result).toContain('schema = "PUBLIC"');
   });
 
+  it('omits the database line when not provided (snowflake without default DB)', () => {
+    // Regression: previously emitted `database = "undefined"` because
+    // `database` is optional on the broad runtime interface (snowflake
+    // can omit it and rely on `USE database` per query) but the emitter
+    // unconditionally interpolated `${conn.database}`.
+    const result = buildConfigToml({
+      databases: {
+        snow: {
+          type: 'snowflake',
+          account: 'xy12345.us-east-1',
+          user: 'analyst',
+          warehouse: 'COMPUTE_WH',
+        },
+      },
+    });
+    expect(result).not.toContain('database =');
+    expect(result).not.toContain('undefined');
+  });
+
   it('serializes bigquery-specific fields (project, credentials_file)', () => {
     const result = buildConfigToml({
       databases: {

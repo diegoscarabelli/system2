@@ -1049,7 +1049,11 @@ export function buildConfigToml(options: {
     for (const [name, conn] of Object.entries(options.databases)) {
       lines.push(`[databases.${name}]`);
       lines.push(`type = "${conn.type}"`);
-      lines.push(`database = "${conn.database}"`);
+      // `database` is required for every adapter except snowflake (which can
+      // accept entries without a default DB and rely on `USE database` per
+      // query). Emit only when the value is set so we don't write the
+      // literal string "undefined".
+      if (conn.database !== undefined) lines.push(`database = "${conn.database}"`);
       if (conn.host !== undefined) lines.push(`host = "${conn.host}"`);
       if (conn.port !== undefined) lines.push(`port = ${conn.port}`);
       if (conn.user !== undefined) lines.push(`user = "${conn.user}"`);

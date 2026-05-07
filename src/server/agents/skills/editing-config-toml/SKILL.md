@@ -76,9 +76,9 @@ Drivers are dynamically loaded on first use, so installing the right one for eac
 
 ### Per-adapter reference
 
-Required fields are validated by the loader and rejected at startup with a precise diagnostic if missing. Optional fields fall back to driver defaults or native credential mechanisms. This section mirrors the schema in `src/shared/types/databases-schema.ts`; if you add a new field to the schema, update this section.
+Required fields are validated by the loader and rejected at startup with a precise diagnostic if missing. Optional fields fall back to driver defaults or native credential mechanisms.
 
-The field tables and credential-fallback table below are auto-generated from `src/shared/types/databases-schema.ts` (the single source of truth for validation and documentation). Do not edit content between `<!-- BEGIN auto-generated:* -->` markers by hand — run `pnpm generate:db-reference` to regenerate after a schema change. CI will fail if the on-disk content drifts from the schema.
+The field tables and credential-fallback table below are auto-generated from `src/shared/types/databases-schema.ts` (the single source of truth for validation and documentation). Do not edit content between `<!-- BEGIN auto-generated:* -->` markers by hand — when the schema changes, run `pnpm generate:db-reference` and commit the regenerated content. CI fails if the on-disk content drifts from the schema.
 
 #### `postgres` — PostgreSQL (also TimescaleDB, CockroachDB, other Postgres-wire-compatible servers)
 
