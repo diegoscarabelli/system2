@@ -22,7 +22,7 @@ Reference for hand-editing the System2 operational config file. Covers the per-a
 - Service credentials: `[services.brave_search]`.
 - The `[tools.web_search].enabled` flag.
 
-**Never** put LLM or service credentials in `config.toml` — the loader does not read them from there. **Database passwords are an exception**: they belong in `config.toml` on the matching `[databases.<name>].password` field. The file is created with `0600` permissions and the surrounding `~/.system2/` directory is gitignored within its own internal git repo, so personal-use storage is safe. If you prefer, leave `password` unset and rely on the driver's native fallback (e.g. `~/.pgpass`, `~/.my.cnf`, `MYSQL_PWD`).
+**Never** put LLM or service credentials in `config.toml` — the loader does not read them from there. **Database passwords are an exception**: they belong in `config.toml` on the matching `[databases.<name>].password` field. The file is created with `0600` permissions, and `config.toml` (alongside `auth/` and the legacy `oauth/`) is listed in `~/.system2/.gitignore` so it isn't committed to the internal git repo System2 maintains for knowledge-file version control. Personal-use storage is safe. If you prefer, leave `password` unset and rely on the driver's native fallback (e.g. `~/.pgpass`, `~/.my.cnf`, `MYSQL_PWD`).
 
 ## Editing protocol
 

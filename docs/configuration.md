@@ -433,7 +433,7 @@ Database drivers are not bundled with System2. The Guide installs the required d
 
 ### Credentials
 
-For adapters that use traditional host/user/password connections (postgres, mysql, mssql, clickhouse), passwords can be stored directly in `config.toml` via the `password` field. Since `config.toml` is created with `0600` permissions and `~/.system2/` is gitignored, this is safe for personal use. When `password` is omitted, drivers fall back to their native credential mechanisms — see the auto-generated credential-fallback table further down for the per-adapter behaviour. Snowflake and BigQuery use different fields (`credentials_file`, `account`, `project`); the same per-adapter table covers their fallback semantics.
+For adapters that use traditional host/user/password connections (postgres, mysql, mssql, clickhouse), passwords can be stored directly in `config.toml` via the `password` field. `config.toml` is created with `0600` permissions, and the file is listed in `~/.system2/.gitignore` (the internal git repo System2 initializes inside its data directory for knowledge-file version control), so the password isn't committed by accident. When `password` is omitted, drivers fall back to their native credential mechanisms — see the auto-generated credential-fallback table further down for the per-adapter behaviour. Snowflake and BigQuery use different fields (`credentials_file`, `account`, `project`); the same per-adapter table covers their fallback semantics.
 
 ### Configuration fields
 

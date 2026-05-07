@@ -352,9 +352,9 @@ describe('convertTomlDatabases', () => {
     expect(result.ok?.max_rows).toBe(500);
   });
 
-  it('passes through optional fields (socket, ssl, snowflake, bigquery)', () => {
+  it('passes through postgres-valid optional fields (socket, ssl)', () => {
     const result = convertTomlDatabases({
-      full: {
+      pg: {
         type: 'postgres',
         database: 'db',
         host: 'h',
@@ -362,24 +362,76 @@ describe('convertTomlDatabases', () => {
         user: 'u',
         socket: '/tmp/.s.PGSQL.5432',
         ssl: true,
+      },
+    });
+    const conn = result.pg;
+    expect(conn).toBeDefined();
+    expect(conn?.socket).toBe('/tmp/.s.PGSQL.5432');
+    expect(conn?.ssl).toBe(true);
+  });
+
+  it('strips fields that belong to other adapters from a postgres entry', () => {
+    // Pre-0.3.2 the imperative loader copied any "known on some adapter"
+    // field through regardless of the entry's `type`, so a postgres entry
+    // with `account = "..."` would carry a snowflake-only field into the
+    // runtime DatabaseConnectionConfig. The schema-driven loader matches
+    // the entry against postgres specifically and strips fields not on
+    // that variant, so adapters never see unexpected keys.
+    const result = convertTomlDatabases({
+      pg: {
+        type: 'postgres',
+        database: 'db',
+        host: 'h',
+        port: 5432,
+        // Fields that belong to other adapter variants:
         account: 'acct',
         warehouse: 'wh',
-        role: 'r',
-        schema: 's',
         project: 'p',
         credentials_file: '/path/to/creds.json',
       },
     });
-    const conn = result.full;
+    const conn = result.pg;
     expect(conn).toBeDefined();
-    expect(conn?.socket).toBe('/tmp/.s.PGSQL.5432');
-    expect(conn?.ssl).toBe(true);
+    expect(conn?.host).toBe('h');
+    expect(conn?.port).toBe(5432);
+    // Other-adapter fields are absent on the runtime object:
+    expect(conn?.account).toBeUndefined();
+    expect(conn?.warehouse).toBeUndefined();
+    expect(conn?.project).toBeUndefined();
+    expect(conn?.credentials_file).toBeUndefined();
+  });
+
+  it('passes through snowflake-valid fields on a snowflake entry', () => {
+    const result = convertTomlDatabases({
+      snow: {
+        type: 'snowflake',
+        account: 'acct',
+        user: 'analyst',
+        password: 'secret',
+        warehouse: 'wh',
+        role: 'r',
+        schema: 's',
+      },
+    });
+    const conn = result.snow;
+    expect(conn).toBeDefined();
     expect(conn?.account).toBe('acct');
     expect(conn?.warehouse).toBe('wh');
     expect(conn?.role).toBe('r');
     expect(conn?.schema).toBe('s');
-    expect(conn?.project).toBe('p');
-    expect(conn?.credentials_file).toBe('/path/to/creds.json');
+  });
+
+  it('passes through bigquery credentials_file', () => {
+    const result = convertTomlDatabases({
+      bq: {
+        type: 'bigquery',
+        project: 'my-project',
+        database: 'my_dataset',
+        credentials_file: '/path/to/creds.json',
+      },
+    });
+    expect(result.bq?.project).toBe('my-project');
+    expect(result.bq?.credentials_file).toBe('/path/to/creds.json');
   });
 
   it('passes through the password field', () => {

@@ -754,12 +754,40 @@ export function convertTomlDatabases(toml: Record<string, unknown>): DatabasesCo
     }
 
     // After Value.Check, `entry` conforms to one of the schema variants.
-    // Cast to the broad runtime interface for adapter consumption.
-    databases[name] = entry as unknown as DatabaseConnectionConfig;
+    // Strip any keys that aren't part of the matched variant before storing
+    // — without this step the full TOML table (including warned-but-ignored
+    // typo keys) would leak into the runtime DatabaseConnectionConfig and
+    // potentially confuse downstream code that walks Object.keys. The pre-
+    // 0.3.2 imperative loader only copied known fields; the schema-driven
+    // loader has to do the same explicitly.
+    const variantSchemaForType = ADAPTER_SCHEMAS[declaredType as AdapterType];
+    // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+    const variantSchemaAny = variantSchemaForType as any;
+    const variantOptions: unknown[] = Array.isArray(variantSchemaAny.anyOf)
+      ? (variantSchemaAny.anyOf as unknown[])
+      : [variantSchemaForType];
+    let matchedVariant: { properties: Record<string, unknown> } | undefined;
+    for (const v of variantOptions) {
+      // biome-ignore lint/suspicious/noExplicitAny: TypeBox runtime introspection
+      if (Value.Check(v as any, entry)) {
+        matchedVariant = v as { properties: Record<string, unknown> };
+        break;
+      }
+    }
+    const allowedKeys = new Set(Object.keys(matchedVariant?.properties ?? {}));
+    const sanitized: Record<string, unknown> = {};
+    // After Value.Check, `entry` is narrowed to the discriminated-union type
+    // and TS won't allow generic string indexing; cast to a record for the
+    // sanitization copy.
+    const entryAsRecord = entry as unknown as Record<string, unknown>;
+    for (const key of allowedKeys) {
+      if (entryAsRecord[key] !== undefined) sanitized[key] = entryAsRecord[key];
+    }
+    databases[name] = sanitized as unknown as DatabaseConnectionConfig;
     // Reference the per-variant type so the import isn't dead — the cast
     // above is the runtime narrowing point, but the validated value is also
     // structurally a `ValidatedDatabaseConnection`.
-    void (entry as unknown as ValidatedDatabaseConnection);
+    void (sanitized as unknown as ValidatedDatabaseConnection);
   }
 
   return databases;
