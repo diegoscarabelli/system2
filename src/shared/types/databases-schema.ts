@@ -31,7 +31,7 @@ import { type Static, Type } from '@sinclair/typebox';
 // annotations and the auto-generated reference table.)
 
 const PostgresSchema = Type.Object({
-  type: Type.Literal('postgres'),
+  type: Type.Literal('postgres', { description: 'Must be `"postgres"`' }),
   database: Type.String({ description: 'Database name' }),
   host: Type.Optional(Type.String({ description: 'Defaults to `localhost`' })),
   port: Type.Optional(Type.Number({ description: 'Defaults to `5432`' })),
@@ -50,7 +50,7 @@ const PostgresSchema = Type.Object({
 });
 
 const MysqlSchema = Type.Object({
-  type: Type.Literal('mysql'),
+  type: Type.Literal('mysql', { description: 'Must be `"mysql"`' }),
   database: Type.String({ description: 'Database name' }),
   host: Type.Optional(Type.String({ description: 'Defaults to `localhost`' })),
   port: Type.Optional(Type.Number({ description: 'Defaults to `3306`' })),
@@ -73,7 +73,7 @@ const MysqlSchema = Type.Object({
  *  `host` is optional: the adapter defaults it to `localhost`, mirroring
  *  the typical local-development case. */
 const MssqlSchema = Type.Object({
-  type: Type.Literal('mssql'),
+  type: Type.Literal('mssql', { description: 'Must be `"mssql"`' }),
   database: Type.String({ description: 'Database name' }),
   user: Type.String({ description: 'Required (no native fallback for tedious)' }),
   password: Type.String({ description: 'Required (no native fallback for tedious)' }),
@@ -87,7 +87,7 @@ const MssqlSchema = Type.Object({
 });
 
 const ClickhouseSchema = Type.Object({
-  type: Type.Literal('clickhouse'),
+  type: Type.Literal('clickhouse', { description: 'Must be `"clickhouse"`' }),
   database: Type.String({ description: 'Database name' }),
   host: Type.Optional(Type.String({ description: 'Defaults to `localhost`' })),
   port: Type.Optional(Type.Number({ description: 'Defaults to `8123` (HTTP) or `8443` (HTTPS)' })),
@@ -112,7 +112,7 @@ const ClickhouseSchema = Type.Object({
  *  rejection error so users see a useful "missing one of" message instead of
  *  the default "no variant matched". */
 const SnowflakeWithPassword = Type.Object({
-  type: Type.Literal('snowflake'),
+  type: Type.Literal('snowflake', { description: 'Must be `"snowflake"`' }),
   account: Type.String({ description: 'Account identifier (e.g. `xy12345.us-east-1`)' }),
   user: Type.String({ description: 'Authentication username' }),
   password: Type.String({ description: 'Basic auth password' }),
@@ -132,7 +132,7 @@ const SnowflakeWithPassword = Type.Object({
 });
 
 const SnowflakeWithKeyPair = Type.Object({
-  type: Type.Literal('snowflake'),
+  type: Type.Literal('snowflake', { description: 'Must be `"snowflake"`' }),
   account: Type.String({ description: 'Account identifier (e.g. `xy12345.us-east-1`)' }),
   user: Type.String({ description: 'Authentication username' }),
   credentials_file: Type.String({
@@ -154,7 +154,7 @@ const SnowflakeWithKeyPair = Type.Object({
 const SnowflakeSchema = Type.Union([SnowflakeWithPassword, SnowflakeWithKeyPair]);
 
 const BigQuerySchema = Type.Object({
-  type: Type.Literal('bigquery'),
+  type: Type.Literal('bigquery', { description: 'Must be `"bigquery"`' }),
   project: Type.String({ description: 'GCP project ID' }),
   database: Type.String({ description: 'BigQuery dataset name' }),
   credentials_file: Type.Optional(
@@ -170,7 +170,7 @@ const BigQuerySchema = Type.Object({
 });
 
 const SqliteSchema = Type.Object({
-  type: Type.Literal('sqlite'),
+  type: Type.Literal('sqlite', { description: 'Must be `"sqlite"`' }),
   database: Type.String({ description: 'Filepath to the `.db`/`.sqlite`/`.sqlite3` file' }),
   max_rows: Type.Optional(
     Type.Number({ description: 'Per-query row cap; defaults `10000`, max `1000000`' })
@@ -178,7 +178,7 @@ const SqliteSchema = Type.Object({
 });
 
 const DuckDbSchema = Type.Object({
-  type: Type.Literal('duckdb'),
+  type: Type.Literal('duckdb', { description: 'Must be `"duckdb"`' }),
   database: Type.String({
     description: 'Filepath, or `:memory:`, or `md:<dbname>` for MotherDuck',
   }),

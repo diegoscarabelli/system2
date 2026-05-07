@@ -1,6 +1,6 @@
 ---
 name: editing-config-toml
-description: Use when editing `~/.system2/config.toml` — adding or modifying a database connection (the most structured edit, with per-adapter required and optional fields), tuning per-agent overrides (`[agents.<role>]`), or changing operational defaults (`[backup]`, `[logs]`, `[scheduler]`, `[chat]`, `[knowledge]`, `[session]`, `[delivery]`, `web_search_max_results`). Does NOT cover `~/.system2/auth/.auth.toml` (managed by `system2 config`, not hand-edited).
+description: Use when editing `~/.system2/config.toml` — adding or modifying a database connection, tuning per-agent overrides, or changing operational defaults. Does NOT cover `~/.system2/auth/.auth.toml` (managed by `system2 config`).
 roles: [guide, conductor, worker]
 ---
 
@@ -32,7 +32,7 @@ Follow this protocol for every edit:
 2. **Use `edit`, not `write`**: `write` replaces the entire file and destroys other sections (per-agent overrides, other databases, operational defaults). `edit` does targeted string replacement.
 3. **Never use `append: true`**: it dumps content at the bottom, far from the right section header. Always edit in place at the correct location.
 4. **Place new database blocks immediately after the commented `[databases.mydb]` example**, keeping all `[databases.<name>]` sections grouped.
-5. **Restart the daemon** after any edit (`system2 restart`). The daemon reads config at startup; live edits don't apply until restart.
+5. **Restart the daemon** after any edit (`system2 stop && system2 start`). The daemon reads config at startup; live edits don't apply until restart.
 
 `config.toml` is gitignored inside `~/.system2/`'s internal git repo (created automatically by the daemon for knowledge-file version control). Edits are local-only — they don't get committed by accident.
 
@@ -86,7 +86,7 @@ The field tables and credential-fallback table below are auto-generated from `sr
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"postgres"` |
 | `database` | yes | Database name |
 | `host` | no | Defaults to `localhost` |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
@@ -115,7 +115,7 @@ password = "secret"
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"mysql"` |
 | `database` | yes | Database name |
 | `host` | no | Defaults to `localhost` |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
@@ -144,7 +144,7 @@ password = "secret"
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"mssql"` |
 | `database` | yes | Database name |
 | `password` | yes | Required (no native fallback for tedious) |
 | `user` | yes | Required (no native fallback for tedious) |
@@ -173,7 +173,7 @@ ssl = true
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"clickhouse"` |
 | `database` | yes | Database name |
 | `host` | no | Defaults to `localhost` |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
@@ -202,12 +202,12 @@ ssl = true
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
-| `database` | no | Default database (sessions can issue `USE database` per-query) |
+| `type` | yes | Must be `"snowflake"` |
 | `account` | yes | Account identifier (e.g. `xy12345.us-east-1`) |
 | `user` | yes | Authentication username |
 | `credentials_file` | one-of | Path to PEM private key (key-pair auth alternative to password) |
 | `password` | one-of | Basic auth password |
+| `database` | no | Default database (sessions can issue `USE database` per-query) |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
 | `query_timeout` | no | Seconds; defaults `30` |
 | `role` | no | Default security role |
@@ -245,7 +245,7 @@ A snowflake entry with neither `password` nor `credentials_file` is rejected at 
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"bigquery"` |
 | `database` | yes | BigQuery dataset name |
 | `project` | yes | GCP project ID |
 | `credentials_file` | no | Path to service-account JSON. Falls back to ADC (`GOOGLE_APPLICATION_CREDENTIALS` env var or `gcloud auth application-default login`) |
@@ -268,7 +268,7 @@ credentials_file = "/path/to/service-account.json"
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"sqlite"` |
 | `database` | yes | Filepath to the `.db`/`.sqlite`/`.sqlite3` file |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
 
@@ -286,7 +286,7 @@ database = "/path/to/data.db"
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"duckdb"` |
 | `database` | yes | Filepath, or `:memory:`, or `md:<dbname>` for MotherDuck |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
 | `query_timeout` | no | Seconds; defaults `30` |
@@ -321,13 +321,27 @@ database = "md:my_md_db"
 
 <!-- END auto-generated:credential-fallback -->
 
-### After editing
+### Verifying and troubleshooting
 
-After adding or modifying a `[databases.<name>]` block:
+After saving an edit and restarting the daemon (per the editing protocol above), verify the new entry by running a simple test query through `query_database` (e.g. `SELECT 1`). If it fails:
 
-1. Save the file.
-2. Restart the daemon: `system2 restart`.
-3. Verify the connection by running a simple test query through `query_database` (e.g. `SELECT 1`). If it fails, troubleshoot with the user before moving on.
+When the daemon refuses to load an entry, the loader emits a single warning line per affected database to the daemon log. Common shapes:
+
+- `[Config] Skipping database "<name>": missing required field "<field>" for type "<type>"` — the schema rejected the entry. Cross-reference the per-adapter table above; add the missing field or correct its placement.
+- `[Config] Skipping database "<name>": field "type" must be a string (got <typeof>)` — the `type` value is the wrong shape (e.g. `type = 42`).
+- `[Config] Skipping database "<name>": unknown type "<type>". Valid types: postgres, mysql, ...` — typo in the `type` value.
+- `[Config] Skipping database "<name>": snowflake requires either "password" (basic auth) or "credentials_file" (key-pair auth)` — pick one auth method per the snowflake section above.
+- `[Config] Unknown field "<key>" on databases.<name> — ignored. Did you mean "<suggestion>"?` — a typo in a field name. The entry still loads with the field unset; fix the typo if the value mattered.
+
+When the entry loads but the test query fails, the error comes from the driver, not the loader. Common causes:
+
+- `password authentication failed` (postgres/mysql/mssql/clickhouse): wrong `password`, wrong `user`, or the user lacks `CONNECT` / `USAGE` privileges on the target database.
+- `database "<name>" does not exist` (postgres) / `Unknown database` (mysql): the `database` value doesn't match a real database on the server.
+- Connection timeouts: wrong `host`/`port`, server not running, firewall, or (for remote servers) the user's machine isn't on the right network. Verify with the native client first (`psql`, `mysql`, etc.) before assuming the issue is in the config.
+- Snowflake `Authentication failed`: for basic auth, double-check `account` (no `https://` prefix, no `.snowflakecomputing.com` suffix). For key-pair, verify `credentials_file` is a PEM-formatted private key and matches the public key uploaded to the snowflake user.
+- BigQuery `Could not load the default credentials`: ADC isn't configured. Either set `credentials_file` or run `gcloud auth application-default login`.
+
+Fix the underlying issue, restart the daemon, and re-run the test query. Don't paper over real auth problems by removing fields — that just produces a different error.
 
 ## Other sections — short reference
 

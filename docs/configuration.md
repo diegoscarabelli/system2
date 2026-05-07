@@ -445,7 +445,7 @@ The per-adapter field tables and credential-fallback table below are auto-genera
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"postgres"` |
 | `database` | yes | Database name |
 | `host` | no | Defaults to `localhost` |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
@@ -460,7 +460,7 @@ The per-adapter field tables and credential-fallback table below are auto-genera
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"mysql"` |
 | `database` | yes | Database name |
 | `host` | no | Defaults to `localhost` |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
@@ -475,7 +475,7 @@ The per-adapter field tables and credential-fallback table below are auto-genera
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"mssql"` |
 | `database` | yes | Database name |
 | `password` | yes | Required (no native fallback for tedious) |
 | `user` | yes | Required (no native fallback for tedious) |
@@ -489,7 +489,7 @@ The per-adapter field tables and credential-fallback table below are auto-genera
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"clickhouse"` |
 | `database` | yes | Database name |
 | `host` | no | Defaults to `localhost` |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
@@ -503,12 +503,12 @@ The per-adapter field tables and credential-fallback table below are auto-genera
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
-| `database` | no | Default database (sessions can issue `USE database` per-query) |
+| `type` | yes | Must be `"snowflake"` |
 | `account` | yes | Account identifier (e.g. `xy12345.us-east-1`) |
 | `user` | yes | Authentication username |
 | `credentials_file` | one-of | Path to PEM private key (key-pair auth alternative to password) |
 | `password` | one-of | Basic auth password |
+| `database` | no | Default database (sessions can issue `USE database` per-query) |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
 | `query_timeout` | no | Seconds; defaults `30` |
 | `role` | no | Default security role |
@@ -519,7 +519,7 @@ The per-adapter field tables and credential-fallback table below are auto-genera
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"bigquery"` |
 | `database` | yes | BigQuery dataset name |
 | `project` | yes | GCP project ID |
 | `credentials_file` | no | Path to service-account JSON. Falls back to ADC (`GOOGLE_APPLICATION_CREDENTIALS` env var or `gcloud auth application-default login`) |
@@ -530,7 +530,7 @@ The per-adapter field tables and credential-fallback table below are auto-genera
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"sqlite"` |
 | `database` | yes | Filepath to the `.db`/`.sqlite`/`.sqlite3` file |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
 
@@ -538,7 +538,7 @@ The per-adapter field tables and credential-fallback table below are auto-genera
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes |  |
+| `type` | yes | Must be `"duckdb"` |
 | `database` | yes | Filepath, or `:memory:`, or `md:<dbname>` for MotherDuck |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
 | `query_timeout` | no | Seconds; defaults `30` |

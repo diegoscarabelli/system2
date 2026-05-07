@@ -121,10 +121,13 @@ function describeFields(adapter: AdapterType): FieldRow[] {
  */
 function renderAdapterTable(adapter: AdapterType): string {
   const rows = describeFields(adapter);
-  // Order: type first, then database, then required fields (alphabetical),
-  // then one-of fields (alphabetical), then optional fields (alphabetical).
-  // Puts the "must-set" fields at the top of the table so users see what
-  // they need to provide before scanning the optional knobs below.
+  // Order: type first, then required fields (alphabetical), then one-of
+  // fields (alphabetical), then optional fields (alphabetical, with
+  // `database` placed first within the optional group when it isn't
+  // required for that adapter — so the "what dataset/file" field stays
+  // near the top even when validation doesn't require it). Required
+  // fields up front so users see what they must provide before scanning
+  // the optional knobs.
   const requiredRank: Record<FieldRow['required'], number> = {
     yes: 0,
     'one-of': 1,
@@ -133,10 +136,10 @@ function renderAdapterTable(adapter: AdapterType): string {
   rows.sort((a, b) => {
     if (a.name === 'type') return -1;
     if (b.name === 'type') return 1;
-    if (a.name === 'database') return -1;
-    if (b.name === 'database') return 1;
     const rankDelta = requiredRank[a.required] - requiredRank[b.required];
     if (rankDelta !== 0) return rankDelta;
+    if (a.name === 'database') return -1;
+    if (b.name === 'database') return 1;
     return a.name.localeCompare(b.name);
   });
   const header = '| Field | Required | Notes |\n|-------|----------|-------|';
