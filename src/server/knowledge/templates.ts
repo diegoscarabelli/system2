@@ -10,6 +10,12 @@ export const INFRASTRUCTURE_TEMPLATE = `# Infrastructure
 > Data stack details. Updated by the Guide during onboarding and as infrastructure evolves.
 > References to code directories, documentation, and URLs are encouraged.
 
+**Editing convention:** each section's \`>\` blockquote describes how to fill that
+section. Keep the blockquote intact for future editors; place actual content
+in normal markdown BELOW the blockquote, separated by a blank line. Do not
+delete blockquotes or fold content into them. (Same convention applies to
+\`user.md\`.)
+
 ## Overview
 
 > A few paragraphs describing the user's data stack at a high level: what they have, what
@@ -50,7 +56,7 @@ export const INFRASTRUCTURE_TEMPLATE = `# Infrastructure
 >
 > **Roles:**
 > - \`read_only\` (password): read-only access for System2 queries and dashboards. Credentials in \`~/.system2/config.toml [databases.example]\` (set the \`password\` field directly there).
-> - \`app_writer\` (password): read-write access for ETL pipelines. Credentials managed by the pipeline framework — record the actual location here when known (e.g. a credentials JSON in the IaC repo, a secret manager, or a per-pipeline \`.env\` if used).
+> - \`app_writer\` (password): read-write access for ETL pipelines. Credentials in \`~/repos/my_pipelines/.env\`.
 
 ## Data Repositories
 
