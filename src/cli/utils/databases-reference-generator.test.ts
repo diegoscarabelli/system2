@@ -41,10 +41,20 @@ const DOCS_PATH = join(REPO_ROOT, 'docs', 'configuration.md');
 
 const UPDATE = process.env.UPDATE_SCHEMA_DERIVED === '1';
 
+/** Normalize CRLF → LF before comparing or writing. Git on Windows
+ *  checks files out with `core.autocrlf=true` by default, so the
+ *  on-disk content has CRLF line endings while the generator emits
+ *  LF; without normalization the equality test would always fail on
+ *  Windows runners (and in update mode we'd write CRLF back, churning
+ *  the diff every time). */
+function normalizeLineEndings(s: string): string {
+  return s.replace(/\r\n/g, '\n');
+}
+
 describe('schema-derived database reference', () => {
   it('editing-config-toml/SKILL.md is in sync with the schema', () => {
     const gen = generateDatabaseReference();
-    const onDisk = readFileSync(SKILL_PATH, 'utf-8');
+    const onDisk = normalizeLineEndings(readFileSync(SKILL_PATH, 'utf-8'));
     const expected = applyToSkillSource(onDisk, gen);
     if (UPDATE) {
       if (onDisk !== expected) writeFileSync(SKILL_PATH, expected, 'utf-8');
@@ -60,7 +70,7 @@ describe('schema-derived database reference', () => {
 
   it('docs/configuration.md is in sync with the schema', () => {
     const gen = generateDatabaseReference();
-    const onDisk = readFileSync(DOCS_PATH, 'utf-8');
+    const onDisk = normalizeLineEndings(readFileSync(DOCS_PATH, 'utf-8'));
     const expected = applyToDocsSource(onDisk, gen);
     if (UPDATE) {
       if (onDisk !== expected) writeFileSync(DOCS_PATH, expected, 'utf-8');
