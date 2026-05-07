@@ -433,20 +433,7 @@ Database drivers are not bundled with System2. The Guide installs the required d
 
 ### Credentials
 
-For adapters that use traditional host/user/password connections (postgres, mysql, mssql, clickhouse), passwords can be stored directly in config.toml via the `password` field. Since config.toml is created with `0600` permissions and gitignored, this is safe for personal use. Alternatively, each driver also supports its native credential mechanism as a fallback when no `password` is configured:
-
-| Type | Credential source |
-|------|------------------|
-| `postgres` | `password` field in config.toml, `~/.pgpass`, or `PGPASSWORD` env var |
-| `mysql` | `password` field in config.toml, `~/.my.cnf` `[client]` section, or `MYSQL_PWD` env var |
-| `sqlite` | No credentials needed |
-| `mssql` | `password` field in config.toml, environment variables (`MSSQL_PASSWORD`), or Azure AD |
-| `clickhouse` | `password` field in config.toml, or server-side default credentials |
-| `duckdb` | No credentials needed (local files); `MOTHERDUCK_TOKEN` env var for MotherDuck |
-| `snowflake` | `SNOWFLAKE_PASSWORD` env var, key-pair via `credentials_file`, or `~/.snowflake/connections.toml` |
-| `bigquery` | `credentials_file` (service account JSON), `GOOGLE_APPLICATION_CREDENTIALS` env var, or gcloud ADC |
-
-When the `password` field is omitted, drivers fall back to their native credential mechanisms (env vars, credential files, etc.).
+For adapters that use traditional host/user/password connections (postgres, mysql, mssql, clickhouse), passwords can be stored directly in `config.toml` via the `password` field. Since `config.toml` is created with `0600` permissions and `~/.system2/` is gitignored, this is safe for personal use. When `password` is omitted, drivers fall back to their native credential mechanisms — see the auto-generated credential-fallback table further down for the per-adapter behaviour. Snowflake and BigQuery use different fields (`credentials_file`, `account`, `project`); the same per-adapter table covers their fallback semantics.
 
 ### Configuration fields
 

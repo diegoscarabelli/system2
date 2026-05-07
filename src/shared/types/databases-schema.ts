@@ -9,7 +9,8 @@
  *   - The `DatabaseConnectionConfig` static type that adapters consume.
  *   - The per-adapter reference auto-generated into the `editing-config-toml`
  *     agent skill and the database table in `docs/configuration.md`
- *     (see `scripts/generate-database-reference.ts`).
+ *     (see `src/cli/utils/databases-reference-generator.ts`, runnable via
+ *     `pnpm generate:db-reference`).
  *
  * Each adapter is its own sub-schema. They share no composed base — the goal
  * is that adding a new adapter or evolving an existing one touches only the

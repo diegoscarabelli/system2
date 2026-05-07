@@ -621,12 +621,19 @@ const KNOWN_DATABASE_FIELDS: ReadonlySet<string> = (() => {
  * password / credentials_file" hint.
  */
 function formatSchemaError(name: string, type: string | undefined, entry: object): string {
-  // Missing or non-string `type` discriminator.
-  if (!type) {
+  // Discriminator failures, in priority order:
+  //   - `type` field absent entirely → missing
+  //   - `type` present but not a string → wrong type
+  //   - `type` is a string but not a recognised adapter → unknown
+  const rawType = (entry as Record<string, unknown>).type;
+  if (rawType === undefined) {
     return `[Config] Skipping database "${name}": missing required field "type"`;
   }
-  if (!ADAPTER_TYPES.includes(type as AdapterType)) {
-    return `[Config] Skipping database "${name}": unknown type "${type}". Valid types: ${ADAPTER_TYPES.join(', ')}`;
+  if (typeof rawType !== 'string') {
+    return `[Config] Skipping database "${name}": field "type" must be a string (got ${typeof rawType})`;
+  }
+  if (!type || !ADAPTER_TYPES.includes(type as AdapterType)) {
+    return `[Config] Skipping database "${name}": unknown type "${rawType}". Valid types: ${ADAPTER_TYPES.join(', ')}`;
   }
   // Snowflake special case: the Type.Union of password vs key-pair variants
   // produces an opaque "expected union value" diagnostic. Diagnose directly.
