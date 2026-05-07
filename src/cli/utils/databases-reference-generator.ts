@@ -120,22 +120,21 @@ function describeFields(adapter: AdapterType): FieldRow[] {
  * agent skill (per-adapter sub-section) and the human docs (unified table).
  */
 function renderAdapterTable(adapter: AdapterType): string {
-  const rows = describeFields(adapter);
-  // Order: type first, then required fields (alphabetical), then one-of
-  // fields (alphabetical), then optional fields (alphabetical, with
-  // `database` placed first within the optional group when it isn't
-  // required for that adapter — so the "what dataset/file" field stays
-  // near the top even when validation doesn't require it). Required
-  // fields up front so users see what they must provide before scanning
-  // the optional knobs.
+  // Drop the `type` row: it's always required and always equals the
+  // section heading the table appears under, so the row would only ever
+  // restate what the reader already knows. Each table is scoped to one
+  // adapter; the discriminator is implicit.
+  const rows = describeFields(adapter).filter((r) => r.name !== 'type');
+  // Order: required fields first (alphabetical), then one-of (alphabetical),
+  // then optional (alphabetical, with `database` first within the optional
+  // group when it isn't required for that adapter so the "what dataset/file"
+  // field stays near the top).
   const requiredRank: Record<FieldRow['required'], number> = {
     yes: 0,
     'one-of': 1,
     no: 2,
   };
   rows.sort((a, b) => {
-    if (a.name === 'type') return -1;
-    if (b.name === 'type') return 1;
     const rankDelta = requiredRank[a.required] - requiredRank[b.required];
     if (rankDelta !== 0) return rankDelta;
     if (a.name === 'database') return -1;

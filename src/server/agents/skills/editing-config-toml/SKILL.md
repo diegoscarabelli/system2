@@ -86,7 +86,6 @@ The field tables and credential-fallback table below are auto-generated from `sr
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes | Must be `"postgres"` |
 | `database` | yes | Database name |
 | `host` | no | Defaults to `localhost` |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
@@ -115,7 +114,6 @@ password = "secret"
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes | Must be `"mysql"` |
 | `database` | yes | Database name |
 | `host` | no | Defaults to `localhost` |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
@@ -144,7 +142,6 @@ password = "secret"
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes | Must be `"mssql"` |
 | `database` | yes | Database name |
 | `password` | yes | Required (no native fallback for tedious) |
 | `user` | yes | Required (no native fallback for tedious) |
@@ -173,7 +170,6 @@ ssl = true
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes | Must be `"clickhouse"` |
 | `database` | yes | Database name |
 | `host` | no | Defaults to `localhost` |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
@@ -202,7 +198,6 @@ ssl = true
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes | Must be `"snowflake"` |
 | `account` | yes | Account identifier (e.g. `xy12345.us-east-1`) |
 | `user` | yes | Authentication username |
 | `credentials_file` | one-of | Path to PEM private key (key-pair auth alternative to password) |
@@ -245,7 +240,6 @@ A snowflake entry with neither `password` nor `credentials_file` is rejected at 
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes | Must be `"bigquery"` |
 | `database` | yes | BigQuery dataset name |
 | `project` | yes | GCP project ID |
 | `credentials_file` | no | Path to service-account JSON. Falls back to ADC (`GOOGLE_APPLICATION_CREDENTIALS` env var or `gcloud auth application-default login`) |
@@ -268,7 +262,6 @@ credentials_file = "/path/to/service-account.json"
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes | Must be `"sqlite"` |
 | `database` | yes | Filepath to the `.db`/`.sqlite`/`.sqlite3` file |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
 
@@ -286,7 +279,6 @@ database = "/path/to/data.db"
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes | Must be `"duckdb"` |
 | `database` | yes | Filepath, or `:memory:`, or `md:<dbname>` for MotherDuck |
 | `max_rows` | no | Per-query row cap; defaults `10000`, max `1000000` |
 | `query_timeout` | no | Seconds; defaults `30` |
