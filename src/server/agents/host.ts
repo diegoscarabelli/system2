@@ -737,12 +737,11 @@ export class AgentHost {
       if (completedScheduledTask && this.resetSessionAfterScheduledTask) {
         this.resetSessionToHeader();
         // Reinitialize asynchronously so the next scheduled tick has a live session ready.
-        // Errors are logged in the .catch below; cron ticks are 30 min apart so initialize()
-        // has plenty of headroom. Using void-and-catch to keep handleSessionEvent synchronous.
-        // Set isReinitializing so any deliverMessage()/prompt() calls landing during the
-        // reset+reinit window get the existing "Agent is reinitializing" rejection instead of
-        // racing against a half-torn-down session, then clear it in .finally so the next tick
-        // is unblocked even if initialize() throws.
+        // Errors are surfaced via .catch (logged AND propagated to any deliveries queued during
+        // reinit). Cron ticks are 30 min apart so initialize() has plenty of headroom. Using
+        // void-and-catch to keep handleSessionEvent synchronous. Set isReinitializing so
+        // concurrent deliverMessage() calls queue in pendingDeliveries (rather than rejecting),
+        // then clear it in .finally so the next tick is unblocked even if initialize() throws.
         this.isReinitializing = true;
         void this.initialize()
           .then(() => {
@@ -753,6 +752,16 @@ export class AgentHost {
           })
           .catch((err) => {
             log.error('[AgentHost] Failed to reinitialize after scheduled-task reset:', err);
+            // Reject every pending delivery so their deferred promises don't hang forever —
+            // leaving them pending would block any trackJobExecution caller awaiting the
+            // delivery (e.g., server.checkNarratorCatchUp). Mirrors the failover path's
+            // cleanup in reinitializeWithProvider.
+            const rejectError = err instanceof Error ? err : new Error(String(err));
+            for (const delivery of this.pendingDeliveries) {
+              delivery.reject(rejectError);
+            }
+            this.pendingDeliveries = [];
+            this.deliverySendCount = 0;
           })
           .finally(() => {
             this.isReinitializing = false;
@@ -1272,18 +1281,22 @@ export class AgentHost {
       // Uses sendCustomMessage directly (not deliverMessage) to avoid duplicating
       // chat cache entries that were already added by the original delivery.
       if (deliveriesToRetry && deliveriesToRetry.length > 0 && this.session) {
-        log.info(
-          `[AgentHost] Replaying ${deliveriesToRetry.length} pending deliveries with new provider...`
-        );
         // Merge: deliveries queued by concurrent deliverMessage() during async
-        // reinit must be preserved (this.session was non-null throughout initialize(),
-        // so new deliverMessage calls could push entries we must not drop).
+        // reinit must be preserved. With queue-during-reinit (issue #169),
+        // deliverMessage pushes to pendingDeliveries even while isReinitializing
+        // is true, so newDuringReinit can hold real entries and must be replayed
+        // alongside the original snapshot.
         const newDuringReinit = this.pendingDeliveries.filter(
           (d) => !deliveriesToRetry.includes(d)
         );
-        this.pendingDeliveries = [...deliveriesToRetry, ...newDuringReinit];
+        const allToReplay = [...deliveriesToRetry, ...newDuringReinit];
+        this.pendingDeliveries = allToReplay;
+        log.info(
+          `[AgentHost] Replaying ${allToReplay.length} pending delivery(ies) with new provider ` +
+            `(${deliveriesToRetry.length} pre-reinit, ${newDuringReinit.length} during reinit)...`
+        );
         const session = this.session;
-        for (const d of deliveriesToRetry) {
+        for (const d of allToReplay) {
           // Increment count synchronously so agent_end (which fires before
           // sendCustomMessage resolves for idle agents) sees the correct tally.
           this.deliverySendCount++;
@@ -1570,14 +1583,12 @@ export class AgentHost {
     details: { sender: number; receiver: number; timestamp: number },
     urgent?: boolean
   ): Promise<void> {
-    // Check isReinitializing BEFORE the null-session guard. The scheduled-task reset path
-    // explicitly nulls `this.session` before kicking off initialize(), so during that window
-    // both conditions hold; surfacing the more specific "reinitializing" error helps callers
-    // distinguish a transient reinit from a permanent uninitialized state.
-    if (this.isReinitializing) {
-      return Promise.reject(new Error('Agent is reinitializing, delivery rejected'));
-    }
-    if (!this.session) {
+    // Truly uninitialized — initialize() has never run. This is a caller bug, not a transient
+    // race, so reject. Reinit-in-progress (this.session may be null because resetSessionToHeader
+    // cleared it) is a different state: it's transient, the new session is on the way, and the
+    // replay paths in handleSessionEvent / reinitializeWithProvider will deliver this message
+    // against the new session once init completes.
+    if (!this.session && !this.isReinitializing) {
       return Promise.reject(new Error('AgentHost not initialized. Call initialize() first.'));
     }
 
@@ -1644,6 +1655,18 @@ export class AgentHost {
         content: cacheContent,
         timestamp: details.timestamp,
       });
+    }
+
+    // If a reinit is in flight (scheduled-task reset path nulls this.session synchronously, or
+    // failover keeps the old session live but `isReinitializing` is set), defer the actual send.
+    // The replay paths run after init completes:
+    //   - reset path: handleSessionEvent → void initialize().then(replayPendingDeliveries)
+    //   - failover:   reinitializeWithProvider replays the merged pendingDeliveries against the
+    //                 new session
+    // Both iterate this.pendingDeliveries (which now includes our entry), so the message reaches
+    // the new session without us touching the dying one here.
+    if (!this.session || this.isReinitializing) {
+      return promise;
     }
 
     // Reload resource loader to pick up knowledge file changes, then deliver.
