@@ -1278,19 +1278,20 @@ export class AgentHost {
       // Reset the send counter: old session's sends are gone, new session starts fresh
       this.deliverySendCount = 0;
 
-      // Retry the pending prompt with the new provider
-      if (promptToRetry && this.session) {
-        log.info('[AgentHost] Retrying prompt with new provider...');
-        // Restore only if nothing newer arrived during reinitialization.
-        this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
-        await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
-      }
-
-      // Replay the deliveries captured in the snapshot above. Uses sendCustomMessage directly
-      // (not deliverMessage) to avoid duplicating chat cache entries already added by the
-      // original delivery. Crucially we iterate the pre-clear snapshot, NOT live
-      // pendingDeliveries — entries pushed after isReinitializing was cleared have already
-      // been sent via the normal path and must not be replayed.
+      // Replay BEFORE the prompt retry to preserve the FIFO invariant that
+      // handleSessionEvent's shift logic depends on (Copilot round 3, PR #170). The replay loop
+      // is synchronous (it starts async sendCustomMessage calls but doesn't await), so it
+      // populates deliverySendCount and leaves the backlog entries at the front of
+      // pendingDeliveries BEFORE any await yields control. If the replay ran AFTER the prompt
+      // await, a concurrent deliverMessage() arriving during the await would land at
+      // deliverySendCount=1 with backlog entries still at the front of pendingDeliveries —
+      // agent_end would then shift a backlog entry and resolve its promise early, while the
+      // replay would re-send the backlog entry to the agent (duplicate processing).
+      //
+      // Uses sendCustomMessage directly (not deliverMessage) to avoid duplicating chat cache
+      // entries already added by the original delivery. Iterates the pre-clear snapshot, NOT
+      // live pendingDeliveries — entries pushed during the prompt-retry await below go through
+      // the normal send path and must not be replayed.
       if (toReplay.length > 0 && this.session) {
         log.info(
           `[AgentHost] Replaying ${toReplay.length} pending delivery(ies) with new provider ` +
@@ -1323,6 +1324,17 @@ export class AgentHost {
               d.reject(error instanceof Error ? error : new Error(String(error)));
             });
         }
+      }
+
+      // Retry the pending prompt with the new provider AFTER the replay loop has queued its
+      // sends. Replays are now at the front of pendingDeliveries with their deliverySendCount
+      // accounted for, so a concurrent deliverMessage() during this await lands at the END
+      // of pendingDeliveries (FIFO preserved).
+      if (promptToRetry && this.session) {
+        log.info('[AgentHost] Retrying prompt with new provider...');
+        // Restore only if nothing newer arrived during reinitialization.
+        this.pendingPrompt = this.pendingPrompt ?? promptToRetry;
+        await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
       }
     } catch (error) {
       log.error('[AgentHost] Failed to reinitialize:', error);

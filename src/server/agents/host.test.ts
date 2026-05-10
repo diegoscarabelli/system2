@@ -2360,6 +2360,109 @@ describe('AgentHost', () => {
       );
       expect(sentContents).toEqual(['post-clear-delivery']);
     });
+
+    it('preserves FIFO send order when a delivery lands during the prompt-retry await with backlog present', async () => {
+      // Copilot round 3 (PR #170): if the replay loop ran AFTER `await session.prompt(...)`,
+      // a concurrent deliverMessage during that await would land at deliverySendCount=1 with
+      // backlog entries [A, B] still at the front of pendingDeliveries. agent_end would shift
+      // the wrong entry (resolving A's promise early) AND the subsequent replay would re-send
+      // A to the agent (duplicate processing). The fix moves replay BEFORE the prompt await
+      // so backlog sends and their deliverySendCount accounting happen before any await yields.
+      //
+      // Observable from the call order on sendCustomMessage: with the fix, [A, B, X];
+      // without the fix, [X, A, B]. We assert the fix's order to lock the invariant.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        deliverySendCount: number;
+        reinitializeWithProvider: (
+          provider: string,
+          prompt: string | null,
+          deliveries: unknown[],
+          reason?: string,
+          detail?: string
+        ) => Promise<void>;
+        session: {
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+          prompt: ReturnType<typeof vi.fn>;
+        } | null;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        initialize: ReturnType<typeof vi.fn>;
+        authResolver: {
+          getActiveKey: ReturnType<typeof vi.fn>;
+          ensureFresh: ReturnType<typeof vi.fn>;
+        };
+      };
+
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.authResolver.getActiveKey = vi
+        .fn()
+        .mockReturnValue({ keyIndex: 0, tier: 'api_keys' });
+      internal.authResolver.ensureFresh = vi.fn().mockResolvedValue(undefined);
+
+      let resolvePrompt!: () => void;
+      const promptPromise = new Promise<void>((resolve) => {
+        resolvePrompt = resolve;
+      });
+      const freshSession = {
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+        prompt: vi.fn().mockImplementation(() => promptPromise),
+      };
+      internal.initialize = vi.fn().mockImplementation(async () => {
+        internal.session = freshSession;
+      });
+
+      // Pre-failover backlog of two scheduled-task deliveries.
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      const A = { content: 'A-backlog', details, resolve: vi.fn(), reject: vi.fn() };
+      const B = { content: 'B-backlog', details, resolve: vi.fn(), reject: vi.fn() };
+      internal.pendingDeliveries = [A, B];
+
+      const reinitPromise = internal.reinitializeWithProvider(
+        'google',
+        'retry-prompt',
+        [A, B], // ← deliveriesToRetry snapshot
+        'failover reason',
+        'failover detail'
+      );
+
+      // Flush microtasks until reinit reaches the gated `await session.prompt`. With the fix
+      // in place, replay has already run synchronously; without the fix, the prompt await
+      // starts before any replay.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Drop X into the queue during the prompt-retry await.
+      const postClearPromise = host.deliverMessage('X-during-prompt', details);
+      void postClearPromise.catch(() => {});
+
+      // Flush microtasks so the normal-path send for X fires.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Release prompt; reinit body returns.
+      resolvePrompt();
+      await reinitPromise;
+
+      // Assert FIFO order on sendCustomMessage. With the fix: [A, B, X]. Without: [X, A, B].
+      const sentContents = freshSession.sendCustomMessage.mock.calls.map(
+        (c) => (c[0] as { content: string }).content
+      );
+      expect(sentContents).toEqual(['A-backlog', 'B-backlog', 'X-during-prompt']);
+    });
   });
 
   describe('compaction pruning', () => {
