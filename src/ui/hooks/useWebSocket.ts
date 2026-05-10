@@ -168,12 +168,6 @@ export function useWebSocket() {
           break;
         }
 
-        case 'context_usage': {
-          const aid = message.agentId ?? state.guideAgentId;
-          if (aid !== null) state.setContextPercent(message.percent, aid);
-          break;
-        }
-
         case 'artifact': {
           const artifactStore = useArtifactStore.getState();
           if (message.filePath) {
@@ -233,8 +227,8 @@ export function useWebSocket() {
           usePushStore.getState().bumpJobs();
           break;
 
-        case 'agent_busy_changed':
-          // Update busy state inline (no refetch needed)
+        case 'agent_busy_state':
+          // Idempotent: handles both broadcast (transition) and unicast (snapshot) variants.
           usePushStore
             .getState()
             .setAgentBusy(message.agentId, message.busy, message.contextPercent);

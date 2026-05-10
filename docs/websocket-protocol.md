@@ -3,6 +3,7 @@
 The UI communicates with the server over a single WebSocket connection. The server streams agent events in real time.
 
 **Key source files:**
+
 - `src/shared/types/messages.ts`: TypeScript types
 - `src/server/websocket/handler.ts`: WebSocketHandler
 - `src/ui/hooks/useWebSocket.ts`: client-side hook
@@ -30,11 +31,11 @@ type ClientMessage =
 ```
 
 | Message | Description |
-|---------|-------------|
+| --- | --- |
 | `user_message` | Standard user input. `agentId` targets a specific agent (defaults to active). |
 | `steering_message` | Priority message inserted ASAP into the agent loop (interrupts current work). |
 | `abort` | Cancel current agent execution for the specified (or active) agent. |
-| `switch_agent` | Switch the active chat to a different agent. Server responds with that agent's `chat_history`, `context_usage`, and `ready_for_input` (if idle). |
+| `switch_agent` | Switch the active chat to a different agent. Server responds with that agent's `chat_history`, `provider_info`, an `agent_busy_state` snapshot (seeds busy + context usage), and `ready_for_input` (if idle). |
 
 ## Server -> Client
 
@@ -48,7 +49,6 @@ type ServerMessage =
   | { type: 'tool_call_end'; name: string; result: string; agentId?: number }
   | { type: 'tool_call_progress'; name: string; message: string; agentId?: number }
   | { type: 'artifact'; url: string; title?: string; filePath?: string }
-  | { type: 'context_usage'; percent: number | null; tokens: number | null; contextWindow: number; agentId?: number }
   | { type: 'provider_info'; provider: string; agentId: number }
   | { type: 'provider_change'; provider: string; reason?: string; agentId: number }
   | { type: 'error'; message: string; agentId?: number }
@@ -62,17 +62,16 @@ type ServerMessage =
   | { type: 'agents_changed' }
   | { type: 'artifacts_changed' }
   | { type: 'job_executions_changed' }
-  | { type: 'agent_busy_changed'; agentId: number; busy: boolean; contextPercent: number | null };
+  | { type: 'agent_busy_state'; agentId: number; busy: boolean; contextPercent: number | null };
 ```
 
 | Message | Description |
-|---------|-------------|
+| --- | --- |
 | `thinking_chunk` / `thinking_end` | Streaming extended thinking blocks |
 | `assistant_chunk` / `assistant_end` | Streaming response text. `assistant_end` carries `errorMessage` when the LLM stop reason was an error; the UI renders it as a collapsible system message in the chat timeline. |
 | `tool_call_start` / `tool_call_end` | Tool execution lifecycle |
 | `tool_call_progress` | Heartbeat progress from a long-running tool (e.g., bash `::system2::` sentinel). Carries the progress `message` for UI display. |
 | `artifact` | Display artifact in a UI tab. Includes `title` (from DB or filename) and `filePath` (absolute path for tab dedup). Sent when `show_artifact` completes. |
-| `context_usage` | Context window usage after each agent turn |
 | `provider_info` | Sent on connect/switch: current LLM provider for an agent |
 | `provider_change` | Sent on failover: provider switched. Includes `reason` (e.g., "503 server error, switched to anthropic") and `agentId` so the UI routes the system message to the correct agent chat |
 | `error` | Error message |
@@ -84,7 +83,7 @@ type ServerMessage =
 | `agents_changed` | Broadcast when an agent is spawned, terminated, or resurrected. UI panels refetch `/api/agents`. |
 | `artifacts_changed` | Broadcast when `write_system2_db` modifies an artifact. UI panels refetch `/api/artifacts`. |
 | `job_executions_changed` | Broadcast when a scheduler job execution is created, completed, failed, or skipped. UI panels refetch `/api/job-executions`. |
-| `agent_busy_changed` | Broadcast when an agent's busy state changes (message processing start/end). Includes `agentId`, `busy`, and `contextPercent`. |
+| `agent_busy_state` | Broadcast when an agent's busy state changes (message processing start/end). Includes `agentId`, `busy`, and `contextPercent` — single source of truth for context usage in both AgentPane and MessageInput. Also sent unicast on `switch_agent` to seed the new client's view. |
 
 All database writes by agents go through `write_system2_db`, which fires an `onWrite` callback that the server maps to the appropriate push notification. Agents are instructed to never use `bash`/`sqlite3` to modify `app.db`, ensuring all changes are captured. REST endpoints are used for the initial data load on page open. On WebSocket reconnect, the UI clears stale `agentBusy` state (which may have drifted during the disconnect) and bumps all push version counters so every panel refetches from the server.
 
@@ -92,7 +91,7 @@ All database writes by agents go through `write_system2_db`, which fires an `onW
 
 ### Standard User Message
 
-```
+```text
 User types message
   -> UI sends { type: 'user_message', content, agentId }
     -> WebSocketHandler resolves target agent via agentId (default: active)
@@ -104,13 +103,13 @@ User types message
              thinking_chunk* -> thinking_end
              tool_call_start -> tool_call_end (repeated per tool)
              assistant_chunk* -> assistant_end
-             context_usage
+             agent_busy_state (busy=false, broadcast — carries contextPercent)
              ready_for_input
 ```
 
 ### Steering Message
 
-```
+```text
 User sends steering while agent is working
   -> UI sends { type: 'steering_message', content, agentId }
     -> WebSocketHandler calls agentHost.prompt(content, { isSteering: true })
@@ -120,7 +119,7 @@ User sends steering while agent is working
 
 ### Agent Switching
 
-```
+```text
 User clicks agent in AgentPane
   -> UI updates activeAgentId in chat store (immediate UI switch)
   -> UI sends { type: 'switch_agent', agentId }
@@ -128,8 +127,9 @@ User clicks agent in AgentPane
        1. Updates activeAgentId
        2. Subscribes to new agent's events (additive, keeps previous subscriptions)
        3. Sends chat_history (from agent's chatCache)
-       4. Sends context_usage (if available)
-       5. Sends ready_for_input (if agent is idle)
+       4. Sends provider_info
+       5. Sends agent_busy_state (unicast snapshot — seeds busy + contextPercent)
+       6. Sends ready_for_input (if agent is idle)
   -> UI loadHistory merges committed messages but preserves in-progress streaming state
 ```
 
@@ -143,7 +143,7 @@ HTML artifacts rendered in iframes communicate with the server through a postMes
 
 **Flow:**
 
-```
+```text
 Artifact iframe JS
   -> window.parent.postMessage({ type: 'system2:query', requestId, sql, database? })
     -> ArtifactViewer listener in the UI
@@ -183,7 +183,7 @@ Each `AgentHost` owns its own `MessageHistory` (chat cache) stored at `~/.system
 Each WebSocket connection gets its own `WebSocketHandler` instance. It:
 
 1. Receives `AgentRegistry` and `guideAgentId` in its constructor
-2. Sends Guide's chat history and provider info on connect
+2. Sends Guide's `chat_history`, `provider_info`, and an `agent_busy_state` snapshot on connect (the snapshot seeds the client's busy + context usage state)
 3. Subscribes to agent events (additive: subscriptions are kept across switches so background agents continue streaming)
 4. Converts Pi SDK events to `ServerMessage` types (all tagged with `agentId`):
    - `message_update` (with thinking) -> `thinking_chunk`; transition to text/tool/end -> `thinking_end`
@@ -192,7 +192,7 @@ Each WebSocket connection gets its own `WebSocketHandler` instance. It:
    - `tool_execution_start` -> `tool_call_start`
    - `tool_execution_update` (heartbeat only) -> `tool_call_progress`
    - `tool_execution_end` -> `tool_call_end`
-   - `agent_end` -> `context_usage` + `ready_for_input`
+   - `agent_end` -> `ready_for_input` (context usage delivery happens via `AgentHost.onBusyChange` -> `agent_busy_state` broadcast)
 5. Captures user messages in the target agent's chat cache and broadcasts to other tabs
 6. Handles `switch_agent` by adding a subscription (if not already subscribed) and sending the new agent's state
 7. Records non-Guide user messages in the `ConversationSummarizer` for Guide notification

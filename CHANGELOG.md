@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AgentHost.deliverMessage` no longer rejects with `Agent is reinitializing, delivery rejected` when a delivery lands during a reset+reinit window. Deliveries are now queued in `pendingDeliveries` and replayed against the fresh session by the existing replay path (`replayPendingDeliveries` after a scheduled-task reset, or the inline replay loop in `reinitializeWithProvider` for failovers). The "uninitialized" reject still fires when `initialize()` has genuinely never run. Fixes #169 — the back-to-back catch-up race where `memory-update / catch-up` was rejected because the preceding `daily-summary / catch-up`'s `agent_end` had just kicked off the Narrator's post-scheduled-task reset+reinit.
 - `reinitializeWithProvider`'s replay loop now iterates the merged set of deliveries (pre-failover snapshot + entries queued during reinit) instead of just the snapshot. Previously a no-op because the early reject made `newDuringReinit` unreachable; load-bearing now that `deliverMessage` queues during reinit.
+- The context-usage % shown in `MessageInput` (chat input "X% used") could disagree with the same agent's `Context %` column in `AgentPane`. The two displays were driven by separate WebSocket messages with different fire cadences: `context_usage` (only on agent focus and `agent_end`) drove the chat input; `agent_busy_state` (every busy transition) drove the table. Around a turn boundary that included compaction or a failover-driven `compactForProvider`, the chat input could be left holding the pre-compaction value while the table reflected the post-compaction value (or vice versa).
+
+### Changed
+
+- `agent_busy_state` is now the single source of truth for per-agent context-usage % in the UI. Both `AgentPane` (via overlay onto `/api/agents` data) and `MessageInput` (via the active agent's entry in `usePushStore.agentBusy`) read the same map. The chat store no longer carries a `contextPercent` field, and the WebSocket handler unicasts an `agent_busy_state` snapshot on initial connect (for the Guide) and on `switch_agent` (for the newly focused agent) to seed the client's view before the first busy transition.
+- WebSocket message `agent_busy_changed` is renamed to `agent_busy_state`. The payload is identical (`agentId`, `busy`, `contextPercent`); the new name reflects that the message represents the agent's current state (sent as both a broadcast on transitions and a unicast snapshot on connect/switch), not strictly a "change" event.
+
+### Removed
+
+- `context_usage` WebSocket message type and its emitters (`handler.ts` on focus + on `agent_end`) and consumer (`useWebSocket.ts`). The `tokens` and `contextWindow` fields it carried weren't consumed anywhere in the UI; `agent_busy_state` already covers every moment `context_usage` used to fire.
+- `setContextPercent` action and the `contextPercent` field on `PerAgentState` in `chat.ts`. `MessageInput` now reads from `usePushStore` instead.
 
 ## [0.3.2] - 2026-05-06
 

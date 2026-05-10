@@ -22,7 +22,7 @@ interface PushStore {
   artifactsVersion: number;
   /** Incremented on job_executions_changed. */
   jobsVersion: number;
-  /** Per-agent busy state updated inline from agent_busy_changed (no refetch needed). */
+  /** Per-agent busy + context state updated inline from agent_busy_state (no refetch needed). */
   agentBusy: Map<number, AgentBusyState>;
 
   bumpBoard: () => void;

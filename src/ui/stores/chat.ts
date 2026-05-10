@@ -34,7 +34,6 @@ export interface PerAgentState {
   activeThinkingId: string | null;
   isStreaming: boolean;
   isWaitingForResponse: boolean;
-  contextPercent: number | null;
   provider: string | null;
   compactionStatus: 'idle' | 'compacting' | 'compacted';
   compactionTimestamp: number | null;
@@ -48,7 +47,6 @@ function createDefaultAgentState(): PerAgentState {
     activeThinkingId: null,
     isStreaming: false,
     isWaitingForResponse: false,
-    contextPercent: null,
     provider: null,
     compactionStatus: 'idle',
     compactionTimestamp: null,
@@ -93,7 +91,6 @@ interface ChatState {
   clearAllStreamingState: () => void;
   setStreaming: (streaming: boolean, agentId?: number) => void;
   setWaitingForResponse: (waiting: boolean, agentId?: number) => void;
-  setContextPercent: (percent: number | null, agentId?: number) => void;
   setProvider: (provider: string, agentId: number) => void;
   startCompaction: (agentId: number) => void;
   finishCompaction: (agentId: number) => void;
@@ -459,16 +456,6 @@ export const useChatStore = create<ChatState>()(
         set((state) => ({
           agentStates: updateAgentState(state.agentStates, targetId, () => ({
             isWaitingForResponse: waiting,
-          })),
-        }));
-      },
-
-      setContextPercent: (percent: number | null, agentId?: number) => {
-        const targetId = agentId ?? get().activeAgentId;
-        if (targetId === null) return;
-        set((state) => ({
-          agentStates: updateAgentState(state.agentStates, targetId, () => ({
-            contextPercent: percent,
           })),
         }));
       },
