@@ -2166,6 +2166,92 @@ describe('AgentHost', () => {
       // And exactly three sends — not duplicates from being seen as both snapshot AND new.
       expect(freshSession.sendCustomMessage).toHaveBeenCalledTimes(3);
     });
+
+    it('replays deliveries queued during failover-driven reinit even when the pre-failover snapshot is empty', async () => {
+      // Edge case from Copilot round 1 (PR #170): failover can be triggered when no deliveries
+      // are in flight (deliveriesToRetry empty). With queue-during-reinit, new deliveries can
+      // still arrive while initialize() runs. If the replay block were gated on
+      // `deliveriesToRetry.length > 0`, those promises would be stranded.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        deliverySendCount: number;
+        reinitializeWithProvider: (
+          provider: string,
+          prompt: string | null,
+          deliveries: unknown[],
+          reason?: string,
+          detail?: string
+        ) => Promise<void>;
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> } | null;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        initialize: ReturnType<typeof vi.fn>;
+        authResolver: {
+          getActiveKey: ReturnType<typeof vi.fn>;
+          ensureFresh: ReturnType<typeof vi.fn>;
+        };
+      };
+
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.authResolver.getActiveKey = vi
+        .fn()
+        .mockReturnValue({ keyIndex: 0, tier: 'api_keys' });
+      internal.authResolver.ensureFresh = vi.fn().mockResolvedValue(undefined);
+
+      let resolveInit!: () => void;
+      const initPromise = new Promise<void>((resolve) => {
+        resolveInit = resolve;
+      });
+      const freshSession = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal.initialize = vi.fn().mockImplementation(async () => {
+        await initPromise;
+        internal.session = freshSession;
+      });
+
+      // Empty snapshot — failover triggered with no deliveries currently in flight.
+      internal.pendingDeliveries = [];
+
+      const reinitPromise = internal.reinitializeWithProvider(
+        'google',
+        null,
+        [], // ← empty deliveriesToRetry
+        'failover reason',
+        'failover detail'
+      );
+
+      // Inject a delivery mid-flight.
+      await Promise.resolve();
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      const lateEntry = {
+        content: 'late-during-empty-snapshot-reinit',
+        details,
+        resolve: vi.fn(),
+        reject: vi.fn(),
+      };
+      internal.pendingDeliveries.push(lateEntry);
+
+      // Let initialize resolve. Replay must trigger despite the empty snapshot.
+      resolveInit();
+      await reinitPromise;
+
+      const sentContents = freshSession.sendCustomMessage.mock.calls.map(
+        (c) => (c[0] as { content: string }).content
+      );
+      expect(sentContents).toContain('late-during-empty-snapshot-reinit');
+      expect(freshSession.sendCustomMessage).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('compaction pruning', () => {

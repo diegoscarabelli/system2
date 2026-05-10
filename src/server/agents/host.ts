@@ -1280,20 +1280,19 @@ export class AgentHost {
       // These were queued in the old session which was destroyed during reinit.
       // Uses sendCustomMessage directly (not deliverMessage) to avoid duplicating
       // chat cache entries that were already added by the original delivery.
-      if (deliveriesToRetry && deliveriesToRetry.length > 0 && this.session) {
-        // Merge: deliveries queued by concurrent deliverMessage() during async
-        // reinit must be preserved. With queue-during-reinit (issue #169),
-        // deliverMessage pushes to pendingDeliveries even while isReinitializing
-        // is true, so newDuringReinit can hold real entries and must be replayed
-        // alongside the original snapshot.
-        const newDuringReinit = this.pendingDeliveries.filter(
-          (d) => !deliveriesToRetry.includes(d)
-        );
-        const allToReplay = [...deliveriesToRetry, ...newDuringReinit];
-        this.pendingDeliveries = allToReplay;
+      //
+      // The merged set drives the gate (not deliveriesToRetry alone). With queue-during-reinit
+      // (issue #169), deliverMessage pushes to pendingDeliveries even while isReinitializing is
+      // true, so the snapshot can be empty while newDuringReinit holds real entries. Gating on
+      // deliveriesToRetry would skip the replay block entirely and strand those promises.
+      const retrySnapshot = deliveriesToRetry ?? [];
+      const newDuringReinit = this.pendingDeliveries.filter((d) => !retrySnapshot.includes(d));
+      const allToReplay = [...retrySnapshot, ...newDuringReinit];
+      this.pendingDeliveries = allToReplay;
+      if (allToReplay.length > 0 && this.session) {
         log.info(
           `[AgentHost] Replaying ${allToReplay.length} pending delivery(ies) with new provider ` +
-            `(${deliveriesToRetry.length} pre-reinit, ${newDuringReinit.length} during reinit)...`
+            `(${retrySnapshot.length} pre-reinit, ${newDuringReinit.length} during reinit)...`
         );
         const session = this.session;
         for (const d of allToReplay) {
