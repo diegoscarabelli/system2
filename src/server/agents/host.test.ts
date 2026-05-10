@@ -2252,6 +2252,114 @@ describe('AgentHost', () => {
       expect(sentContents).toContain('late-during-empty-snapshot-reinit');
       expect(freshSession.sendCustomMessage).toHaveBeenCalledTimes(1);
     });
+
+    it('does NOT double-send a delivery that arrives after isReinitializing is cleared but before replay runs', async () => {
+      // Copilot round 2 (PR #170): reinitializeWithProvider clears `isReinitializing = false`
+      // BEFORE the optional `await session.prompt(promptToRetry)`. During that await, a
+      // deliverMessage() call goes through the normal send path AND lands in pendingDeliveries.
+      // If the replay block recomputed `newDuringReinit` from live pendingDeliveries after the
+      // await, it would pick up that delivery and send it a second time. The fix snapshots the
+      // queued-during-reinit set BEFORE clearing the flag, so post-clear deliveries are not
+      // replayed.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        deliverySendCount: number;
+        reinitializeWithProvider: (
+          provider: string,
+          prompt: string | null,
+          deliveries: unknown[],
+          reason?: string,
+          detail?: string
+        ) => Promise<void>;
+        session: {
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+          prompt: ReturnType<typeof vi.fn>;
+        } | null;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        initialize: ReturnType<typeof vi.fn>;
+        authResolver: {
+          getActiveKey: ReturnType<typeof vi.fn>;
+          ensureFresh: ReturnType<typeof vi.fn>;
+        };
+      };
+
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.authResolver.getActiveKey = vi
+        .fn()
+        .mockReturnValue({ keyIndex: 0, tier: 'api_keys' });
+      internal.authResolver.ensureFresh = vi.fn().mockResolvedValue(undefined);
+
+      // Install fresh session up front so prompt() can be awaited. We will gate the
+      // prompt() call so a deliverMessage() can land during that await.
+      let resolvePrompt!: () => void;
+      const promptPromise = new Promise<void>((resolve) => {
+        resolvePrompt = resolve;
+      });
+      const freshSession = {
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+        prompt: vi.fn().mockImplementation(() => promptPromise),
+      };
+      internal.initialize = vi.fn().mockImplementation(async () => {
+        internal.session = freshSession;
+      });
+
+      internal.pendingDeliveries = [];
+
+      // Trigger failover with a non-null promptToRetry so the await session.prompt path runs.
+      const reinitPromise = internal.reinitializeWithProvider(
+        'google',
+        'retry-this-prompt',
+        [],
+        'failover reason',
+        'failover detail'
+      );
+
+      // Yield until reinit reaches the prompt await — initialize has resolved, isReinitializing
+      // is now false, and session.prompt is in flight.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // At this point a deliverMessage() lands. With isReinitializing=false and session
+      // non-null, it goes through the normal send path (sendCustomMessage called once,
+      // pushed to pendingDeliveries).
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      const postClearPromise = host.deliverMessage('post-clear-delivery', details);
+      // Don't await completion — let it resolve at the agent's pace.
+      void postClearPromise.catch(() => {});
+
+      // deliverMessage's send goes through `reload.then(...)` — flush microtasks so the
+      // sendCustomMessage call lands before we assert.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Verify it went through the normal send path (1 sendCustomMessage call).
+      expect(freshSession.sendCustomMessage).toHaveBeenCalledTimes(1);
+
+      // Now let the prompt retry complete; the replay block runs next.
+      resolvePrompt();
+      await reinitPromise;
+
+      // The replay block must NOT re-send the post-clear delivery. Still exactly 1 send.
+      expect(freshSession.sendCustomMessage).toHaveBeenCalledTimes(1);
+      const sentContents = freshSession.sendCustomMessage.mock.calls.map(
+        (c) => (c[0] as { content: string }).content
+      );
+      expect(sentContents).toEqual(['post-clear-delivery']);
+    });
   });
 
   describe('compaction pruning', () => {

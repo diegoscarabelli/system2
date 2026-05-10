@@ -1262,6 +1262,16 @@ export class AgentHost {
         });
       }
 
+      // Snapshot the "queued-while-reinitializing" set BEFORE clearing the flag. Anything in
+      // pendingDeliveries right now that is NOT in the pre-failover snapshot was pushed by a
+      // concurrent deliverMessage() call that took the queue-during-reinit branch (issue #169).
+      // We must replay these, but only these — deliveries that arrive AFTER we clear the flag
+      // will go through the normal send path (because session is now non-null and the flag is
+      // false) and would be sent twice if we recomputed this set after the await below.
+      const retrySnapshot = deliveriesToRetry ?? [];
+      const queuedDuringReinit = this.pendingDeliveries.filter((d) => !retrySnapshot.includes(d));
+      const toReplay = [...retrySnapshot, ...queuedDuringReinit];
+
       // Re-arm error handling before retrying the prompt. Errors from the new
       // provider need normal failover, not the isReinitializing early-return.
       this.isReinitializing = false;
@@ -1276,26 +1286,18 @@ export class AgentHost {
         await this.session.prompt(promptToRetry, { streamingBehavior: 'followUp' });
       }
 
-      // Replay pending custom-message deliveries (scheduled tasks, inter-agent messages).
-      // These were queued in the old session which was destroyed during reinit.
-      // Uses sendCustomMessage directly (not deliverMessage) to avoid duplicating
-      // chat cache entries that were already added by the original delivery.
-      //
-      // The merged set drives the gate (not deliveriesToRetry alone). With queue-during-reinit
-      // (issue #169), deliverMessage pushes to pendingDeliveries even while isReinitializing is
-      // true, so the snapshot can be empty while newDuringReinit holds real entries. Gating on
-      // deliveriesToRetry would skip the replay block entirely and strand those promises.
-      const retrySnapshot = deliveriesToRetry ?? [];
-      const newDuringReinit = this.pendingDeliveries.filter((d) => !retrySnapshot.includes(d));
-      const allToReplay = [...retrySnapshot, ...newDuringReinit];
-      this.pendingDeliveries = allToReplay;
-      if (allToReplay.length > 0 && this.session) {
+      // Replay the deliveries captured in the snapshot above. Uses sendCustomMessage directly
+      // (not deliverMessage) to avoid duplicating chat cache entries already added by the
+      // original delivery. Crucially we iterate the pre-clear snapshot, NOT live
+      // pendingDeliveries — entries pushed after isReinitializing was cleared have already
+      // been sent via the normal path and must not be replayed.
+      if (toReplay.length > 0 && this.session) {
         log.info(
-          `[AgentHost] Replaying ${allToReplay.length} pending delivery(ies) with new provider ` +
-            `(${retrySnapshot.length} pre-reinit, ${newDuringReinit.length} during reinit)...`
+          `[AgentHost] Replaying ${toReplay.length} pending delivery(ies) with new provider ` +
+            `(${retrySnapshot.length} pre-reinit, ${queuedDuringReinit.length} during reinit)...`
         );
         const session = this.session;
-        for (const d of allToReplay) {
+        for (const d of toReplay) {
           // Increment count synchronously so agent_end (which fires before
           // sendCustomMessage resolves for idle agents) sees the correct tally.
           this.deliverySendCount++;
