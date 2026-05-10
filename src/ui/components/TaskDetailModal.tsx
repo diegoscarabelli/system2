@@ -8,10 +8,10 @@
 import { XIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef, useState } from 'react';
-import Markdown from 'react-markdown';
 import { usePushStore } from '../stores/push';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
+import Markdown from './Markdown';
 
 interface TaskDetail {
   id: number;

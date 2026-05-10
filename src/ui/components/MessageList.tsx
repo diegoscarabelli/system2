@@ -7,7 +7,6 @@
 
 import { Box, Text } from '@primer/react';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import Markdown from 'react-markdown';
 import {
   EMPTY_AGENT_STATE,
   type Message,
@@ -18,6 +17,7 @@ import {
 } from '../stores/chat';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
+import Markdown from './Markdown';
 
 /** Format a millisecond timestamp as local HH:MM, or "Mar 18, HH:MM" if not today */
 function formatTime(ts: number): string {
@@ -149,6 +149,19 @@ function MarkdownContent({ content, muted }: { content: string; muted?: boolean 
           marginLeft: 0,
           color: 'fg.muted',
         },
+        '& table': {
+          borderCollapse: 'collapse',
+          width: '100%',
+          marginTop: 2,
+          marginBottom: 2,
+        },
+        '& th, & td': {
+          border: '1px solid',
+          borderColor: 'border.default',
+          padding: 1,
+          textAlign: 'left',
+        },
+        '& th': { fontWeight: 'bold', backgroundColor: 'neutral.muted' },
       }}
     >
       <Markdown>{content}</Markdown>
