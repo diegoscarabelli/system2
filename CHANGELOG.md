@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `AgentHost.deliverMessage` no longer rejects with `Agent is reinitializing, delivery rejected` when a delivery lands during a reset+reinit window. Deliveries are now queued in `pendingDeliveries` and replayed against the fresh session by the existing replay path (`replayPendingDeliveries` after a scheduled-task reset, or the inline replay loop in `reinitializeWithProvider` for failovers). The "uninitialized" reject still fires when `initialize()` has genuinely never run. Fixes #169 — the back-to-back catch-up race where `memory-update / catch-up` was rejected because the preceding `daily-summary / catch-up`'s `agent_end` had just kicked off the Narrator's post-scheduled-task reset+reinit.
+- `reinitializeWithProvider`'s replay loop now iterates the merged set of deliveries (pre-failover snapshot + entries queued during reinit) instead of just the snapshot. Previously a no-op because the early reject made `newDuringReinit` unreachable; load-bearing now that `deliverMessage` queues during reinit.
+
 ## [0.3.2] - 2026-05-06
 
 ### Added

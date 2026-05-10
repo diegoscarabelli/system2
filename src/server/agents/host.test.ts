@@ -2069,6 +2069,400 @@ describe('AgentHost', () => {
       // isReinitializing should be reset (finally block)
       expect(internal.isReinitializing).toBe(false);
     });
+
+    it('replays deliveries queued during failover-driven reinit alongside the pre-failover snapshot', async () => {
+      // Issue #169 follow-on: with deliverMessage now queuing during reinit (instead of
+      // rejecting), the merge logic at reinitializeWithProvider lines 1281-1284 is finally
+      // load-bearing. newDuringReinit must be replayed against the new session — not just
+      // the pre-failover deliveriesToRetry snapshot. Before the fix, the loop iterated
+      // deliveriesToRetry only and silently dropped any delivery that landed mid-reinit.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        deliverySendCount: number;
+        reinitializeWithProvider: (
+          provider: string,
+          prompt: string | null,
+          deliveries: unknown[],
+          reason?: string,
+          detail?: string
+        ) => Promise<void>;
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> } | null;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        initialize: ReturnType<typeof vi.fn>;
+        authResolver: {
+          getActiveKey: ReturnType<typeof vi.fn>;
+          ensureFresh: ReturnType<typeof vi.fn>;
+        };
+      };
+
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.authResolver.getActiveKey = vi
+        .fn()
+        .mockReturnValue({ keyIndex: 0, tier: 'api_keys' });
+      internal.authResolver.ensureFresh = vi.fn().mockResolvedValue(undefined);
+
+      // Hold initialize in flight so we can inject a newDuringReinit entry mid-flight.
+      let resolveInit!: () => void;
+      const initPromise = new Promise<void>((resolve) => {
+        resolveInit = resolve;
+      });
+      const freshSession = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal.initialize = vi.fn().mockImplementation(async () => {
+        await initPromise;
+        internal.session = freshSession;
+      });
+
+      // Pre-failover snapshot: two deliveries already in the queue.
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      const snapshotA = { content: 'snapshot-A', details, resolve: vi.fn(), reject: vi.fn() };
+      const snapshotB = { content: 'snapshot-B', details, resolve: vi.fn(), reject: vi.fn() };
+      internal.pendingDeliveries = [snapshotA, snapshotB];
+
+      // Caller passes the snapshot as deliveriesToRetry (this is what handlePotentialError does
+      // before calling reinitializeWithProvider).
+      const reinitPromise = internal.reinitializeWithProvider(
+        'google',
+        null,
+        [snapshotA, snapshotB],
+        'failover reason',
+        'failover detail'
+      );
+
+      // Yield so reinit awaits authResolver/initialize. Now inject a delivery that arrives
+      // mid-flight (this simulates the new queue-during-reinit behavior in deliverMessage).
+      await Promise.resolve();
+      const lateEntry = {
+        content: 'late-during-reinit',
+        details,
+        resolve: vi.fn(),
+        reject: vi.fn(),
+      };
+      internal.pendingDeliveries.push(lateEntry);
+
+      // Now let initialize resolve. The replay loop must iterate the MERGED list.
+      resolveInit();
+      await reinitPromise;
+
+      // All three deliveries got sent against the fresh session.
+      const sentContents = freshSession.sendCustomMessage.mock.calls.map(
+        (c) => (c[0] as { content: string }).content
+      );
+      expect(sentContents).toContain('snapshot-A');
+      expect(sentContents).toContain('snapshot-B');
+      expect(sentContents).toContain('late-during-reinit');
+      // And exactly three sends — not duplicates from being seen as both snapshot AND new.
+      expect(freshSession.sendCustomMessage).toHaveBeenCalledTimes(3);
+    });
+
+    it('replays deliveries queued during failover-driven reinit even when the pre-failover snapshot is empty', async () => {
+      // Edge case from Copilot round 1 (PR #170): failover can be triggered when no deliveries
+      // are in flight (deliveriesToRetry empty). With queue-during-reinit, new deliveries can
+      // still arrive while initialize() runs. If the replay block were gated on
+      // `deliveriesToRetry.length > 0`, those promises would be stranded.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        deliverySendCount: number;
+        reinitializeWithProvider: (
+          provider: string,
+          prompt: string | null,
+          deliveries: unknown[],
+          reason?: string,
+          detail?: string
+        ) => Promise<void>;
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> } | null;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        initialize: ReturnType<typeof vi.fn>;
+        authResolver: {
+          getActiveKey: ReturnType<typeof vi.fn>;
+          ensureFresh: ReturnType<typeof vi.fn>;
+        };
+      };
+
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.authResolver.getActiveKey = vi
+        .fn()
+        .mockReturnValue({ keyIndex: 0, tier: 'api_keys' });
+      internal.authResolver.ensureFresh = vi.fn().mockResolvedValue(undefined);
+
+      let resolveInit!: () => void;
+      const initPromise = new Promise<void>((resolve) => {
+        resolveInit = resolve;
+      });
+      const freshSession = { sendCustomMessage: vi.fn().mockResolvedValue(undefined) };
+      internal.initialize = vi.fn().mockImplementation(async () => {
+        await initPromise;
+        internal.session = freshSession;
+      });
+
+      // Empty snapshot — failover triggered with no deliveries currently in flight.
+      internal.pendingDeliveries = [];
+
+      const reinitPromise = internal.reinitializeWithProvider(
+        'google',
+        null,
+        [], // ← empty deliveriesToRetry
+        'failover reason',
+        'failover detail'
+      );
+
+      // Inject a delivery mid-flight.
+      await Promise.resolve();
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      const lateEntry = {
+        content: 'late-during-empty-snapshot-reinit',
+        details,
+        resolve: vi.fn(),
+        reject: vi.fn(),
+      };
+      internal.pendingDeliveries.push(lateEntry);
+
+      // Let initialize resolve. Replay must trigger despite the empty snapshot.
+      resolveInit();
+      await reinitPromise;
+
+      const sentContents = freshSession.sendCustomMessage.mock.calls.map(
+        (c) => (c[0] as { content: string }).content
+      );
+      expect(sentContents).toContain('late-during-empty-snapshot-reinit');
+      expect(freshSession.sendCustomMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT double-send a delivery that arrives after isReinitializing is cleared but before replay runs', async () => {
+      // Copilot round 2 (PR #170): reinitializeWithProvider clears `isReinitializing = false`
+      // BEFORE the optional `await session.prompt(promptToRetry)`. During that await, a
+      // deliverMessage() call goes through the normal send path AND lands in pendingDeliveries.
+      // If the replay block recomputed `newDuringReinit` from live pendingDeliveries after the
+      // await, it would pick up that delivery and send it a second time. The fix snapshots the
+      // queued-during-reinit set BEFORE clearing the flag, so post-clear deliveries are not
+      // replayed.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        deliverySendCount: number;
+        reinitializeWithProvider: (
+          provider: string,
+          prompt: string | null,
+          deliveries: unknown[],
+          reason?: string,
+          detail?: string
+        ) => Promise<void>;
+        session: {
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+          prompt: ReturnType<typeof vi.fn>;
+        } | null;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        initialize: ReturnType<typeof vi.fn>;
+        authResolver: {
+          getActiveKey: ReturnType<typeof vi.fn>;
+          ensureFresh: ReturnType<typeof vi.fn>;
+        };
+      };
+
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.authResolver.getActiveKey = vi
+        .fn()
+        .mockReturnValue({ keyIndex: 0, tier: 'api_keys' });
+      internal.authResolver.ensureFresh = vi.fn().mockResolvedValue(undefined);
+
+      // Install fresh session up front so prompt() can be awaited. We will gate the
+      // prompt() call so a deliverMessage() can land during that await.
+      let resolvePrompt!: () => void;
+      const promptPromise = new Promise<void>((resolve) => {
+        resolvePrompt = resolve;
+      });
+      const freshSession = {
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+        prompt: vi.fn().mockImplementation(() => promptPromise),
+      };
+      internal.initialize = vi.fn().mockImplementation(async () => {
+        internal.session = freshSession;
+      });
+
+      internal.pendingDeliveries = [];
+
+      // Trigger failover with a non-null promptToRetry so the await session.prompt path runs.
+      const reinitPromise = internal.reinitializeWithProvider(
+        'google',
+        'retry-this-prompt',
+        [],
+        'failover reason',
+        'failover detail'
+      );
+
+      // Yield until reinit reaches the prompt await — initialize has resolved, isReinitializing
+      // is now false, and session.prompt is in flight.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // At this point a deliverMessage() lands. With isReinitializing=false and session
+      // non-null, it goes through the normal send path (sendCustomMessage called once,
+      // pushed to pendingDeliveries).
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      const postClearPromise = host.deliverMessage('post-clear-delivery', details);
+      // Don't await completion — let it resolve at the agent's pace.
+      void postClearPromise.catch(() => {});
+
+      // deliverMessage's send goes through `reload.then(...)` — flush microtasks so the
+      // sendCustomMessage call lands before we assert.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Verify it went through the normal send path (1 sendCustomMessage call).
+      expect(freshSession.sendCustomMessage).toHaveBeenCalledTimes(1);
+
+      // Now let the prompt retry complete; the replay block runs next.
+      resolvePrompt();
+      await reinitPromise;
+
+      // The replay block must NOT re-send the post-clear delivery. Still exactly 1 send.
+      expect(freshSession.sendCustomMessage).toHaveBeenCalledTimes(1);
+      const sentContents = freshSession.sendCustomMessage.mock.calls.map(
+        (c) => (c[0] as { content: string }).content
+      );
+      expect(sentContents).toEqual(['post-clear-delivery']);
+    });
+
+    it('preserves FIFO send order when a delivery lands during the prompt-retry await with backlog present', async () => {
+      // Copilot round 3 (PR #170): if the replay loop ran AFTER `await session.prompt(...)`,
+      // a concurrent deliverMessage during that await would land at deliverySendCount=1 with
+      // backlog entries [A, B] still at the front of pendingDeliveries. agent_end would shift
+      // the wrong entry (resolving A's promise early) AND the subsequent replay would re-send
+      // A to the agent (duplicate processing). The fix moves replay BEFORE the prompt await
+      // so backlog sends and their deliverySendCount accounting happen before any await yields.
+      //
+      // Observable from the call order on sendCustomMessage: with the fix, [A, B, X];
+      // without the fix, [X, A, B]. We assert the fix's order to lock the invariant.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        deliverySendCount: number;
+        reinitializeWithProvider: (
+          provider: string,
+          prompt: string | null,
+          deliveries: unknown[],
+          reason?: string,
+          detail?: string
+        ) => Promise<void>;
+        session: {
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+          prompt: ReturnType<typeof vi.fn>;
+        } | null;
+        _chatCache: { push: ReturnType<typeof vi.fn>; getMessages: ReturnType<typeof vi.fn> };
+        initialize: ReturnType<typeof vi.fn>;
+        authResolver: {
+          getActiveKey: ReturnType<typeof vi.fn>;
+          ensureFresh: ReturnType<typeof vi.fn>;
+        };
+      };
+
+      internal._chatCache = { push: vi.fn(), getMessages: vi.fn().mockReturnValue([]) };
+      internal.authResolver.getActiveKey = vi
+        .fn()
+        .mockReturnValue({ keyIndex: 0, tier: 'api_keys' });
+      internal.authResolver.ensureFresh = vi.fn().mockResolvedValue(undefined);
+
+      let resolvePrompt!: () => void;
+      const promptPromise = new Promise<void>((resolve) => {
+        resolvePrompt = resolve;
+      });
+      const freshSession = {
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+        prompt: vi.fn().mockImplementation(() => promptPromise),
+      };
+      internal.initialize = vi.fn().mockImplementation(async () => {
+        internal.session = freshSession;
+      });
+
+      // Pre-failover backlog of two scheduled-task deliveries.
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      const A = { content: 'A-backlog', details, resolve: vi.fn(), reject: vi.fn() };
+      const B = { content: 'B-backlog', details, resolve: vi.fn(), reject: vi.fn() };
+      internal.pendingDeliveries = [A, B];
+
+      const reinitPromise = internal.reinitializeWithProvider(
+        'google',
+        'retry-prompt',
+        [A, B], // ← deliveriesToRetry snapshot
+        'failover reason',
+        'failover detail'
+      );
+
+      // Flush microtasks until reinit reaches the gated `await session.prompt`. With the fix
+      // in place, replay has already run synchronously; without the fix, the prompt await
+      // starts before any replay.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Drop X into the queue during the prompt-retry await.
+      const postClearPromise = host.deliverMessage('X-during-prompt', details);
+      void postClearPromise.catch(() => {});
+
+      // Flush microtasks so the normal-path send for X fires.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Release prompt; reinit body returns.
+      resolvePrompt();
+      await reinitPromise;
+
+      // Assert FIFO order on sendCustomMessage. With the fix: [A, B, X]. Without: [X, A, B].
+      const sentContents = freshSession.sendCustomMessage.mock.calls.map(
+        (c) => (c[0] as { content: string }).content
+      );
+      expect(sentContents).toEqual(['A-backlog', 'B-backlog', 'X-during-prompt']);
+    });
   });
 
   describe('compaction pruning', () => {
@@ -3928,55 +4322,146 @@ describe('AgentHost', () => {
       expect(internal.resetSessionAfterScheduledTask).toBe(true);
     });
 
-    it('sets isReinitializing during reset+reinit window so concurrent deliveries are rejected', async () => {
+    it('queues deliveries that land during the reset+reinit window and replays them after init', async () => {
       const { internal } = makeHostWithSessionDir({ reset: true });
       const host = internal as unknown as AgentHost;
 
-      // Hold initialize() in flight so we can observe the in-window state.
+      // Hold initialize() in flight so we can observe the in-window state. When initialize
+      // does eventually resolve, install a fresh session mock so the replay loop has somewhere
+      // to send.
       let resolveInit!: () => void;
       const initPromise = new Promise<void>((resolve) => {
         resolveInit = resolve;
       });
-      internal.initialize = vi.fn().mockImplementation(() => initPromise);
+      const freshSendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      internal.initialize = vi.fn().mockImplementation(async () => {
+        await initPromise;
+        internal.session = { sendCustomMessage: freshSendCustomMessage, dispose: vi.fn() };
+      });
 
       const details = { sender: 1, receiver: 2, timestamp: Date.now() };
+      const resolveA = vi.fn();
       internal.pendingDeliveries = [
         {
           content: '[Scheduled task: daily-summary]\n\nfile: /x',
           details,
           scheduledTask: true,
-          resolve: vi.fn(),
+          resolve: resolveA,
           reject: vi.fn(),
         },
       ];
       internal.deliverySendCount = 1;
 
-      // Trigger the reset+reinit path. After this returns, isReinitializing should be true.
+      // Drive the reset+reinit path. After this returns, isReinitializing is true and
+      // this.session is null (resetSessionToHeader nulls it before kicking off initialize).
       internal.handleSessionEvent({ type: 'agent_end' });
 
       const reinitFlag = (internal as unknown as { isReinitializing: boolean }).isReinitializing;
       expect(reinitFlag).toBe(true);
 
-      // A delivery landing during the reinit window must be rejected with the cleaner
-      // "Agent is reinitializing" error, NOT the generic "not initialized" error. Even though
-      // resetSessionToHeader nulled `internal.session`, deliverMessage checks isReinitializing
-      // first so the more specific error wins.
-      await expect(
-        host.deliverMessage('[Message from guide agent (id=1)]\n\nhi', {
-          sender: 1,
-          receiver: 2,
-          timestamp: Date.now(),
-        })
-      ).rejects.toThrow(/Agent is reinitializing/);
+      // A delivery that lands during the reinit window — the exact scenario from issue #169
+      // (memory-update catch-up arriving immediately after daily-summary catch-up's agent_end)
+      // — must NOT reject. It should queue in pendingDeliveries and be replayed after init.
+      const followUpPromise = host.deliverMessage('[Scheduled task: memory-update]\n\nfile: /y', {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
 
-      // Let initialize() resolve and confirm the flag clears via the .finally hook.
+      // Queued, not rejected. The promise stays pending.
+      let settled = false;
+      followUpPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        }
+      );
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      // pendingDeliveries now contains: A (the in-flight one whose agent_end fired) — wait,
+      // pre-reset cleanup shifts A out — plus the newly queued one. We assert the new one is in.
+      const queued = (internal as unknown as { pendingDeliveries: Array<{ content: string }> })
+        .pendingDeliveries;
+      expect(queued.some((d) => d.content.includes('memory-update'))).toBe(true);
+
+      // Let initialize() resolve. The .then(replayPendingDeliveries) chain replays the queued
+      // delivery against the fresh session.
       resolveInit();
+      // Flush microtasks so the void initialize().then(replay) chain runs.
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
-      const reinitFlagAfter = (internal as unknown as { isReinitializing: boolean })
-        .isReinitializing;
-      expect(reinitFlagAfter).toBe(false);
+
+      // The deferred memory-update was sent against the fresh session.
+      const sentContents = freshSendCustomMessage.mock.calls.map(
+        (c) => (c[0] as { content: string }).content
+      );
+      expect(sentContents).toContain('[Scheduled task: memory-update]\n\nfile: /y');
+    });
+
+    it('rejects pending deliveries when initialize fails in the reset path so callers do not hang', async () => {
+      // Without this rejection, deferred delivery promises sit unresolved forever, blocking
+      // any trackJobExecution caller awaiting the delivery (e.g. server.checkNarratorCatchUp).
+      // Mirrors the failover path's cleanup in reinitializeWithProvider.
+      const { internal } = makeHostWithSessionDir({ reset: true });
+      const host = internal as unknown as AgentHost;
+
+      // Hold initialize in flight, then reject. Until the rejection lands, a delivery queued
+      // during the reinit window must remain pending; after rejection, it should be rejected
+      // with the init error.
+      let rejectInit!: (err: Error) => void;
+      const initPromise = new Promise<void>((_, rej) => {
+        rejectInit = rej;
+      });
+      internal.initialize = vi.fn().mockImplementation(() => initPromise);
+
+      const details = { sender: 1, receiver: 2, timestamp: Date.now() };
+      const resolveA = vi.fn();
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /x',
+          details,
+          scheduledTask: true,
+          resolve: resolveA,
+          reject: vi.fn(),
+        },
+      ];
+      internal.deliverySendCount = 1;
+
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      // A new delivery lands during reinit — gets queued (issue #169 fix).
+      let lateRejection: unknown;
+      const lateDelivery = host.deliverMessage('[Scheduled task: memory-update]\n\nfile: /y', {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      lateDelivery.catch((e) => {
+        lateRejection = e;
+      });
+
+      // Verify it's queued (pending), not yet settled.
+      await Promise.resolve();
+      expect(lateRejection).toBeUndefined();
+
+      // Now fail initialize. The .catch in handleSessionEvent should reject all pending.
+      rejectInit(new Error('boom: cannot recreate session'));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Late delivery's promise was rejected with the init error.
+      expect(lateRejection).toBeInstanceOf(Error);
+      expect((lateRejection as Error).message).toContain('boom: cannot recreate session');
+
+      // pendingDeliveries was cleared (so the next cron tick starts from an empty queue).
+      expect(internal.pendingDeliveries).toHaveLength(0);
+      expect(internal.deliverySendCount).toBe(0);
     });
 
     it('replays queued deliveries against the fresh session after reset', async () => {
