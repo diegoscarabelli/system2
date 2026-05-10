@@ -158,7 +158,7 @@ function MarkdownContent({ content, muted }: { content: string; muted?: boolean 
         '& th, & td': {
           border: '1px solid',
           borderColor: 'border.default',
-          padding: 1,
+          padding: 2,
           textAlign: 'left',
         },
         '& th': { fontWeight: 'bold', backgroundColor: 'neutral.muted' },

@@ -2,9 +2,9 @@ import ReactMarkdown, { type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 export function Markdown({ remarkPlugins, children, ...rest }: Options) {
-  const plugins = remarkPlugins ? [remarkGfm, ...remarkPlugins] : [remarkGfm];
+  const extra = (remarkPlugins ?? []).filter((p) => p !== remarkGfm);
   return (
-    <ReactMarkdown remarkPlugins={plugins} {...rest}>
+    <ReactMarkdown remarkPlugins={[remarkGfm, ...extra]} {...rest}>
       {children}
     </ReactMarkdown>
   );
