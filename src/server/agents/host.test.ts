@@ -23,6 +23,15 @@ import type { LlmConfig } from '../../shared/index.js';
 import { AgentHost, MAX_DELIVERY_BYTES, pickModelForTier } from './host.js';
 import type { AgentRegistry } from './registry.js';
 
+// Stub retry.ts's `sleep` so the retry-path tests don't actually wait the
+// exponential-backoff delay (~1s+ per case from `calculateDelay`). Everything
+// else in retry.ts is kept as the real implementation — `shouldRetry` /
+// `shouldFailover` / `categorizeError` behavior is what these tests exercise.
+vi.mock('./retry.js', async () => {
+  const actual = await vi.importActual<typeof import('./retry.js')>('./retry.js');
+  return { ...actual, sleep: vi.fn().mockResolvedValue(undefined) };
+});
+
 // Mock pi-ai's catalog for pickModelForTier tests so the OAuth resolver
 // returns deterministic IDs regardless of what's installed.
 vi.mock('@mariozechner/pi-ai', () => ({
