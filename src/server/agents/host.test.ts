@@ -1143,6 +1143,11 @@ describe('AgentHost', () => {
         assistantMessageEvent: {},
       });
       expect(hostInternal.currentTurnHasOutput).toBe(true);
+
+      // agent_end also resets the flag at the run boundary, matching the
+      // documented lifecycle.
+      hostInternal.handleSessionEvent({ type: 'agent_end', messages: [] });
+      expect(hostInternal.currentTurnHasOutput).toBe(false);
     });
   });
 
