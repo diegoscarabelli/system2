@@ -900,7 +900,6 @@ export class AgentHost {
     // also rejected for simplicity. The cost is that any caller awaiting them
     // sees a transient error; for scheduled tasks this just means waiting for
     // the next cron tick (~30 min).
-    let contaminationFired = false;
     if (this.currentTurnHasOutput && this.pendingDeliveries.length > 0) {
       log.warn(
         `[AgentHost] Turn already emitted output before failure; ` +
@@ -914,24 +913,12 @@ export class AgentHost {
         d.reject(contaminationError);
       }
       this.pendingDeliveries = [];
-      contaminationFired = true;
     }
 
     const deliveriesToRetry = [...this.pendingDeliveries];
     // Reset the send counter: the failed turn's sends are abandoned.
     // The retry/failover path will re-send and re-increment as needed.
     this.deliverySendCount = 0;
-
-    // If contamination cleared every delivery and there's no prompt to retry,
-    // the retry/failover machinery below has nothing left to do. Returning
-    // here avoids incrementing retryAttempts and awaiting sleep() for a no-op
-    // retry — which would otherwise burn the retry budget for the *next*
-    // genuine error on the same provider/category. The contaminated deliveries
-    // have already been rejected; the awaiter (e.g. trackJobExecution) will
-    // surface the failure and the next cron tick redoes the window.
-    if (contaminationFired && !promptToRetry) {
-      return;
-    }
 
     // OAuth model fallback: when the auto-resolved family flagship returns
     // 403/404 (provider-specific entitlement / "model not found" signals),
@@ -1034,6 +1021,16 @@ export class AgentHost {
 
     // Check if we should retry
     if (shouldRetry(category, currentAttempts)) {
+      // Nothing left to retry: the contaminated-turn guard above cleared
+      // pendingDeliveries and there is no pendingPrompt. Skipping the
+      // sleep+retry-budget increment preserves retryAttempts for the next
+      // genuine error on this provider/category. We've already passed the
+      // cooldown-rotation and OAuth-refresh checks above, so this only
+      // short-circuits the now-pointless retry-with-sleep work (#175).
+      if (!promptToRetry && deliveriesToRetry.length === 0) {
+        return;
+      }
+
       const delay = calculateDelay(currentAttempts);
       log.info(`[AgentHost] Retrying in ${Math.round(delay)}ms (attempt ${currentAttempts + 1})`);
 
