@@ -2227,28 +2227,23 @@ describe('buildAndDeliverDailySummary', () => {
     warnSpy.mockRestore();
   });
 
-  it('surfaces every rejection without unhandledRejection when multiple deliveries fail', async () => {
+  it('aggregates every rejection when multiple deliveries fail', async () => {
     // Regression: handlePotentialError's contamination short-circuit can reject
     // multiple pending deliveries in the same tick. With Promise.all, only the
     // first rejection was awaited and the rest became unhandledRejection →
-    // process exit. Promise.allSettled consumes every rejection.
-
-    // The outer describe enables fake timers; use real timers here so the
-    // microtask-drain after the rejection can flush any leaked unhandled
-    // rejections that the buggy code would have produced.
-    vi.useRealTimers();
+    // process exit. Promise.allSettled consumes every rejection and the throw
+    // path bundles them into an AggregateError. The AggregateError shape +
+    // message format is the proof we went through the new path (the old code
+    // threw the raw underlying error, not an aggregate).
+    const today = FIXED_NOW.toISOString().slice(0, 10);
+    const lastRunTs = new Date(FIXED_NOW.getTime() - 10 * 60_000).toISOString();
+    const entryTs = new Date(FIXED_NOW.getTime() - 5 * 60_000).toISOString();
 
     const dir = trackTmpDir(makeTmpDir());
     const summariesDir = join(dir, 'knowledge', 'daily_summaries');
     const sessionDir = join(dir, 'sessions', 'guide_1');
     mkdirSync(summariesDir, { recursive: true });
     mkdirSync(sessionDir, { recursive: true });
-
-    // Stale lastRunTs so there is activity since lastRun and the function
-    // proceeds all the way to the deliveries Promise.allSettled.
-    const today = new Date().toISOString().slice(0, 10);
-    const lastRunTs = new Date(Date.now() - 10 * 60_000).toISOString();
-    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
     writeFileSync(
       join(summariesDir, `${today}.md`),
       `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
@@ -2268,48 +2263,44 @@ describe('buildAndDeliverDailySummary', () => {
       },
     } as unknown as AgentHost;
 
-    // Capture any unhandledRejection that escapes during the test.
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown) => unhandled.push(reason);
-    process.on('unhandledRejection', onUnhandled);
+    // Two projects → two project-log deliveries + one daily-summary delivery,
+    // all rejecting. Old Promise.all path would throw the raw first rejection.
+    const db = {
+      query(sql: string) {
+        if (sql.includes('FROM agent')) {
+          return [
+            { id: 1, role: 'guide', project_name: null },
+            { id: 2, role: 'conductor', project_name: 'P1' },
+            { id: 3, role: 'conductor', project_name: 'P2' },
+          ];
+        }
+        if (sql.includes('FROM project p')) {
+          return [
+            { id: 1, name: 'P1' },
+            { id: 2, name: 'P2' },
+          ];
+        }
+        return [];
+      },
+    } as unknown as DatabaseClient;
 
+    let caught: unknown;
     try {
-      // Two projects → two project-log deliveries + one daily-summary delivery,
-      // all rejecting. Promise.all would have leaked ≥1 unhandled rejection.
-      const db = {
-        query(sql: string) {
-          if (sql.includes('FROM agent')) {
-            return [
-              { id: 1, role: 'guide', project_name: null },
-              { id: 2, role: 'conductor', project_name: 'P1' },
-              { id: 3, role: 'conductor', project_name: 'P2' },
-            ];
-          }
-          if (sql.includes('FROM project p')) {
-            return [
-              { id: 1, name: 'P1' },
-              { id: 2, name: 'P2' },
-            ];
-          }
-          return [];
-        },
-      } as unknown as DatabaseClient;
-
-      await expect(buildAndDeliverDailySummary(db, failingHost, 99, dir, 30)).rejects.toThrow(
-        /daily-summary deliveries failed/
-      );
-
-      // Give the microtask + macrotask queues a chance to surface any leaked
-      // rejections that Promise.all would have left dangling.
-      await new Promise((resolve) => setImmediate(resolve));
-      expect(unhandled).toHaveLength(0);
-
-      // All-or-nothing: cursor on the summary file must NOT advance.
-      const ts = readFrontmatterField(join(summariesDir, `${today}.md`), 'last_narrator_update_ts');
-      expect(ts).toBe(lastRunTs);
-    } finally {
-      process.off('unhandledRejection', onUnhandled);
+      await buildAndDeliverDailySummary(db, failingHost, 99, dir, 30);
+    } catch (err) {
+      caught = err;
     }
+    expect(caught).toBeInstanceOf(AggregateError);
+    const aggErr = caught as AggregateError;
+    expect(aggErr.message).toMatch(/daily-summary deliveries failed/);
+    expect(aggErr.message).toContain('Delivery aborted: API error after model output (401)');
+    // Every rejected delivery is preserved in .errors so callers / observers
+    // can inspect the per-delivery reason if the aggregated message isn't enough.
+    expect(aggErr.errors.length).toBeGreaterThanOrEqual(2);
+
+    // All-or-nothing: cursor on the summary file must NOT advance.
+    const ts = readFrontmatterField(join(summariesDir, `${today}.md`), 'last_narrator_update_ts');
+    expect(ts).toBe(lastRunTs);
   });
 });
 

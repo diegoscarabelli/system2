@@ -1258,13 +1258,23 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
   const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
   if (failures.length > 0) {
     for (const failure of failures) {
-      log.error('[daily-summary] delivery failed:', failure.reason);
+      log.error('[Scheduler] daily-summary delivery failed:', failure.reason);
     }
     // All-or-nothing: do not advance frontmatter cursors on partial failure;
     // the next cron tick retries from the same lastRunTs.
+    //
+    // AggregateError.stack only shows the aggregator's own frames, not the
+    // per-delivery reasons; trackJobExecution stores `error.stack ?? message`
+    // on the job_executions row, so without flattening, the DB record would
+    // only show "N/M deliveries failed" with no clue what went wrong.
+    // Fold each reason's message into the aggregate message so it ends up in
+    // job_executions.failure_message alongside the per-failure log lines.
+    const reasonSummary = failures
+      .map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason)))
+      .join('; ');
     throw new AggregateError(
       failures.map((f) => f.reason),
-      `${failures.length}/${results.length} daily-summary deliveries failed`
+      `${failures.length}/${results.length} daily-summary deliveries failed: ${reasonSummary}`
     );
   }
 
