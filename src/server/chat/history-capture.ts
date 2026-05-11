@@ -6,6 +6,7 @@
  * independently.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { ChatMessage, ChatTurnEvent } from '../../shared/index.js';
 import type { MessageHistory } from './history.js';
@@ -142,34 +143,36 @@ export function createHistoryCaptureSubscriber(
       }
 
       case 'compaction_start':
+        // Use randomUUID suffix to guarantee uniqueness even when start and
+        // end fire in the same millisecond (silent-failure no-ops do that).
+        // React keys collide otherwise and timeline items get dropped.
         getChatCache().push({
-          id: `msg-${Date.now()}`,
+          id: `msg-compaction-start-${randomUUID().slice(0, 8)}`,
           role: 'system',
-          content: `Context compaction started (reason=${event.reason})`,
+          content: 'Context compaction started',
           timestamp: Date.now(),
         });
         break;
 
       case 'compaction_end': {
-        // DIAGNOSTIC: surface why a compaction ended so silently-failing
-        // compactions (early-exit in _runAutoCompaction) are visible. The SDK
-        // emits compaction_end for both success and several no-op paths.
-        const parts: string[] = [`reason=${event.reason}`];
-        if (event.aborted) parts.push('aborted=true');
-        if (event.willRetry) parts.push('willRetry=true');
-        if (event.errorMessage) parts.push(`error=${event.errorMessage}`);
-        if (event.result) {
-          parts.push(
-            `tokensBefore=${event.result.tokensBefore}`,
-            `firstKeptEntryId=${event.result.firstKeptEntryId}`
-          );
-        } else if (!event.aborted && !event.errorMessage) {
-          parts.push('result=undefined (silent no-op)');
+        // Clean message on success; surface diagnostic detail only when
+        // something went wrong so silent failures don't pose as successes.
+        let content: string;
+        if (event.aborted) {
+          content = 'Context compaction aborted';
+        } else if (event.errorMessage) {
+          content = `Context compaction failed: ${event.errorMessage}`;
+        } else if (!event.result) {
+          // SDK fired compaction_end without a result and without flagging
+          // abort/error. Treat as a silent no-op and surface it.
+          content = 'Context compaction failed: no result (silent no-op)';
+        } else {
+          content = 'Context compacted';
         }
         getChatCache().push({
-          id: `msg-${Date.now()}`,
+          id: `msg-compaction-end-${randomUUID().slice(0, 8)}`,
           role: 'system',
-          content: `Context compacted [${parts.join(', ')}]`,
+          content,
           timestamp: Date.now(),
         });
         break;
