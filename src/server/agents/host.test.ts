@@ -956,6 +956,194 @@ describe('AgentHost', () => {
       // fires when session.prompt() throws synchronously
       expect(hostInternal.pendingPrompt).toBe('hello world');
     });
+
+    it('rejects pending deliveries instead of resending when turn already emitted output (#175)', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        currentTurnHasOutput: boolean;
+        session: {
+          prompt: ReturnType<typeof vi.fn>;
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+        };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+        currentKeyIndex: number;
+      };
+
+      hostInternal.session = {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.currentKeyIndex = 0;
+      hostInternal.pendingPrompt = null;
+
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      const reject1 = vi.fn();
+      const reject2 = vi.fn();
+      hostInternal.pendingDeliveries = [
+        { content: 'project-log', details, urgent: false, resolve: vi.fn(), reject: reject1 },
+        { content: 'daily-summary', details, urgent: false, resolve: vi.fn(), reject: reject2 },
+      ];
+
+      // Simulate that the model emitted output before the failure (e.g. ran a tool call).
+      hostInternal.currentTurnHasOutput = true;
+
+      // Rate limit on first attempt would normally take the retry path and resend.
+      hostInternal.retryAttempts = new Map();
+      hostInternal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      await hostInternal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
+      });
+
+      expect(reject1).toHaveBeenCalledOnce();
+      expect(reject2).toHaveBeenCalledOnce();
+      const rejectArg = reject1.mock.calls[0][0] as Error;
+      expect(rejectArg).toBeInstanceOf(Error);
+      expect(rejectArg.message).toContain('API error after model output');
+      expect(hostInternal.pendingDeliveries).toHaveLength(0);
+      // No resend: sendCustomMessage must not have been called.
+      expect(hostInternal.session.sendCustomMessage).not.toHaveBeenCalled();
+    });
+
+    it('still resends pending deliveries when no output was emitted yet (#175 regression)', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        pendingPrompt: string | null;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          urgent?: boolean;
+          resolve: () => void;
+          reject: (reason: Error) => void;
+        }>;
+        currentTurnHasOutput: boolean;
+        session: {
+          prompt: ReturnType<typeof vi.fn>;
+          sendCustomMessage: ReturnType<typeof vi.fn>;
+        };
+        handlePotentialError: (event: unknown) => Promise<void>;
+        authResolver: {
+          markKeyFailed: ReturnType<typeof vi.fn>;
+          getNextProvider: ReturnType<typeof vi.fn>;
+          isKeyInCooldown: ReturnType<typeof vi.fn>;
+        };
+        retryAttempts: Map<string, number>;
+        currentProvider: string;
+        currentKeyIndex: number;
+      };
+
+      hostInternal.session = {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        sendCustomMessage: vi.fn().mockResolvedValue(undefined),
+      };
+      hostInternal.currentProvider = 'cerebras';
+      hostInternal.currentKeyIndex = 0;
+      hostInternal.pendingPrompt = null;
+
+      const details = { sender: 0, receiver: 2, timestamp: Date.now() };
+      const reject1 = vi.fn();
+      hostInternal.pendingDeliveries = [
+        { content: 'project-log', details, urgent: false, resolve: vi.fn(), reject: reject1 },
+      ];
+
+      // No output emitted yet — safe to resend.
+      hostInternal.currentTurnHasOutput = false;
+
+      hostInternal.retryAttempts = new Map();
+      hostInternal.authResolver.isKeyInCooldown = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.markKeyFailed = vi.fn().mockReturnValue(false);
+      hostInternal.authResolver.getNextProvider = vi.fn().mockReturnValue(null);
+
+      await hostInternal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
+      });
+
+      // Existing resend path runs.
+      expect(reject1).not.toHaveBeenCalled();
+      expect(hostInternal.session.sendCustomMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'project-log' }),
+        expect.objectContaining({ deliverAs: 'followUp', triggerTurn: true })
+      );
+    });
+
+    it('handleSessionEvent flips currentTurnHasOutput on output events and resets on turn_start (#175)', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+
+      const hostInternal = host as unknown as {
+        currentTurnHasOutput: boolean;
+        handleSessionEvent: (event: unknown) => void;
+        handlePotentialError: ReturnType<typeof vi.fn>;
+      };
+
+      hostInternal.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+
+      expect(hostInternal.currentTurnHasOutput).toBe(false);
+
+      hostInternal.handleSessionEvent({ type: 'turn_start' });
+      expect(hostInternal.currentTurnHasOutput).toBe(false);
+
+      hostInternal.handleSessionEvent({ type: 'message_start', message: {} });
+      expect(hostInternal.currentTurnHasOutput).toBe(true);
+
+      // turn_start resets the flag for the next turn
+      hostInternal.handleSessionEvent({ type: 'turn_start' });
+      expect(hostInternal.currentTurnHasOutput).toBe(false);
+
+      hostInternal.handleSessionEvent({
+        type: 'tool_execution_start',
+        toolCallId: 'x',
+        toolName: 'Edit',
+        args: {},
+      });
+      expect(hostInternal.currentTurnHasOutput).toBe(true);
+
+      hostInternal.handleSessionEvent({ type: 'turn_start' });
+      expect(hostInternal.currentTurnHasOutput).toBe(false);
+
+      hostInternal.handleSessionEvent({
+        type: 'message_update',
+        message: {},
+        assistantMessageEvent: {},
+      });
+      expect(hostInternal.currentTurnHasOutput).toBe(true);
+    });
   });
 
   describe('busy state', () => {
