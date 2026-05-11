@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `AgentHost.handlePotentialError` no longer resends in-flight deliveries when the API call fails after the model has already emitted output (`message_start` / `message_update` / `tool_execution_start`). Previously, a `Request timed out` mid-turn would trigger the retry-resend path, re-feeding the same delivery to the model and re-running any side effects (e.g. file edits) the tool calls had already committed before the connection dropped. The narrator's ad-hoc dedup ("section already exists, skipping") masked the duplicates but did not prevent them. The host now tracks `currentTurnHasOutput` per turn (set on output events, reset on `turn_start`) and, when contamination is detected on failure, rejects all pending delivery promises with a transient error and skips the resend. The job's awaiter (e.g. `trackJobExecution`) marks the job failed, the cursor (`last_narrator_update_ts`) is not advanced, and the next cron tick redoes the window from scratch with the recipient's idempotency handling whatever partial work landed on disk. Fixes #175.
+
 ## [0.3.3] - 2026-05-10
 
 ### Added
