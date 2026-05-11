@@ -95,5 +95,10 @@
     "vite": "^5.0.11",
     "vitest": "4.0.18"
   },
-  "packageManager": "pnpm@8.15.0"
+  "packageManager": "pnpm@8.15.0",
+  "pnpm": {
+    "patchedDependencies": {
+      "@mariozechner/pi-coding-agent@0.71.1": "patches/@mariozechner__pi-coding-agent@0.71.1.patch"
+    }
+  }
 }

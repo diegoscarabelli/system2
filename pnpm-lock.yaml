@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@mariozechner/pi-coding-agent@0.71.1':
+    hash: loarssh6j74qyu4ihirmxx4ipy
+    path: patches/@mariozechner__pi-coding-agent@0.71.1.patch
+
 dependencies:
   '@clack/prompts':
     specifier: ^1.0.1
@@ -19,7 +24,7 @@ dependencies:
     version: 0.71.1(ws@8.20.0)(zod@4.4.1)
   '@mariozechner/pi-coding-agent':
     specifier: ^0.71.1
-    version: 0.71.1(ws@8.20.0)(zod@4.4.1)
+    version: 0.71.1(patch_hash=loarssh6j74qyu4ihirmxx4ipy)(ws@8.20.0)(zod@4.4.1)
   '@mozilla/readability':
     specifier: ^0.6.0
     version: 0.6.0
@@ -1779,7 +1784,7 @@ packages:
       - zod
     dev: false
 
-  /@mariozechner/pi-coding-agent@0.71.1(ws@8.20.0)(zod@4.4.1):
+  /@mariozechner/pi-coding-agent@0.71.1(patch_hash=loarssh6j74qyu4ihirmxx4ipy)(ws@8.20.0)(zod@4.4.1):
     resolution: {integrity: sha512-pP7ymz+MmZrcN5aUldm1q1cVbG3u04yZR/XsHEfidku5W3PP1uxsA0A4g4NOhXnkK5EZ+Qg6H12BAbVvl7Qq2Q==}
     engines: {node: '>=20.6.0'}
     hasBin: true
@@ -1816,6 +1821,7 @@ packages:
       - ws
       - zod
     dev: false
+    patched: true
 
   /@mariozechner/pi-tui@0.71.1:
     resolution: {integrity: sha512-jNMN9EmGiH8EIKG62fceOTonoJ9k0cohTdjQCDrOk77vnxPVK+3be/+S1xk4hxviltwxlRH0d7mGQXs+CuEL8g==}
