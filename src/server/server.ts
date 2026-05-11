@@ -964,14 +964,14 @@ export class Server {
   /**
    * Debounced broadcast: coalesces rapid successive pushes of the same message type
    * into a single broadcast (e.g., creating 10 tasks triggers one board_changed).
-   * agent_busy_changed is sent immediately since it carries per-message payload.
+   * agent_busy_state is sent immediately since it carries per-message payload.
    */
   private pendingBroadcasts = new Map<string, ReturnType<typeof setTimeout>>();
   private static readonly BROADCAST_DEBOUNCE_MS = 50;
 
   private debouncedBroadcast(message: ServerMessage): void {
     // Messages with per-event payload must be sent immediately
-    if (message.type === 'agent_busy_changed') {
+    if (message.type === 'agent_busy_state') {
       this.broadcastToAll(message);
       return;
     }
@@ -1014,7 +1014,7 @@ export class Server {
     return {
       onDatabaseWrite: (entityType: WriteEntityType) => this.handleDatabaseWrite(entityType),
       onBusyChange: (agentId: number, busy: boolean, contextPercent: number | null) =>
-        this.debouncedBroadcast({ type: 'agent_busy_changed', agentId, busy, contextPercent }),
+        this.debouncedBroadcast({ type: 'agent_busy_state', agentId, busy, contextPercent }),
       onAgentTerminate: () => this.debouncedBroadcast({ type: 'agents_changed' }),
     };
   }

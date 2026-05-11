@@ -10,6 +10,7 @@ import { ArrowUpIcon, SquareFillIcon } from '@primer/octicons-react';
 import { Box } from '@primer/react';
 import { useRef, useState } from 'react';
 import { EMPTY_AGENT_STATE, useChatStore } from '../stores/chat';
+import { usePushStore } from '../stores/push';
 import { colors, contextColor } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
 
@@ -33,7 +34,12 @@ export function MessageInput({ onSend, onSteer, onAbort }: MessageInputProps) {
     if (s.activeAgentId === null) return EMPTY_AGENT_STATE;
     return s.agentStates.get(s.activeAgentId) ?? EMPTY_AGENT_STATE;
   });
-  const { isStreaming, isWaitingForResponse, contextPercent, provider } = activeState;
+  const { isStreaming, isWaitingForResponse, provider } = activeState;
+  // contextPercent comes from the push store (driven by agent_busy_state) — same
+  // source AgentPane uses, so the chat input and table can never disagree.
+  const contextPercent = usePushStore((s) =>
+    activeAgentId !== null ? (s.agentBusy.get(activeAgentId)?.contextPercent ?? null) : null
+  );
   const { accent, accentHover } = useAccentColors();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 

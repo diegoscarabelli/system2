@@ -84,7 +84,7 @@ The `Server` class is the main entry point. It accepts a `ServerConfig` and orch
 
 ### Push Broadcasts
 
-The server broadcasts lightweight WebSocket notifications when state changes, so UI panels update in real time without polling. Five push message types exist: `board_changed` (projects, tasks, links, comments), `agents_changed` (spawn/terminate/resurrect), `artifacts_changed`, `job_executions_changed`, and `agent_busy_changed` (inline busy/context data).
+The server broadcasts lightweight WebSocket notifications when state changes, so UI panels update in real time without polling. Five push message types exist: `board_changed` (projects, tasks, links, comments), `agents_changed` (spawn/terminate/resurrect), `artifacts_changed`, `job_executions_changed`, and `agent_busy_state` (inline busy/context data — also sent unicast as a snapshot on connect and on `switch_agent`).
 
 Push notifications flow through callbacks threaded into subsystems:
 

@@ -778,7 +778,7 @@ export class AgentHost {
       // race with the in-flight compaction. If a previous agent_end is
       // already deferred (a rare case where pi-coding-agent fires another
       // agent_end while pruning is in flight), keep the latest event since
-      // ready_for_input/context_usage are idempotent for the WS handler.
+      // ready_for_input is idempotent for the WS handler.
       if (this.isPruning) {
         this.deferredAgentEnd = event;
         return;

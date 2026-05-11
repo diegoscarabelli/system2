@@ -55,6 +55,10 @@ export class WebSocketHandler {
     });
     this.send({ type: 'provider_info', provider: guideHost.getProvider(), agentId: guideAgentId });
 
+    // Seed Guide's busy/context state into the client's push store so
+    // MessageInput's contextPercent is populated before the first turn ends.
+    this.sendAgentBusySnapshot(guideAgentId, guideHost);
+
     // Subscribe to Guide's events for streaming to this client
     this.subscribeToAgent(guideAgentId, guideHost);
 
@@ -174,17 +178,9 @@ export class WebSocketHandler {
         });
         this.send({ type: 'provider_info', provider: host.getProvider(), agentId: newAgentId });
 
-        // Send context usage for the new agent
-        const usage = host.getContextUsage();
-        if (usage) {
-          this.send({
-            type: 'context_usage',
-            percent: usage.percent,
-            tokens: usage.tokens,
-            contextWindow: usage.contextWindow,
-            agentId: newAgentId,
-          });
-        }
+        // Seed this client's busy/context state for the new agent — drives both
+        // AgentPane and MessageInput via the same push-store entry.
+        this.sendAgentBusySnapshot(newAgentId, host);
 
         // Send ready_for_input if the agent is idle
         if (!host.isBusy()) {
@@ -341,17 +337,9 @@ export class WebSocketHandler {
           (host.state as unknown as Record<string, unknown>).stopReason
         );
 
-        // Send context usage update
-        const usage = host.getContextUsage();
-        if (usage) {
-          this.send({
-            type: 'context_usage',
-            percent: usage.percent,
-            tokens: usage.tokens,
-            contextWindow: usage.contextWindow,
-            agentId,
-          });
-        }
+        // Context usage delivery is handled by AgentHost.onBusyChange (busy=false)
+        // broadcasting agent_busy_state — single source of truth for both AgentPane
+        // and MessageInput.
 
         // Signal that the agent is ready for the next message
         this.send({ type: 'ready_for_input', agentId });
@@ -391,6 +379,21 @@ export class WebSocketHandler {
 
   private sendError(message: string): void {
     this.send({ type: 'error', message });
+  }
+
+  /**
+   * Unicast snapshot of an agent's current busy + context state to this client.
+   * Mirrors what a server-side agent_busy_state broadcast delivers; used to seed
+   * the client's push store on initial connect (for the Guide) and on switch_agent
+   * (for the newly focused agent) before any busy transition has occurred.
+   */
+  private sendAgentBusySnapshot(agentId: number, host: AgentHost): void {
+    this.send({
+      type: 'agent_busy_state',
+      agentId,
+      busy: host.isBusy(),
+      contextPercent: host.getContextUsage()?.percent ?? null,
+    });
   }
 
   private cleanup(): void {

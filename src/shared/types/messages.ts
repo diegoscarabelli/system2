@@ -25,13 +25,6 @@ export type ServerMessage =
   | { type: 'tool_call_end'; name: string; result: string; agentId?: number }
   | { type: 'tool_call_progress'; name: string; message: string; agentId?: number } // Heartbeat progress from long-running tool
   | { type: 'artifact'; url: string; title?: string; filePath?: string }
-  | {
-      type: 'context_usage';
-      percent: number | null;
-      tokens: number | null;
-      contextWindow: number;
-      agentId?: number;
-    }
   | { type: 'error'; message: string; agentId?: number }
   | { type: 'ready_for_input'; agentId?: number } // Signals that the agent is ready for the next message
   | { type: 'chat_history'; messages: ChatMessage[]; agentId: number } // Sent on connect and agent switch
@@ -52,8 +45,8 @@ export type ServerMessage =
   | { type: 'artifacts_changed' } // Artifact catalog changed
   | { type: 'job_executions_changed' } // Scheduler job execution changed
   | {
-      type: 'agent_busy_changed';
+      type: 'agent_busy_state';
       agentId: number;
       busy: boolean;
       contextPercent: number | null;
-    }; // Agent busy state changed; includes current context usage snapshot
+    }; // Broadcast on busy transitions; unicast snapshot on connect / switch_agent.

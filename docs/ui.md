@@ -4,7 +4,7 @@ React web interface providing a real-time chat experience with artifact display.
 
 **Source:** `src/ui/`
 **Build:** [Vite](https://vite.dev/) (part of `pnpm build`)
-**Dependencies:** [React 18](https://react.dev/), [Zustand](https://github.com/pmndrs/zustand), [Primer React](https://primer.style/react), [react-markdown](https://github.com/remarkjs/react-markdown)
+**Dependencies:** [React 18](https://react.dev/), [Zustand](https://github.com/pmndrs/zustand), [Primer React](https://primer.style/react), [react-markdown](https://github.com/remarkjs/react-markdown) + [remark-gfm](https://github.com/remarkjs/remark-gfm) (always applied via the shared `Markdown` wrapper for GFM tables, strikethrough, autolinks, task lists)
 
 ## Source Structure
 
@@ -26,6 +26,7 @@ src/
 │   ├── TaskDetailModal.tsx # Task detail overlay (comments, links, markdown)
 │   ├── ProjectDetailModal.tsx # Project detail overlay (status, labels, dates)
 │   ├── MultiSelectDropdown.tsx # Reusable multiselect dropdown with checkboxes
+│   ├── Markdown.tsx        # Shared react-markdown wrapper with remark-gfm always applied
 │   └── ParticlesBackground.tsx # Animated particle background (tsparticles)
 ├── hooks/
 │   ├── useWebSocket.ts    # WebSocket connection and message handling
@@ -145,7 +146,7 @@ Overlay modal showing full project details. Receives the project data directly f
 
 ### AgentPane
 
-Side panel showing all non-archived agents with busy/idle indicators. Refetches `GET /api/agents` when `agentsVersion` bumps (push-driven); busy state and context window percentages come from `agent_busy_changed` push messages (inline, no refetch). Groups agents into "System" (Guide, Narrator) listed first, then by project name. Each agent row shows a teal (`#00aaba`) circle when busy or grey when idle. Toggled via PeopleIcon in the activity bar.
+Side panel showing all non-archived agents with busy/idle indicators. Refetches `GET /api/agents` when `agentsVersion` bumps (push-driven); busy state and context window percentages come from `agent_busy_state` push messages (inline, no refetch). Groups agents into "System" (Guide, Narrator) listed first, then by project name. Each agent row shows a teal (`#00aaba`) circle when busy or grey when idle. Toggled via PeopleIcon in the activity bar.
 
 Clicking an agent row switches the chat panel to that agent. The active agent is highlighted with an accent-colored left border on its ID cell. Switching updates `activeAgentId` in the chat store, which triggers the WebSocket hook to send `switch_agent` to the server. The server responds with the agent's chat history and streaming state.
 
@@ -186,7 +187,6 @@ Supports multi-agent chat via per-agent state. Each agent has its own message hi
 | `currentTurnEvents` | `ChatTurnEvent[]` | Thinking + tool calls for current turn |
 | `isStreaming` | `boolean` | Currently receiving chunks |
 | `isWaitingForResponse` | `boolean` | Sent message, no response yet |
-| `contextPercent` | `number \| null` | Context window usage % |
 | `compactionStatus` | `'idle' \| 'compacting' \| 'compacted'` | Auto-compaction state (transient, not persisted) |
 
 Components read the active agent's state via selectors (e.g., `useChatStore(s => s.agentStates.get(s.activeAgentId))`). An exported `EMPTY_AGENT_STATE` constant provides a stable default for selectors when no agent state exists yet.
@@ -224,7 +224,7 @@ Tracks server push notification state. Version counters are incremented when the
 | `agentsVersion` | `number` | Bumped on `agents_changed` (spawn/terminate/resurrect) |
 | `artifactsVersion` | `number` | Bumped on `artifacts_changed` |
 | `jobsVersion` | `number` | Bumped on `job_executions_changed` |
-| `agentBusy` | `Map<number, { busy, contextPercent }>` | Per-agent busy state from `agent_busy_changed`, consumed inline (no refetch) |
+| `agentBusy` | `Map<number, { busy, contextPercent }>` | Per-agent busy state + context usage from `agent_busy_state`, consumed inline (no refetch). Single source of truth for `contextPercent` — both `AgentPane` and `MessageInput` read it here. |
 
 Key actions:
 
