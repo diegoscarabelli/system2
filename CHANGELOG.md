@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-05-11
+
 ### Fixed
 
-- Daily-summary cron no longer crashes the server when two or more narrator deliveries reject in the same tick. `buildAndDeliverDailySummary` was awaiting the deliveries array with `await Promise.all(...)`, which surfaces only the first rejection and leaves the rest as floating rejected promises. Once the contamination short-circuit in `handlePotentialError` started aborting all pending deliveries on a single mid-turn API failure (released in 0.3.4 / #177), every cron run with ≥2 deliveries that hit a mid-turn error promoted at least one rejection to `unhandledRejection` → uncaught exception → process exit on Node 25. Replaced with `Promise.allSettled` + per-failure logging + an `AggregateError` throw so every rejection is consumed; the existing all-or-nothing semantics are preserved (`advanceFrontmatterCursors` still runs only when every delivery succeeds, so the next cron tick retries from the same `lastRunTs`).
+- Daily-summary cron no longer crashes the server when two or more narrator deliveries reject in the same tick. `buildAndDeliverDailySummary` has always awaited the deliveries array with `await Promise.all(...)`, which surfaces only the first rejection and leaves any others as floating rejected promises. The bug was latent until the contamination short-circuit in `handlePotentialError` (#177, in 0.3.4) started aborting **all** pending deliveries on a single mid-turn API failure: from that point, any daily-summary cron run with ≥2 deliveries that hit a mid-turn error promoted at least one rejection to `unhandledRejection` → uncaught exception → process exit on Node 25 (whose default behavior for unhandled rejections is `throw`). Replaced with `Promise.allSettled` + per-failure `log.error` + an `AggregateError` throw whose message flattens each delivery's error so `job_executions.failure_message` keeps the diagnostic detail (the raw `AggregateError.stack` only shows the aggregator's own frames). All-or-nothing semantics preserved: `advanceFrontmatterCursors` still runs only when every delivery succeeds, so the next cron tick retries from the same `lastRunTs`.
 
 ## [0.3.4] - 2026-05-11
 
