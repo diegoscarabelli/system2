@@ -102,8 +102,25 @@ export interface WebSearchToolConfig {
   max_results?: number;
 }
 
+export interface BashToolConfig {
+  /** Inline byte cap on the bash tool's response. When stdout+stderr exceeds
+   *  this, the full output is saved to a file under the agent's session
+   *  directory and the response shows head + tail previews + the file path.
+   *  When omitted, callers fall back to DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES
+   *  (128 KB). Mirrors the `web_search.max_results` pattern: top-level
+   *  scalar in config.toml (`bash_max_inline_output_bytes`) folded into
+   *  this nested shape. */
+  max_inline_output_bytes?: number;
+}
+
+/** Single source of truth for the bash tool's default inline output cap.
+ *  Both the CLI's generated config.toml (commented default) and the server's
+ *  `createBashTool` default reference this constant so they cannot drift. */
+export const DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES = 128 * 1024;
+
 export interface ToolsConfig {
   web_search?: WebSearchToolConfig;
+  bash?: BashToolConfig;
 }
 
 export interface SchedulerConfig {

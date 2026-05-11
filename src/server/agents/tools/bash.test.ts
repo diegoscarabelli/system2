@@ -1,10 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BLOCKED_BASH_PATTERNS, createBashTool, filterHeartbeats, HEARTBEAT_RE } from './bash.js';
+import {
+  BLOCKED_BASH_PATTERNS,
+  capOutputForInline,
+  createBashTool,
+  filterHeartbeats,
+  HEARTBEAT_RE,
+} from './bash.js';
 
 const isWindows = platform() === 'win32';
 
@@ -437,6 +443,79 @@ describe('bash tool', () => {
       // Should execute synchronously and return output directly
       expect((result.content[0] as { text: string }).text).toContain('fallthrough');
       expect(result.details).toHaveProperty('exitCode', 0);
+    });
+  });
+
+  describe('large-output cap', () => {
+    it('returns output verbatim when under the inline cap', () => {
+      const out = 'hello world';
+      const result = capOutputForInline(out, 'toolu_test', undefined, 1024);
+      expect(result).toBe(out);
+    });
+
+    it('truncates without a file save when sessionDir is absent', () => {
+      // Use a large input so the head + tail elision exceeds the formatting
+      // overhead (header lines + truncation marker). For very small inputs the
+      // wrapper adds more bytes than the elision saves, which is acceptable
+      // but not interesting to assert on.
+      const out = 'A'.repeat(100_000);
+      const result = capOutputForInline(out, 'toolu_test', undefined, 1024);
+      expect(result).toContain('Output too large to inline');
+      expect(result).toContain('file save unavailable');
+      expect(result).toContain('bytes truncated');
+      // Inline payload is far smaller than the original.
+      expect(result.length).toBeLessThan(out.length);
+    });
+
+    it('saves full output to a file and returns head + tail previews', () => {
+      const sessionDir = trackDir(makeTmpDir());
+      // 50 KB of distinguishable content: head ↔ tail readily checkable.
+      const head = 'HEAD-MARKER-AAAA'.repeat(700); // 11,200 bytes
+      const middle = 'MID'.repeat(10_000); // 30,000 bytes (will be elided)
+      const tail = 'TAIL-MARKER-ZZZZ'.repeat(700); // 11,200 bytes
+      const out = head + middle + tail;
+      // Cap at 4 KB so we definitely overflow.
+      const result = capOutputForInline(out, 'toolu_cap_test', sessionDir, 4096);
+
+      const expectedFile = join(sessionDir, 'bash-output', 'toolu_cap_test.log');
+      expect(existsSync(expectedFile)).toBe(true);
+      // The file has the FULL output, byte-for-byte.
+      expect(readFileSync(expectedFile, 'utf-8')).toBe(out);
+      // The inline payload points at the file and includes byte/line counts.
+      expect(result).toContain(`Output saved to ${expectedFile}`);
+      expect(result).toContain(`${out.length.toLocaleString()} bytes`);
+      // It contains the head marker (from the start of out) and the tail marker
+      // (from the end of out), but not the middle marker.
+      expect(result).toContain('HEAD-MARKER-AAAA');
+      expect(result).toContain('TAIL-MARKER-ZZZZ');
+      expect(result).not.toContain('MID');
+      expect(result).toContain('bytes truncated');
+    });
+
+    it('emits unique files for distinct tool call ids in the same session', () => {
+      const sessionDir = trackDir(makeTmpDir());
+      const out = 'X'.repeat(10_000);
+      capOutputForInline(out, 'toolu_A', sessionDir, 1024);
+      capOutputForInline(out, 'toolu_B', sessionDir, 1024);
+      expect(existsSync(join(sessionDir, 'bash-output', 'toolu_A.log'))).toBe(true);
+      expect(existsSync(join(sessionDir, 'bash-output', 'toolu_B.log'))).toBe(true);
+    });
+
+    it('foreground command: large stdout is saved + previewed in tool result', async () => {
+      const sessionDir = trackDir(makeTmpDir());
+      const tool = createBashTool(undefined, { sessionDir, maxInlineOutputBytes: 4096 });
+      // Emit 8 KB of recognizable text. yes-style loop kept small for cross-platform timing.
+      const cmd = isWindows
+        ? `for ($i=0; $i -lt 200; $i++) { Write-Output "LINE-MARKER-$i with padding ${'X'.repeat(40)}" }`
+        : `for i in $(seq 1 200); do echo "LINE-MARKER-$i with padding ${'X'.repeat(40)}"; done`;
+      const result = await tool.execute('toolu_fg_big', { command: cmd } as BashParams);
+      const text = (result.content[0] as { text: string }).text;
+
+      expect(text).toContain('Output saved to');
+      expect(text).toContain('bash-output');
+      expect(text).toContain('toolu_fg_big.log');
+      expect(text).toContain('bytes truncated');
+      expect(existsSync(join(sessionDir, 'bash-output', 'toolu_fg_big.log'))).toBe(true);
     });
   });
 });

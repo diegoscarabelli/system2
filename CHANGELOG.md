@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `bash` tool now caps inline output at **128 KB** (configurable). When stdout + stderr exceeds the cap, the full output is saved to `<sessionDir>/bash-output/<toolCallId>.log` and the response carries head (8 KB) + tail (2 KB) previews + the file path + total byte / line counts. The agent can read specific slices via the `read` tool (with `offset` / `limit`) or rerun bash with `grep`/`tail`/`sed` on the saved file. Motivation: a single bash command that dumped a ~6.9 MB Python stack trace from a failed Prefect run blew the conductor's context from 51% → 86% in one tool result, then the next user message produced a 4.37 M-token prompt that Anthropic 400'd (`prompt is too long: 4374639 tokens > 1000000 maximum`). The cap policy mirrors Claude Code's `Bash` tool (30 KB default, configurable up to 150 KB) — proportionally scaled up for system2's 1 M-token context models. Default exposed via `bash_max_inline_output_bytes` in `config.toml` (top-level scalar, matching the `web_search_max_results` pattern). Hard upper bound on what's captured from the child process (`MAX_BUFFER`) stays at 10 MB so we don't lose data in the saved file; the new cap only governs the inline response.
+
 ## [0.3.5] - 2026-05-11
 
 ### Fixed

@@ -8,20 +8,46 @@
  * Supports a heartbeat protocol for long-running commands: scripts can
  * emit `::system2:: <message>` lines on stdout to reset the inactivity
  * timer and push progress updates to the UI.
+ *
+ * Large-output handling: when stdout+stderr exceeds the inline cap
+ * (default 128 KB, configurable), the full output is saved to a file
+ * under `<sessionDir>/bash-output/<toolCallId>.log` and the tool returns
+ * head + tail previews plus the file path. The agent can then use the
+ * `read` tool with offset/limit (or rerun bash with grep/tail/sed) to
+ * inspect specific slices on demand.
  */
 
 import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
+import { join } from 'node:path';
 import type { AgentTool, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import { type Static, Type } from '@sinclair/typebox';
+import { DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES } from '../../../shared/index.js';
+import { log } from '../../utils/logger.js';
 
 const LEGACY_TIMEOUT = 120_000; // 120s fixed timeout (backward compat when no timeout params given)
 const DEFAULT_INACTIVITY_TIMEOUT = 60_000; // 60 seconds
 const DEFAULT_TOTAL_TIMEOUT = 600_000; // 10 minutes
 const MIN_TIMEOUT = 10_000; // 10 seconds
 const MAX_TIMEOUT = 600_000; // 10 minutes
-const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
+
+/** Hard upper bound on bytes accepted FROM a single command's stdout/stderr
+ *  streams. Anything past this is dropped during streaming (runaway-process
+ *  guard). Separate from MAX_INLINE_OUTPUT_BYTES: that one decides what's
+ *  shown to the model inline vs. saved to a file; this one bounds what's
+ *  ever captured in the first place. */
+const MAX_BUFFER = 10 * 1024 * 1024; // 10 MB
+
+/** Bytes from the start of large output included verbatim in the inline preview. */
+const PREVIEW_HEAD_BYTES = 8 * 1024;
+
+/** Bytes from the end of large output included verbatim in the inline preview. */
+const PREVIEW_TAIL_BYTES = 2 * 1024;
+
+/** Per-agent subdirectory under the session dir where large bash outputs are saved. */
+const BASH_OUTPUT_SUBDIR = 'bash-output';
 
 /** Sentinel pattern: lines matching `::system2:: <message>` are heartbeats. */
 export const HEARTBEAT_RE = /^::system2::\s*(.*)$/;
@@ -275,7 +301,67 @@ function runCommand(
   });
 }
 
-export function createBashTool(notifyBackground?: NotifyBackground) {
+export interface BashToolOptions {
+  /** Where to persist large output files. When undefined (e.g. in tests), the
+   *  cap still applies but output is truncated in place without a file save. */
+  sessionDir?: string;
+  /** Override the inline byte cap. Defaults to DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES. */
+  maxInlineOutputBytes?: number;
+}
+
+/**
+ * Cap inline tool output. If `output.length` exceeds `maxInlineBytes` and
+ * `sessionDir` is available, write the full output to a file under
+ * `<sessionDir>/bash-output/<toolCallId>.log` and return a string containing
+ * a header pointer + head/tail previews + a "[...N bytes truncated...]"
+ * marker between them. If `sessionDir` is absent or the file write fails,
+ * truncate without saving (best-effort).
+ *
+ * Exported for tests.
+ */
+export function capOutputForInline(
+  output: string,
+  toolCallId: string,
+  sessionDir: string | undefined,
+  maxInlineBytes: number
+): string {
+  if (output.length <= maxInlineBytes) {
+    return output;
+  }
+
+  const totalBytes = output.length;
+  const lineCount = output.split('\n').length;
+  let savedPath: string | null = null;
+
+  if (sessionDir) {
+    try {
+      const dir = join(sessionDir, BASH_OUTPUT_SUBDIR);
+      mkdirSync(dir, { recursive: true });
+      savedPath = join(dir, `${toolCallId}.log`);
+      writeFileSync(savedPath, output, 'utf-8');
+    } catch (err) {
+      log.warn('[bash] Failed to save large output to file; falling back to truncate-only:', err);
+      savedPath = null;
+    }
+  }
+
+  const head = output.slice(0, PREVIEW_HEAD_BYTES);
+  const tail = output.slice(-PREVIEW_TAIL_BYTES);
+  const truncatedBytes = totalBytes - head.length - tail.length;
+
+  const headerLine = savedPath
+    ? `[Output saved to ${savedPath} — ${totalBytes.toLocaleString()} bytes, ${lineCount.toLocaleString()} lines]`
+    : `[Output too large to inline — ${totalBytes.toLocaleString()} bytes, ${lineCount.toLocaleString()} lines; file save unavailable]`;
+  const guidanceLine = savedPath
+    ? `[Showing first ${PREVIEW_HEAD_BYTES.toLocaleString()} bytes + last ${PREVIEW_TAIL_BYTES.toLocaleString()} bytes. Use the read tool with offset/limit on the file above, or run bash again with grep/tail/sed/awk on the file path to inspect specific portions.]`
+    : `[Showing first ${PREVIEW_HEAD_BYTES.toLocaleString()} bytes + last ${PREVIEW_TAIL_BYTES.toLocaleString()} bytes.]`;
+
+  return `${headerLine}\n${guidanceLine}\n\n${head}\n\n[...${truncatedBytes.toLocaleString()} bytes truncated...]\n\n${tail}`;
+}
+
+export function createBashTool(notifyBackground?: NotifyBackground, opts: BashToolOptions = {}) {
+  const sessionDir = opts.sessionDir;
+  const maxInlineOutputBytes = opts.maxInlineOutputBytes ?? DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES;
   // Track background processes for cleanup
   const backgroundProcesses = new Map<string, ChildProcess>();
 
@@ -316,7 +402,7 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
     name: 'bash',
     label: 'Execute Shell Command',
     description:
-      'Execute a shell command and return stdout/stderr. 120-second timeout by default. Uses PowerShell on Windows, bash on macOS/Linux. Set run_in_background to true for long-running commands — you will be notified when they complete. Output is streamed as the command runs. For long-running foreground commands, set inactivity_timeout_seconds and/or total_timeout_seconds to use dual timeouts (inactivity resets on output, total is a hard cap). Scripts can emit "::system2:: <message>" on stdout as heartbeats to reset the inactivity timer and show progress in the UI.',
+      'Execute a shell command and return stdout/stderr. 120-second timeout by default. Uses PowerShell on Windows, bash on macOS/Linux. Set run_in_background to true for long-running commands — you will be notified when they complete. Output is streamed as the command runs. For long-running foreground commands, set inactivity_timeout_seconds and/or total_timeout_seconds to use dual timeouts (inactivity resets on output, total is a hard cap). Scripts can emit "::system2:: <message>" on stdout as heartbeats to reset the inactivity timer and show progress in the UI. Large output (>128 KB by default) is saved to a file under the agent\'s session directory and the response shows head + tail previews plus the file path so you can read specific slices via the `read` tool (with offset/limit) or rerun bash with grep/tail/sed against the saved file.',
     parameters: bashParams,
     execute: async (_toolCallId, rawParams, signal, onUpdate) => {
       // pi-agent-core 0.71 (typebox-1) types execute params loosely (each
@@ -390,9 +476,10 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
           signal?.removeEventListener('abort', onAbort);
           const exitCode = code ?? 0;
           const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
+          const cappedOutput = capOutputForInline(output, id, sessionDir, maxInlineOutputBytes);
           const prefix =
             exitCode === 0 ? 'Background command completed' : 'Background command failed';
-          notifyBackground(`${prefix}: ${params.command}\n\n${output || '(no output)'}`, {
+          notifyBackground(`${prefix}: ${params.command}\n\n${cappedOutput || '(no output)'}`, {
             stdout,
             stderr,
             exitCode,
@@ -458,13 +545,21 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
         );
 
         const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
+        const cappedOutput = capOutputForInline(
+          output,
+          _toolCallId,
+          sessionDir,
+          maxInlineOutputBytes
+        );
 
         if (exitCode !== 0) {
+          // Build the failure response from the capped representation so the
+          // inline payload stays bounded even on long error dumps.
           return {
             content: [
               {
                 type: 'text',
-                text: `Command failed (exit code ${exitCode}):\n\nSTDOUT:\n${stdout}\n\nSTDERR:\n${stderr}`,
+                text: `Command failed (exit code ${exitCode}):\n\n${cappedOutput}`,
               },
             ],
             details: { stdout, stderr, exitCode },
@@ -472,7 +567,7 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
         }
 
         return {
-          content: [{ type: 'text', text: output || '(command completed with no output)' }],
+          content: [{ type: 'text', text: cappedOutput || '(command completed with no output)' }],
           details: { stdout, stderr, exitCode },
         };
       } catch (error: unknown) {
@@ -485,12 +580,19 @@ export function createBashTool(notifyBackground?: NotifyBackground) {
         const errorMsg = err.message || String(error);
         const stdout = err.stdout || '';
         const stderr = err.stderr || '';
+        const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
+        const cappedOutput = capOutputForInline(
+          output,
+          _toolCallId,
+          sessionDir,
+          maxInlineOutputBytes
+        );
 
         return {
           content: [
             {
               type: 'text',
-              text: `Command failed:\n${errorMsg}\n\nSTDOUT:\n${stdout}\n\nSTDERR:\n${stderr}`,
+              text: `Command failed:\n${errorMsg}\n\n${cappedOutput}`,
             },
           ],
           details: {

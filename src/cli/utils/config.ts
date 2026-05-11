@@ -44,6 +44,7 @@ import {
   ADAPTER_TYPES,
   API_KEYS_PROVIDER_IDS,
   DatabaseConnectionSchema,
+  DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES,
   DEFAULT_SESSION_ARCHIVE_KEEP_COUNT,
   DEFAULT_SESSION_ROTATION_SIZE_BYTES,
   OAUTH_PROVIDER_IDS,
@@ -162,6 +163,11 @@ interface TomlConfigFile {
    *  `max_results` knob — promoted out of `[tools.web_search]` in 0.3.0
    *  because the section now lives in .auth.toml with just `enabled`. */
   web_search_max_results?: number;
+  /** Top-level scalar (no enclosing section). Inline byte cap for the bash
+   *  tool's output. Above this, output is saved to a file under the agent's
+   *  session directory and the response carries head + tail previews + the
+   *  file path. Mirrors the `web_search_max_results` pattern. */
+  bash_max_inline_output_bytes?: number;
 }
 
 /**
@@ -464,7 +470,8 @@ function convertTomlServices(toml: NonNullable<TomlAuthFile['services']>): Servi
  */
 function convertTomlTools(
   authTools: TomlAuthFile['tools'] | undefined,
-  configMaxResults: number | undefined
+  configMaxResults: number | undefined,
+  configBashMaxInlineOutputBytes: number | undefined
 ): ToolsConfig {
   const tools: ToolsConfig = {};
   if (authTools?.web_search) {
@@ -477,6 +484,12 @@ function convertTomlTools(
       enabled: authTools.web_search.enabled ?? true,
       max_results: configMaxResults ?? DEFAULT_WEB_SEARCH_MAX_RESULTS,
     };
+  }
+  // Bash is always available; only expose the config when the user has
+  // explicitly set the knob. When unset, server code falls back to the
+  // DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES constant in bash.ts.
+  if (typeof configBashMaxInlineOutputBytes === 'number') {
+    tools.bash = { max_inline_output_bytes: configBashMaxInlineOutputBytes };
   }
   return tools;
 }
@@ -970,8 +983,12 @@ export function loadConfigFromPaths(configPath: string, authPath: string): Syste
     config.services = convertTomlServices(tomlAuth.services);
   }
 
-  if (tomlAuth.tools) {
-    config.tools = convertTomlTools(tomlAuth.tools, tomlConfig.web_search_max_results);
+  if (tomlAuth.tools || typeof tomlConfig.bash_max_inline_output_bytes === 'number') {
+    config.tools = convertTomlTools(
+      tomlAuth.tools,
+      tomlConfig.web_search_max_results,
+      tomlConfig.bash_max_inline_output_bytes
+    );
   }
 
   if (tomlConfig.databases) {
@@ -1077,6 +1094,14 @@ export function buildConfigToml(options: {
   );
   lines.push('# Uncomment to override.');
   lines.push(`# web_search_max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
+  lines.push('#');
+  lines.push('# Inline byte cap on bash tool output. Above this, the full output is');
+  lines.push("# saved to a file under the agent's session directory and the response");
+  lines.push('# carries head + tail previews + the file path so the agent can read');
+  lines.push('# specific slices on demand. Default pinned in code');
+  lines.push(`# (DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES = ${DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES}).`);
+  lines.push('# Uncomment to override.');
+  lines.push(`# bash_max_inline_output_bytes = ${DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES}`);
   lines.push('');
 
   lines.push(...sectionHeader('Databases'));
