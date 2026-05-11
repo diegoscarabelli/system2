@@ -468,7 +468,7 @@ function convertTomlServices(toml: NonNullable<TomlAuthFile['services']>): Servi
  * `tools.web_search.{enabled, max_results}` consumer shape, so server code
  * doesn't need to know about the file split.
  */
-function convertTomlTools(
+export function convertTomlTools(
   authTools: TomlAuthFile['tools'] | undefined,
   configMaxResults: number | undefined,
   configBashMaxInlineOutputBytes: number | undefined
@@ -487,9 +487,27 @@ function convertTomlTools(
   }
   // Bash is always available; only expose the config when the user has
   // explicitly set the knob. When unset, server code falls back to the
-  // DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES constant in bash.ts.
-  if (typeof configBashMaxInlineOutputBytes === 'number') {
-    tools.bash = { max_inline_output_bytes: configBashMaxInlineOutputBytes };
+  // DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES constant in shared/types/config.ts.
+  //
+  // Validation: must be a positive integer and >= MIN_BASH_INLINE_BYTES.
+  // The minimum exists because the inline payload reserves room for header +
+  // guidance + truncation marker; budgets below ~4 KB produce useless
+  // previews (head/tail clamped to near-zero). On any invalid value we warn
+  // and fall through to the in-code default.
+  const MIN_BASH_INLINE_BYTES = 4 * 1024;
+  if (configBashMaxInlineOutputBytes !== undefined) {
+    if (
+      typeof configBashMaxInlineOutputBytes !== 'number' ||
+      !Number.isInteger(configBashMaxInlineOutputBytes) ||
+      configBashMaxInlineOutputBytes < MIN_BASH_INLINE_BYTES
+    ) {
+      console.warn(
+        `[Config] Invalid bash_max_inline_output_bytes = ${configBashMaxInlineOutputBytes}. ` +
+          `Must be an integer >= ${MIN_BASH_INLINE_BYTES}. Using default (${DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES}).`
+      );
+    } else {
+      tools.bash = { max_inline_output_bytes: configBashMaxInlineOutputBytes };
+    }
   }
   return tools;
 }

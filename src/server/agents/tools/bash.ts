@@ -309,13 +309,47 @@ export interface BashToolOptions {
   maxInlineOutputBytes?: number;
 }
 
+/** Result of capOutputForInline: the string to feed back into the model and,
+ *  when output was saved, the absolute path to the saved file (so callers can
+ *  also shrink the persisted `details.stdout/stderr` to a marker instead of
+ *  re-storing the same bytes in the JSONL). */
+export interface CappedOutput {
+  inline: string;
+  savedPath: string | null;
+  totalBytes: number;
+}
+
+/** Cheap newline scan; avoids `split('\n')` allocating an N-element array on
+ *  near-MAX_BUFFER outputs. Treats trailing newline as terminating the last
+ *  line (i.e., "a\nb\n".lineCount === 2), matching `split('\n').length - 1`
+ *  for non-empty inputs and 1 for the empty string. */
+function countLines(s: string): number {
+  if (s.length === 0) return 1;
+  let n = 1;
+  let i = -1;
+  // biome-ignore lint/suspicious/noAssignInExpressions: tight loop, standard scan pattern
+  while ((i = s.indexOf('\n', i + 1)) !== -1) n++;
+  return n;
+}
+
 /**
- * Cap inline tool output. If `output.length` exceeds `maxInlineBytes` and
- * `sessionDir` is available, write the full output to a file under
+ * Cap inline tool output. If the output's UTF-8 byte size exceeds
+ * `maxInlineBytes` and `sessionDir` is available, write the full output to
  * `<sessionDir>/bash-output/<toolCallId>.log` and return a string containing
  * a header pointer + head/tail previews + a "[...N bytes truncated...]"
  * marker between them. If `sessionDir` is absent or the file write fails,
  * truncate without saving (best-effort).
+ *
+ * Byte accounting uses `Buffer.byteLength(..., 'utf8')` rather than
+ * `string.length` (which counts UTF-16 code units): for non-ASCII output the
+ * two diverge, and the cap is documented as a byte cap. Preview slicing
+ * stays in code-unit space because slicing the UTF-8 byte stream on a
+ * non-boundary would corrupt multi-byte characters; the slice budgets are
+ * conservative (the saved file is the source of truth).
+ *
+ * Preview budgets are clamped so that head + tail + header overhead never
+ * exceed `maxInlineBytes`. For tiny `maxInlineBytes` (e.g. tests using 1 KB)
+ * head and tail are scaled down rather than allowed to overlap.
  *
  * Exported for tests.
  */
@@ -324,13 +358,13 @@ export function capOutputForInline(
   toolCallId: string,
   sessionDir: string | undefined,
   maxInlineBytes: number
-): string {
-  if (output.length <= maxInlineBytes) {
-    return output;
+): CappedOutput {
+  const totalBytes = Buffer.byteLength(output, 'utf8');
+  if (totalBytes <= maxInlineBytes) {
+    return { inline: output, savedPath: null, totalBytes };
   }
 
-  const totalBytes = output.length;
-  const lineCount = output.split('\n').length;
+  const lineCount = countLines(output);
   let savedPath: string | null = null;
 
   if (sessionDir) {
@@ -345,18 +379,42 @@ export function capOutputForInline(
     }
   }
 
-  const head = output.slice(0, PREVIEW_HEAD_BYTES);
-  const tail = output.slice(-PREVIEW_TAIL_BYTES);
-  const truncatedBytes = totalBytes - head.length - tail.length;
+  // Reserve a small slice of `maxInlineBytes` for the header + guidance +
+  // truncation marker so head + tail never push the inline payload over
+  // `maxInlineBytes`. Numbers are rough — the exact overhead depends on
+  // toLocaleString output for the byte counts, but ~512 is a safe upper bound.
+  const HEADER_OVERHEAD_BYTES = 512;
+  const previewBudgetBytes = Math.max(0, maxInlineBytes - HEADER_OVERHEAD_BYTES);
+  // 80/20 split between head and tail; the head is more useful for diagnostics
+  // (initial error message, command echo, etc.).
+  const headBudgetBytes = Math.min(PREVIEW_HEAD_BYTES, Math.floor(previewBudgetBytes * 0.8));
+  const tailBudgetBytes = Math.min(PREVIEW_TAIL_BYTES, previewBudgetBytes - headBudgetBytes);
+
+  // Slice in code-unit space — see function docstring for why.
+  const head = output.slice(0, headBudgetBytes);
+  const tail = tailBudgetBytes > 0 ? output.slice(-tailBudgetBytes) : '';
+  const headBytes = Buffer.byteLength(head, 'utf8');
+  const tailBytes = Buffer.byteLength(tail, 'utf8');
+  const truncatedBytes = Math.max(0, totalBytes - headBytes - tailBytes);
 
   const headerLine = savedPath
     ? `[Output saved to ${savedPath} — ${totalBytes.toLocaleString()} bytes, ${lineCount.toLocaleString()} lines]`
     : `[Output too large to inline — ${totalBytes.toLocaleString()} bytes, ${lineCount.toLocaleString()} lines; file save unavailable]`;
   const guidanceLine = savedPath
-    ? `[Showing first ${PREVIEW_HEAD_BYTES.toLocaleString()} bytes + last ${PREVIEW_TAIL_BYTES.toLocaleString()} bytes. Use the read tool with offset/limit on the file above, or run bash again with grep/tail/sed/awk on the file path to inspect specific portions.]`
-    : `[Showing first ${PREVIEW_HEAD_BYTES.toLocaleString()} bytes + last ${PREVIEW_TAIL_BYTES.toLocaleString()} bytes.]`;
+    ? `[Showing first ${headBytes.toLocaleString()} bytes + last ${tailBytes.toLocaleString()} bytes. Use the read tool with offset/limit on the file above, or run bash again with grep/tail/sed/awk on the file path to inspect specific portions.]`
+    : `[Showing first ${headBytes.toLocaleString()} bytes + last ${tailBytes.toLocaleString()} bytes.]`;
 
-  return `${headerLine}\n${guidanceLine}\n\n${head}\n\n[...${truncatedBytes.toLocaleString()} bytes truncated...]\n\n${tail}`;
+  const inline = `${headerLine}\n${guidanceLine}\n\n${head}\n\n[...${truncatedBytes.toLocaleString()} bytes truncated...]\n\n${tail}`;
+  return { inline, savedPath, totalBytes };
+}
+
+/** Replace `details.stdout` / `details.stderr` with a short marker pointing at
+ *  the saved file when output was persisted. The persisted message in the
+ *  JSONL stores `details`, so without this the full output would be re-stored
+ *  there even though `content` (what the model sees) is capped. The saved
+ *  file is the source of truth for the operator. */
+function shrinkDetailsForSavedOutput(savedPath: string, totalBytes: number): string {
+  return `[Saved to ${savedPath} — ${totalBytes.toLocaleString()} bytes; see file for full content]`;
 }
 
 export function createBashTool(notifyBackground?: NotifyBackground, opts: BashToolOptions = {}) {
@@ -476,12 +534,19 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
           signal?.removeEventListener('abort', onAbort);
           const exitCode = code ?? 0;
           const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
-          const cappedOutput = capOutputForInline(output, id, sessionDir, maxInlineOutputBytes);
+          const capped = capOutputForInline(output, id, sessionDir, maxInlineOutputBytes);
           const prefix =
             exitCode === 0 ? 'Background command completed' : 'Background command failed';
-          notifyBackground(`${prefix}: ${params.command}\n\n${cappedOutput || '(no output)'}`, {
-            stdout,
-            stderr,
+          // When output was saved to file, shrink the persisted details so the
+          // JSONL message doesn't re-store the same megabytes that already live
+          // in the saved file. The marker tells operators where to look.
+          const detailsStdout = capped.savedPath
+            ? shrinkDetailsForSavedOutput(capped.savedPath, capped.totalBytes)
+            : stdout;
+          const detailsStderr = capped.savedPath ? '' : stderr;
+          notifyBackground(`${prefix}: ${params.command}\n\n${capped.inline || '(no output)'}`, {
+            stdout: detailsStdout,
+            stderr: detailsStderr,
             exitCode,
             command: params.command,
           });
@@ -545,12 +610,11 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
         );
 
         const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
-        const cappedOutput = capOutputForInline(
-          output,
-          _toolCallId,
-          sessionDir,
-          maxInlineOutputBytes
-        );
+        const capped = capOutputForInline(output, _toolCallId, sessionDir, maxInlineOutputBytes);
+        const detailsStdout = capped.savedPath
+          ? shrinkDetailsForSavedOutput(capped.savedPath, capped.totalBytes)
+          : stdout;
+        const detailsStderr = capped.savedPath ? '' : stderr;
 
         if (exitCode !== 0) {
           // Build the failure response from the capped representation so the
@@ -559,16 +623,16 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
             content: [
               {
                 type: 'text',
-                text: `Command failed (exit code ${exitCode}):\n\n${cappedOutput}`,
+                text: `Command failed (exit code ${exitCode}):\n\n${capped.inline}`,
               },
             ],
-            details: { stdout, stderr, exitCode },
+            details: { stdout: detailsStdout, stderr: detailsStderr, exitCode },
           };
         }
 
         return {
-          content: [{ type: 'text', text: cappedOutput || '(command completed with no output)' }],
-          details: { stdout, stderr, exitCode },
+          content: [{ type: 'text', text: capped.inline || '(command completed with no output)' }],
+          details: { stdout: detailsStdout, stderr: detailsStderr, exitCode },
         };
       } catch (error: unknown) {
         const err = error as {
@@ -581,24 +645,23 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
         const stdout = err.stdout || '';
         const stderr = err.stderr || '';
         const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
-        const cappedOutput = capOutputForInline(
-          output,
-          _toolCallId,
-          sessionDir,
-          maxInlineOutputBytes
-        );
+        const capped = capOutputForInline(output, _toolCallId, sessionDir, maxInlineOutputBytes);
+        const detailsStdout = capped.savedPath
+          ? shrinkDetailsForSavedOutput(capped.savedPath, capped.totalBytes)
+          : stdout;
+        const detailsStderr = capped.savedPath ? '' : stderr;
 
         return {
           content: [
             {
               type: 'text',
-              text: `Command failed:\n${errorMsg}\n\n${cappedOutput}`,
+              text: `Command failed:\n${errorMsg}\n\n${capped.inline}`,
             },
           ],
           details: {
             error: errorMsg,
-            stdout,
-            stderr,
+            stdout: detailsStdout,
+            stderr: detailsStderr,
             exitCode: err.exitCode || 1,
           },
         };
