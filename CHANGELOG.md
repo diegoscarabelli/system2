@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-05-11
+
 ### Changed
 
 - The chat-store's `compactionStatus` no longer has a `'compacted'` terminal state. `finishCompaction` transitions `'compacting' → 'idle'` directly, so the transient in-flight indicator at the bottom of the timeline disappears as soon as the compaction completes (instead of staying glued at the bottom out of chronological order while later messages stream in above it). The persisted "Context compacted" system message from `history-capture` already records the event in correct chronological position ([#174](https://github.com/diegoscarabelli/system2/pull/174))
