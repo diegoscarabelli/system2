@@ -1037,6 +1037,10 @@ describe('AgentHost', () => {
       expect(hostInternal.pendingDeliveries).toHaveLength(0);
       // No resend: sendCustomMessage must not have been called.
       expect(hostInternal.session.sendCustomMessage).not.toHaveBeenCalled();
+      // retryAttempts must not have been incremented: there was nothing left
+      // to retry once contamination cleared the deliveries and there is no
+      // pending prompt, so the budget for future errors stays intact (#175).
+      expect(hostInternal.retryAttempts.size).toBe(0);
     });
 
     it('still resends pending deliveries when no output was emitted yet (#175 regression)', async () => {
