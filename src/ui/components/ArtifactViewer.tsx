@@ -8,13 +8,13 @@
 import { XIcon } from '@primer/octicons-react';
 import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef, useState } from 'react';
-import Markdown from 'react-markdown';
 import { useArtifactMtimePoll } from '../hooks/useArtifactMtimePoll';
 import { handleQueryMessage } from '../query-bridge';
 import { useArtifactStore } from '../stores/artifact';
 import { useThemeStore } from '../stores/theme';
 import { useAccentColors } from '../theme/useAccentColors';
 import { KanbanBoard } from './KanbanBoard';
+import { Markdown } from './Markdown';
 import { ParticlesBackground } from './ParticlesBackground';
 
 const MAX_PREVIEW_BYTES = 5 * 1024 * 1024; // 5 MB
