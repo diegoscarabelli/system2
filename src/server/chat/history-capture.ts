@@ -147,7 +147,7 @@ export function createHistoryCaptureSubscriber(
         // end fire in the same millisecond (silent-failure no-ops do that).
         // React keys collide otherwise and timeline items get dropped.
         getChatCache().push({
-          id: `msg-compaction-start-${randomUUID().slice(0, 8)}`,
+          id: `msg-compaction-start-${randomUUID()}`,
           role: 'system',
           content: 'Context compaction started',
           timestamp: Date.now(),
@@ -170,7 +170,7 @@ export function createHistoryCaptureSubscriber(
           content = 'Context compacted';
         }
         getChatCache().push({
-          id: `msg-compaction-end-${randomUUID().slice(0, 8)}`,
+          id: `msg-compaction-end-${randomUUID()}`,
           role: 'system',
           content,
           timestamp: Date.now(),
