@@ -956,7 +956,10 @@ export async function buildAndDeliverDailySummary(
   ) as Array<{ id: number; name: string; dir_name: string | null }>;
 
   const projectDataList: ProjectActivityData[] = [];
-  const deliveries: Promise<void>[] = [];
+  // Track each delivery's label so a rejection log / aggregated error can
+  // identify which payload failed (e.g. 'project-log:Foo' vs 'daily-summary')
+  // when multiple deliveries reject in the same tick.
+  const deliveries: Array<{ label: string; promise: Promise<void> }> = [];
 
   for (const project of activeProjects) {
     // Use persisted dir_name, falling back to resolveProjectDir for legacy projects
@@ -1082,13 +1085,14 @@ ${truncatedProjectActivity}
 
 ${projectDbTruncation.rendered}`;
 
-    deliveries.push(
-      narratorHost.deliverMessage(projectLogMessage, {
+    deliveries.push({
+      label: `project-log:${project.name}`,
+      promise: narratorHost.deliverMessage(projectLogMessage, {
         sender: 0,
         receiver: narratorId,
         timestamp: Date.now(),
-      })
-    );
+      }),
+    });
   }
 
   // 6. Build daily summary — grouped by project vs non-project
@@ -1240,13 +1244,14 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
   }
 
   // 9. Deliver daily summary
-  deliveries.push(
-    narratorHost.deliverMessage(messageParts.join('\n\n'), {
+  deliveries.push({
+    label: 'daily-summary',
+    promise: narratorHost.deliverMessage(messageParts.join('\n\n'), {
       sender: 0,
       receiver: narratorId,
       timestamp: Date.now(),
-    })
-  );
+    }),
+  });
 
   // Wait for the Narrator to finish processing all deliveries. Use allSettled
   // (not Promise.all) so every rejection is consumed: when two or more
@@ -1254,23 +1259,29 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
   // contamination short-circuit aborts all pending deliveries on a mid-turn
   // API error — Promise.all surfaces only the first, and Node promotes the
   // rest to unhandledRejection → process exit.
-  const results = await Promise.allSettled(deliveries);
-  const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+  const results = await Promise.allSettled(deliveries.map((d) => d.promise));
+  const failures: Array<{ label: string; reason: unknown }> = [];
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      failures.push({ label: deliveries[i].label, reason: r.reason });
+    }
+  });
   if (failures.length > 0) {
     for (const failure of failures) {
-      log.error('[Scheduler] daily-summary delivery failed:', failure.reason);
+      log.error(`[Scheduler] daily-summary delivery failed (${failure.label}):`, failure.reason);
     }
     // All-or-nothing: do not advance frontmatter cursors on partial failure;
     // the next cron tick retries from the same lastRunTs.
     //
     // AggregateError.stack only shows the aggregator's own frames, not the
     // per-delivery reasons; trackJobExecution stores `error.stack ?? message`
-    // on the job_executions row, so without flattening, the DB record would
-    // only show "N/M deliveries failed" with no clue what went wrong.
-    // Fold each reason's message into the aggregate message so it ends up in
-    // job_executions.failure_message alongside the per-failure log lines.
+    // on the job_execution row's `error` column, so without flattening, the
+    // DB record would only show "N/M deliveries failed" with no clue what
+    // went wrong or which delivery. Fold each rejection's label + message
+    // into the aggregate message so it ends up in job_execution.error
+    // alongside the per-failure log lines.
     const reasonSummary = failures
-      .map((f) => (f.reason instanceof Error ? f.reason.message : String(f.reason)))
+      .map((f) => `${f.label}: ${f.reason instanceof Error ? f.reason.message : String(f.reason)}`)
       .join('; ');
     throw new AggregateError(
       failures.map((f) => f.reason),

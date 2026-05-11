@@ -2235,6 +2235,16 @@ describe('buildAndDeliverDailySummary', () => {
     // path bundles them into an AggregateError. The AggregateError shape +
     // message format is the proof we went through the new path (the old code
     // threw the raw underlying error, not an aggregate).
+    //
+    // Why no `process.on('unhandledRejection', …)` assertion here: under
+    // vitest's default fake timers (which this describe enables), neither a
+    // manual microtask drain nor `vi.runAllTimersAsync()` actually flushes
+    // Node's unhandledRejection event queue. An earlier revision of this
+    // test included that listener and gave false-positive passes against
+    // the buggy Promise.all code — verified by stashing the fix and re-
+    // running. The AggregateError-shape + flattened-message assertions
+    // below are what catch the regression (the old code threw a raw
+    // Error, not an AggregateError, so the instanceof check fails fast).
     const today = FIXED_NOW.toISOString().slice(0, 10);
     const lastRunTs = new Date(FIXED_NOW.getTime() - 10 * 60_000).toISOString();
     const entryTs = new Date(FIXED_NOW.getTime() - 5 * 60_000).toISOString();
@@ -2294,6 +2304,12 @@ describe('buildAndDeliverDailySummary', () => {
     const aggErr = caught as AggregateError;
     expect(aggErr.message).toMatch(/daily-summary deliveries failed/);
     expect(aggErr.message).toContain('Delivery aborted: API error after model output (401)');
+    // Per-delivery labels (project-log:<name> and daily-summary) are folded
+    // into the aggregate message so operators reading `job_execution.error`
+    // can tell which payload failed without grepping logs.
+    expect(aggErr.message).toContain('project-log:P1');
+    expect(aggErr.message).toContain('project-log:P2');
+    expect(aggErr.message).toContain('daily-summary:');
     // Every rejected delivery is preserved in .errors so callers / observers
     // can inspect the per-delivery reason if the aggregated message isn't enough.
     expect(aggErr.errors.length).toBeGreaterThanOrEqual(2);
