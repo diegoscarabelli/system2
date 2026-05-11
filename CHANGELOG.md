@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-10
+
 ### Added
 
 - New shared `Markdown` wrapper component (`src/ui/components/Markdown.tsx`) around `react-markdown` that always applies `remark-gfm`. All four `react-markdown` call sites (`ArtifactViewer`, `MessageList`, `TaskDetailModal`, `ProjectDetailModal`) now route through the wrapper so GFM tables, strikethrough, autolinks, and task lists render consistently. Chat `MarkdownContent` also gained table border styling so chat tables visually match the artifact viewer. Adds `remark-gfm@4.0.1` dependency.
@@ -15,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `agent_busy_state` is now the single source of truth for per-agent context-usage % in the UI. Both `AgentPane` (via overlay onto `/api/agents` data) and `MessageInput` (via the active agent's entry in `usePushStore.agentBusy`) read the same map. The chat store no longer carries a `contextPercent` field, and the WebSocket handler unicasts an `agent_busy_state` snapshot on initial connect (for the Guide) and on `switch_agent` (for the newly focused agent) to seed the client's view before the first busy transition.
 - WebSocket message `agent_busy_changed` is renamed to `agent_busy_state`. The payload is identical (`agentId`, `busy`, `contextPercent`); the new name reflects that the message represents the agent's current state (sent as both a broadcast on transitions and a unicast snapshot on connect/switch), not strictly a "change" event.
+- Shared Knowledge Files now use `>` blockquotes as section-instruction scaffolding that the Guide preserves rather than folds into or replaces. `src/server/agents/agents.md` gains a Shared Knowledge Files editing-convention block (right-shape example + common wrong shapes to avoid), and the `INFRASTRUCTURE_TEMPLATE` in `src/server/knowledge/templates.ts` surfaces the same convention near the top of the generated file. The `app_writer` credentials example is also reverted to the simple `~/repos/my_pipelines/.env` pattern matching the standard setup.
 
 ### Fixed
 
@@ -22,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AgentHost.deliverMessage` no longer rejects with `Agent is reinitializing, delivery rejected` when a delivery lands during a reset+reinit window. Deliveries are now queued in `pendingDeliveries` and replayed against the fresh session by the existing replay path (`replayPendingDeliveries` after a scheduled-task reset, or the inline replay loop in `reinitializeWithProvider` for failovers). The "uninitialized" reject still fires when `initialize()` has genuinely never run. Fixes #169 — the back-to-back catch-up race where `memory-update / catch-up` was rejected because the preceding `daily-summary / catch-up`'s `agent_end` had just kicked off the Narrator's post-scheduled-task reset+reinit.
 - `reinitializeWithProvider`'s replay loop now iterates the merged set of deliveries (pre-failover snapshot + entries queued during reinit) instead of just the snapshot. Previously a no-op because the early reject made `newDuringReinit` unreachable; load-bearing now that `deliverMessage` queues during reinit.
 - The context-usage % shown in `MessageInput` (chat input "X% used") could disagree with the same agent's `Context %` column in `AgentPane`. The two displays were driven by separate WebSocket messages with different fire cadences: `context_usage` (only on agent focus and `agent_end`) drove the chat input; `agent_busy_changed` (every busy transition) drove the table. Around a turn boundary that included compaction or a failover-driven `compactForProvider`, the chat input could be left holding the pre-compaction value while the table reflected the post-compaction value (or vice versa). (This release also renames `agent_busy_changed` to `agent_busy_state` — see the Changed section.)
+- `git-commit.test.ts` `commitIfStateDir` describe-block timeout raised from vitest's 5s default to 15s. The five tests each run a synchronous git command chain (init, config, commit, log, rev-list) against a tempdir, and on `windows-latest` runners these chains intermittently exceeded the 5s ceiling. Locally and on Linux/macOS they finish in well under a second; the 15s headroom is a safety net for slow runners, not a real expectation.
 
 ### Removed
 

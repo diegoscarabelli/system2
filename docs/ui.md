@@ -4,7 +4,7 @@ React web interface providing a real-time chat experience with artifact display.
 
 **Source:** `src/ui/`
 **Build:** [Vite](https://vite.dev/) (part of `pnpm build`)
-**Dependencies:** [React 18](https://react.dev/), [Zustand](https://github.com/pmndrs/zustand), [Primer React](https://primer.style/react), [react-markdown](https://github.com/remarkjs/react-markdown)
+**Dependencies:** [React 18](https://react.dev/), [Zustand](https://github.com/pmndrs/zustand), [Primer React](https://primer.style/react), [react-markdown](https://github.com/remarkjs/react-markdown) + [remark-gfm](https://github.com/remarkjs/remark-gfm) (always applied via the shared `Markdown` wrapper for GFM tables, strikethrough, autolinks, task lists)
 
 ## Source Structure
 
@@ -26,6 +26,7 @@ src/
 │   ├── TaskDetailModal.tsx # Task detail overlay (comments, links, markdown)
 │   ├── ProjectDetailModal.tsx # Project detail overlay (status, labels, dates)
 │   ├── MultiSelectDropdown.tsx # Reusable multiselect dropdown with checkboxes
+│   ├── Markdown.tsx        # Shared react-markdown wrapper with remark-gfm always applied
 │   └── ParticlesBackground.tsx # Animated particle background (tsparticles)
 ├── hooks/
 │   ├── useWebSocket.ts    # WebSocket connection and message handling
