@@ -1248,8 +1248,25 @@ IMPORTANT: Do not message the Guide when you are done. This is a background task
     })
   );
 
-  // Wait for the Narrator to finish processing all deliveries
-  await Promise.all(deliveries);
+  // Wait for the Narrator to finish processing all deliveries. Use allSettled
+  // (not Promise.all) so every rejection is consumed: when two or more
+  // deliveries reject in the same tick — e.g. handlePotentialError's
+  // contamination short-circuit aborts all pending deliveries on a mid-turn
+  // API error — Promise.all surfaces only the first, and Node promotes the
+  // rest to unhandledRejection → process exit.
+  const results = await Promise.allSettled(deliveries);
+  const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (failures.length > 0) {
+    for (const failure of failures) {
+      log.error('[daily-summary] delivery failed:', failure.reason);
+    }
+    // All-or-nothing: do not advance frontmatter cursors on partial failure;
+    // the next cron tick retries from the same lastRunTs.
+    throw new AggregateError(
+      failures.map((f) => f.reason),
+      `${failures.length}/${results.length} daily-summary deliveries failed`
+    );
+  }
 
   // Server-side cursor advancement: update frontmatter so the next cron run
   // starts from newRunTs. Previously delegated to the LLM, but compaction

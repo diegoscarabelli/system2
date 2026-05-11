@@ -2226,6 +2226,91 @@ describe('buildAndDeliverDailySummary', () => {
 
     warnSpy.mockRestore();
   });
+
+  it('surfaces every rejection without unhandledRejection when multiple deliveries fail', async () => {
+    // Regression: handlePotentialError's contamination short-circuit can reject
+    // multiple pending deliveries in the same tick. With Promise.all, only the
+    // first rejection was awaited and the rest became unhandledRejection →
+    // process exit. Promise.allSettled consumes every rejection.
+
+    // The outer describe enables fake timers; use real timers here so the
+    // microtask-drain after the rejection can flush any leaked unhandled
+    // rejections that the buggy code would have produced.
+    vi.useRealTimers();
+
+    const dir = trackTmpDir(makeTmpDir());
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    mkdirSync(summariesDir, { recursive: true });
+    mkdirSync(sessionDir, { recursive: true });
+
+    // Stale lastRunTs so there is activity since lastRun and the function
+    // proceeds all the way to the deliveries Promise.allSettled.
+    const today = new Date().toISOString().slice(0, 10);
+    const lastRunTs = new Date(Date.now() - 10 * 60_000).toISOString();
+    const entryTs = new Date(Date.now() - 5 * 60_000).toISOString();
+    writeFileSync(
+      join(summariesDir, `${today}.md`),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
+    );
+    const entry = JSON.stringify({
+      type: 'message',
+      timestamp: entryTs,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'guide activity' }] },
+    });
+    writeFileSync(join(sessionDir, 'session.jsonl'), entry);
+
+    // Host whose deliveries all reject — simulates contamination short-circuit
+    // aborting every pending delivery on an API auth failure.
+    const failingHost = {
+      deliverMessage() {
+        return Promise.reject(new Error('Delivery aborted: API error after model output (401)'));
+      },
+    } as unknown as AgentHost;
+
+    // Capture any unhandledRejection that escapes during the test.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      // Two projects → two project-log deliveries + one daily-summary delivery,
+      // all rejecting. Promise.all would have leaked ≥1 unhandled rejection.
+      const db = {
+        query(sql: string) {
+          if (sql.includes('FROM agent')) {
+            return [
+              { id: 1, role: 'guide', project_name: null },
+              { id: 2, role: 'conductor', project_name: 'P1' },
+              { id: 3, role: 'conductor', project_name: 'P2' },
+            ];
+          }
+          if (sql.includes('FROM project p')) {
+            return [
+              { id: 1, name: 'P1' },
+              { id: 2, name: 'P2' },
+            ];
+          }
+          return [];
+        },
+      } as unknown as DatabaseClient;
+
+      await expect(buildAndDeliverDailySummary(db, failingHost, 99, dir, 30)).rejects.toThrow(
+        /daily-summary deliveries failed/
+      );
+
+      // Give the microtask + macrotask queues a chance to surface any leaked
+      // rejections that Promise.all would have left dangling.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toHaveLength(0);
+
+      // All-or-nothing: cursor on the summary file must NOT advance.
+      const ts = readFrontmatterField(join(summariesDir, `${today}.md`), 'last_narrator_update_ts');
+      expect(ts).toBe(lastRunTs);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
 });
 
 describe('trackJobExecution', () => {
