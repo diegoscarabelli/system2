@@ -740,6 +740,11 @@ export class AgentHost {
         this.oauthRefreshAttempted = false;
       }
       this.lastTurnErrored = false;
+      // Clear the per-turn output flag at the run boundary, matching its
+      // documented lifecycle. turn_start of the next run will reset it too,
+      // but resetting here keeps the flag from carrying state across runs in
+      // any code path that might inspect it between agent_end and turn_start.
+      this.currentTurnHasOutput = false;
 
       // If this turn completed a scheduled-task delivery for a role configured to reset,
       // truncate the session JSONL to a fresh header. The Narrator's durable memory lives in
