@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Auto-compaction now runs end-to-end on high-context Anthropic models. The pi-coding-agent SDK was computing `maxTokens = 0.8 × reserveTokens` (or `0.5 ×` for turn-prefix summaries) without clamping at `model.maxTokens`, so on configurations where `0.25 × contextWindow > model.maxTokens` (in practice: `claude-opus-4-7` with the 1M-context variant and our `reserveTokens = 500K`) every summarization request was rejected by the API with HTTP 400 (`max_tokens: 250000 > 128000`). Context grew unbounded turn after turn while the chat falsely reported successful compactions. Fixed locally via `pnpm patch @mariozechner/pi-coding-agent@0.71.1` clamping at both call sites; the same fix was filed upstream as [pi-mono#4390](https://github.com/badlogic/pi-mono/issues/4390) ([#174](https://github.com/diegoscarabelli/system2/pull/174))
+- `history-capture` now surfaces the real outcome of `compaction_end` instead of pushing a generic "Context compacted" for every event regardless of success. Successful compactions get a clean "Context compacted"; aborted ones get "Context compaction aborted"; failed ones include the SDK's `errorMessage`. This is the patch that exposed the SDK 400 above — without it the failure was invisible for ~10 days. Message IDs use `randomUUID()` (full UUID) instead of `msg-${Date.now()}` to prevent React key collisions when start/end fire within the same millisecond (which happens on silent-failure paths) ([#174](https://github.com/diegoscarabelli/system2/pull/174))
+- `AgentHost.handleCompactionTracking` only bumps the pruning counter when the SDK reports a real success (`result != null && !aborted && !errorMessage`). Previously every `compaction_end` event incremented the counter, so silent failures inflated it toward `compaction_depth` and would have triggered a doomed pruning compaction (which would 400-fail for the same SDK reason). The parameter is now typed as `AgentSessionEvent` directly so TypeScript narrows the discriminated union without an `as` cast; overflow recovery now calls a new `bumpCompactionCount()` helper instead of fabricating a partial event ([#174](https://github.com/diegoscarabelli/system2/pull/174))
+
+### Changed
+
+- The chat-store's `compactionStatus` no longer has a `'compacted'` terminal state. `finishCompaction` transitions `'compacting' → 'idle'` directly, so the transient in-flight indicator at the bottom of the timeline disappears as soon as the compaction completes (instead of staying glued at the bottom out of chronological order while later messages stream in above it). The persisted "Context compacted" system message from `history-capture` already records the event in correct chronological position ([#174](https://github.com/diegoscarabelli/system2/pull/174))
+
 ## [0.3.3] - 2026-05-10
 
 ### Added

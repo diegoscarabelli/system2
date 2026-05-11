@@ -187,7 +187,7 @@ Supports multi-agent chat via per-agent state. Each agent has its own message hi
 | `currentTurnEvents` | `ChatTurnEvent[]` | Thinking + tool calls for current turn |
 | `isStreaming` | `boolean` | Currently receiving chunks |
 | `isWaitingForResponse` | `boolean` | Sent message, no response yet |
-| `compactionStatus` | `'idle' \| 'compacting' \| 'compacted'` | Auto-compaction state (transient, not persisted) |
+| `compactionStatus` | `'idle' \| 'compacting'` | Transient in-flight indicator (not persisted). Transitions back to `idle` on `compaction_end`; the persisted "Context compacted" system message from `history-capture` records the event in chronological position. |
 
 Components read the active agent's state via selectors (e.g., `useChatStore(s => s.agentStates.get(s.activeAgentId))`). An exported `EMPTY_AGENT_STATE` constant provides a stable default for selectors when no agent state exists yet.
 

@@ -78,7 +78,7 @@ type ServerMessage =
 | `ready_for_input` | Agent finished, ready for next message |
 | `chat_history` | Sent on connect (Guide) and on `switch_agent`: recent messages for the specified agent |
 | `user_message_broadcast` | User message from another tab, broadcast to all other connected clients |
-| `compaction_start` / `compaction_end` | Auto-compaction lifecycle (context window management). UI shows transient "Compacting..." / "Compacted" indicator |
+| `compaction_start` / `compaction_end` | Auto-compaction lifecycle (context window management). UI shows a transient "Compacting..." indicator while in flight; on `compaction_end` the indicator clears and the chat timeline gets a persisted "Context compacted" (or `failed: ...` / `aborted`) system message in chronological position |
 | `board_changed` | Broadcast when `write_system2_db` modifies a project, task, task_link, or task_comment. UI panels refetch `/api/kanban`. |
 | `agents_changed` | Broadcast when an agent is spawned, terminated, or resurrected. UI panels refetch `/api/agents`. |
 | `artifacts_changed` | Broadcast when `write_system2_db` modifies an artifact. UI panels refetch `/api/artifacts`. |
