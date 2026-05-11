@@ -2227,24 +2227,20 @@ describe('buildAndDeliverDailySummary', () => {
     warnSpy.mockRestore();
   });
 
-  it('aggregates every rejection when multiple deliveries fail', async () => {
-    // Regression: handlePotentialError's contamination short-circuit can reject
-    // multiple pending deliveries in the same tick. With Promise.all, only the
-    // first rejection was awaited and the rest became unhandledRejection →
-    // process exit. Promise.allSettled consumes every rejection and the throw
-    // path bundles them into an AggregateError. The AggregateError shape +
-    // message format is the proof we went through the new path (the old code
-    // threw the raw underlying error, not an aggregate).
-    //
-    // Why no `process.on('unhandledRejection', …)` assertion here: under
-    // vitest's default fake timers (which this describe enables), neither a
-    // manual microtask drain nor `vi.runAllTimersAsync()` actually flushes
-    // Node's unhandledRejection event queue. An earlier revision of this
-    // test included that listener and gave false-positive passes against
-    // the buggy Promise.all code — verified by stashing the fix and re-
-    // running. The AggregateError-shape + flattened-message assertions
-    // below are what catch the regression (the old code threw a raw
-    // Error, not an AggregateError, so the instanceof check fails fast).
+  /**
+   * Build the standard "every delivery rejects" scenario used by both
+   * regression tests below. Two conductor projects + one daily-summary
+   * delivery, all rejecting. Returns the tmpdir + the db + a failing host
+   * + the timestamps so each test can assert what it cares about.
+   */
+  function setupAllRejectingScenario(): {
+    dir: string;
+    summariesDir: string;
+    db: DatabaseClient;
+    host: AgentHost;
+    today: string;
+    lastRunTs: string;
+  } {
     const today = FIXED_NOW.toISOString().slice(0, 10);
     const lastRunTs = new Date(FIXED_NOW.getTime() - 10 * 60_000).toISOString();
     const entryTs = new Date(FIXED_NOW.getTime() - 5 * 60_000).toISOString();
@@ -2258,23 +2254,21 @@ describe('buildAndDeliverDailySummary', () => {
       join(summariesDir, `${today}.md`),
       `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — ${today}\n`
     );
-    const entry = JSON.stringify({
-      type: 'message',
-      timestamp: entryTs,
-      message: { role: 'assistant', content: [{ type: 'text', text: 'guide activity' }] },
-    });
-    writeFileSync(join(sessionDir, 'session.jsonl'), entry);
+    writeFileSync(
+      join(sessionDir, 'session.jsonl'),
+      JSON.stringify({
+        type: 'message',
+        timestamp: entryTs,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'guide activity' }] },
+      })
+    );
 
-    // Host whose deliveries all reject — simulates contamination short-circuit
-    // aborting every pending delivery on an API auth failure.
-    const failingHost = {
+    const host = {
       deliverMessage() {
         return Promise.reject(new Error('Delivery aborted: API error after model output (401)'));
       },
     } as unknown as AgentHost;
 
-    // Two projects → two project-log deliveries + one daily-summary delivery,
-    // all rejecting. Old Promise.all path would throw the raw first rejection.
     const db = {
       query(sql: string) {
         if (sql.includes('FROM agent')) {
@@ -2294,9 +2288,19 @@ describe('buildAndDeliverDailySummary', () => {
       },
     } as unknown as DatabaseClient;
 
+    return { dir, summariesDir, db, host, today, lastRunTs };
+  }
+
+  it('aggregates every rejection when multiple deliveries fail', async () => {
+    // Asserts the AggregateError shape + flattened message. The old Promise.all
+    // path threw a raw Error (not an AggregateError), so `instanceof
+    // AggregateError` fails fast on the buggy code (verified by stashing the
+    // jobs.ts fix and re-running).
+    const { dir, summariesDir, db, host, today, lastRunTs } = setupAllRejectingScenario();
+
     let caught: unknown;
     try {
-      await buildAndDeliverDailySummary(db, failingHost, 99, dir, 30);
+      await buildAndDeliverDailySummary(db, host, 99, dir, 30);
     } catch (err) {
       caught = err;
     }
@@ -2304,20 +2308,40 @@ describe('buildAndDeliverDailySummary', () => {
     const aggErr = caught as AggregateError;
     expect(aggErr.message).toMatch(/daily-summary deliveries failed/);
     expect(aggErr.message).toContain('Delivery aborted: API error after model output (401)');
-    // Per-delivery labels (project-log:<name> and daily-summary) are folded
-    // into the aggregate message so operators reading `job_execution.error`
-    // can tell which payload failed without grepping logs.
-    expect(aggErr.message).toContain('project-log:P1');
-    expect(aggErr.message).toContain('project-log:P2');
+    // Per-delivery labels (project-log:<id>:<name> and daily-summary) are
+    // folded into the aggregate message so operators reading
+    // `job_execution.error` can tell which payload failed without grepping
+    // logs. `project.id` is included because `project.name` is not unique in
+    // the schema.
+    expect(aggErr.message).toContain('project-log:1:P1');
+    expect(aggErr.message).toContain('project-log:2:P2');
     expect(aggErr.message).toContain('daily-summary:');
-    // Every rejected delivery is preserved in .errors so callers / observers
-    // can inspect the per-delivery reason if the aggregated message isn't enough.
-    expect(aggErr.errors.length).toBeGreaterThanOrEqual(2);
+    // Three rejections → three .errors entries. Strict equality catches a
+    // partial-aggregation regression (e.g., a future change that drops
+    // failures when their messages match).
+    expect(aggErr.errors).toHaveLength(3);
 
     // All-or-nothing: cursor on the summary file must NOT advance.
     const ts = readFrontmatterField(join(summariesDir, `${today}.md`), 'last_narrator_update_ts');
     expect(ts).toBe(lastRunTs);
   });
+
+  // Note on the absent `process.on('unhandledRejection', …)` assertion:
+  // empirically, neither default vitest fake timers nor `toFake: ['Date']`
+  // (real setTimeout/setImmediate) produce a fireable unhandledRejection
+  // event for this scenario under vitest's test runner — the listener gives
+  // false-positive passes against a manually re-introduced `Promise.all`.
+  // The runner appears to attach its own handlers or V8 considers Promise's
+  // internal `.then`-chains "handled enough." Verified by stubbing the fix
+  // back to Promise.all and observing the listener never fires.
+  //
+  // The crash mode is real in production (Node 25 daemon, no test runner)
+  // and is what motivated this fix — see PR #178 description for the 401
+  // mid-turn crash that exposed it. We rely on the AggregateError-shape +
+  // flattened-message assertion above (which DOES fail against the buggy
+  // Promise.all) as the unit-test guard against regressions of THIS code
+  // path. The broader "no floating rejections anywhere in the daemon"
+  // posture is tracked separately in #179 (process-level safety net).
 });
 
 describe('trackJobExecution', () => {

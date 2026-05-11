@@ -957,8 +957,10 @@ export async function buildAndDeliverDailySummary(
 
   const projectDataList: ProjectActivityData[] = [];
   // Track each delivery's label so a rejection log / aggregated error can
-  // identify which payload failed (e.g. 'project-log:Foo' vs 'daily-summary')
-  // when multiple deliveries reject in the same tick.
+  // identify which payload failed (e.g. 'project-log:42:Foo' vs 'daily-summary')
+  // when multiple deliveries reject in the same tick. Includes project.id
+  // because `project.name` has no UNIQUE constraint in the schema, so two
+  // projects can share a name.
   const deliveries: Array<{ label: string; promise: Promise<void> }> = [];
 
   for (const project of activeProjects) {
@@ -1086,7 +1088,7 @@ ${truncatedProjectActivity}
 ${projectDbTruncation.rendered}`;
 
     deliveries.push({
-      label: `project-log:${project.name}`,
+      label: `project-log:${project.id}:${project.name}`,
       promise: narratorHost.deliverMessage(projectLogMessage, {
         sender: 0,
         receiver: narratorId,
