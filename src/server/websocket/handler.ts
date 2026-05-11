@@ -55,15 +55,9 @@ export class WebSocketHandler {
     });
     this.send({ type: 'provider_info', provider: guideHost.getProvider(), agentId: guideAgentId });
 
-    // Seed Guide's busy/context state into the client's push store. Mirrors the
-    // switch_agent path so MessageInput's contextPercent is populated before the
-    // first turn ends.
-    this.send({
-      type: 'agent_busy_state',
-      agentId: guideAgentId,
-      busy: guideHost.isBusy(),
-      contextPercent: guideHost.getContextUsage()?.percent ?? null,
-    });
+    // Seed Guide's busy/context state into the client's push store so
+    // MessageInput's contextPercent is populated before the first turn ends.
+    this.sendAgentBusySnapshot(guideAgentId, guideHost);
 
     // Subscribe to Guide's events for streaming to this client
     this.subscribeToAgent(guideAgentId, guideHost);
@@ -184,15 +178,9 @@ export class WebSocketHandler {
         });
         this.send({ type: 'provider_info', provider: host.getProvider(), agentId: newAgentId });
 
-        // Seed this client's busy/context state for the new agent. Mirrors what an
-        // agent_busy_state broadcast would deliver — the client uses the same handler
-        // path and updates the push store, which drives both AgentPane and MessageInput.
-        this.send({
-          type: 'agent_busy_state',
-          agentId: newAgentId,
-          busy: host.isBusy(),
-          contextPercent: host.getContextUsage()?.percent ?? null,
-        });
+        // Seed this client's busy/context state for the new agent — drives both
+        // AgentPane and MessageInput via the same push-store entry.
+        this.sendAgentBusySnapshot(newAgentId, host);
 
         // Send ready_for_input if the agent is idle
         if (!host.isBusy()) {
@@ -391,6 +379,21 @@ export class WebSocketHandler {
 
   private sendError(message: string): void {
     this.send({ type: 'error', message });
+  }
+
+  /**
+   * Unicast snapshot of an agent's current busy + context state to this client.
+   * Mirrors what a server-side agent_busy_state broadcast delivers; used to seed
+   * the client's push store on initial connect (for the Guide) and on switch_agent
+   * (for the newly focused agent) before any busy transition has occurred.
+   */
+  private sendAgentBusySnapshot(agentId: number, host: AgentHost): void {
+    this.send({
+      type: 'agent_busy_state',
+      agentId,
+      busy: host.isBusy(),
+      contextPercent: host.getContextUsage()?.percent ?? null,
+    });
   }
 
   private cleanup(): void {
