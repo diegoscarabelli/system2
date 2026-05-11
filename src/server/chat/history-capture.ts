@@ -142,15 +142,38 @@ export function createHistoryCaptureSubscriber(
       }
 
       case 'compaction_start':
-      case 'compaction_end':
         getChatCache().push({
           id: `msg-${Date.now()}`,
           role: 'system',
-          content:
-            event.type === 'compaction_start' ? 'Context compaction started' : 'Context compacted',
+          content: `Context compaction started (reason=${event.reason})`,
           timestamp: Date.now(),
         });
         break;
+
+      case 'compaction_end': {
+        // DIAGNOSTIC: surface why a compaction ended so silently-failing
+        // compactions (early-exit in _runAutoCompaction) are visible. The SDK
+        // emits compaction_end for both success and several no-op paths.
+        const parts: string[] = [`reason=${event.reason}`];
+        if (event.aborted) parts.push('aborted=true');
+        if (event.willRetry) parts.push('willRetry=true');
+        if (event.errorMessage) parts.push(`error=${event.errorMessage}`);
+        if (event.result) {
+          parts.push(
+            `tokensBefore=${event.result.tokensBefore}`,
+            `firstKeptEntryId=${event.result.firstKeptEntryId}`
+          );
+        } else if (!event.aborted && !event.errorMessage) {
+          parts.push('result=undefined (silent no-op)');
+        }
+        getChatCache().push({
+          id: `msg-${Date.now()}`,
+          role: 'system',
+          content: `Context compacted [${parts.join(', ')}]`,
+          timestamp: Date.now(),
+        });
+        break;
+      }
     }
   };
 }

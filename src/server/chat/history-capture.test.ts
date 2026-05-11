@@ -96,24 +96,33 @@ describe('createHistoryCaptureSubscriber', () => {
     const cache = mockCache();
     const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
-    sub({ type: 'compaction_start' } as unknown as AgentSessionEvent);
+    sub({ type: 'compaction_start', reason: 'threshold' } as unknown as AgentSessionEvent);
 
     expect(cache.push).toHaveBeenCalledOnce();
     const msg = cache.messages[0] as { role: string; content: string };
     expect(msg.role).toBe('system');
-    expect(msg.content).toBe('Context compaction started');
+    expect(msg.content).toContain('Context compaction started');
+    expect(msg.content).toContain('reason=threshold');
   });
 
-  it('captures compaction_end as system message', () => {
+  it('captures compaction_end as system message with diagnostic detail', () => {
     const cache = mockCache();
     const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
-    sub({ type: 'compaction_end' } as unknown as AgentSessionEvent);
+    sub({
+      type: 'compaction_end',
+      reason: 'threshold',
+      result: undefined,
+      aborted: false,
+      willRetry: false,
+    } as unknown as AgentSessionEvent);
 
     expect(cache.push).toHaveBeenCalledOnce();
     const msg = cache.messages[0] as { role: string; content: string };
     expect(msg.role).toBe('system');
-    expect(msg.content).toBe('Context compacted');
+    expect(msg.content).toContain('Context compacted');
+    expect(msg.content).toContain('reason=threshold');
+    expect(msg.content).toContain('result=undefined (silent no-op)');
   });
 
   it('captures text + tool calls in the same turn', () => {

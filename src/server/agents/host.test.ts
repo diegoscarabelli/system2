@@ -166,7 +166,12 @@ describe('AgentHost', () => {
       const hostInternal = host as unknown as {
         pendingPrompt: string | null;
         session: { prompt: ReturnType<typeof vi.fn> };
-        handleSessionEvent: (event: { type: string }) => void;
+        handleSessionEvent: (event: {
+          type: string;
+          result?: unknown;
+          aborted?: boolean;
+          errorMessage?: string;
+        }) => void;
       };
 
       // Track pendingPrompt value during session.prompt()
@@ -211,7 +216,12 @@ describe('AgentHost', () => {
 
       const hostInternal = host as unknown as {
         pendingPrompt: string | null;
-        handleSessionEvent: (event: { type: string }) => void;
+        handleSessionEvent: (event: {
+          type: string;
+          result?: unknown;
+          aborted?: boolean;
+          errorMessage?: string;
+        }) => void;
         handlePotentialError: ReturnType<typeof vi.fn>;
         handleCompactionTracking: ReturnType<typeof vi.fn>;
       };
@@ -2477,7 +2487,12 @@ describe('AgentHost', () => {
         compact: ReturnType<typeof vi.fn>;
         getContextUsage: ReturnType<typeof vi.fn>;
       } | null;
-      handleCompactionTracking: (event: { type: string }) => void;
+      handleCompactionTracking: (event: {
+        type: string;
+        result?: unknown;
+        aborted?: boolean;
+        errorMessage?: string;
+      }) => void;
       triggerPruningCompaction: () => Promise<void>;
       findBaselineSummary: () => string | null;
       readCompactionCount: () => number;
@@ -2624,22 +2639,76 @@ describe('AgentHost', () => {
     });
 
     describe('handleCompactionTracking', () => {
-      it('increments counter on compaction_end and persists', () => {
+      it('increments counter on a successful compaction_end (non-null result)', () => {
         const { internal } = makeHostForPruning(3);
         internal.compactionCount = 0;
         internal.writeCompactionCount = vi.fn();
 
-        internal.handleCompactionTracking({ type: 'compaction_end' });
+        internal.handleCompactionTracking({
+          type: 'compaction_end',
+          result: { firstKeptEntryId: 'abc' },
+          aborted: false,
+        });
 
         expect(internal.compactionCount).toBe(1);
         expect(internal.writeCompactionCount).toHaveBeenCalledWith(1);
+      });
+
+      it('does NOT increment when result is undefined (silent no-op)', () => {
+        const { internal } = makeHostForPruning(3);
+        internal.compactionCount = 0;
+        internal.writeCompactionCount = vi.fn();
+
+        internal.handleCompactionTracking({
+          type: 'compaction_end',
+          result: undefined,
+          aborted: false,
+        });
+
+        expect(internal.compactionCount).toBe(0);
+        expect(internal.writeCompactionCount).not.toHaveBeenCalled();
+      });
+
+      it('does NOT increment when aborted', () => {
+        const { internal } = makeHostForPruning(3);
+        internal.compactionCount = 0;
+        internal.writeCompactionCount = vi.fn();
+
+        internal.handleCompactionTracking({
+          type: 'compaction_end',
+          result: { firstKeptEntryId: 'abc' },
+          aborted: true,
+        });
+
+        expect(internal.compactionCount).toBe(0);
+        expect(internal.writeCompactionCount).not.toHaveBeenCalled();
+      });
+
+      it('does NOT increment when errorMessage is set', () => {
+        const { internal } = makeHostForPruning(3);
+        internal.compactionCount = 0;
+        internal.writeCompactionCount = vi.fn();
+
+        internal.handleCompactionTracking({
+          type: 'compaction_end',
+          result: undefined,
+          aborted: false,
+          errorMessage: 'Auto-compaction failed: HTTP 400',
+        });
+
+        expect(internal.compactionCount).toBe(0);
+        expect(internal.writeCompactionCount).not.toHaveBeenCalled();
       });
 
       it('does not increment counter when compaction_depth is 0', () => {
         const { internal } = makeHostForPruning(0);
         internal.compactionCount = 0;
 
-        internal.handleCompactionTracking({ type: 'compaction_end' });
+        internal.handleCompactionTracking({
+          type: 'compaction_end',
+          result: { firstKeptEntryId: 'abc' },
+          aborted: false,
+        });
 
         expect(internal.compactionCount).toBe(0);
       });
@@ -2721,7 +2790,12 @@ describe('AgentHost', () => {
         onBusyChange?: (agentId: number, busy: boolean, contextPercent: number | null) => void;
         listeners: Set<(event: { type: string }) => void>;
         deferredAgentEnd: { type: string } | null;
-        handleSessionEvent: (event: { type: string }) => void;
+        handleSessionEvent: (event: {
+          type: string;
+          result?: unknown;
+          aborted?: boolean;
+          errorMessage?: string;
+        }) => void;
         handlePotentialError: (event: unknown) => Promise<void>;
       };
 
@@ -2856,7 +2930,11 @@ describe('AgentHost', () => {
         def.handlePotentialError = vi.fn().mockResolvedValue(undefined);
         def.listeners = new Set();
 
-        def.handleSessionEvent({ type: 'compaction_end' });
+        def.handleSessionEvent({
+          type: 'compaction_end',
+          result: { firstKeptEntryId: 'abc' },
+          aborted: false,
+        });
 
         expect(def.compactionCount).toBe(1);
       });
