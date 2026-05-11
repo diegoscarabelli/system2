@@ -292,6 +292,13 @@ export class AgentHost {
    *  re-tries the family flagship. */
   private oauthFallbackUsedFor: Set<LlmProvider> = new Set();
   private deliverySendCount = 0;
+  /** True once the model has emitted any output (message_start, message_update,
+   *  or tool_execution_start) during the current turn. Reset on turn_start and
+   *  agent_end. Read in handlePotentialError to decide whether resending the
+   *  in-flight delivery is safe — a contaminated turn may have already triggered
+   *  tool side effects (e.g. file edits), so re-feeding it to the model would
+   *  duplicate work. See GitHub issue #175. */
+  private currentTurnHasOutput = false;
   private compactionCount = 0;
   private compactionDepth = 0;
   private isPruning = false;
@@ -687,6 +694,18 @@ export class AgentHost {
       log.error('[AgentHost] handlePotentialError threw unexpectedly:', err);
     });
 
+    // Track whether the current turn has emitted any model output. Used by
+    // handlePotentialError to detect contaminated turns (issue #175).
+    if (event.type === 'turn_start') {
+      this.currentTurnHasOutput = false;
+    } else if (
+      event.type === 'message_start' ||
+      event.type === 'message_update' ||
+      event.type === 'tool_execution_start'
+    ) {
+      this.currentTurnHasOutput = true;
+    }
+
     // Track busy state from agent activity
     if (event.type === 'message_update' || event.type === 'tool_execution_start') {
       if (!this.busy) {
@@ -721,6 +740,11 @@ export class AgentHost {
         this.oauthRefreshAttempted = false;
       }
       this.lastTurnErrored = false;
+      // Clear the per-turn output flag at the run boundary, matching its
+      // documented lifecycle. turn_start of the next run will reset it too,
+      // but resetting here keeps the flag from carrying state across runs in
+      // any code path that might inspect it between agent_end and turn_start.
+      this.currentTurnHasOutput = false;
 
       // If this turn completed a scheduled-task delivery for a role configured to reset,
       // truncate the session JSONL to a fresh header. The Narrator's durable memory lives in
@@ -863,6 +887,34 @@ export class AgentHost {
       this.pendingDeliveries = [];
     }
 
+    // Contaminated-turn check (issue #175). If the model emitted any output
+    // before the failure, the in-flight delivery may have already triggered
+    // tool side effects (e.g. file edits). Resending it would re-run those
+    // side effects. Reject all pending deliveries instead and let the caller
+    // surface a failure — for scheduled deliveries the next cron tick reads
+    // the unchanged `last_narrator_update_ts` and redoes the window from
+    // scratch, with the recipient's idempotency check handling whatever
+    // partial work landed on disk.
+    //
+    // Queued-but-not-yet-processed deliveries behind the in-flight one are
+    // also rejected for simplicity. The cost is that any caller awaiting them
+    // sees a transient error; for scheduled tasks this just means waiting for
+    // the next cron tick (~30 min).
+    if (this.currentTurnHasOutput && this.pendingDeliveries.length > 0) {
+      log.warn(
+        `[AgentHost] Turn already emitted output before failure; ` +
+          `rejecting ${this.pendingDeliveries.length} pending delivery(ies) ` +
+          `instead of resending to avoid duplicate side effects.`
+      );
+      const contaminationError = new Error(
+        `Delivery aborted: API error after model output (${errorMessage})`
+      );
+      for (const d of this.pendingDeliveries) {
+        d.reject(contaminationError);
+      }
+      this.pendingDeliveries = [];
+    }
+
     const deliveriesToRetry = [...this.pendingDeliveries];
     // Reset the send counter: the failed turn's sends are abandoned.
     // The retry/failover path will re-send and re-increment as needed.
@@ -969,6 +1021,16 @@ export class AgentHost {
 
     // Check if we should retry
     if (shouldRetry(category, currentAttempts)) {
+      // Nothing left to retry: the contaminated-turn guard above cleared
+      // pendingDeliveries and there is no pendingPrompt. Skipping the
+      // sleep+retry-budget increment preserves retryAttempts for the next
+      // genuine error on this provider/category. We've already passed the
+      // cooldown-rotation and OAuth-refresh checks above, so this only
+      // short-circuits the now-pointless retry-with-sleep work (#175).
+      if (!promptToRetry && deliveriesToRetry.length === 0) {
+        return;
+      }
+
       const delay = calculateDelay(currentAttempts);
       log.info(`[AgentHost] Retrying in ${Math.round(delay)}ms (attempt ${currentAttempts + 1})`);
 
