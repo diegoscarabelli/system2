@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-10
+
 ### Added
 
 - New shared `Markdown` wrapper component (`src/ui/components/Markdown.tsx`) around `react-markdown` that always applies `remark-gfm`. All four `react-markdown` call sites (`ArtifactViewer`, `MessageList`, `TaskDetailModal`, `ProjectDetailModal`) now route through the wrapper so GFM tables, strikethrough, autolinks, and task lists render consistently. Chat `MarkdownContent` also gained table border styling so chat tables visually match the artifact viewer. Adds `remark-gfm@4.0.1` dependency.
