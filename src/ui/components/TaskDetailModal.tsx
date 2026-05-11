@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePushStore } from '../stores/push';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
-import Markdown from './Markdown';
+import { Markdown } from './Markdown';
 
 interface TaskDetail {
   id: number;

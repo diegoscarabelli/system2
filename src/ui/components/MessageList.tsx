@@ -17,7 +17,7 @@ import {
 } from '../stores/chat';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
-import Markdown from './Markdown';
+import { Markdown } from './Markdown';
 
 /** Format a millisecond timestamp as local HH:MM, or "Mar 18, HH:MM" if not today */
 function formatTime(ts: number): string {

@@ -1,8 +1,8 @@
 import ReactMarkdown, { type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-export function Markdown(props: Omit<Options, 'remarkPlugins'>) {
-  return <ReactMarkdown {...props} remarkPlugins={[remarkGfm]} />;
-}
+const REMARK_PLUGINS = [remarkGfm];
 
-export default Markdown;
+export function Markdown(props: Omit<Options, 'remarkPlugins'>) {
+  return <ReactMarkdown {...props} remarkPlugins={REMARK_PLUGINS} />;
+}

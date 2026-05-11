@@ -10,7 +10,7 @@ import { Box, IconButton, Text } from '@primer/react';
 import { useEffect, useRef } from 'react';
 import { colors } from '../theme/colors';
 import { useAccentColors } from '../theme/useAccentColors';
-import Markdown from './Markdown';
+import { Markdown } from './Markdown';
 
 interface ProjectData {
   id: number;
