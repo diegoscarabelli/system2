@@ -92,11 +92,11 @@ describe('createHistoryCaptureSubscriber', () => {
     expect(cache.push).not.toHaveBeenCalled();
   });
 
-  it('captures compaction_start as system message', () => {
+  it('captures compaction_start as a clean system message', () => {
     const cache = mockCache();
     const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
-    sub({ type: 'compaction_start' } as unknown as AgentSessionEvent);
+    sub({ type: 'compaction_start', reason: 'threshold' } as unknown as AgentSessionEvent);
 
     expect(cache.push).toHaveBeenCalledOnce();
     const msg = cache.messages[0] as { role: string; content: string };
@@ -104,16 +104,74 @@ describe('createHistoryCaptureSubscriber', () => {
     expect(msg.content).toBe('Context compaction started');
   });
 
-  it('captures compaction_end as system message', () => {
+  it('captures successful compaction_end as a clean system message', () => {
     const cache = mockCache();
     const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
 
-    sub({ type: 'compaction_end' } as unknown as AgentSessionEvent);
+    sub({
+      type: 'compaction_end',
+      reason: 'threshold',
+      result: { firstKeptEntryId: 'abc', tokensBefore: 100000 },
+      aborted: false,
+      willRetry: false,
+    } as unknown as AgentSessionEvent);
 
     expect(cache.push).toHaveBeenCalledOnce();
     const msg = cache.messages[0] as { role: string; content: string };
     expect(msg.role).toBe('system');
     expect(msg.content).toBe('Context compacted');
+  });
+
+  it('surfaces errorMessage on failed compaction_end', () => {
+    const cache = mockCache();
+    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+
+    sub({
+      type: 'compaction_end',
+      reason: 'threshold',
+      result: undefined,
+      aborted: false,
+      willRetry: false,
+      errorMessage: 'Auto-compaction failed: HTTP 400 max_tokens exceeds cap',
+    } as unknown as AgentSessionEvent);
+
+    const msg = cache.messages[0] as { role: string; content: string };
+    expect(msg.content).toBe(
+      'Context compaction failed: Auto-compaction failed: HTTP 400 max_tokens exceeds cap'
+    );
+  });
+
+  it('surfaces aborted compaction_end distinctly from failure', () => {
+    const cache = mockCache();
+    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+
+    sub({
+      type: 'compaction_end',
+      reason: 'manual',
+      result: undefined,
+      aborted: true,
+      willRetry: false,
+    } as unknown as AgentSessionEvent);
+
+    const msg = cache.messages[0] as { role: string; content: string };
+    expect(msg.content).toBe('Context compaction aborted');
+  });
+
+  it('surfaces silent no-op (result undefined, no flags) as a failure', () => {
+    const cache = mockCache();
+    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+
+    sub({
+      type: 'compaction_end',
+      reason: 'threshold',
+      result: undefined,
+      aborted: false,
+      willRetry: false,
+    } as unknown as AgentSessionEvent);
+
+    const msg = cache.messages[0] as { role: string; content: string };
+    expect(msg.content).toContain('Context compaction failed');
+    expect(msg.content).toContain('silent no-op');
   });
 
   it('captures text + tool calls in the same turn', () => {

@@ -1,0 +1,28 @@
+diff --git a/dist/core/compaction/compaction.js b/dist/core/compaction/compaction.js
+index 0658cb737dd13f5606ea9b5ebb98443c547a922d..33f848d0384eed496aa991b4147e7031de323ac7 100644
+--- a/dist/core/compaction/compaction.js
++++ b/dist/core/compaction/compaction.js
+@@ -430,7 +430,11 @@ Keep each section concise. Preserve exact file paths, function names, and error
+  * If previousSummary is provided, uses the update prompt to merge.
+  */
+ export async function generateSummary(currentMessages, model, reserveTokens, apiKey, headers, signal, customInstructions, previousSummary, thinkingLevel) {
+-    const maxTokens = Math.floor(0.8 * reserveTokens);
++    // Clamp at the model's per-response output cap. Without this, large-context
++    // models (e.g. claude-opus-4-7 with a 1M context window) compute a maxTokens
++    // that exceeds the provider's output limit and the API rejects every
++    // summarization request with HTTP 400.
++    const maxTokens = Math.min(Math.floor(0.8 * reserveTokens), model.maxTokens ?? Infinity);
+     // Use update prompt if we have a previous summary, otherwise initial prompt
+     let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
+     if (customInstructions) {
+@@ -590,7 +594,9 @@ export async function compact(preparation, model, apiKey, headers, customInstruc
+  * Generate a summary for a turn prefix (when splitting a turn).
+  */
+ async function generateTurnPrefixSummary(messages, model, reserveTokens, apiKey, headers, signal, thinkingLevel) {
+-    const maxTokens = Math.floor(0.5 * reserveTokens); // Smaller budget for turn prefix
++    // Smaller budget for turn prefix, clamped at the model's per-response cap
++    // (see generateSummary above for the rationale).
++    const maxTokens = Math.min(Math.floor(0.5 * reserveTokens), model.maxTokens ?? Infinity);
+     const llmMessages = convertToLlm(messages);
+     const conversationText = serializeConversation(llmMessages);
+     const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;

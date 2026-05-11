@@ -35,7 +35,7 @@ export interface PerAgentState {
   isStreaming: boolean;
   isWaitingForResponse: boolean;
   provider: string | null;
-  compactionStatus: 'idle' | 'compacting' | 'compacted';
+  compactionStatus: 'idle' | 'compacting';
   compactionTimestamp: number | null;
 }
 
@@ -477,10 +477,14 @@ export const useChatStore = create<ChatState>()(
       },
 
       finishCompaction: (agentId: number) => {
+        // Transition straight back to idle on compaction_end. The persisted
+        // "Context compacted" system message from history-capture records the
+        // event in correct chronological position; the transient indicator
+        // only needs to exist during the in-flight window.
         set((state) => ({
           agentStates: updateAgentState(state.agentStates, agentId, () => ({
-            compactionStatus: 'compacted' as const,
-            compactionTimestamp: Date.now(),
+            compactionStatus: 'idle' as const,
+            compactionTimestamp: null,
             isStreaming: false,
           })),
         }));

@@ -1796,15 +1796,24 @@ export class AgentHost {
 
   /**
    * Handle compaction tracking for pruning.
-   * Increments counter on compaction_end and triggers pruning when threshold is met.
+   * Increments counter only when a compaction actually produced a summary, so
+   * silent no-ops (early exits in the SDK's _runAutoCompaction) and failures
+   * don't burn the pruning-depth budget.
    */
-  private handleCompactionTracking(event: Pick<AgentSessionEvent, 'type'>): void {
+  private handleCompactionTracking(event: AgentSessionEvent): void {
     if (this.compactionDepth <= 0) return;
 
-    // Track compaction counter
-    if (event.type === 'compaction_end') {
-      this.compactionCount++;
-      this.writeCompactionCount(this.compactionCount);
+    // Track compaction counter — only on real, completed compactions.
+    // Using AgentSessionEvent (the SDK's discriminated union) lets TypeScript
+    // narrow `event` to the full `compaction_end` shape here, so we can read
+    // result/aborted/errorMessage directly without a cast.
+    if (
+      event.type === 'compaction_end' &&
+      event.result != null &&
+      !event.aborted &&
+      !event.errorMessage
+    ) {
+      this.bumpCompactionCount();
     }
 
     // Trigger pruning compaction on agent_end when counter reaches depth
@@ -1826,6 +1835,18 @@ export class AgentHost {
           this.flushDeferredAgentEnd();
         });
     }
+  }
+
+  /**
+   * Increment the pruning counter and persist it. Called from
+   * `handleCompactionTracking` for SDK-driven `compaction_end` events that
+   * actually produced a summary, and directly from `handleContextOverflow`
+   * after a successful manual `session.compact()` (since the overflow path
+   * doesn't go through `handleCompactionTracking` with a real SDK event).
+   */
+  private bumpCompactionCount(): void {
+    this.compactionCount++;
+    this.writeCompactionCount(this.compactionCount);
   }
 
   /**
@@ -2229,8 +2250,13 @@ export class AgentHost {
       if (this.session) {
         log.info('[AgentHost] Context overflow: compacting...');
         await this.session.compact();
-        // Synthesize compaction_end so the pruning counter stays accurate
-        this.handleCompactionTracking({ type: 'compaction_end' });
+        // session.compact() throws on failure, so reaching here means success.
+        // Bump the pruning counter directly instead of synthesizing a fake
+        // SDK event — handleCompactionTracking is strictly typed against the
+        // SDK's AgentSessionEvent union now.
+        if (this.compactionDepth > 0) {
+          this.bumpCompactionCount();
+        }
         log.info('[AgentHost] Context overflow: compaction complete');
       }
 

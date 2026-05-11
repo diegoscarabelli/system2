@@ -6,6 +6,7 @@
  * independently.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { ChatMessage, ChatTurnEvent } from '../../shared/index.js';
 import type { MessageHistory } from './history.js';
@@ -142,15 +143,40 @@ export function createHistoryCaptureSubscriber(
       }
 
       case 'compaction_start':
-      case 'compaction_end':
+        // Use randomUUID suffix to guarantee uniqueness even when start and
+        // end fire in the same millisecond (silent-failure no-ops do that).
+        // React keys collide otherwise and timeline items get dropped.
         getChatCache().push({
-          id: `msg-${Date.now()}`,
+          id: `msg-compaction-start-${randomUUID()}`,
           role: 'system',
-          content:
-            event.type === 'compaction_start' ? 'Context compaction started' : 'Context compacted',
+          content: 'Context compaction started',
           timestamp: Date.now(),
         });
         break;
+
+      case 'compaction_end': {
+        // Clean message on success; surface diagnostic detail only when
+        // something went wrong so silent failures don't pose as successes.
+        let content: string;
+        if (event.aborted) {
+          content = 'Context compaction aborted';
+        } else if (event.errorMessage) {
+          content = `Context compaction failed: ${event.errorMessage}`;
+        } else if (!event.result) {
+          // SDK fired compaction_end without a result and without flagging
+          // abort/error. Treat as a silent no-op and surface it.
+          content = 'Context compaction failed: no result (silent no-op)';
+        } else {
+          content = 'Context compacted';
+        }
+        getChatCache().push({
+          id: `msg-compaction-end-${randomUUID()}`,
+          role: 'system',
+          content,
+          timestamp: Date.now(),
+        });
+        break;
+      }
     }
   };
 }
