@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@mariozechner/pi-coding-agent@0.71.1':
-    hash: loarssh6j74qyu4ihirmxx4ipy
+    hash: tl2qlv5rs26gkls2rfb3luf5hu
     path: patches/@mariozechner__pi-coding-agent@0.71.1.patch
 
 dependencies:
@@ -24,7 +24,7 @@ dependencies:
     version: 0.71.1(ws@8.20.0)(zod@4.4.1)
   '@mariozechner/pi-coding-agent':
     specifier: ^0.71.1
-    version: 0.71.1(patch_hash=loarssh6j74qyu4ihirmxx4ipy)(ws@8.20.0)(zod@4.4.1)
+    version: 0.71.1(patch_hash=tl2qlv5rs26gkls2rfb3luf5hu)(ws@8.20.0)(zod@4.4.1)
   '@mozilla/readability':
     specifier: ^0.6.0
     version: 0.6.0
@@ -1784,7 +1784,7 @@ packages:
       - zod
     dev: false
 
-  /@mariozechner/pi-coding-agent@0.71.1(patch_hash=loarssh6j74qyu4ihirmxx4ipy)(ws@8.20.0)(zod@4.4.1):
+  /@mariozechner/pi-coding-agent@0.71.1(patch_hash=tl2qlv5rs26gkls2rfb3luf5hu)(ws@8.20.0)(zod@4.4.1):
     resolution: {integrity: sha512-pP7ymz+MmZrcN5aUldm1q1cVbG3u04yZR/XsHEfidku5W3PP1uxsA0A4g4NOhXnkK5EZ+Qg6H12BAbVvl7Qq2Q==}
     engines: {node: '>=20.6.0'}
     hasBin: true
