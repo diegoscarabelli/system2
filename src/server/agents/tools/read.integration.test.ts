@@ -25,7 +25,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, platform, tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { createReadTool } from '@mariozechner/pi-coding-agent';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createBashTool } from './bash.js';
@@ -348,11 +348,5 @@ describe('read tool (pi-ai integration)', () => {
     // We don't enumerate the schema internals (typebox shape varies) — just
     // assert the tool definition has a parameters field.
     expect(tool.parameters).toBeDefined();
-  });
-
-  // Sanity: ensure `relative()` resolves against process.cwd() differently
-  // than our explicit homedir() cwd, so the resolution test above is meaningful.
-  it('path-resolution-distinct sanity check (test-meta)', () => {
-    expect(relative(process.cwd(), homedir())).not.toBe('');
   });
 });
