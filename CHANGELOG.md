@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-05-12
+
 ### Changed
 
 - Replaced system2's custom `read` tool with pi-ai's `createReadTool` (from `@mariozechner/pi-coding-agent`, already a dependency). System2's previous `read.ts` was a thin wrapper around `fs.readFile` with no `offset` / `limit`, no size cap, and no truncation — meaning the bash output-cap pattern in this release was effectively bypassable by reading the saved file back into context. Pi-ai's `createReadTool` ships everything that pattern needs: `offset` (1-indexed line) + `limit` (line count) for slicing; per-call truncation at 2,000 lines or 50 KB with a `[Showing lines X-Y of N. Use offset=Z to continue.]` continuation hint; image auto-resize for vision-capable models; a `[Line N is X.XKB, exceeds 50.0KB limit. Use bash: sed -n 'Np' ...]` fallback when a single line exceeds the byte cap; AbortSignal support; and Unicode-normalization for macOS screenshot-style paths (NFD, U+2019 right-single-quotation-mark, leading `@`). Wired with `homedir()` as cwd to mirror the legacy semantics where relative paths resolved against the user's home directory. **Behavioral change on missing files**: the legacy system2 `read` returned a successful tool response with text `"File not found: <path>"`; pi-ai's `read` throws and the SDK turns the throw into a tool-error event. Same end result for the model (it sees "this tool failed") but the JSONL records differ — any log query grepping for the literal `File not found:` string would miss future errors. Closes #181. (See [docs/tools.md](docs/tools.md) for the new parameter table and recovery pattern.)
