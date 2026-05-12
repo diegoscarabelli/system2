@@ -200,9 +200,11 @@ describe('read tool (pi-ai integration)', () => {
     >[1]);
 
     // Extract the saved-file path from the bash response. The header line
-    // matches `[Output saved to <path> — N bytes, M lines]`.
+    // matches `[Output saved to <path> — N bytes, M lines]`. Use a
+    // non-greedy match up to the ` — ` delimiter so paths containing spaces
+    // (common in macOS/Windows user-profile directories) survive intact.
     const bashText = (bashResult.content[0] as { text: string }).text;
-    const m = bashText.match(/Output saved to (\S+) — /);
+    const m = bashText.match(/Output saved to (.+?) — /);
     expect(m).not.toBeNull();
     const savedPath = m?.[1] ?? '';
     expect(existsSync(savedPath)).toBe(true);
@@ -219,7 +221,9 @@ describe('read tool (pi-ai integration)', () => {
   });
 
   it('rejects on nonexistent file (pi-ai throws — tool runtime turns it into an error)', async () => {
-    const ghostPath = `/tmp/system2-read-ghost-${randomUUID()}.txt`;
+    // Use OS-appropriate tmpdir() rather than a hardcoded /tmp path so the
+    // test works on Windows runners too (where /tmp doesn't exist).
+    const ghostPath = join(tmpdir(), `system2-read-ghost-${randomUUID()}.txt`);
     // Pi-ai's read throws on access failure; assert the promise rejects.
     // Behavioral change from legacy system2 read (which returned a content
     // response with "File not found: <path>" text) — documented in CHANGELOG.

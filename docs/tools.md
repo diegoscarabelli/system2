@@ -36,7 +36,7 @@ Execute shell commands with streaming output and optional background execution. 
     process_batch "$i"
   done
   ```
-- **Inline output cap (default 128 KB):** when stdout + stderr exceeds the cap (measured in UTF-8 bytes), the full output is saved to `<sessionDir>/bash-output/<toolCallId>.log` and the tool response carries head (≤ 8 KB) + tail (≤ 2 KB) previews + the file path + total byte / line counts. The agent inspects specific slices via `read` (with `offset`/`limit`) or reruns `bash` with `grep`/`tail`/`sed`/`awk` on the saved file. The persisted `details.stdout`/`details.stderr` are shrunk to a short pointer marker when output was saved, so the JSONL doesn't re-store megabytes that already live in the file. Configurable per-agent via the top-level `bash_max_inline_output_bytes` scalar in `config.toml` (must be an integer >= 4 KB; invalid values warn and fall back to the default).
+- **Inline output cap (default 128 KB):** when stdout + stderr exceeds the cap (measured in UTF-8 bytes), the full output is saved to `<sessionDir>/bash-output/<toolCallId>.log` and the tool response carries head (≤ 8 KB) + tail (≤ 2 KB) previews + the file path + total byte / line counts. The agent inspects specific slices via `read` (with `offset`/`limit`, which is cross-platform) or reruns `bash` with filter commands against the saved file: `grep`/`tail`/`sed`/`awk` on macOS/Linux; PowerShell equivalents on Windows (`Select-String`, `Get-Content -Tail N`, `Get-Content -TotalCount N`). The persisted `details.stdout`/`details.stderr` are shrunk to a short pointer marker when output was saved, so the JSONL doesn't re-store megabytes that already live in the file. Configurable per-agent via the top-level `bash_max_inline_output_bytes` scalar in `config.toml` (must be an integer >= 4 KB; invalid values warn and fall back to the default).
 - **Captured-bytes hard cap (10 MB UTF-8 bytes):** the streaming side maintains a running UTF-8 byte count and drops anything past 10 MB as a runaway-process guard. The saved file holds whatever was captured up to that limit — it is NOT a guarantee against truncation for outputs > 10 MB.
 - **Working directory:** user's home directory (overridable via `cwd`)
 - **Shell:** PowerShell (`powershell.exe`) on Windows, `/bin/bash` on macOS/Linux
@@ -76,6 +76,8 @@ The hint tells the agent the exact `offset` to pass on the next call. Truncation
 [Line 42 is 200 KB, exceeds 50 KB limit. Use bash: sed -n '42p' /path/to/file | head -c 51200]
 ```
 
+Note: pi-ai emits this Unix-form command verbatim. On Windows, where system2's `bash` tool runs PowerShell, the agent needs to translate — equivalent PowerShell: `Get-Content /path/to/file -TotalCount 42 | Select-Object -Last 1 | ForEach-Object { $_.Substring(0, [Math]::Min($_.Length, 51200)) }`. Cross-platform fallback when no PowerShell-native form is obvious: invoke `node -e "process.stdout.write(require('fs').readFileSync('/path/to/file','utf8').split('\\n')[41].slice(0,51200))"` (0-indexed; line 42 → index 41).
+
 **Image files.** Files whose MIME type is a supported image (jpeg, png, gif, webp) are read as binary, base64-encoded, optionally resized to fit the model's inline-image budget, and returned as a structured `image` content block alongside a `text` note describing dimensions. When the current model lacks vision support, the response includes `[Current model does not support images. The image will be omitted from this request.]`.
 
 **Errors.**
@@ -84,7 +86,7 @@ The hint tells the agent the exact `offset` to pass on the next call. Truncation
 - Out-of-bounds `offset`: `Error: Offset N is beyond end of file (M lines total)`.
 - Aborted (agent session signal): `Error: Operation aborted`.
 
-**Bash-output recovery pattern.** The `bash` tool saves outputs > 128 KB UTF-8 bytes to `<sessionDir>/bash-output/<toolCallId>.log` and returns the file path. The agent inspects specific portions of that file by passing it to `read` with `offset` / `limit`, or by re-running `bash` with `grep`/`tail`/`sed` on the same path. See the `bash` section above for the full pattern.
+**Bash-output recovery pattern.** The `bash` tool saves outputs > 128 KB UTF-8 bytes to `<sessionDir>/bash-output/<toolCallId>.log` and returns the file path. The agent inspects specific portions of that file by passing it to `read` with `offset` / `limit` (cross-platform), or by re-running `bash` with filter commands on the same path: `grep`/`tail`/`sed`/`awk` on macOS/Linux; `Select-String`/`Get-Content -Tail N`/`Get-Content -TotalCount N` on Windows (PowerShell). See the `bash` section above for the full pattern.
 
 
 ### `edit`
