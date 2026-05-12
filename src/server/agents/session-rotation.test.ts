@@ -386,6 +386,65 @@ describe('rotateSessionIfNeeded', () => {
       warnSpy.mockRestore();
     });
 
+    it('bare-bytes-tail rotation drops orphan toolResult that slipped past the user-turn cut', () => {
+      // Defense-in-depth coverage for filterOrphanToolResults's wire-up into
+      // the bare-bytes-tail path. `selectTailEntries` aligns to user-turn
+      // boundaries so it SHOULDN'T produce orphans, but the filter is wired
+      // in as belt-and-braces against a future bug there. This test
+      // synthesizes the failure mode the filter is supposed to guard against:
+      // a kept tail that starts at a user turn but contains an orphan
+      // tool_result (a hypothetical regression in selectTailEntries that
+      // forgot to enforce tool_use/tool_result pairing within the kept
+      // window). If the filter is correctly wired, the orphan and any
+      // descendants are dropped.
+      const file = join(tmpDir, 'session.jsonl');
+      const entries: object[] = [
+        sessionHeader(),
+        // User turn — this is where selectTailEntries' cut would land.
+        messageEntry('u1', null, 'user'),
+        // Orphan: toolResult whose toolCallId is NOT emitted by any kept
+        // assistant in the file. The matching toolCall existed in some
+        // hypothetical pre-cut entry that didn't survive `selectTailEntries`.
+        toolResultEntry('tr-orphan', 'u1', 'toolu_NOT_IN_FILE'),
+        // Dependent: an assistant text response chained to the orphan.
+        messageEntry('asst-dep', 'tr-orphan', 'assistant'),
+        // Clean continuation: a user turn whose parent does NOT chain through
+        // the orphan (parented on u1 directly), then a valid tool_use /
+        // tool_result pair. These survive the filter.
+        messageEntry('u2', 'u1', 'user'),
+        assistantToolCallEntry('a-good', 'u2', 'toolu_GOOD'),
+        toolResultEntry('tr-good', 'a-good', 'toolu_GOOD'),
+      ];
+      writeJsonl(file, entries);
+
+      const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+      expect(rotated).toBe(true);
+
+      // Filter fired with the orphan-warn message.
+      const warnMessages = warnSpy.mock.calls.map((c) => String(c[0]));
+      expect(warnMessages.some((m) => m.includes('orphan tool_result'))).toBe(true);
+      warnSpy.mockRestore();
+
+      const newFile = findMostRecentSession(tmpDir);
+      const rotatedLines = readFileSync(newFile as string, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      const ids = rotatedLines.map((e) => e.id);
+
+      // Orphan and its dependent dropped.
+      expect(ids).not.toContain('tr-orphan');
+      expect(ids).not.toContain('asst-dep');
+      // Clean continuation preserved: u1 is the cut anchor; u2 and the valid
+      // pair below it survive because their parent chain (u2 -> u1) doesn't
+      // pass through the orphan.
+      expect(ids).toContain('u1');
+      expect(ids).toContain('u2');
+      expect(ids).toContain('a-good');
+      expect(ids).toContain('tr-good');
+    });
+
     it('returns header-only when the newest entry alone exceeds the tail cap', () => {
       // Single entry larger than HARD_FALLBACK_TAIL_BYTES (1 MB). Strict cap means
       // we drop it rather than writing a rotated file still > 1 MB.
