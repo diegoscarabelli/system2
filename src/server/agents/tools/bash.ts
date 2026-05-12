@@ -339,16 +339,26 @@ export interface CappedOutput {
   totalBytes: number;
 }
 
-/** Cheap newline scan; avoids `split('\n')` allocating an N-element array on
- *  near-MAX_BUFFER outputs. Treats trailing newline as terminating the last
- *  line (i.e., "a\nb\n".lineCount === 2), matching `split('\n').length - 1`
- *  for non-empty inputs and 1 for the empty string. */
+/** Count lines in `s` using `wc -l`-compatible semantics:
+ *    - empty string → 0
+ *    - count `\n` occurrences
+ *    - add 1 if the string does NOT end in `\n` (last line is partial)
+ *  Examples:
+ *    countLines("")        === 0
+ *    countLines("a")       === 1   // partial line, no trailing newline
+ *    countLines("a\n")     === 1   // exactly one terminated line
+ *    countLines("a\nb")    === 2   // one terminated + one partial
+ *    countLines("a\nb\n")  === 2
+ *  Avoids `split('\n')` which would allocate an N-element array on near-
+ *  MAX_BUFFER outputs. */
 function countLines(s: string): number {
-  if (s.length === 0) return 1;
-  let n = 1;
+  if (s.length === 0) return 0;
+  let n = 0;
   let i = -1;
   // biome-ignore lint/suspicious/noAssignInExpressions: tight loop, standard scan pattern
   while ((i = s.indexOf('\n', i + 1)) !== -1) n++;
+  // Trailing partial line (no `\n` after the last character).
+  if (!s.endsWith('\n')) n++;
   return n;
 }
 
@@ -381,6 +391,13 @@ function takeLastNBytes(s: string, budgetBytes: number): string {
     if (Buffer.byteLength(s.slice(-mid), 'utf8') <= budgetBytes) lo = mid;
     else hi = mid - 1;
   }
+  // Critical: JS treats `slice(-0)` as `slice(0)`, returning the WHOLE string.
+  // If the search bottomed out at `lo === 0` (every single character's UTF-8
+  // bytes already exceed the budget), the only correct return is the empty
+  // string — anything else violates the byte budget AND causes the final-
+  // guard shrink loop in `capOutputForInline` to spin forever (tail never
+  // shrinks below a single multi-byte character).
+  if (lo === 0) return '';
   return s.slice(-lo);
 }
 

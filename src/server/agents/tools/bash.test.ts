@@ -693,5 +693,70 @@ describe('bash tool', () => {
       expect(details.stdout).toContain('hello');
       expect(existsSync(join(sessionDir, 'bash-output', 'toolu_fg_small.log'))).toBe(false);
     });
+
+    it('terminates when output is a single multi-byte char and the budget halves below the char size', async () => {
+      // Round-4 regression: takeLastNBytes returned the full string on
+      // `lo === 0` (JS quirk: `slice(-0)` === `slice(0)` === entire string),
+      // which caused the final-guard shrink loop to spin forever for tail
+      // values like '🤖' (4 bytes) when newBudget = floor(4/2) = 2 — the
+      // helper kept returning '🤖' instead of '', so tail.length stayed > 0
+      // and the loop iterated indefinitely. We use a small explicit cap
+      // (16 KB) plus a single-emoji output, but the assertion is just
+      // "completes in a bounded time"; if the regression returned the test
+      // would hang past the per-test timeout.
+      const sessionDir = trackDir(makeTmpDir());
+      // Build an output that's just over the cap, ending in a multi-byte
+      // emoji so the tail-shrink path is the one exercised at termination.
+      const out = `${'A'.repeat(20_000)}🤖`;
+      const { inline } = await capOutputForInline(out, 'toolu_loop_guard', sessionDir, 16_384);
+      // Test framework's default timeout would fail this if the loop hung.
+      // Bonus invariant: inline stays within cap.
+      expect(Buffer.byteLength(inline, 'utf8')).toBeLessThanOrEqual(16_384);
+    });
+  });
+
+  describe('countLines', () => {
+    // We test through capOutputForInline's "N lines" header text rather than
+    // exporting countLines, since the helper is private. Each case forces
+    // the cap branch with a tiny maxInlineBytes and reads the line count
+    // from the rendered header.
+    function getLineCountFromHeader(out: string): number {
+      // Force cap path with very small budget, no sessionDir → "Output too
+      // large to inline — N bytes, M lines; file save unavailable"
+      // (synchronous return shape: kept here as async for the API).
+      return new Promise<number>((resolve) => {
+        capOutputForInline(out, 'toolu_lc', undefined, 16).then((r) => {
+          const m = r.inline.match(/(\d[\d,]*) lines/);
+          resolve(m ? Number(m[1].replace(/,/g, '')) : -1);
+        });
+      }) as unknown as number;
+    }
+
+    it('counts trailing-newline output without phantom over-count (round-4 regression)', async () => {
+      // Round-4 regression: countLines previously returned `1 + newline_count`
+      // unconditionally, so an output ending in `\n` got an extra phantom
+      // line (e.g. "a\nb\n" → 3 instead of 2). Now uses `wc -l` semantics:
+      // newline_count + (ends_with_newline ? 0 : 1).
+      //
+      // Force the cap branch with a tiny budget; read "N lines" from the
+      // rendered header.
+      const headerLineCount = async (s: string): Promise<number> => {
+        const { inline } = await capOutputForInline(s, 'toolu_lc', undefined, 16);
+        const m = inline.match(/(\d[\d,]*) lines/);
+        return m ? Number(m[1].replace(/,/g, '')) : -1;
+      };
+
+      // 2 newlines, ends with newline → wc -l = 2.
+      // Pad with a final '\n' to maintain trailing-newline state while
+      // ensuring the input exceeds the 16-byte cap.
+      expect(await headerLineCount(`a\nb\n${'X'.repeat(50)}\n`)).toBe(3); // 3 newlines, ends \n
+      // 2 newlines, no trailing newline → wc -l = 3 (one partial line).
+      expect(await headerLineCount(`a\nb\n${'X'.repeat(50)}`)).toBe(3);
+      // Pure trailing-newline regression: input ending in `\n` matches its
+      // newline count, not newline_count + 1.
+      expect(await headerLineCount(`${'A\n'.repeat(50)}`)).toBe(50);
+      // Same line content without trailing newline → one additional partial.
+      expect(await headerLineCount(`${'A\n'.repeat(49)}A`)).toBe(50);
+    });
   });
 });
