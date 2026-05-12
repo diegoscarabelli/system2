@@ -22,6 +22,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   createAgentSession,
+  createReadTool,
   DefaultResourceLoader,
   ModelRegistry,
   SessionManager,
@@ -93,7 +94,6 @@ import { createCancelReminderTool } from './tools/cancel-reminder.js';
 import { createEditTool } from './tools/edit.js';
 import { createListRemindersTool } from './tools/list-reminders.js';
 import { createMessageAgentTool } from './tools/message-agent.js';
-import { createReadTool } from './tools/read.js';
 import { createReadSystem2DbTool } from './tools/read-system2-db.js';
 import { type AgentResurrector, createResurrectAgentTool } from './tools/resurrect-agent.js';
 import { createSetReminderTool } from './tools/set-reminder.js';
@@ -1551,7 +1551,15 @@ export class AgentHost {
           maxInlineOutputBytes: this.toolsConfig?.bash?.max_inline_output_bytes,
         }
       ),
-      createReadTool(),
+      // pi-ai's read tool. Resolves relative paths against homedir() to
+      // mirror the legacy system2 read tool's semantics; gains offset/limit
+      // slicing, 2,000-line / 50 KB truncation with "use offset=N to continue"
+      // hints, image auto-resize for vision models, AbortSignal support, and
+      // a `bash: sed -n 'Np' file | head -c N` fallback when a single line
+      // exceeds the byte cap. Pairs with bash.ts's output-cap-to-file pattern:
+      // when bash saves a large output, the agent reads slices of the saved
+      // file via offset/limit here.
+      createReadTool(homedir(), { autoResizeImages: true }),
       createEditTool(),
       createWriteTool(),
     ];

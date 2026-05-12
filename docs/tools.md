@@ -49,13 +49,43 @@ Execute shell commands with streaming output and optional background execution. 
 
 ### `read`
 
-Read file contents from the filesystem.
+Read file contents from the filesystem. Backed by pi-ai's `createReadTool` (from `@mariozechner/pi-coding-agent`) so the per-tool behavior is maintained upstream and matches the SDK's other coding-agent integrations. Wired in [`src/server/agents/host.ts`](../src/server/agents/host.ts) with `homedir()` as the cwd (so relative paths resolve against the user's home).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `path` | string | Absolute path or `~/` relative path |
+| `path` | string | File path. Accepts absolute, `~/` relative, and bare-relative (resolved against the user's home directory). Pi-ai's resolver additionally handles NFD-vs-NFC normalization for macOS file names and strips a leading `@` (clipboard-paste artifact). |
+| `offset` | number? | 1-indexed line number to start reading from. Defaults to 1 (start of file). |
+| `limit` | number? | Maximum number of lines to read. When omitted, pi-ai's truncation rules apply (see below). |
 
-Returns the file contents as a string.
+**Output limits.** Pi-ai truncates to whichever of these is hit first:
+
+- **`DEFAULT_MAX_LINES = 2,000` lines** per call
+- **`DEFAULT_MAX_BYTES = 50 KB`** per call (UTF-8)
+
+When truncation occurs, the response body is followed by a continuation hint, for example:
+
+```
+[Showing lines 1-2000 of 12,345. Use offset=2001 to continue.]
+```
+
+The hint tells the agent the exact `offset` to pass on the next call. Truncation metadata is also returned under `details.truncation` (`{truncated, truncatedBy, outputLines, totalLines, maxBytes, maxLines, firstLineExceedsLimit}`) for any consumer that needs it.
+
+**Long-single-line fallback.** When the very first line of the requested range exceeds `DEFAULT_MAX_BYTES`, pi-ai returns a one-line response telling the agent to fall back to bash:
+
+```
+[Line 42 is 200 KB, exceeds 50 KB limit. Use bash: sed -n '42p' /path/to/file | head -c 51200]
+```
+
+**Image files.** Files whose MIME type is a supported image (jpeg, png, gif, webp) are read as binary, base64-encoded, optionally resized to fit the model's inline-image budget, and returned as a structured `image` content block alongside a `text` note describing dimensions. When the current model lacks vision support, the response includes `[Current model does not support images. The image will be omitted from this request.]`.
+
+**Errors.**
+
+- Nonexistent / unreadable file: pi-ai throws (the agent SDK turns this into a tool error). The error message includes the resolved absolute path.
+- Out-of-bounds `offset`: `Error: Offset N is beyond end of file (M lines total)`.
+- Aborted (agent session signal): `Error: Operation aborted`.
+
+**Bash-output recovery pattern.** The `bash` tool saves outputs > 128 KB UTF-8 bytes to `<sessionDir>/bash-output/<toolCallId>.log` and returns the file path. The agent inspects specific portions of that file by passing it to `read` with `offset` / `limit`, or by re-running `bash` with `grep`/`tail`/`sed` on the same path. See the `bash` section above for the full pattern.
+
 
 ### `edit`
 
