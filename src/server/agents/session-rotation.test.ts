@@ -914,6 +914,57 @@ describe('rotateSessionIfNeeded — archive pruning', () => {
     expect(ids).toContain('survivor-user');
   });
 
+  it('anchored rotation drops a malformed toolResult missing toolCallId', () => {
+    // Defensive coverage: a toolResult with no `toolCallId` (or a non-string
+    // one) cannot be matched to any toolCall and would fail provider
+    // validation on reconstruction just like a normal orphan. The filter
+    // treats both cases identically. This isn't a failure mode observed in
+    // production — pi-ai's serialization always emits a string toolCallId —
+    // but the filter's mission is to keep the rotated JSONL self-consistent
+    // for the SDK regardless of source corruption.
+    const file = join(tmpDir, 'session.jsonl');
+    const entries: object[] = [
+      sessionHeader(),
+      messageEntry('u1', 'pre-comp-parent', 'user'),
+      assistantToolCallEntry('a1', 'u1', 'toolu_A'),
+      toolResultEntry('tr1', 'a1', 'toolu_A'),
+      // Malformed toolResult: `toolCallId` omitted entirely.
+      {
+        type: 'message',
+        id: 'tr-malformed',
+        parentId: 'a1',
+        timestamp: new Date().toISOString(),
+        message: { role: 'toolResult' },
+      },
+      compactionEntry('c1', 'tr-malformed', 'u1'),
+      messageEntry('survivor', 'c1', 'user'),
+    ];
+    writeJsonl(file, entries);
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+    expect(rotated).toBe(true);
+    // Filter fired and warn-logged because tr-malformed was dropped.
+    const warnMessages = warnSpy.mock.calls.map((c) => String(c[0]));
+    expect(warnMessages.some((m) => m.includes('orphan tool_result'))).toBe(true);
+    warnSpy.mockRestore();
+
+    const newFile = readdirSync(tmpDir).find(
+      (f) => f.endsWith('.jsonl') && !f.endsWith('.archived')
+    );
+    const rotatedLines = readFileSync(join(tmpDir, newFile as string), 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    const ids = rotatedLines.map((e) => e.id);
+    // Malformed entry dropped; valid pair and survivor preserved.
+    expect(ids).not.toContain('tr-malformed');
+    expect(ids).toContain('u1');
+    expect(ids).toContain('a1');
+    expect(ids).toContain('tr1');
+    expect(ids).toContain('survivor');
+  });
+
   it('bare-bytes-tail rotation also prunes archives', () => {
     // Pre-seed 6 stale archives with old mtimes so the prune step has work to do.
     for (let i = 0; i < 6; i++) {

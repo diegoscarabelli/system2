@@ -245,17 +245,26 @@ export function filterOrphanToolResults(entries: SessionEntry[]): {
     }
   }
 
-  // Step 2: identify orphan `toolResult` entry ids.
+  // Step 2: identify orphan `toolResult` entry ids. A toolResult is dropped
+  // when either:
+  //  - its `toolCallId` isn't a string (malformed/corrupted entry — cannot
+  //    match any toolCall and would fail provider validation on
+  //    reconstruction), or
+  //  - its `toolCallId` is a string absent from the emitted set (the
+  //    matching `tool_use` was pruned by upstream compaction).
+  // Both cases produce the same downstream failure (LLM provider rejects
+  // the API request) and the same recovery (drop the toolResult plus any
+  // descendants chained on it), so they share one predicate.
   const droppedIds = new Set<string>();
   for (const e of entries) {
     if (e.type !== 'message' || !e.id) continue;
     const msg = (e as SessionEntry & { message?: unknown }).message as
-      | { role?: string; toolCallId?: string }
+      | { role?: string; toolCallId?: unknown }
       | undefined;
-    if (msg?.role === 'toolResult' && typeof msg.toolCallId === 'string') {
-      if (!emittedToolCallIds.has(msg.toolCallId)) {
-        droppedIds.add(e.id);
-      }
+    if (msg?.role !== 'toolResult') continue;
+    const toolCallId = msg.toolCallId;
+    if (typeof toolCallId !== 'string' || !emittedToolCallIds.has(toolCallId)) {
+      droppedIds.add(e.id);
     }
   }
 
