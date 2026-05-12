@@ -150,6 +150,16 @@ function runCommand(
 
     let stdout = '';
     let stderr = '';
+    // Track running UTF-8 byte counts so MAX_BUFFER enforces on bytes (its
+    // documented unit) rather than UTF-16 code units. `stdout.length` would
+    // undercount for non-ASCII content (each non-BMP codepoint is 2 UTF-16
+    // code units but 4 UTF-8 bytes, multi-byte BMP chars are 1 code unit but
+    // 2-3 UTF-8 bytes). Computing `Buffer.byteLength(stdout, 'utf8')` per
+    // chunk would be O(n²) total over the whole stream, so we maintain the
+    // running count incrementally — each chunk's byte length is computed
+    // once and added.
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
     let settled = false;
     let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
     let totalTimer: ReturnType<typeof setTimeout> | undefined;
@@ -244,8 +254,12 @@ function runCommand(
       // Filter heartbeat sentinel lines
       const { filtered, heartbeats } = filterHeartbeats(complete);
 
-      if (filtered && stdout.length + filtered.length <= MAX_BUFFER) {
-        stdout += filtered;
+      if (filtered) {
+        const filteredBytes = Buffer.byteLength(filtered, 'utf8');
+        if (stdoutBytes + filteredBytes <= MAX_BUFFER) {
+          stdout += filtered;
+          stdoutBytes += filteredBytes;
+        }
       }
 
       // Emit heartbeat progress updates (minimal payload: only details matter)
@@ -274,8 +288,10 @@ function runCommand(
     child.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       resetInactivityTimer();
-      if (stderr.length + text.length <= MAX_BUFFER) {
+      const textBytes = Buffer.byteLength(text, 'utf8');
+      if (stderrBytes + textBytes <= MAX_BUFFER) {
         stderr += text;
+        stderrBytes += textBytes;
       }
       onUpdate?.({
         content: [{ type: 'text', text: stdout + (stderr ? `\nSTDERR:\n${stderr}` : '') }],
@@ -287,8 +303,12 @@ function runCommand(
       // Flush any remaining partial line from the buffer
       if (pendingLine) {
         const { filtered } = filterHeartbeats(pendingLine);
-        if (filtered && stdout.length + filtered.length <= MAX_BUFFER) {
-          stdout += filtered;
+        if (filtered) {
+          const filteredBytes = Buffer.byteLength(filtered, 'utf8');
+          if (stdoutBytes + filteredBytes <= MAX_BUFFER) {
+            stdout += filtered;
+            stdoutBytes += filteredBytes;
+          }
         }
         pendingLine = '';
       }
@@ -390,14 +410,17 @@ function safeOutputFilename(toolCallId: string): string {
  * byte-bounded even on heavily non-ASCII output.
  *
  * Layout & cap enforcement:
- *   - HEADER_OVERHEAD_BYTES reserved for the two header lines + truncation
- *     marker (~512 bytes covers typical byte-count strings).
- *   - Preview budget = max(0, maxInlineBytes - HEADER_OVERHEAD_BYTES), split
- *     80/20 between head and tail (head is more useful for diagnostics:
- *     command echo, initial error message).
- *   - If the preview budget is <= 0 (i.e. maxInlineBytes <= HEADER_OVERHEAD)
- *     the function emits a header-only payload (no head/tail). The CLI
- *     validator enforces maxInlineBytes >= 4 KB so this is a defensive
+ *   - Initial preview budget is `maxInlineBytes - HEADER_OVERHEAD_BYTES` (512).
+ *     This is a starting reservation; the actual header (`savedPath`, locale-
+ *     formatted byte/line counts, guidance text) may be larger or smaller.
+ *   - After the initial render, a final-guard loop checks the rendered string's
+ *     UTF-8 byte length. If it exceeds `maxInlineBytes` (e.g. an unusually long
+ *     savedPath consumed more than 512 bytes of the budget), the loop halves
+ *     `head` then `tail` until the payload fits, falling back to header-only
+ *     if even an empty preview would overflow.
+ *   - 80/20 split between head and tail (head is more useful for diagnostics).
+ *   - If the preview budget is <= 0 the function emits a header-only payload.
+ *     The CLI validator enforces maxInlineBytes >= 4 KB so this is a defensive
  *     branch, not a routine path.
  *
  * I/O is async (fs.promises.mkdir + writeFile) so that a 10 MB write does
@@ -444,24 +467,58 @@ export async function capOutputForInline(
     head = takeFirstNBytes(output, headBudgetBytes);
     tail = tailBudgetBytes > 0 ? takeLastNBytes(output, tailBudgetBytes) : '';
   }
-  const headBytes = Buffer.byteLength(head, 'utf8');
-  const tailBytes = Buffer.byteLength(tail, 'utf8');
-  const truncatedBytes = Math.max(0, totalBytes - headBytes - tailBytes);
 
   const headerLine = savedPath
     ? `[Output saved to ${savedPath} — ${totalBytes.toLocaleString()} bytes, ${lineCount.toLocaleString()} lines]`
     : `[Output too large to inline — ${totalBytes.toLocaleString()} bytes, ${lineCount.toLocaleString()} lines; file save unavailable]`;
-  const guidanceLine = savedPath
-    ? `[Showing first ${headBytes.toLocaleString()} bytes + last ${tailBytes.toLocaleString()} bytes. Use the read tool with offset/limit on the file above, or run bash again with grep/tail/sed/awk on the file path to inspect specific portions.]`
-    : `[Showing first ${headBytes.toLocaleString()} bytes + last ${tailBytes.toLocaleString()} bytes.]`;
 
-  // Header-only fallback: emit just the header lines when the budget didn't
-  // permit any preview. Body is omitted entirely (no truncation marker since
-  // there's nothing on either side of it).
-  const inline =
-    previewBudgetBytes <= 0
-      ? `${headerLine}\n${guidanceLine}`
-      : `${headerLine}\n${guidanceLine}\n\n${head}\n\n[...${truncatedBytes.toLocaleString()} bytes truncated...]\n\n${tail}`;
+  /** Render the inline payload from the current head/tail. Pure: depends only
+   *  on the outer-scope `headerLine`, `savedPath`, `totalBytes`. The final
+   *  guard loop below repeatedly calls this with shrunken previews and
+   *  re-measures until the result fits `maxInlineBytes`. */
+  const renderInline = (h: string, t: string): string => {
+    const hBytes = Buffer.byteLength(h, 'utf8');
+    const tBytes = Buffer.byteLength(t, 'utf8');
+    const truncated = Math.max(0, totalBytes - hBytes - tBytes);
+    const guidance = savedPath
+      ? `[Showing first ${hBytes.toLocaleString()} bytes + last ${tBytes.toLocaleString()} bytes. Use the read tool with offset/limit on the file above, or run bash again with grep/tail/sed/awk on the file path to inspect specific portions.]`
+      : `[Showing first ${hBytes.toLocaleString()} bytes + last ${tBytes.toLocaleString()} bytes.]`;
+    // Header-only when there's no preview content to show; skip the truncation
+    // marker too (nothing on either side of it).
+    if (h.length === 0 && t.length === 0) {
+      return `${headerLine}\n${guidance}`;
+    }
+    return `${headerLine}\n${guidance}\n\n${h}\n\n[...${truncated.toLocaleString()} bytes truncated...]\n\n${t}`;
+  };
+
+  let inline = renderInline(head, tail);
+
+  // Final-guard loop: enforce `maxInlineBytes` on the actual rendered byte
+  // length. Reasons it can exceed the initial estimate:
+  //   - Long `savedPath` (e.g. nested test/tmp directories) consumes more
+  //     than HEADER_OVERHEAD_BYTES of the header.
+  //   - Locale-formatted count fields wider than expected.
+  //   - Multi-byte characters at the head/tail boundaries that
+  //     `takeFirstNBytes` / `takeLastNBytes` couldn't shrink further than
+  //     their budgets.
+  // Strategy: halve `head` until fit; if still over with `head` empty, halve
+  // `tail`; final fallback is `head = tail = ''` (header-only).
+  while (Buffer.byteLength(inline, 'utf8') > maxInlineBytes && head.length > 0) {
+    const newBudget = Math.max(0, Math.floor(Buffer.byteLength(head, 'utf8') / 2));
+    head = takeFirstNBytes(head, newBudget);
+    inline = renderInline(head, tail);
+  }
+  while (Buffer.byteLength(inline, 'utf8') > maxInlineBytes && tail.length > 0) {
+    const newBudget = Math.max(0, Math.floor(Buffer.byteLength(tail, 'utf8') / 2));
+    tail = takeLastNBytes(tail, newBudget);
+    inline = renderInline(head, tail);
+  }
+  // If even the header-only render exceeds `maxInlineBytes` (only possible
+  // when `savedPath` itself is longer than the cap — pathological), return
+  // it anyway: a 1-byte overshoot on a vital pointer is better than dropping
+  // the pointer entirely. This is unreachable under the CLI validator's
+  // 4 KB minimum unless someone calls the function directly with a tiny cap.
+
   return { inline, savedPath, totalBytes };
 }
 
@@ -552,6 +609,10 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
 
         let stdout = '';
         let stderr = '';
+        // Running UTF-8 byte counts so MAX_BUFFER enforces on bytes (its
+        // documented unit). See the runCommand version for rationale.
+        let stdoutBytes = 0;
+        let stderrBytes = 0;
 
         let bgPendingLine = '';
         child.stdout?.on('data', (chunk: Buffer) => {
@@ -565,12 +626,22 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
           const complete = text.slice(0, lastNewline + 1);
           bgPendingLine = text.slice(lastNewline + 1);
           const { filtered } = filterHeartbeats(complete);
-          if (filtered && stdout.length + filtered.length <= MAX_BUFFER) stdout += filtered;
+          if (filtered) {
+            const filteredBytes = Buffer.byteLength(filtered, 'utf8');
+            if (stdoutBytes + filteredBytes <= MAX_BUFFER) {
+              stdout += filtered;
+              stdoutBytes += filteredBytes;
+            }
+          }
         });
 
         child.stderr?.on('data', (chunk: Buffer) => {
           const text = chunk.toString();
-          if (stderr.length + text.length <= MAX_BUFFER) stderr += text;
+          const textBytes = Buffer.byteLength(text, 'utf8');
+          if (stderrBytes + textBytes <= MAX_BUFFER) {
+            stderr += text;
+            stderrBytes += textBytes;
+          }
         });
 
         // Kill background process on abort
@@ -584,7 +655,13 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
           // Flush remaining partial line
           if (bgPendingLine) {
             const { filtered } = filterHeartbeats(bgPendingLine);
-            if (filtered && stdout.length + filtered.length <= MAX_BUFFER) stdout += filtered;
+            if (filtered) {
+              const filteredBytes = Buffer.byteLength(filtered, 'utf8');
+              if (stdoutBytes + filteredBytes <= MAX_BUFFER) {
+                stdout += filtered;
+                stdoutBytes += filteredBytes;
+              }
+            }
             bgPendingLine = '';
           }
           backgroundProcesses.delete(id);
@@ -617,8 +694,12 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
               );
             } catch (err) {
               log.error('[bash] Failed to deliver background output:', err);
+              // Reflect the actual exit code in the prefix so operators
+              // don't see "completed" for a command that actually failed.
+              const fallbackPrefix =
+                exitCode === 0 ? 'Background command completed' : 'Background command failed';
               notifyBackground(
-                `Background command completed (delivery error): ${params.command}\n\n(internal error capping output)`,
+                `${fallbackPrefix} (delivery error): ${params.command}\n\n(internal error capping output)`,
                 {
                   stdout: '',
                   stderr: '',

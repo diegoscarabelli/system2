@@ -43,7 +43,7 @@ The **Guide** is the primary user-facing agent. However, the user may choose to 
 
 | Tool | Description | Available to |
 |------|-------------|--------------|
-| `bash` | Execute shell commands (120s timeout, 10MB captured-bytes hard cap, streaming output). Set `run_in_background` for long-running commands. Uses PowerShell on Windows, default shell on macOS/Linux. **Large outputs are auto-saved**: when stdout+stderr exceeds ~128 KB the full output goes to a file under your session dir and the response shows head + tail previews + the file path. Use `read` (with `offset`/`limit`) or rerun `bash` with `grep`/`tail`/`sed` on that file to inspect specific slices. | All agents |
+| `bash` | Execute shell commands (120s timeout, 10MB UTF-8-byte captured hard cap, streaming output). Set `run_in_background` for long-running commands. Uses PowerShell on Windows, default shell on macOS/Linux. **Large outputs are auto-saved**: when stdout+stderr exceeds ~128 KB (UTF-8 bytes) the full output goes to a file under your session dir and the response shows head + tail previews + the file path. Use `read` (with `offset`/`limit`) or rerun `bash` with `grep`/`tail`/`sed` on that file to inspect specific slices. | All agents |
 | `read` | Read file contents (absolute or `~/` relative paths) | All agents |
 | `edit` | Edit a file by replacing an exact string match (`old_string` → `new_string`), or append content to a file (`append: true`). Preferred over `write` for modifying existing files. | All agents |
 | `write` | Write or create files. Auto-creates parent directories. Use for new files or complete rewrites. | All agents |

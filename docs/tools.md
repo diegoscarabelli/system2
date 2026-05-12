@@ -37,7 +37,7 @@ Execute shell commands with streaming output and optional background execution. 
   done
   ```
 - **Inline output cap (default 128 KB):** when stdout + stderr exceeds the cap (measured in UTF-8 bytes), the full output is saved to `<sessionDir>/bash-output/<toolCallId>.log` and the tool response carries head (≤ 8 KB) + tail (≤ 2 KB) previews + the file path + total byte / line counts. The agent inspects specific slices via `read` (with `offset`/`limit`) or reruns `bash` with `grep`/`tail`/`sed`/`awk` on the saved file. The persisted `details.stdout`/`details.stderr` are shrunk to a short pointer marker when output was saved, so the JSONL doesn't re-store megabytes that already live in the file. Configurable per-agent via the top-level `bash_max_inline_output_bytes` scalar in `config.toml` (must be an integer >= 4 KB; invalid values warn and fall back to the default).
-- **Captured-bytes hard cap (10 MB):** the streaming side drops anything past 10 MB as a runaway-process guard. The saved file holds whatever was captured up to that limit — it is NOT a guarantee against truncation for outputs > 10 MB.
+- **Captured-bytes hard cap (10 MB UTF-8 bytes):** the streaming side maintains a running UTF-8 byte count and drops anything past 10 MB as a runaway-process guard. The saved file holds whatever was captured up to that limit — it is NOT a guarantee against truncation for outputs > 10 MB.
 - **Working directory:** user's home directory (overridable via `cwd`)
 - **Shell:** PowerShell (`powershell.exe`) on Windows, `/bin/bash` on macOS/Linux
 - **Streaming:** output is streamed to the agent as the command runs via `onUpdate`
