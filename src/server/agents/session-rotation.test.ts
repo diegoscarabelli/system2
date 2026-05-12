@@ -55,6 +55,40 @@ function compactionEntry(id: string, parentId: string, firstKeptEntryId: string)
   };
 }
 
+/** Assistant message carrying one `toolCall` block (pi-ai's JSONL serialization
+ *  of an Anthropic `tool_use`). The agent emits these, then the runtime
+ *  responds with a matching `toolResult` entry. */
+function assistantToolCallEntry(id: string, parentId: string | null, toolCallId: string): object {
+  return {
+    type: 'message',
+    id,
+    parentId,
+    timestamp: new Date().toISOString(),
+    message: {
+      role: 'assistant',
+      content: [{ type: 'toolCall', id: toolCallId, name: 'bash', input: { command: 'echo hi' } }],
+      stopReason: 'toolUse',
+    },
+  };
+}
+
+/** ToolResult message responding to an `assistantToolCallEntry`. */
+function toolResultEntry(id: string, parentId: string, toolCallId: string): object {
+  return {
+    type: 'message',
+    id,
+    parentId,
+    timestamp: new Date().toISOString(),
+    message: {
+      role: 'toolResult',
+      toolCallId,
+      toolName: 'bash',
+      content: [{ type: 'text', text: 'hi' }],
+      isError: false,
+    },
+  };
+}
+
 let tmpDir: string;
 
 beforeEach(() => {
@@ -652,6 +686,156 @@ describe('rotateSessionIfNeeded — archive pruning', () => {
     const remainingPaths = archives.map((f) => join(tmpDir, f)).sort();
     const expectedKept = archivedPaths.slice(2).sort();
     expect(remainingPaths).toEqual(expectedKept);
+  });
+
+  it('anchored rotation drops orphan toolResult whose toolCall was pruned by upstream compaction', () => {
+    // Repro of the conductor-stuck bug (2026-05-12): pi-ai's compaction
+    // selected a firstKeptEntryId that placed the cut between a tool_use
+    // (pruned, summarized away) and its corresponding tool_result (kept).
+    // Without the orphan filter, the rotated JSONL contained a toolResult
+    // whose toolCallId had no matching toolCall, and every LLM provider
+    // rejected the next API call (Anthropic 400 unexpected tool_use_id,
+    // Google "function response must come after function call").
+    //
+    // Reproduction:
+    //   header → compaction(firstKept=tr1) → tr1 (orphan: toolCall was in
+    //     a pre-compaction entry that got summarized) → asst-text (parent=tr1)
+    //     → user → ...
+    // After rotation, both tr1 and asst-text must be dropped; the rest of
+    // the conversation continues from the user turn.
+    const file = join(tmpDir, 'session.jsonl');
+    const entries: object[] = [
+      sessionHeader(),
+      // Pre-compaction work that was summarized (not in file — fine, just
+      // illustrative of where the orphan tool_use was).
+      compactionEntry('c1', 'header-parent', 'tr1-orphan'),
+      // Orphan: toolResult whose toolCallId is NOT emitted by any kept
+      // assistant toolCall block.
+      toolResultEntry('tr1-orphan', 'pruned-toolcall', 'toolu_PRUNED_BY_COMPACTION'),
+      // Dependent: assistant text response chained to the orphan toolResult.
+      // Drops too — its parent reference would dangle, and the SDK would
+      // surface it as the leading message in the API request which Anthropic
+      // would reject (first message must be `user`).
+      messageEntry('asst-text-dep', 'tr1-orphan', 'assistant'),
+      // Resume point: a valid user turn whose parent is the compaction marker
+      // (NOT the orphan or its dependent). This is how a real session looks
+      // after the conductor receives a new user message post-compaction —
+      // parent points back to the compaction anchor, not into the stranded
+      // pre-compaction branch. Without this break in the parent chain, the
+      // filter would (correctly) drop everything downstream of the orphan.
+      messageEntry('u1', 'c1', 'user'),
+      assistantToolCallEntry('a1', 'u1', 'toolu_GOOD'),
+      toolResultEntry('tr-good', 'a1', 'toolu_GOOD'),
+    ];
+    writeJsonl(file, entries);
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+    expect(rotated).toBe(true);
+
+    // Filter fired and logged a warning.
+    const warnMessages = warnSpy.mock.calls.map((c) => String(c[0]));
+    expect(warnMessages.some((m) => m.includes('orphan tool_result'))).toBe(true);
+    warnSpy.mockRestore();
+
+    // Inspect the rotated file: orphan toolResult and its dependent must be
+    // gone; the valid tool_use/tool_result pair must remain.
+    const newFile = readdirSync(tmpDir).find(
+      (f) => f.endsWith('.jsonl') && !f.endsWith('.archived')
+    );
+    expect(newFile).toBeDefined();
+    const rotatedLines = readFileSync(join(tmpDir, newFile as string), 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    const ids = rotatedLines.map((e) => e.id);
+    expect(ids).not.toContain('tr1-orphan');
+    expect(ids).not.toContain('asst-text-dep');
+    expect(ids).toContain('u1');
+    expect(ids).toContain('a1');
+    expect(ids).toContain('tr-good');
+  });
+
+  it('anchored rotation: no-op for sessions with matching tool_use/tool_result pairs', () => {
+    // Regression guard: the filter must NOT drop entries when every
+    // toolResult has a matching toolCall in the kept range. Tests the
+    // happy path (most rotations) is unaffected by the filter.
+    const file = join(tmpDir, 'session.jsonl');
+    const entries: object[] = [
+      sessionHeader(),
+      compactionEntry('c1', 'header-parent', 'u1'),
+      messageEntry('u1', 'pre-comp-parent', 'user'),
+      assistantToolCallEntry('a1', 'u1', 'toolu_A'),
+      toolResultEntry('tr1', 'a1', 'toolu_A'),
+      assistantToolCallEntry('a2', 'tr1', 'toolu_B'),
+      toolResultEntry('tr2', 'a2', 'toolu_B'),
+    ];
+    writeJsonl(file, entries);
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+    expect(rotated).toBe(true);
+    // No orphan warning when every pair is intact.
+    const warnMessages = warnSpy.mock.calls.map((c) => String(c[0]));
+    expect(warnMessages.some((m) => m.includes('orphan tool_result'))).toBe(false);
+    warnSpy.mockRestore();
+
+    const newFile = readdirSync(tmpDir).find(
+      (f) => f.endsWith('.jsonl') && !f.endsWith('.archived')
+    );
+    const rotatedLines = readFileSync(join(tmpDir, newFile as string), 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    const ids = rotatedLines.map((e) => e.id);
+    // All four user/assistant/toolResult entries preserved.
+    expect(ids).toEqual(expect.arrayContaining(['u1', 'a1', 'tr1', 'a2', 'tr2']));
+  });
+
+  it('anchored rotation drops a chain of multiple dependents on a single orphan', () => {
+    // Generalization of the conductor case: the orphan toolResult was followed
+    // by *several* dependent entries (assistant text → user → assistant ...).
+    // The transitive drop loop must reach all of them so no descendant of the
+    // orphan survives.
+    const file = join(tmpDir, 'session.jsonl');
+    const entries: object[] = [
+      sessionHeader(),
+      compactionEntry('c1', 'header-parent', 'tr-orphan'),
+      toolResultEntry('tr-orphan', 'pruned-toolcall', 'toolu_PRUNED'),
+      messageEntry('asst-1', 'tr-orphan', 'assistant'),
+      messageEntry('user-1', 'asst-1', 'user'),
+      messageEntry('asst-2', 'user-1', 'assistant'),
+      // A clean restart point: a user message whose parent chain DOES NOT
+      // touch the orphan. This is the survivor.
+      messageEntry('user-clean', 'asst-2', 'user'),
+    ];
+    writeJsonl(file, entries);
+
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const rotated = rotateSessionIfNeeded(tmpDir, '/tmp', 0);
+    expect(rotated).toBe(true);
+    warnSpy.mockRestore();
+
+    const newFile = readdirSync(tmpDir).find(
+      (f) => f.endsWith('.jsonl') && !f.endsWith('.archived')
+    );
+    const rotatedLines = readFileSync(join(tmpDir, newFile as string), 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    const ids = rotatedLines.map((e) => e.id);
+    // Orphan AND all four downstream dependents must be dropped.
+    expect(ids).not.toContain('tr-orphan');
+    expect(ids).not.toContain('asst-1');
+    expect(ids).not.toContain('user-1');
+    expect(ids).not.toContain('asst-2');
+    expect(ids).not.toContain('user-clean');
+    // user-clean was rooted (transitively) on the orphan via asst-2/user-1/
+    // asst-1/tr-orphan — so it drops too. This is the correct outcome: the
+    // chain is poisoned at its root, so the safest resume point is the next
+    // fresh user turn (none in this fixture, so the kept range collapses to
+    // header + compaction marker, and the conductor cold-starts on the
+    // compaction summary alone).
   });
 
   it('bare-bytes-tail rotation also prunes archives', () => {
