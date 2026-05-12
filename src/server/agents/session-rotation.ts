@@ -189,6 +189,152 @@ function selectTailEntries(entries: SessionEntry[], tailBytes: number): SessionE
 }
 
 /**
+ * Drop orphan `toolResult` entries (and any descendants rooted on them) from a
+ * rotated entry list. An orphan is a `toolResult` whose `toolCallId` is not
+ * emitted by any kept assistant message's `toolCall` content block — meaning
+ * the matching `tool_use` was pruned by an upstream compaction or rotation
+ * step, but the `toolResult` slipped through.
+ *
+ * Without this filter, the SDK reconstructs an API request with a
+ * `tool_result` block referencing a `tool_use_id` that has no corresponding
+ * `tool_use` block, and the LLM provider rejects the request (Anthropic:
+ * `unexpected tool_use_id found in tool_result blocks`; Google:
+ * `function response turn must come immediately after a function call turn`).
+ *
+ * The root cause is upstream — pi-ai's compaction can place its cut between a
+ * `tool_use` and its `tool_result`, and the compaction marker's
+ * `firstKeptEntryId` records the cut without ensuring the kept range is
+ * internally consistent. We can't change that from here; what we can do is
+ * audit the post-rotation entry list and drop the inconsistency before the
+ * file is written.
+ *
+ * Why we also drop descendants: an assistant message whose `parentId` chains
+ * to a dropped `toolResult` was generated in response to that result. If we
+ * keep it, its `parentId` becomes a dangling reference; even if the SDK
+ * tolerates that, the assistant message often ends up as the first message in
+ * the constructed API request, which Anthropic rejects (first message must be
+ * `user`). Drop the whole stranded sub-chain so the next valid `user`-turn
+ * boundary is the resume point.
+ *
+ * Returns `{ filtered, droppedIds }`. The helper does NOT log — callers
+ * own the warn emission so they can include file-level context (session
+ * basename, rotation path tag) that the helper has no access to.
+ * `droppedIds` is the list of every entry id removed (orphans plus their
+ * transitive descendants) so callers can include sample ids in the log
+ * for operator triage.
+ */
+export function filterOrphanToolResults(entries: SessionEntry[]): {
+  filtered: SessionEntry[];
+  droppedIds: string[];
+} {
+  if (entries.length === 0) return { filtered: entries, droppedIds: [] };
+
+  // Step 1: collect all `toolCall.id` values emitted by assistant messages in
+  // the kept range. These are the valid targets for `toolResult.toolCallId`.
+  const emittedToolCallIds = new Set<string>();
+  for (const e of entries) {
+    if (e.type !== 'message') continue;
+    const msg = (e as SessionEntry & { message?: unknown }).message as
+      | { role?: string; content?: Array<{ type?: string; id?: string }> }
+      | undefined;
+    if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
+    for (const block of msg.content) {
+      if (block?.type === 'toolCall' && typeof block.id === 'string') {
+        emittedToolCallIds.add(block.id);
+      }
+    }
+  }
+
+  // Step 2: identify orphan `toolResult` entry ids. A toolResult is dropped
+  // when either:
+  //  - its `toolCallId` isn't a string (malformed/corrupted entry — cannot
+  //    match any toolCall and would fail provider validation on
+  //    reconstruction), or
+  //  - its `toolCallId` is a string absent from the emitted set (the
+  //    matching `tool_use` was pruned by upstream compaction).
+  // Both cases produce the same downstream failure (LLM provider rejects
+  // the API request) and the same recovery (drop the toolResult plus any
+  // descendants chained on it), so they share one predicate.
+  const droppedIds = new Set<string>();
+  for (const e of entries) {
+    if (e.type !== 'message' || !e.id) continue;
+    const msg = (e as SessionEntry & { message?: unknown }).message as
+      | { role?: string; toolCallId?: unknown }
+      | undefined;
+    if (msg?.role !== 'toolResult') continue;
+    const toolCallId = msg.toolCallId;
+    if (typeof toolCallId !== 'string' || !emittedToolCallIds.has(toolCallId)) {
+      droppedIds.add(e.id);
+    }
+  }
+
+  if (droppedIds.size === 0) return { filtered: entries, droppedIds: [] };
+
+  // Step 3: transitively mark every descendant of a dropped entry. Build a
+  // `parentId → child ids` index and an id → entry lookup in one pass, then
+  // BFS from the seed orphans. O(N) total — large rotated sessions can have
+  // tens of thousands of entries, and a naive fixed-point loop would be O(N^2)
+  // in the worst case (a long linear parent chain).
+  //
+  // Compaction markers act as structural anchors, not as continuations of the
+  // pre-compaction chain: their `parentId` typically points at the last entry
+  // of the kept pre-compaction tail, but the marker itself represents the
+  // *boundary* between summarized history and the post-compaction
+  // conversation. If we propagated the drop through the marker, every
+  // post-compaction entry chained back to it would also drop — wiping the
+  // resume point and effectively cold-starting the agent every time the
+  // entire kept tail happens to chain to an orphan. Treat compaction entries
+  // as BFS sinks: they (and everything past them) survive even when their
+  // parentId resolves to a dropped entry.
+  const childrenByParent = new Map<string, string[]>();
+  const entryById = new Map<string, SessionEntry>();
+  for (const e of entries) {
+    if (!e.id) continue;
+    entryById.set(e.id, e);
+    if (!e.parentId) continue;
+    const list = childrenByParent.get(e.parentId);
+    if (list) list.push(e.id);
+    else childrenByParent.set(e.parentId, [e.id]);
+  }
+  const queue: string[] = Array.from(droppedIds);
+  while (queue.length > 0) {
+    const parentId = queue.pop() as string;
+    const children = childrenByParent.get(parentId);
+    if (!children) continue;
+    for (const childId of children) {
+      if (droppedIds.has(childId)) continue;
+      if (entryById.get(childId)?.type === 'compaction') continue;
+      droppedIds.add(childId);
+      queue.push(childId);
+    }
+  }
+
+  return {
+    filtered: entries.filter((e) => !e.id || !droppedIds.has(e.id)),
+    droppedIds: Array.from(droppedIds),
+  };
+}
+
+/**
+ * Emit the orphan-filter warn log with file-level context. Centralized so the
+ * two rotation paths (anchored, bare-bytes-tail) share the same format. Caller
+ * supplies a short path tag identifying which rotation path triggered the
+ * filter, so operators can correlate the warning with the right code path.
+ */
+function logOrphanFilterDrop(
+  currentFile: string,
+  pathTag: 'anchored-rotation' | 'bare-bytes-tail',
+  droppedIds: string[]
+): void {
+  if (droppedIds.length === 0) return;
+  const sample = droppedIds.slice(0, 5).join(', ');
+  const overflow = droppedIds.length > 5 ? `, ... (${droppedIds.length - 5} more)` : '';
+  log.warn(
+    `[SessionRotation] Filter dropped ${droppedIds.length} orphan tool_result/dependent entries from ${basename(currentFile)} (${pathTag}; sample ids: ${sample}${overflow}). Upstream compaction or tail-selection cut between a tool_use and its tool_result; without this filter the SDK would construct an invalid API request.`
+  );
+}
+
+/**
  * Write rotated entries to a new JSONL and archive the old file.
  */
 export function writeRotatedFile(
@@ -277,7 +423,14 @@ function forceBareBytesTailRotation(
   reason: string
 ): true {
   const tailEntries = selectTailEntries(entries, HARD_FALLBACK_TAIL_BYTES);
-  const newEntries: SessionEntry[] = [createSessionHeader(cwd), ...tailEntries];
+  // Defense-in-depth: selectTailEntries already cuts on a user-turn boundary
+  // so the tail SHOULD be self-consistent, but the filter is cheap and the
+  // alternative (an orphan-tool_result slips through and locks the conductor
+  // out of every LLM provider) is unrecoverable without manual JSONL surgery.
+  const { filtered: filteredTail, droppedIds: tailDroppedIds } =
+    filterOrphanToolResults(tailEntries);
+  logOrphanFilterDrop(currentFile, 'bare-bytes-tail', tailDroppedIds);
+  const newEntries: SessionEntry[] = [createSessionHeader(cwd), ...filteredTail];
   const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
   log.info(
     `[SessionRotation] Created new session file: ${newFilename} with ${newEntries.length} entries (bare-bytes-tail fallback: ${reason})`
@@ -433,7 +586,17 @@ export function rotateSessionIfNeeded(
   // 2. Entries from firstKeptEntryId up to (not including) compaction entry
   // 3. The compaction entry
   // 4. All entries after the compaction entry
-  const newEntries: SessionEntry[] = [];
+  //
+  // Pi-ai's compaction selects a `firstKeptEntryId` that defines the cut
+  // between the summary and the kept tail, but the implementation can place
+  // that cut between a `tool_use` and its corresponding `tool_result` —
+  // leaving the result orphaned in the kept range. The filter below scans
+  // the assembled list for orphan `toolResult` entries and drops them (plus
+  // any descendants chaining back to them) before the file is written.
+  // Without this, the SDK reconstructs an API request the LLM provider
+  // rejects on the very first turn after rotation, locking the agent out
+  // until manual JSONL surgery.
+  let newEntries: SessionEntry[] = [];
 
   // Add new header
   newEntries.push(createSessionHeader(cwd));
@@ -450,6 +613,12 @@ export function rotateSessionIfNeeded(
   for (let i = compactionIndex + 1; i < entries.length; i++) {
     newEntries.push(entries[i]);
   }
+
+  // Drop orphan tool_result/dependents (see comment above the assignment).
+  const { filtered: filteredEntries, droppedIds: anchoredDroppedIds } =
+    filterOrphanToolResults(newEntries);
+  logOrphanFilterDrop(currentFile, 'anchored-rotation', anchoredDroppedIds);
+  newEntries = filteredEntries;
 
   // Write new file (and archive old)
   const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
