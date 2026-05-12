@@ -216,11 +216,18 @@ function selectTailEntries(entries: SessionEntry[], tailBytes: number): SessionE
  * `user`). Drop the whole stranded sub-chain so the next valid `user`-turn
  * boundary is the resume point.
  *
- * Returns the filtered list. Logs at warn level when any entries are dropped
- * so operators can correlate with upstream compaction events.
+ * Returns `{ filtered, droppedIds }`. The helper does NOT log — callers
+ * own the warn emission so they can include file-level context (session
+ * basename, rotation path tag) that the helper has no access to.
+ * `droppedIds` is the list of every entry id removed (orphans plus their
+ * transitive descendants) so callers can include sample ids in the log
+ * for operator triage.
  */
-export function filterOrphanToolResults(entries: SessionEntry[]): SessionEntry[] {
-  if (entries.length === 0) return entries;
+export function filterOrphanToolResults(entries: SessionEntry[]): {
+  filtered: SessionEntry[];
+  droppedIds: string[];
+} {
+  if (entries.length === 0) return { filtered: entries, droppedIds: [] };
 
   // Step 1: collect all `toolCall.id` values emitted by assistant messages in
   // the kept range. These are the valid targets for `toolResult.toolCallId`.
@@ -252,7 +259,7 @@ export function filterOrphanToolResults(entries: SessionEntry[]): SessionEntry[]
     }
   }
 
-  if (droppedIds.size === 0) return entries;
+  if (droppedIds.size === 0) return { filtered: entries, droppedIds: [] };
 
   // Step 3: transitively mark every descendant of a dropped entry. Build a
   // `parentId → child ids` index and an id → entry lookup in one pass, then
@@ -293,11 +300,29 @@ export function filterOrphanToolResults(entries: SessionEntry[]): SessionEntry[]
     }
   }
 
-  log.warn(
-    `[SessionRotation] Dropped ${droppedIds.size} orphan tool_result/dependent entries from rotated session (likely upstream compaction cut between a tool_use and its tool_result; without this filter the SDK would construct an invalid API request).`
-  );
+  return {
+    filtered: entries.filter((e) => !e.id || !droppedIds.has(e.id)),
+    droppedIds: Array.from(droppedIds),
+  };
+}
 
-  return entries.filter((e) => !e.id || !droppedIds.has(e.id));
+/**
+ * Emit the orphan-filter warn log with file-level context. Centralized so the
+ * two rotation paths (anchored, bare-bytes-tail) share the same format. Caller
+ * supplies a short path tag identifying which rotation path triggered the
+ * filter, so operators can correlate the warning with the right code path.
+ */
+function logOrphanFilterDrop(
+  currentFile: string,
+  pathTag: 'anchored-rotation' | 'bare-bytes-tail',
+  droppedIds: string[]
+): void {
+  if (droppedIds.length === 0) return;
+  const sample = droppedIds.slice(0, 5).join(', ');
+  const overflow = droppedIds.length > 5 ? `, ... (${droppedIds.length - 5} more)` : '';
+  log.warn(
+    `[SessionRotation] Filter dropped ${droppedIds.length} orphan tool_result/dependent entries from ${basename(currentFile)} (${pathTag}; sample ids: ${sample}${overflow}). Upstream compaction or tail-selection cut between a tool_use and its tool_result; without this filter the SDK would construct an invalid API request.`
+  );
 }
 
 /**
@@ -393,7 +418,9 @@ function forceBareBytesTailRotation(
   // so the tail SHOULD be self-consistent, but the filter is cheap and the
   // alternative (an orphan-tool_result slips through and locks the conductor
   // out of every LLM provider) is unrecoverable without manual JSONL surgery.
-  const filteredTail = filterOrphanToolResults(tailEntries);
+  const { filtered: filteredTail, droppedIds: tailDroppedIds } =
+    filterOrphanToolResults(tailEntries);
+  logOrphanFilterDrop(currentFile, 'bare-bytes-tail', tailDroppedIds);
   const newEntries: SessionEntry[] = [createSessionHeader(cwd), ...filteredTail];
   const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
   log.info(
@@ -579,7 +606,10 @@ export function rotateSessionIfNeeded(
   }
 
   // Drop orphan tool_result/dependents (see comment above the assignment).
-  newEntries = filterOrphanToolResults(newEntries);
+  const { filtered: filteredEntries, droppedIds: anchoredDroppedIds } =
+    filterOrphanToolResults(newEntries);
+  logOrphanFilterDrop(currentFile, 'anchored-rotation', anchoredDroppedIds);
+  newEntries = filteredEntries;
 
   // Write new file (and archive old)
   const newFilename = writeRotatedFile(sessionDir, currentFile, newEntries);
