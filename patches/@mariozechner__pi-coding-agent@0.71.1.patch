@@ -1,3 +1,68 @@
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+index 27aa76b416e44b9a813fedc00dbaf609e284f0d5..1f34eef9a8ad9a943dad23c8b88d3581a8787ca1 100644
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -1471,9 +1471,20 @@ export class AgentSession {
+      * Internal: Run auto-compaction with events.
+      */
+     async _runAutoCompaction(reason, willRetry) {
++        // Guard against concurrent auto-compactions. Without this, the shared
++        // `_autoCompactionAbortController` field races between runs and the
++        // later run's `signal.aborted` check throws after the earlier run's
++        // finally has cleared the field.
++        if (this._autoCompactionAbortController !== undefined) {
++            return;
++        }
+         const settings = this.settingsManager.getCompactionSettings();
+         this._emit({ type: "compaction_start", reason });
+-        this._autoCompactionAbortController = new AbortController();
++        // Hold a local reference so the rest of this run is independent of the
++        // shared field — defense in depth in case a future caller bypasses the
++        // guard above.
++        const abortController = new AbortController();
++        this._autoCompactionAbortController = abortController;
+         try {
+             if (!this.model) {
+                 this._emit({
+@@ -1517,7 +1528,7 @@ export class AgentSession {
+                     preparation,
+                     branchEntries: pathEntries,
+                     customInstructions: undefined,
+-                    signal: this._autoCompactionAbortController.signal,
++                    signal: abortController.signal,
+                 }));
+                 if (extensionResult?.cancel) {
+                     this._emit({
+@@ -1547,13 +1558,13 @@ export class AgentSession {
+             }
+             else {
+                 // Generate compaction result
+-                const compactResult = await compact(preparation, this.model, apiKey, headers, undefined, this._autoCompactionAbortController.signal, this.thinkingLevel);
++                const compactResult = await compact(preparation, this.model, apiKey, headers, undefined, abortController.signal, this.thinkingLevel);
+                 summary = compactResult.summary;
+                 firstKeptEntryId = compactResult.firstKeptEntryId;
+                 tokensBefore = compactResult.tokensBefore;
+                 details = compactResult.details;
+             }
+-            if (this._autoCompactionAbortController.signal.aborted) {
++            if (abortController.signal.aborted) {
+                 this._emit({
+                     type: "compaction_end",
+                     reason,
+@@ -1615,7 +1626,12 @@ export class AgentSession {
+             });
+         }
+         finally {
+-            this._autoCompactionAbortController = undefined;
++            // Only clear the field if it still points at our controller — a
++            // future caller that bypasses the guard at the top must not have
++            // their controller wiped by an earlier run's finally.
++            if (this._autoCompactionAbortController === abortController) {
++                this._autoCompactionAbortController = undefined;
++            }
+         }
+     }
+     /**
 diff --git a/dist/core/compaction/compaction.js b/dist/core/compaction/compaction.js
 index 0658cb737dd13f5606ea9b5ebb98443c547a922d..33f848d0384eed496aa991b4147e7031de323ac7 100644
 --- a/dist/core/compaction/compaction.js
