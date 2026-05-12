@@ -756,26 +756,34 @@ describe('rotateSessionIfNeeded — archive pruning', () => {
     // rejected the next API call (Anthropic 400 unexpected tool_use_id,
     // Google "function response must come after function call").
     //
-    // Reproduction:
-    //   header → compaction(firstKept=tr1) → tr1 (orphan: toolCall was in
-    //     a pre-compaction entry that got summarized) → asst-text (parent=tr1)
-    //     → user → ...
-    // After rotation, both tr1 and asst-text must be dropped; the rest of
-    // the conversation continues from the user turn.
+    // Realistic session layout (matches how rotateSessionIfNeeded interprets
+    // the file): the compaction marker sits *after* the kept pre-compaction
+    // tail it anchors, and `firstKeptEntryId` points back into that tail.
+    //
+    //   header
+    //   tr1-orphan         <- firstKeptEntryId (orphan: matching toolCall
+    //                         lived in a pre-compaction entry that was
+    //                         summarized away)
+    //   asst-text-dep      <- dependent on the orphan
+    //   compaction(parent=asst-text-dep, firstKept=tr1-orphan)
+    //   u1 (post-compaction user turn, parented on the compaction anchor)
+    //   a1 / tr-good       <- valid tool_use / tool_result pair
+    //
+    // After rotation, the orphan and its dependent must be dropped; the
+    // post-compaction conversation continues from u1.
     const file = join(tmpDir, 'session.jsonl');
     const entries: object[] = [
       sessionHeader(),
-      // Pre-compaction work that was summarized (not in file — fine, just
-      // illustrative of where the orphan tool_use was).
-      compactionEntry('c1', 'header-parent', 'tr1-orphan'),
-      // Orphan: toolResult whose toolCallId is NOT emitted by any kept
-      // assistant toolCall block.
+      // firstKeptEntryId target — orphan toolResult at the start of the
+      // pre-compaction kept tail.
       toolResultEntry('tr1-orphan', 'pruned-toolcall', 'toolu_PRUNED_BY_COMPACTION'),
       // Dependent: assistant text response chained to the orphan toolResult.
       // Drops too — its parent reference would dangle, and the SDK would
       // surface it as the leading message in the API request which Anthropic
       // would reject (first message must be `user`).
       messageEntry('asst-text-dep', 'tr1-orphan', 'assistant'),
+      // Compaction marker closes the pre-compaction tail.
+      compactionEntry('c1', 'asst-text-dep', 'tr1-orphan'),
       // Resume point: a valid user turn whose parent is the compaction marker
       // (NOT the orphan or its dependent). This is how a real session looks
       // after the conductor receives a new user message post-compaction —
@@ -819,14 +827,17 @@ describe('rotateSessionIfNeeded — archive pruning', () => {
     // Regression guard: the filter must NOT drop entries when every
     // toolResult has a matching toolCall in the kept range. Tests the
     // happy path (most rotations) is unaffected by the filter.
+    // Realistic layout: firstKeptEntryId points back into the pre-compaction
+    // tail (u1, a1, tr1) and the compaction marker sits at the end of it.
+    // Post-compaction continues with another valid pair (a2, tr2).
     const file = join(tmpDir, 'session.jsonl');
     const entries: object[] = [
       sessionHeader(),
-      compactionEntry('c1', 'header-parent', 'u1'),
       messageEntry('u1', 'pre-comp-parent', 'user'),
       assistantToolCallEntry('a1', 'u1', 'toolu_A'),
       toolResultEntry('tr1', 'a1', 'toolu_A'),
-      assistantToolCallEntry('a2', 'tr1', 'toolu_B'),
+      compactionEntry('c1', 'tr1', 'u1'),
+      assistantToolCallEntry('a2', 'c1', 'toolu_B'),
       toolResultEntry('tr2', 'a2', 'toolu_B'),
     ];
     writeJsonl(file, entries);
@@ -853,20 +864,30 @@ describe('rotateSessionIfNeeded — archive pruning', () => {
 
   it('anchored rotation drops a chain of multiple dependents on a single orphan', () => {
     // Generalization of the conductor case: the orphan toolResult was followed
-    // by *several* dependent entries (assistant text → user → assistant ...).
-    // The transitive drop loop must reach all of them so no descendant of the
+    // by *several* dependent entries (assistant → user → assistant → user).
+    // The transitive drop must reach all of them so no descendant of the
     // orphan survives.
+    //
+    // Realistic layout — kept pre-compaction tail (rooted on the orphan), then
+    // the compaction marker, then a post-compaction user turn parented back
+    // on the compaction anchor (NOT chained through the orphan) which is the
+    // safe resume point and the only entry expected to survive the filter.
     const file = join(tmpDir, 'session.jsonl');
     const entries: object[] = [
       sessionHeader(),
-      compactionEntry('c1', 'header-parent', 'tr-orphan'),
+      // firstKeptEntryId target.
       toolResultEntry('tr-orphan', 'pruned-toolcall', 'toolu_PRUNED'),
-      messageEntry('asst-1', 'tr-orphan', 'assistant'),
-      messageEntry('user-1', 'asst-1', 'user'),
-      messageEntry('asst-2', 'user-1', 'assistant'),
-      // A clean restart point: a user message whose parent chain DOES NOT
-      // touch the orphan. This is the survivor.
-      messageEntry('user-clean', 'asst-2', 'user'),
+      // Four-deep transitive chain — every entry rooted on tr-orphan.
+      messageEntry('desc-1-asst', 'tr-orphan', 'assistant'),
+      messageEntry('desc-2-user', 'desc-1-asst', 'user'),
+      messageEntry('desc-3-asst', 'desc-2-user', 'assistant'),
+      messageEntry('desc-4-user', 'desc-3-asst', 'user'),
+      // Compaction marker at the end of the pre-compaction tail.
+      compactionEntry('c1', 'desc-4-user', 'tr-orphan'),
+      // Survivor: a fresh post-compaction user turn parented on the compaction
+      // anchor. Its parent chain does NOT touch the orphan, so it is the
+      // expected safe resume point.
+      messageEntry('survivor-user', 'c1', 'user'),
     ];
     writeJsonl(file, entries);
 
@@ -883,18 +904,14 @@ describe('rotateSessionIfNeeded — archive pruning', () => {
       .filter((l) => l.trim())
       .map((l) => JSON.parse(l));
     const ids = rotatedLines.map((e) => e.id);
-    // Orphan AND all four downstream dependents must be dropped.
+    // Orphan and all four descendants drop.
     expect(ids).not.toContain('tr-orphan');
-    expect(ids).not.toContain('asst-1');
-    expect(ids).not.toContain('user-1');
-    expect(ids).not.toContain('asst-2');
-    expect(ids).not.toContain('user-clean');
-    // user-clean was rooted (transitively) on the orphan via asst-2/user-1/
-    // asst-1/tr-orphan — so it drops too. This is the correct outcome: the
-    // chain is poisoned at its root, so the safest resume point is the next
-    // fresh user turn (none in this fixture, so the kept range collapses to
-    // header + compaction marker, and the conductor cold-starts on the
-    // compaction summary alone).
+    expect(ids).not.toContain('desc-1-asst');
+    expect(ids).not.toContain('desc-2-user');
+    expect(ids).not.toContain('desc-3-asst');
+    expect(ids).not.toContain('desc-4-user');
+    // Post-compaction survivor preserved.
+    expect(ids).toContain('survivor-user');
   });
 
   it('bare-bytes-tail rotation also prunes archives', () => {

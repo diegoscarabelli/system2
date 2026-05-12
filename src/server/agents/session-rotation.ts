@@ -254,19 +254,43 @@ export function filterOrphanToolResults(entries: SessionEntry[]): SessionEntry[]
 
   if (droppedIds.size === 0) return entries;
 
-  // Step 3: transitively mark any entry whose `parentId` chains to a dropped
-  // entry. Bounded loop — at most `entries.length` iterations needed since
-  // each pass adds at least one id until stable.
-  for (let pass = 0; pass < entries.length; pass++) {
-    let changed = false;
-    for (const e of entries) {
-      if (!e.id || droppedIds.has(e.id)) continue;
-      if (e.parentId && droppedIds.has(e.parentId)) {
-        droppedIds.add(e.id);
-        changed = true;
-      }
+  // Step 3: transitively mark every descendant of a dropped entry. Build a
+  // `parentId → child ids` index and an id → entry lookup in one pass, then
+  // BFS from the seed orphans. O(N) total — large rotated sessions can have
+  // tens of thousands of entries, and a naive fixed-point loop would be O(N^2)
+  // in the worst case (a long linear parent chain).
+  //
+  // Compaction markers act as structural anchors, not as continuations of the
+  // pre-compaction chain: their `parentId` typically points at the last entry
+  // of the kept pre-compaction tail, but the marker itself represents the
+  // *boundary* between summarized history and the post-compaction
+  // conversation. If we propagated the drop through the marker, every
+  // post-compaction entry chained back to it would also drop — wiping the
+  // resume point and effectively cold-starting the agent every time the
+  // entire kept tail happens to chain to an orphan. Treat compaction entries
+  // as BFS sinks: they (and everything past them) survive even when their
+  // parentId resolves to a dropped entry.
+  const childrenByParent = new Map<string, string[]>();
+  const entryById = new Map<string, SessionEntry>();
+  for (const e of entries) {
+    if (!e.id) continue;
+    entryById.set(e.id, e);
+    if (!e.parentId) continue;
+    const list = childrenByParent.get(e.parentId);
+    if (list) list.push(e.id);
+    else childrenByParent.set(e.parentId, [e.id]);
+  }
+  const queue: string[] = Array.from(droppedIds);
+  while (queue.length > 0) {
+    const parentId = queue.pop() as string;
+    const children = childrenByParent.get(parentId);
+    if (!children) continue;
+    for (const childId of children) {
+      if (droppedIds.has(childId)) continue;
+      if (entryById.get(childId)?.type === 'compaction') continue;
+      droppedIds.add(childId);
+      queue.push(childId);
     }
-    if (!changed) break;
   }
 
   log.warn(
