@@ -221,7 +221,118 @@ describe('read tool (pi-ai integration)', () => {
   it('rejects on nonexistent file (pi-ai throws — tool runtime turns it into an error)', async () => {
     const ghostPath = `/tmp/system2-read-ghost-${randomUUID()}.txt`;
     // Pi-ai's read throws on access failure; assert the promise rejects.
+    // Behavioral change from legacy system2 read (which returned a content
+    // response with "File not found: <path>" text) — documented in CHANGELOG.
     await expect(execRead(tool, { path: ghostPath })).rejects.toThrow();
+  });
+
+  it('emits the long-single-line bash fallback when a line exceeds DEFAULT_MAX_BYTES (50 KB)', async () => {
+    // Pi-ai's read returns a one-line response telling the agent to use bash
+    // with `sed` when a single line is too wide to fit in the byte budget.
+    // This is the recovery escape hatch the docs describe; lock the marker
+    // in so a pi-ai upstream change can't silently break agents that depend
+    // on the fallback.
+    const dir = trackDir(makeTmpDir());
+    const file = join(dir, 'one-fat-line.txt');
+    // 60 KB single line (no newlines) — exceeds 50 KB DEFAULT_MAX_BYTES on
+    // the very first line.
+    writeFileSync(file, 'X'.repeat(60_000));
+
+    const result = await execRead(tool, { path: file });
+    const text = result.content[0].text ?? '';
+
+    // Pi-ai's message uses formatSize (e.g. "58.6KB"), not raw byte counts.
+    // Format: `[Line N is X KB, exceeds 50.0KB limit. Use bash: sed -n 'Np' file | head -c BYTES]`
+    expect(text).toMatch(/Line 1 is [\d.]+[KMG]?B, exceeds [\d.]+[KMG]?B limit/);
+    expect(text).toMatch(/Use bash: sed -n '1p'/);
+    expect(text).toContain(file);
+    expect(text).toMatch(/head -c \d+\]?$/);
+    // The truncation details should also flag this specific path.
+    expect(result.details?.truncation).toBeDefined();
+    const truncation = result.details?.truncation as Record<string, unknown>;
+    expect(truncation.firstLineExceedsLimit).toBe(true);
+  });
+
+  it('reads an image file and returns an image content block (without auto-resize)', async () => {
+    // 1×1 transparent PNG (canonical well-known 67-byte payload). Validates
+    // pi-ai's image-detection path is reachable through our wiring and that
+    // the response carries an `image` content block alongside the text note.
+    //
+    // Disable autoResizeImages for this test: pi-ai's resizeImage helper is
+    // tuned for inline-image size limits and refuses to return a result when
+    // it can't shrink the image below that limit (returns null). For a
+    // 67-byte PNG the resize logic fails — pi-ai then falls back to a
+    // text-only "[Image omitted: could not be resized below the inline image
+    // size limit.]" response. Disabling autoResize forces the always-emit
+    // path, which is the integration we want to lock in: pi-ai correctly
+    // detects the MIME, base64-encodes, and emits an `image` content block.
+    // (Production keeps autoResize=true; the resize logic works for real
+    // images, just not pathologically tiny test fixtures.)
+    const noResizeTool = createReadTool(homedir(), { autoResizeImages: false });
+    const dir = trackDir(makeTmpDir());
+    const file = join(dir, 'pixel.png');
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeIVWwwAAAAASUVORK5CYII=',
+      'base64'
+    );
+    writeFileSync(file, png);
+
+    const result = await execRead(noResizeTool, { path: file });
+
+    // Pi-ai returns [text note, image]. Image block has `data` (base64) +
+    // `mimeType` (image/png). The text note describes the file as an image.
+    const types = result.content.map((b) => b.type);
+    expect(types).toContain('text');
+    expect(types).toContain('image');
+    const imageBlock = result.content.find((b) => b.type === 'image');
+    expect(imageBlock?.mimeType).toMatch(/^image\/png$/);
+    expect(typeof imageBlock?.data).toBe('string');
+    expect((imageBlock?.data ?? '').length).toBeGreaterThan(0);
+  });
+
+  it('asserts the truncation details schema (locks in pi-ai field names)', async () => {
+    // Loose `toBeDefined()` doesn't catch upstream field renames. Lock the
+    // documented schema so a pi-ai bump that renames `outputLines` or drops
+    // `firstLineExceedsLimit` surfaces here as a test failure rather than a
+    // silent regression in any consumer that reads `details.truncation`.
+    const dir = trackDir(makeTmpDir());
+    const file = join(dir, 'three-thousand.txt');
+    const content = Array.from({ length: 3000 }, (_, i) => `L${i + 1}`).join('\n');
+    writeFileSync(file, content);
+
+    const result = await execRead(tool, { path: file });
+    const t = result.details?.truncation as Record<string, unknown>;
+    expect(t).toBeDefined();
+    // Documented keys from pi-ai's createReadToolDefinition source.
+    expect(t).toHaveProperty('truncated');
+    expect(t).toHaveProperty('truncatedBy');
+    expect(t).toHaveProperty('outputLines');
+    expect(t).toHaveProperty('totalLines');
+    // `maxLines` / `maxBytes` may be optional (only the active limit's value
+    // is necessarily present), so we assert at least one is set.
+    expect(t.maxLines !== undefined || t.maxBytes !== undefined).toBe(true);
+    // For the line-cap path we expect `truncatedBy === 'lines'`.
+    expect(t.truncatedBy).toBe('lines');
+    expect(t.truncated).toBe(true);
+  });
+
+  it('rejects with "Operation aborted" when the session signal aborts before execute', async () => {
+    // Pi-ai's createReadTool observes AbortSignal — agent sessions that get
+    // cancelled mid-read should fail cleanly. Easiest deterministic case:
+    // abort the signal BEFORE calling execute. The pre-execute guard inside
+    // pi-ai returns a rejection before any fs work happens.
+    const dir = trackDir(makeTmpDir());
+    const file = join(dir, 'tiny.txt');
+    writeFileSync(file, 'hello');
+
+    const controller = new AbortController();
+    controller.abort();
+
+    // tool.execute(toolCallId, params, signal?, onUpdate?, ctx?) — pass the
+    // aborted signal as the third arg.
+    await expect(
+      tool.execute('test-abort', { path: file } as ReadParams, controller.signal)
+    ).rejects.toThrow(/Operation aborted/);
   });
 
   // Defensive: confirm the tool registers with the expected name + parameters.
