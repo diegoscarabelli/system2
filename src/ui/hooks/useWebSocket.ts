@@ -335,6 +335,13 @@ export function useWebSocket() {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('online', onOnline);
       wsRef.current?.close();
+      // The onclose guard short-circuits because unmounted is now true, so the
+      // store would otherwise keep isConnected=true and stale streaming state
+      // after teardown (route change, HMR, StrictMode dev double-mount). Apply
+      // the same store mutations onclose would have, minus scheduleReconnect.
+      const state = useChatStore.getState();
+      state.setConnected(false);
+      state.clearAllStreamingState();
     };
   }, []);
 
