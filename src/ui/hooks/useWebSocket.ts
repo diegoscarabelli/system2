@@ -72,8 +72,13 @@ export function useWebSocket() {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (unmounted || wsRef.current !== ws) return;
         console.log('WebSocket connected');
         reconnectAttempts = 0;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
         const state = useChatStore.getState();
         state.setConnected(true);
         if (hasConnectedOnce.current) {
@@ -96,6 +101,7 @@ export function useWebSocket() {
       };
 
       ws.onmessage = (event) => {
+        if (unmounted || wsRef.current !== ws) return;
         const message = JSON.parse(event.data) as ServerMessage;
         const state = useChatStore.getState();
 

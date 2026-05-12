@@ -87,8 +87,10 @@ export function MessageInput({ onSend, onSteer, onAbort }: MessageInputProps) {
 
   // When switching agents, the value swaps to that agent's draft via the store,
   // but onChange doesn't fire — recompute textarea height so it matches the new
-  // draft instead of inheriting the previous agent's height.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: autoResize is stable across renders
+  // draft instead of inheriting the previous agent's height. autoResize is
+  // recreated each render but only reads from textareaRef + module constants,
+  // so we intentionally key this effect on activeAgentId alone.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only re-run on agent switch
   useEffect(() => {
     autoResize();
   }, [activeAgentId]);
