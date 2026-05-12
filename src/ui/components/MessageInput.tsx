@@ -8,7 +8,7 @@
 
 import { ArrowUpIcon, SquareFillIcon } from '@primer/octicons-react';
 import { Box } from '@primer/react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { EMPTY_AGENT_STATE, useChatStore } from '../stores/chat';
 import { usePushStore } from '../stores/push';
 import { colors, contextColor } from '../theme/colors';
@@ -26,7 +26,6 @@ interface MessageInputProps {
 }
 
 export function MessageInput({ onSend, onSteer, onAbort }: MessageInputProps) {
-  const [input, setInput] = useState('');
   const isConnected = useChatStore((s) => s.isConnected);
   const activeAgentId = useChatStore((s) => s.activeAgentId);
   const activeAgentRole = useChatStore((s) => s.activeAgentRole);
@@ -35,6 +34,12 @@ export function MessageInput({ onSend, onSteer, onAbort }: MessageInputProps) {
     return s.agentStates.get(s.activeAgentId) ?? EMPTY_AGENT_STATE;
   });
   const { isStreaming, isWaitingForResponse, provider } = activeState;
+  // Per-agent input draft: switching agents preserves each agent's unsent text.
+  const input = activeState.inputDraft;
+  const setInputDraft = useChatStore((s) => s.setInputDraft);
+  const setInput = (value: string) => {
+    if (activeAgentId !== null) setInputDraft(value, activeAgentId);
+  };
   // contextPercent comes from the push store (driven by agent_busy_state) — same
   // source AgentPane uses, so the chat input and table can never disagree.
   const contextPercent = usePushStore((s) =>
@@ -79,6 +84,14 @@ export function MessageInput({ onSend, onSteer, onAbort }: MessageInputProps) {
     textarea.style.height = `${newHeight}px`;
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
   };
+
+  // When switching agents, the value swaps to that agent's draft via the store,
+  // but onChange doesn't fire — recompute textarea height so it matches the new
+  // draft instead of inheriting the previous agent's height.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: autoResize is stable across renders
+  useEffect(() => {
+    autoResize();
+  }, [activeAgentId]);
 
   const ctxColor = contextPercent !== null ? contextColor(contextPercent, accent) : colors.teal;
 
