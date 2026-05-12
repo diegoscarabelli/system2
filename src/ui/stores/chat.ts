@@ -37,6 +37,7 @@ export interface PerAgentState {
   provider: string | null;
   compactionStatus: 'idle' | 'compacting';
   compactionTimestamp: number | null;
+  inputDraft: string;
 }
 
 function createDefaultAgentState(): PerAgentState {
@@ -50,6 +51,7 @@ function createDefaultAgentState(): PerAgentState {
     provider: null,
     compactionStatus: 'idle',
     compactionTimestamp: null,
+    inputDraft: '',
   };
 }
 
@@ -95,6 +97,7 @@ interface ChatState {
   startCompaction: (agentId: number) => void;
   finishCompaction: (agentId: number) => void;
   resetCompaction: (agentId: number) => void;
+  setInputDraft: (value: string, agentId?: number) => void;
 }
 
 /** Immutably update a specific agent's state within the Map. */
@@ -497,6 +500,16 @@ export const useChatStore = create<ChatState>()(
           agentStates: updateAgentState(state.agentStates, agentId, () => ({
             compactionStatus: 'idle' as const,
             compactionTimestamp: null,
+          })),
+        }));
+      },
+
+      setInputDraft: (value: string, agentId?: number) => {
+        const targetId = agentId ?? get().activeAgentId;
+        if (targetId === null) return;
+        set((state) => ({
+          agentStates: updateAgentState(state.agentStates, targetId, () => ({
+            inputDraft: value,
           })),
         }));
       },

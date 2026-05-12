@@ -287,4 +287,48 @@ describe('useChatStore', () => {
       expect(useChatStore.getState().getAgentState(2).provider).toBeNull();
     });
   });
+
+  describe('setInputDraft (per-agent drafts)', () => {
+    it('isolates drafts between agents', () => {
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().loadHistory([], 2);
+
+      useChatStore.getState().setInputDraft('hello A', 1);
+      useChatStore.getState().setInputDraft('hello B', 2);
+
+      expect(useChatStore.getState().getAgentState(1).inputDraft).toBe('hello A');
+      expect(useChatStore.getState().getAgentState(2).inputDraft).toBe('hello B');
+    });
+
+    it('defaults to active agent when agentId is omitted', () => {
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().loadHistory([], 2);
+      useChatStore.setState({ activeAgentId: 1 });
+
+      useChatStore.getState().setInputDraft('typed for active');
+
+      expect(useChatStore.getState().getAgentState(1).inputDraft).toBe('typed for active');
+      expect(useChatStore.getState().getAgentState(2).inputDraft).toBe('');
+    });
+
+    it('clearing a draft on send leaves other agents untouched', () => {
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().loadHistory([], 2);
+      useChatStore.getState().setInputDraft('half-written A', 1);
+      useChatStore.getState().setInputDraft('half-written B', 2);
+
+      // Simulate MessageInput's submit clearing the active agent's draft
+      useChatStore.getState().setInputDraft('', 1);
+
+      expect(useChatStore.getState().getAgentState(1).inputDraft).toBe('');
+      expect(useChatStore.getState().getAgentState(2).inputDraft).toBe('half-written B');
+    });
+
+    it('is a no-op when no agent is active and agentId is omitted', () => {
+      // activeAgentId is null (reset in beforeEach)
+      useChatStore.getState().setInputDraft('orphan text');
+
+      expect(useChatStore.getState().agentStates.size).toBe(0);
+    });
+  });
 });
