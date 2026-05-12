@@ -26,7 +26,20 @@ export class Scheduler {
    * @param handler Function to execute on each trigger
    */
   schedule(name: string, pattern: string, handler: () => void | Promise<void>): void {
-    const cron = new Cron(pattern, handler);
+    // Safety net at the cron→handler boundary: a rejected handler promise
+    // would otherwise propagate up through Croner's `_trigger` (which does
+    // NOT catch by default) and surface as an unhandled rejection, which
+    // Node 25 treats as an uncaught exception and exits the process.
+    // The DB-level "failed" record is already written inside trackJobExecution;
+    // this just keeps the daemon alive so future ticks can recover.
+    const safeHandler = async (): Promise<void> => {
+      try {
+        await handler();
+      } catch (error) {
+        log.error(`[Scheduler] Job "${name}" handler error (uncaught):`, error);
+      }
+    };
+    const cron = new Cron(pattern, safeHandler);
     this.jobs.push({ name, cron });
     log.info(`[Scheduler] Registered job "${name}" with pattern "${pattern}"`);
   }

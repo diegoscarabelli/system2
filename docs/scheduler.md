@@ -18,6 +18,8 @@ class Scheduler {
 }
 ```
 
+`schedule()` wraps the supplied handler in a `safeHandler` that catches and logs (`log.error`) any rejection or thrown error so it cannot escape as an unhandled promise rejection. Croner only catches handler errors when `options.catch` is set on the job; otherwise the rejection propagates, and on Node 25+ an unhandled rejection terminates the process — a single failed scheduled delivery would crash the daemon. The DB-level failure record is still written by `trackJobExecution`, so observability is unchanged.
+
 ## Registered Jobs
 
 | Job              | Schedule                       | Description                                                                |
