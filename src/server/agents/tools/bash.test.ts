@@ -447,9 +447,9 @@ describe('bash tool', () => {
   });
 
   describe('large-output cap', () => {
-    it('returns output verbatim when under the inline cap', () => {
+    it('returns output verbatim when under the inline cap', async () => {
       const out = 'hello world';
-      const { inline, savedPath, totalBytes } = capOutputForInline(
+      const { inline, savedPath, totalBytes } = await capOutputForInline(
         out,
         'toolu_test',
         undefined,
@@ -460,25 +460,44 @@ describe('bash tool', () => {
       expect(totalBytes).toBe(11); // Buffer.byteLength('hello world', 'utf8')
     });
 
-    it('uses UTF-8 byte length, not UTF-16 code units, for the cap decision', () => {
+    it('uses UTF-8 byte length, not UTF-16 code units, for the cap decision', async () => {
       // 100 emoji ≈ 400 UTF-8 bytes but only 200 UTF-16 code units (each
       // surrogate pair is 2 code units, 4 UTF-8 bytes). With a 300-byte cap,
       // string.length=200 would WRONGLY pass through, but the correct
       // Buffer.byteLength=400 trips the cap.
       const out = '🤖'.repeat(100); // 400 bytes, 200 code units
       const sessionDir = trackDir(makeTmpDir());
-      const { savedPath, totalBytes } = capOutputForInline(out, 'toolu_utf8', sessionDir, 300);
+      const { savedPath, totalBytes } = await capOutputForInline(
+        out,
+        'toolu_utf8',
+        sessionDir,
+        300
+      );
       expect(totalBytes).toBe(400);
       expect(savedPath).not.toBeNull();
     });
 
-    it('truncates without a file save when sessionDir is absent', () => {
+    it('keeps the rendered inline payload byte-bounded on non-ASCII (UTF-8 slicing)', async () => {
+      // Pathological non-ASCII: 50 KB of emoji (4 bytes each). With slice-by-
+      // code-unit, head=8 KB code units = 32 KB UTF-8 bytes — would blow past
+      // a 16 KB cap. takeFirstNBytes/takeLastNBytes binary-search the byte-
+      // bounded prefix/suffix so the inline payload stays under maxInlineBytes
+      // (plus a small allowance for the header).
+      const out = '🤖'.repeat(12_500); // 50 KB UTF-8, 25 K code units
+      const sessionDir = trackDir(makeTmpDir());
+      const { inline } = await capOutputForInline(out, 'toolu_utf8_bound', sessionDir, 16_384);
+      const inlineBytes = Buffer.byteLength(inline, 'utf8');
+      // Header overhead reserve is 512 bytes; final payload should be well
+      // under 1.1 × maxInlineBytes. The old code-unit slice would have been
+      // > 2 × maxInlineBytes for this input.
+      expect(inlineBytes).toBeLessThan(16_384 + 1024);
+    });
+
+    it('truncates without a file save when sessionDir is absent', async () => {
       // Use a large input so the head + tail elision exceeds the formatting
-      // overhead (header lines + truncation marker). For very small inputs the
-      // wrapper adds more bytes than the elision saves, which is acceptable
-      // but not interesting to assert on.
+      // overhead (header lines + truncation marker).
       const out = 'A'.repeat(100_000);
-      const { inline, savedPath } = capOutputForInline(out, 'toolu_test', undefined, 1024);
+      const { inline, savedPath } = await capOutputForInline(out, 'toolu_test', undefined, 4096);
       expect(savedPath).toBeNull();
       expect(inline).toContain('Output too large to inline');
       expect(inline).toContain('file save unavailable');
@@ -487,7 +506,7 @@ describe('bash tool', () => {
       expect(inline.length).toBeLessThan(out.length);
     });
 
-    it('saves full output to a file and returns head + tail previews', () => {
+    it('saves full output to a file and returns head + tail previews', async () => {
       const sessionDir = trackDir(makeTmpDir());
       // 50 KB of distinguishable content: head ↔ tail readily checkable.
       const head = 'HEAD-MARKER-AAAA'.repeat(700); // 11,200 bytes
@@ -496,7 +515,12 @@ describe('bash tool', () => {
       const out = head + middle + tail;
       // Cap at 16 KB so head budget (~12.4 KB) is large enough to surface the
       // head marker pattern.
-      const { inline, savedPath } = capOutputForInline(out, 'toolu_cap_test', sessionDir, 16_384);
+      const { inline, savedPath } = await capOutputForInline(
+        out,
+        'toolu_cap_test',
+        sessionDir,
+        16_384
+      );
 
       const expectedFile = join(sessionDir, 'bash-output', 'toolu_cap_test.log');
       expect(savedPath).toBe(expectedFile);
@@ -514,17 +538,34 @@ describe('bash tool', () => {
       expect(inline).toContain('bytes truncated');
     });
 
-    it('clamps head + tail previews to fit within maxInlineBytes (no overlap, no negative truncated)', () => {
+    it('emits a header-only payload when maxInlineBytes is below the header overhead', async () => {
+      // maxInlineBytes < HEADER_OVERHEAD_BYTES (512) → previewBudget = 0,
+      // function should drop the preview entirely instead of inlining a
+      // 0-byte head/tail with negative-truncated weirdness. (The CLI
+      // validator enforces a 4 KB minimum on user input, so this is a
+      // defensive branch only reachable via direct API calls.)
+      const sessionDir = trackDir(makeTmpDir());
+      const { inline, savedPath } = await capOutputForInline(
+        'A'.repeat(50_000),
+        'toolu_header_only',
+        sessionDir,
+        256
+      );
+      expect(savedPath).not.toBeNull();
+      expect(inline).toContain('Output saved to');
+      // No truncation marker — there's no body either side of it to elide.
+      expect(inline).not.toContain('bytes truncated');
+      // Inline is the two header lines only.
+      expect(inline.split('\n').length).toBeLessThanOrEqual(3);
+    });
+
+    it('clamps head + tail previews to fit within maxInlineBytes (no overlap, no negative truncated)', async () => {
       const out = 'A'.repeat(100_000);
       const sessionDir = trackDir(makeTmpDir());
-      // Tiny budget: 1 KB. The default head (8 KB) + tail (2 KB) would massively
-      // exceed this; clamping should keep the inline payload bounded and prevent
-      // head/tail overlap on the source (which would have made truncatedBytes
-      // negative).
-      const { inline } = capOutputForInline(out, 'toolu_clamp', sessionDir, 1024);
-      // Inline payload stays within a multiple of the budget (header overhead +
-      // 100% of preview budget). Assert it didn't blow past 2 × maxInlineBytes.
-      expect(inline.length).toBeLessThan(2048);
+      // Modest budget (above header overhead so previews still render).
+      const { inline } = await capOutputForInline(out, 'toolu_clamp', sessionDir, 4096);
+      // Inline payload stays within a multiple of the budget.
+      expect(inline.length).toBeLessThan(8192);
       // truncatedBytes must be a positive number (no negative-truncation bug).
       const match = inline.match(/\[\.\.\.([0-9,]+) bytes truncated\.\.\.\]/);
       expect(match).not.toBeNull();
@@ -532,16 +573,32 @@ describe('bash tool', () => {
       expect(truncated).toBeGreaterThan(0);
     });
 
-    it('emits unique files for distinct tool call ids in the same session', () => {
+    it('emits unique files for distinct tool call ids in the same session', async () => {
       const sessionDir = trackDir(makeTmpDir());
       const out = 'X'.repeat(10_000);
-      capOutputForInline(out, 'toolu_A', sessionDir, 1024);
-      capOutputForInline(out, 'toolu_B', sessionDir, 1024);
+      await capOutputForInline(out, 'toolu_A', sessionDir, 4096);
+      await capOutputForInline(out, 'toolu_B', sessionDir, 4096);
       expect(existsSync(join(sessionDir, 'bash-output', 'toolu_A.log'))).toBe(true);
       expect(existsSync(join(sessionDir, 'bash-output', 'toolu_B.log'))).toBe(true);
     });
 
-    it('foreground command: large stdout is saved + previewed AND details are shrunk', async () => {
+    it('sanitizes toolCallId to prevent path traversal outside bash-output dir', async () => {
+      const sessionDir = trackDir(makeTmpDir());
+      // Hostile id: tries to escape via `..` and absolute path. Should be
+      // collapsed via basename + whitelist to a single-segment safe name.
+      const hostileId = '../../../etc/passwd';
+      const out = 'A'.repeat(10_000);
+      const { savedPath } = await capOutputForInline(out, hostileId, sessionDir, 4096);
+      // basename('../../../etc/passwd') = 'passwd' → all chars match whitelist
+      // → filename = 'passwd.log'. Crucially, the file must live INSIDE
+      // sessionDir/bash-output, not /etc.
+      expect(savedPath).not.toBeNull();
+      expect(savedPath?.startsWith(join(sessionDir, 'bash-output'))).toBe(true);
+      // The dir-traversal segments did not survive.
+      expect(savedPath).not.toContain('..');
+    });
+
+    it('foreground command: large stdout is saved + previewed AND BOTH details channels are shrunk', async () => {
       const sessionDir = trackDir(makeTmpDir());
       const tool = createBashTool(undefined, { sessionDir, maxInlineOutputBytes: 16_384 });
       // Emit ~25 KB of recognizable text so we comfortably exceed the cap.
@@ -556,13 +613,17 @@ describe('bash tool', () => {
       expect(text).toContain('toolu_fg_big.log');
       expect(text).toContain('bytes truncated');
       expect(existsSync(join(sessionDir, 'bash-output', 'toolu_fg_big.log'))).toBe(true);
-      // Regression: details.stdout (which lands in the JSONL alongside content)
-      // must NOT carry the full output too; otherwise the JSONL bloats by the
-      // same megabytes we already saved to the bash-output file. Marker only.
+      // Regression: BOTH details.stdout AND details.stderr must point at the
+      // saved file. The saved file holds the combined stdout + stderr stream,
+      // so per-channel content in the JSONL is redundant. Empty stderr (the
+      // previous behavior) was inconsistent with the documented "shrunk to
+      // marker" contract.
       expect(details.stdout).toContain('[Saved to');
       expect(details.stdout).toContain('toolu_fg_big.log');
+      expect(details.stderr).toContain('[Saved to');
+      expect(details.stderr).toContain('toolu_fg_big.log');
       expect(details.stdout.length).toBeLessThan(500);
-      expect(details.stderr).toBe('');
+      expect(details.stderr.length).toBeLessThan(500);
     });
 
     it('foreground command: small stdout does NOT shrink details (no file written)', async () => {

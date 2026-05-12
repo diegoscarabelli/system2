@@ -1172,4 +1172,24 @@ describe('convertTomlTools (bash_max_inline_output_bytes validation)', () => {
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
+
+  it('rejects a non-number (e.g. TOML string) and warns instead of silently ignoring', () => {
+    // Regression: previously the loader gated on `typeof === 'number'` BEFORE
+    // calling convertTomlTools, so a string value was silently dropped without
+    // any warning. The gate is now `!== undefined` and the raw value reaches
+    // the validator, which rejects it and emits a warning.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tools = convertTomlTools(undefined, undefined, '64KB');
+    expect(tools.bash).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('rejects a boolean and warns', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tools = convertTomlTools(undefined, undefined, true);
+    expect(tools.bash).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });

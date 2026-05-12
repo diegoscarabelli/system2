@@ -19,9 +19,9 @@
 
 import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { AgentTool, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import { type Static, Type } from '@sinclair/typebox';
 import { DEFAULT_BASH_MAX_INLINE_OUTPUT_BYTES } from '../../../shared/index.js';
@@ -332,33 +332,85 @@ function countLines(s: string): number {
   return n;
 }
 
+/** Return the longest prefix of `s` whose UTF-8 encoding is at most `budgetBytes`.
+ *  Binary search over code-unit length: O(log n × n) on Buffer.byteLength, but
+ *  bounded by the input length and only invoked when we know the prefix is
+ *  oversized. Used by the cap code so preview byte budgets are honored even
+ *  for non-ASCII output (where `s.length` and `Buffer.byteLength` diverge). */
+function takeFirstNBytes(s: string, budgetBytes: number): string {
+  if (budgetBytes <= 0 || s.length === 0) return '';
+  if (Buffer.byteLength(s, 'utf8') <= budgetBytes) return s;
+  let lo = 0;
+  let hi = s.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1;
+    if (Buffer.byteLength(s.slice(0, mid), 'utf8') <= budgetBytes) lo = mid;
+    else hi = mid - 1;
+  }
+  return s.slice(0, lo);
+}
+
+/** Mirror of `takeFirstNBytes` for the suffix of `s`. */
+function takeLastNBytes(s: string, budgetBytes: number): string {
+  if (budgetBytes <= 0 || s.length === 0) return '';
+  if (Buffer.byteLength(s, 'utf8') <= budgetBytes) return s;
+  let lo = 0;
+  let hi = s.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1;
+    if (Buffer.byteLength(s.slice(-mid), 'utf8') <= budgetBytes) lo = mid;
+    else hi = mid - 1;
+  }
+  return s.slice(-lo);
+}
+
+/** Coerce `toolCallId` to a filesystem-safe basename. Defense-in-depth:
+ *  Anthropic's tool-call ids are alphanumeric `toolu_…`, but a future
+ *  provider or a hostile spoof could feed a value containing `/` or `..`
+ *  that would let writeFile escape `<sessionDir>/bash-output`. Strip to a
+ *  whitelist after taking `basename` (which already drops `/` segments). */
+function safeOutputFilename(toolCallId: string): string {
+  const base = basename(toolCallId).replace(/[^A-Za-z0-9_-]/g, '_');
+  return base.length > 0 ? `${base}.log` : 'bash-output.log';
+}
+
 /**
  * Cap inline tool output. If the output's UTF-8 byte size exceeds
  * `maxInlineBytes` and `sessionDir` is available, write the full output to
- * `<sessionDir>/bash-output/<toolCallId>.log` and return a string containing
- * a header pointer + head/tail previews + a "[...N bytes truncated...]"
- * marker between them. If `sessionDir` is absent or the file write fails,
- * truncate without saving (best-effort).
+ * `<sessionDir>/bash-output/<safeOutputFilename(toolCallId)>` and return a
+ * string containing a header pointer + head/tail previews + a "[...N bytes
+ * truncated...]" marker between them. If `sessionDir` is absent or the file
+ * write fails, truncate without saving (best-effort).
  *
  * Byte accounting uses `Buffer.byteLength(..., 'utf8')` rather than
  * `string.length` (which counts UTF-16 code units): for non-ASCII output the
- * two diverge, and the cap is documented as a byte cap. Preview slicing
- * stays in code-unit space because slicing the UTF-8 byte stream on a
- * non-boundary would corrupt multi-byte characters; the slice budgets are
- * conservative (the saved file is the source of truth).
+ * two diverge, and the cap is documented as a byte cap. Preview slicing uses
+ * `takeFirstNBytes` / `takeLastNBytes`, which binary-search for the longest
+ * code-unit prefix/suffix that fits the byte budget — so each preview is
+ * byte-bounded even on heavily non-ASCII output.
  *
- * Preview budgets are clamped so that head + tail + header overhead never
- * exceed `maxInlineBytes`. For tiny `maxInlineBytes` (e.g. tests using 1 KB)
- * head and tail are scaled down rather than allowed to overlap.
+ * Layout & cap enforcement:
+ *   - HEADER_OVERHEAD_BYTES reserved for the two header lines + truncation
+ *     marker (~512 bytes covers typical byte-count strings).
+ *   - Preview budget = max(0, maxInlineBytes - HEADER_OVERHEAD_BYTES), split
+ *     80/20 between head and tail (head is more useful for diagnostics:
+ *     command echo, initial error message).
+ *   - If the preview budget is <= 0 (i.e. maxInlineBytes <= HEADER_OVERHEAD)
+ *     the function emits a header-only payload (no head/tail). The CLI
+ *     validator enforces maxInlineBytes >= 4 KB so this is a defensive
+ *     branch, not a routine path.
+ *
+ * I/O is async (fs.promises.mkdir + writeFile) so that a 10 MB write does
+ * not block Node's event loop during multi-agent concurrent tool execution.
  *
  * Exported for tests.
  */
-export function capOutputForInline(
+export async function capOutputForInline(
   output: string,
   toolCallId: string,
   sessionDir: string | undefined,
   maxInlineBytes: number
-): CappedOutput {
+): Promise<CappedOutput> {
   const totalBytes = Buffer.byteLength(output, 'utf8');
   if (totalBytes <= maxInlineBytes) {
     return { inline: output, savedPath: null, totalBytes };
@@ -370,29 +422,28 @@ export function capOutputForInline(
   if (sessionDir) {
     try {
       const dir = join(sessionDir, BASH_OUTPUT_SUBDIR);
-      mkdirSync(dir, { recursive: true });
-      savedPath = join(dir, `${toolCallId}.log`);
-      writeFileSync(savedPath, output, 'utf-8');
+      await mkdir(dir, { recursive: true });
+      const candidate = join(dir, safeOutputFilename(toolCallId));
+      await writeFile(candidate, output, 'utf-8');
+      savedPath = candidate;
     } catch (err) {
       log.warn('[bash] Failed to save large output to file; falling back to truncate-only:', err);
       savedPath = null;
     }
   }
 
-  // Reserve a small slice of `maxInlineBytes` for the header + guidance +
-  // truncation marker so head + tail never push the inline payload over
-  // `maxInlineBytes`. Numbers are rough — the exact overhead depends on
-  // toLocaleString output for the byte counts, but ~512 is a safe upper bound.
   const HEADER_OVERHEAD_BYTES = 512;
   const previewBudgetBytes = Math.max(0, maxInlineBytes - HEADER_OVERHEAD_BYTES);
-  // 80/20 split between head and tail; the head is more useful for diagnostics
-  // (initial error message, command echo, etc.).
-  const headBudgetBytes = Math.min(PREVIEW_HEAD_BYTES, Math.floor(previewBudgetBytes * 0.8));
-  const tailBudgetBytes = Math.min(PREVIEW_TAIL_BYTES, previewBudgetBytes - headBudgetBytes);
 
-  // Slice in code-unit space — see function docstring for why.
-  const head = output.slice(0, headBudgetBytes);
-  const tail = tailBudgetBytes > 0 ? output.slice(-tailBudgetBytes) : '';
+  let head = '';
+  let tail = '';
+  if (previewBudgetBytes > 0) {
+    // 80/20 split between head and tail.
+    const headBudgetBytes = Math.min(PREVIEW_HEAD_BYTES, Math.floor(previewBudgetBytes * 0.8));
+    const tailBudgetBytes = Math.min(PREVIEW_TAIL_BYTES, previewBudgetBytes - headBudgetBytes);
+    head = takeFirstNBytes(output, headBudgetBytes);
+    tail = tailBudgetBytes > 0 ? takeLastNBytes(output, tailBudgetBytes) : '';
+  }
   const headBytes = Buffer.byteLength(head, 'utf8');
   const tailBytes = Buffer.byteLength(tail, 'utf8');
   const truncatedBytes = Math.max(0, totalBytes - headBytes - tailBytes);
@@ -404,7 +455,13 @@ export function capOutputForInline(
     ? `[Showing first ${headBytes.toLocaleString()} bytes + last ${tailBytes.toLocaleString()} bytes. Use the read tool with offset/limit on the file above, or run bash again with grep/tail/sed/awk on the file path to inspect specific portions.]`
     : `[Showing first ${headBytes.toLocaleString()} bytes + last ${tailBytes.toLocaleString()} bytes.]`;
 
-  const inline = `${headerLine}\n${guidanceLine}\n\n${head}\n\n[...${truncatedBytes.toLocaleString()} bytes truncated...]\n\n${tail}`;
+  // Header-only fallback: emit just the header lines when the budget didn't
+  // permit any preview. Body is omitted entirely (no truncation marker since
+  // there's nothing on either side of it).
+  const inline =
+    previewBudgetBytes <= 0
+      ? `${headerLine}\n${guidanceLine}`
+      : `${headerLine}\n${guidanceLine}\n\n${head}\n\n[...${truncatedBytes.toLocaleString()} bytes truncated...]\n\n${tail}`;
   return { inline, savedPath, totalBytes };
 }
 
@@ -534,22 +591,43 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
           signal?.removeEventListener('abort', onAbort);
           const exitCode = code ?? 0;
           const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
-          const capped = capOutputForInline(output, id, sessionDir, maxInlineOutputBytes);
-          const prefix =
-            exitCode === 0 ? 'Background command completed' : 'Background command failed';
-          // When output was saved to file, shrink the persisted details so the
-          // JSONL message doesn't re-store the same megabytes that already live
-          // in the saved file. The marker tells operators where to look.
-          const detailsStdout = capped.savedPath
-            ? shrinkDetailsForSavedOutput(capped.savedPath, capped.totalBytes)
-            : stdout;
-          const detailsStderr = capped.savedPath ? '' : stderr;
-          notifyBackground(`${prefix}: ${params.command}\n\n${capped.inline || '(no output)'}`, {
-            stdout: detailsStdout,
-            stderr: detailsStderr,
-            exitCode,
-            command: params.command,
-          });
+          // Wrap async work in an IIFE so the 'close' callback stays sync;
+          // any rejection is logged but does not unwind a non-async caller.
+          void (async () => {
+            try {
+              const capped = await capOutputForInline(output, id, sessionDir, maxInlineOutputBytes);
+              const prefix =
+                exitCode === 0 ? 'Background command completed' : 'Background command failed';
+              // When output was saved to file, both stdout and stderr details
+              // point at the saved file — the file contains the combined
+              // stdout + STDERR-prefixed stderr, so the marker fully
+              // substitutes for the per-channel content. Operators inspect
+              // the file rather than the JSONL fields.
+              const marker = capped.savedPath
+                ? shrinkDetailsForSavedOutput(capped.savedPath, capped.totalBytes)
+                : null;
+              notifyBackground(
+                `${prefix}: ${params.command}\n\n${capped.inline || '(no output)'}`,
+                {
+                  stdout: marker ?? stdout,
+                  stderr: marker ?? stderr,
+                  exitCode,
+                  command: params.command,
+                }
+              );
+            } catch (err) {
+              log.error('[bash] Failed to deliver background output:', err);
+              notifyBackground(
+                `Background command completed (delivery error): ${params.command}\n\n(internal error capping output)`,
+                {
+                  stdout: '',
+                  stderr: '',
+                  exitCode,
+                  command: params.command,
+                }
+              );
+            }
+          })();
         });
 
         child.on('error', (err) => {
@@ -610,11 +688,20 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
         );
 
         const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
-        const capped = capOutputForInline(output, _toolCallId, sessionDir, maxInlineOutputBytes);
-        const detailsStdout = capped.savedPath
+        const capped = await capOutputForInline(
+          output,
+          _toolCallId,
+          sessionDir,
+          maxInlineOutputBytes
+        );
+        // Both channels point at the saved file when output was persisted:
+        // the file holds the combined stdout + STDERR-prefixed stderr, so
+        // the marker covers both per-channel slots in the JSONL details.
+        const marker = capped.savedPath
           ? shrinkDetailsForSavedOutput(capped.savedPath, capped.totalBytes)
-          : stdout;
-        const detailsStderr = capped.savedPath ? '' : stderr;
+          : null;
+        const detailsStdout = marker ?? stdout;
+        const detailsStderr = marker ?? stderr;
 
         if (exitCode !== 0) {
           // Build the failure response from the capped representation so the
@@ -645,11 +732,17 @@ export function createBashTool(notifyBackground?: NotifyBackground, opts: BashTo
         const stdout = err.stdout || '';
         const stderr = err.stderr || '';
         const output = stdout + (stderr ? `\nSTDERR:\n${stderr}` : '');
-        const capped = capOutputForInline(output, _toolCallId, sessionDir, maxInlineOutputBytes);
-        const detailsStdout = capped.savedPath
+        const capped = await capOutputForInline(
+          output,
+          _toolCallId,
+          sessionDir,
+          maxInlineOutputBytes
+        );
+        const marker = capped.savedPath
           ? shrinkDetailsForSavedOutput(capped.savedPath, capped.totalBytes)
-          : stdout;
-        const detailsStderr = capped.savedPath ? '' : stderr;
+          : null;
+        const detailsStdout = marker ?? stdout;
+        const detailsStderr = marker ?? stderr;
 
         return {
           content: [

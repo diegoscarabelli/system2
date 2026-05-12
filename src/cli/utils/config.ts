@@ -471,7 +471,11 @@ function convertTomlServices(toml: NonNullable<TomlAuthFile['services']>): Servi
 export function convertTomlTools(
   authTools: TomlAuthFile['tools'] | undefined,
   configMaxResults: number | undefined,
-  configBashMaxInlineOutputBytes: number | undefined
+  // Typed as `unknown` rather than `number | undefined` because the value
+  // comes from TOML — a user can hand-edit any value (string, boolean,
+  // float). The validator below normalises invalid values to the in-code
+  // default with a warning instead of silently ignoring them.
+  configBashMaxInlineOutputBytes: unknown
 ): ToolsConfig {
   const tools: ToolsConfig = {};
   if (authTools?.web_search) {
@@ -1001,7 +1005,10 @@ export function loadConfigFromPaths(configPath: string, authPath: string): Syste
     config.services = convertTomlServices(tomlAuth.services);
   }
 
-  if (tomlAuth.tools || typeof tomlConfig.bash_max_inline_output_bytes === 'number') {
+  if (tomlAuth.tools || tomlConfig.bash_max_inline_output_bytes !== undefined) {
+    // Pass the raw value through (even non-number) so convertTomlTools'
+    // validator can warn the user — gating here on `typeof === 'number'`
+    // would silently drop e.g. a TOML string and bypass the warning path.
     config.tools = convertTomlTools(
       tomlAuth.tools,
       tomlConfig.web_search_max_results,
