@@ -289,6 +289,12 @@ export function useWebSocket() {
       };
 
       ws.onerror = (error) => {
+        // Ignore stale events from a superseded socket: reconnectNow() can
+        // create a new socket while this one is still CLOSING, and React
+        // StrictMode's double-mount also produces a teardown-then-recreate
+        // cycle where the first socket's events would otherwise corrupt the
+        // second socket's connection state.
+        if (unmounted || wsRef.current !== ws) return;
         console.error('WebSocket error:', error);
         const state = useChatStore.getState();
         state.setConnected(false);
@@ -296,6 +302,7 @@ export function useWebSocket() {
       };
 
       ws.onclose = () => {
+        if (unmounted || wsRef.current !== ws) return;
         console.log('WebSocket disconnected');
         const state = useChatStore.getState();
         state.setConnected(false);
