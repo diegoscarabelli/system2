@@ -1539,12 +1539,18 @@ export class AgentHost {
       createReadSystem2DbTool(this.db),
       createWriteSystem2DbTool(this.db, this.agentId, this.onDatabaseWrite),
       createMessageAgentTool(this.agentId, this.registry, this.db, this.maxDeliveryBytes),
-      createBashTool((content, details) => {
-        this.session?.sendCustomMessage(
-          { customType: 'bash_background', content, display: false, details },
-          { deliverAs: 'followUp', triggerTurn: true }
-        );
-      }),
+      createBashTool(
+        (content, details) => {
+          this.session?.sendCustomMessage(
+            { customType: 'bash_background', content, display: false, details },
+            { deliverAs: 'followUp', triggerTurn: true }
+          );
+        },
+        {
+          sessionDir: this._sessionDir ?? undefined,
+          maxInlineOutputBytes: this.toolsConfig?.bash?.max_inline_output_bytes,
+        }
+      ),
       createReadTool(),
       createEditTool(),
       createWriteTool(),

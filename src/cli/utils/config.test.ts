@@ -7,6 +7,7 @@ import {
   convertTomlDelivery,
   convertTomlLlm,
   convertTomlSession,
+  convertTomlTools,
   DEFAULT_DELIVERY,
   DEFAULT_SESSION,
   DEFAULT_WEB_SEARCH_MAX_RESULTS,
@@ -39,6 +40,13 @@ describe('buildConfigToml', () => {
     expect(result).toContain(`# web_search_max_results = ${DEFAULT_WEB_SEARCH_MAX_RESULTS}`);
     // Live (uncommented) scalar must NOT be present in default template.
     expect(result).not.toMatch(/^web_search_max_results = /m);
+  });
+
+  it('emits commented bash_max_inline_output_bytes scalar at code default', () => {
+    const result = buildConfigToml({});
+    expect(result).toContain('# bash_max_inline_output_bytes = 131072');
+    // Live (uncommented) scalar must NOT be present in default template.
+    expect(result).not.toMatch(/^bash_max_inline_output_bytes = /m);
   });
 
   // Operational settings are always emitted as commented templates
@@ -1116,5 +1124,72 @@ describe('validateAgentModels', () => {
 
   it('treats empty models map as no-op', () => {
     expect(() => validateAgentModels({ narrator: {} })).not.toThrow();
+  });
+});
+
+describe('convertTomlTools (bash_max_inline_output_bytes validation)', () => {
+  it('accepts a valid positive integer at or above the minimum', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tools = convertTomlTools(undefined, undefined, 65_536);
+    expect(tools.bash?.max_inline_output_bytes).toBe(65_536);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('omits tools.bash and falls through to default when knob is unset', () => {
+    const tools = convertTomlTools(undefined, undefined, undefined);
+    expect(tools.bash).toBeUndefined();
+  });
+
+  it('rejects a negative value and warns', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tools = convertTomlTools(undefined, undefined, -1);
+    expect(tools.bash).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/bash_max_inline_output_bytes = -1/));
+    warn.mockRestore();
+  });
+
+  it('rejects zero and warns', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tools = convertTomlTools(undefined, undefined, 0);
+    expect(tools.bash).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('rejects a non-integer (fractional) value and warns', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tools = convertTomlTools(undefined, undefined, 5000.5);
+    expect(tools.bash).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('rejects a value below the 4 KB minimum and warns', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tools = convertTomlTools(undefined, undefined, 1024);
+    expect(tools.bash).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('rejects a non-number (e.g. TOML string) and warns instead of silently ignoring', () => {
+    // Regression: previously the loader gated on `typeof === 'number'` BEFORE
+    // calling convertTomlTools, so a string value was silently dropped without
+    // any warning. The gate is now `!== undefined` and the raw value reaches
+    // the validator, which rejects it and emits a warning.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tools = convertTomlTools(undefined, undefined, '64KB');
+    expect(tools.bash).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('rejects a boolean and warns', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const tools = convertTomlTools(undefined, undefined, true);
+    expect(tools.bash).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
