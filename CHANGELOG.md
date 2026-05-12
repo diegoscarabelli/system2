@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-05-12
+
 ### Fixed
 
 - Session rotation now drops orphan `tool_result` entries (and their dependent descendants) before writing the new JSONL. Pi-ai's compaction can place its cut between a `tool_use` and its matching `tool_result` — the compaction marker's `firstKeptEntryId` records the cut faithfully, but the kept range ends up with a `tool_result` whose `tool_use` was summarized away. Without this filter, the SDK reconstructs an API request containing an orphan `tool_result` block, and every LLM provider rejects it (Anthropic: `unexpected tool_use_id found in tool_result blocks`; Google: `function response turn must come immediately after a function call turn`), locking the agent out of every failover lane. The fix adds a post-rotation `filterOrphanToolResults` pass that scans assembled entries, identifies `toolResult`s whose `toolCallId` isn't emitted by any kept assistant `toolCall` block, and drops them together with any entries whose `parentId` chains back to a dropped entry (so a dangling assistant text response chained to the orphan goes too). Applied in both the anchored-rotation path (where the bug actually originates) and `forceBareBytesTailRotation` (defense in depth — `selectTailEntries` already aligns to user-turn boundaries and shouldn't produce orphans, but the filter is cheap). The root cause is upstream in pi-ai; this is a system2-side defense so future occurrences degrade gracefully (drop a few stranded entries + log a warning) instead of bricking the agent.
