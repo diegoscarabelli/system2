@@ -16,6 +16,8 @@ It exists to help people think more clearly about complex questions and empower 
   <img src="docs/images/screenshot_2.png" alt="System2 UI: interactive dashboard and chat" width="49%">
 </p>
 
+https://github.com/user-attachments/assets/d2f688d9-15fe-41a0-a4d0-46b2e87d2236
+
 ---
 
 ## Quick start
