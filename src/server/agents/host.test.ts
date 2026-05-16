@@ -5211,6 +5211,47 @@ describe('AgentHost', () => {
       expect(sendCustomMessage).toHaveBeenCalledTimes(2);
       expect(internal.deliverySendCount).toBe(1);
     });
+
+    it('marks scheduled-task deliveries deferred when queued during reinit (Copilot review #2)', () => {
+      // Without this marking, agent_end's `.some(deferred)` guard would skip dispatch and the
+      // scheduled task could stay stuck in the queue until the next scheduled-task-triggered
+      // reset (which might never come if no other scheduled-task runs).
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const internal = host as unknown as {
+        session: unknown;
+        isReinitializing: boolean;
+        _chatCache: null;
+        _sessionDir: string | null;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+      };
+      internal.session = null;
+      internal.isReinitializing = true;
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      host.deliverMessage('[Scheduled task: memory-update]\n\nfile: /y', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Message from guide agent (id=1)]\n\nhi', {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      expect(internal.pendingDeliveries).toHaveLength(2);
+      // Scheduled-task is marked deferred so agent_end will pick it up later.
+      expect(internal.pendingDeliveries[0].deferred).toBe(true);
+      // Chat is not marked deferred — it relies on the reinit-replay path (which sends
+      // everything regardless of deferred flag).
+      expect(internal.pendingDeliveries[1].deferred).toBeFalsy();
+    });
   });
 });
 

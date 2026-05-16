@@ -1322,6 +1322,8 @@ export class AgentHost {
       content: string;
       details: { sender: number; receiver: number; timestamp: number };
       urgent?: boolean;
+      scheduledTask?: boolean;
+      deferred?: boolean;
       resolve: () => void;
       reject: (reason: Error) => void;
     }>,
@@ -1428,10 +1430,28 @@ export class AgentHost {
             `(${retrySnapshot.length} pre-reinit, ${queuedDuringReinit.length} during reinit)...`
         );
         const session = this.session;
+        // Scheduled-task gate also applies here: without it, a failover that happens with
+        // multiple scheduled-task deliveries queued (e.g., daily-summary's 3 messages) would
+        // batch them as Pi SDK followUp turns in one run on the new session, reintroducing
+        // the within-tick prompt bloat that the gate in deliverMessage is designed to prevent.
+        // Subsequent scheduled-tasks get marked `deferred` so agent_end's dispatch picks them
+        // up after the in-flight one's turn ends. Copilot review #2 raised this on PR #191.
+        let scheduledTaskSent = false;
         for (const d of toReplay) {
+          if (d.scheduledTask && scheduledTaskSent) {
+            d.deferred = true;
+            // toReplay may contain items that have been removed from pendingDeliveries (e.g.,
+            // a rejected stale send); re-add so the agent_end dispatch path can find them.
+            if (!this.pendingDeliveries.includes(d)) {
+              this.pendingDeliveries.push(d);
+            }
+            continue;
+          }
           // Increment count synchronously so agent_end (which fires before
           // sendCustomMessage resolves for idle agents) sees the correct tally.
           this.deliverySendCount++;
+          d.deferred = false;
+          if (d.scheduledTask) scheduledTaskSent = true;
           session
             .sendCustomMessage(
               {
@@ -1452,6 +1472,10 @@ export class AgentHost {
               const idx = this.pendingDeliveries.indexOf(d);
               if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
               d.reject(error instanceof Error ? error : new Error(String(error)));
+              // Release the gate after a failed send (no agent_end will fire for it).
+              if (this.pendingDeliveries.some((x) => x.deferred)) {
+                this.replayPendingDeliveries('after failover replay failure');
+              }
             });
         }
       }
@@ -1823,6 +1847,14 @@ export class AgentHost {
     // Both iterate this.pendingDeliveries (which now includes our entry), so the message reaches
     // the new session without us touching the dying one here.
     if (!this.session || this.isReinitializing) {
+      // Mark scheduled-task items as deferred so agent_end's gated dispatch picks them up
+      // if the reset/failover path's own replay doesn't run them first. Without this, a
+      // scheduled task queued during a brief reinit window could sit forever if the next
+      // agent_end (e.g., for a chat delivery) found nothing marked deferred and skipped
+      // dispatch. Copilot review #2 raised this on PR #191. See GitHub issue #189.
+      if (scheduledTask) {
+        this.pendingDeliveries[this.pendingDeliveries.length - 1].deferred = true;
+      }
       return promise;
     }
 
@@ -1885,6 +1917,12 @@ export class AgentHost {
           reject(
             new Error(`Delivery send failed: ${err instanceof Error ? err.message : String(err)}`)
           );
+        }
+        // Release the scheduled-task gate: agent_end won't fire for a send that never reached
+        // the agent, so without this dispatch any deferred deliveries behind the failed send
+        // would sit in the queue forever. Copilot review #2 raised this on PR #191.
+        if (this.pendingDeliveries.some((d) => d.deferred)) {
+          this.replayPendingDeliveries('after send failure');
         }
       });
 
@@ -2341,6 +2379,12 @@ export class AgentHost {
         const idx = this.pendingDeliveries.indexOf(delivery);
         if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
         delivery.reject(error instanceof Error ? error : new Error(String(error)));
+        // Release the scheduled-task gate: agent_end won't fire for a send that never reached
+        // the agent. Without re-dispatch, deferred deliveries behind the failed send would sit
+        // in the queue forever. Copilot review #2 raised this on PR #191.
+        if (this.pendingDeliveries.some((d) => d.deferred)) {
+          this.replayPendingDeliveries('after dispatch failure');
+        }
       });
       // Scheduled-task gate (after-send half): only one scheduled-task delivery per dispatch.
       // After this delivery's agent_end fires, the next dispatch will pick up where we left off.
