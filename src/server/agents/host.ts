@@ -299,6 +299,14 @@ export class AgentHost {
    *  tool side effects (e.g. file edits), so re-feeding it to the model would
    *  duplicate work. See GitHub issue #175. */
   private currentTurnHasOutput = false;
+  /** True once handlePotentialError has observed a scheduled-task delivery in
+   *  pendingDeliveries during the current turn. Read at agent_end to extend the
+   *  post-scheduled-task session reset to error turns: without this, a failed
+   *  cron tick on a reset-opted-in role leaves the session bloated and every
+   *  subsequent tick grows it further (handleContextOverflow cannot find a safe
+   *  split point at that size). Reset on turn_start and after agent_end consumes
+   *  it. See GitHub issue #189. */
+  private hadScheduledTaskDeliveryThisTurn = false;
   private compactionCount = 0;
   private compactionDepth = 0;
   private isPruning = false;
@@ -698,6 +706,10 @@ export class AgentHost {
     // handlePotentialError to detect contaminated turns (issue #175).
     if (event.type === 'turn_start') {
       this.currentTurnHasOutput = false;
+      // Reset the per-turn scheduled-task flag too; handlePotentialError will
+      // set it again if the turn errors with a scheduled-task delivery pending.
+      // See GitHub issue #189.
+      this.hadScheduledTaskDeliveryThisTurn = false;
     } else if (
       event.type === 'message_start' ||
       event.type === 'message_update' ||
@@ -716,6 +728,7 @@ export class AgentHost {
       // On error turns, lastTurnErrored is true (set synchronously in
       // handlePotentialError before agent_end fires). Skip cleanup so the
       // failed prompt/delivery stays tracked for retry or failover.
+      const wasErroredTurn = this.lastTurnErrored;
       let completedScheduledTask = false;
       if (!this.lastTurnErrored) {
         // Clear pendingPrompt: one agent_end fires after ALL turns (prompt +
@@ -746,7 +759,20 @@ export class AgentHost {
       // any code path that might inspect it between agent_end and turn_start.
       this.currentTurnHasOutput = false;
 
-      // If this turn completed a scheduled-task delivery for a role configured to reset,
+      // A scheduled-task attempt this turn either (a) completed successfully and was
+      // resolved above, or (b) errored and was rejected by handlePotentialError's
+      // contamination/wire-size guards or surfaced as a failover failure. Both cases
+      // warrant the post-scheduled-task session reset on opted-in roles: case (a) is
+      // the original per-tick-freshness behavior; case (b) breaks the self-reinforcing
+      // context-overflow loop described in GitHub issue #189 — without resetting on
+      // error, a bloated session can no longer be compacted (handleContextOverflow
+      // cannot find a safe split point), and every subsequent cron tick grows it by
+      // another ~one-tick's-worth of payload.
+      const scheduledTaskAttempted =
+        completedScheduledTask || (wasErroredTurn && this.hadScheduledTaskDeliveryThisTurn);
+      this.hadScheduledTaskDeliveryThisTurn = false;
+
+      // If this turn attempted a scheduled-task delivery for a role configured to reset,
       // truncate the session JSONL to a fresh header. The Narrator's durable memory lives in
       // files (`daily_summaries/*.md`, `memory.md`, per-project `log.md`) — not in its session
       // — so dropping session state between cron ticks prevents context-overflow loops without
@@ -758,7 +784,13 @@ export class AgentHost {
       // storms at startup queueing multiple scheduled tasks) is precisely when several
       // deliveries pile up. After reinitialize() resolves, replay the queued deliveries
       // against the fresh session.
-      if (completedScheduledTask && this.resetSessionAfterScheduledTask) {
+      if (scheduledTaskAttempted && this.resetSessionAfterScheduledTask) {
+        if (wasErroredTurn) {
+          // The error-turn cleanup block above skipped clearing the send counter; the
+          // failed sends are abandoned and replayPendingDeliveries will re-send from
+          // scratch against the fresh session, so reset to 0 here.
+          this.deliverySendCount = 0;
+        }
         this.resetSessionToHeader();
         // Reinitialize asynchronously so the next scheduled tick has a live session ready.
         // Errors are surfaced via .catch (logged AND propagated to any deliveries queued during
@@ -844,6 +876,16 @@ export class AgentHost {
     // or shift pendingDeliveries. Must be set synchronously (before any await)
     // because agent_end fires synchronously after message_end.
     this.lastTurnErrored = true;
+
+    // Snapshot whether any pending delivery was a scheduled task BEFORE the
+    // contamination guard or any other rejection path empties pendingDeliveries.
+    // agent_end uses this to extend the post-scheduled-task session reset to
+    // error turns, breaking the self-reinforcing context-overflow loop where a
+    // failed cron tick leaves the session bloated and the next tick fails the
+    // same way. See GitHub issue #189.
+    if (this.pendingDeliveries.some((d) => d.scheduledTask)) {
+      this.hadScheduledTaskDeliveryThisTurn = true;
+    }
 
     const errorMessage = message.errorMessage;
     log.info('[AgentHost] API error detected:', errorMessage);

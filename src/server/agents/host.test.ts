@@ -4415,6 +4415,7 @@ describe('AgentHost', () => {
       unsubscribeSession: (() => void) | null;
       compactionCount: number;
       lastTurnErrored: boolean;
+      hadScheduledTaskDeliveryThisTurn: boolean;
       handleSessionEvent: (event: Record<string, unknown>) => void;
       handlePotentialError: ReturnType<typeof vi.fn>;
       handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -4552,6 +4553,99 @@ describe('AgentHost', () => {
       expect(archived.length).toBe(0);
       expect(internal.session).toBe(sessionBefore);
       expect(internal.initialize).not.toHaveBeenCalled();
+    });
+
+    it('resets session on error turn that attempted a scheduled-task delivery (issue #189)', () => {
+      // Repro for the self-reinforcing context-overflow loop: when a daily-summary tick
+      // fails mid-turn (model emitted output, then API returned `prompt is too long`),
+      // the contamination guard rejects pending deliveries before agent_end fires.
+      // Without this reset path, the bloated session never shrinks (handleContextOverflow
+      // can't find a safe split point at that size) and every subsequent tick grows it
+      // further. Resetting after the failed tick breaks the loop — narrator memory lives
+      // in files, so the session is throwaway.
+      const { internal } = makeHostWithSessionDir({ reset: true });
+
+      // Simulate handlePotentialError having seen a scheduled-task delivery in flight
+      // before the contamination guard rejected and cleared the array.
+      internal.hadScheduledTaskDeliveryThisTurn = true;
+      internal.lastTurnErrored = true;
+      internal.pendingDeliveries = [];
+
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      // Session was reset: file archived, in-memory session cleared, reinit kicked off
+      const archived = readdirSync(testDir).filter((f) => f.endsWith('.jsonl.archived'));
+      expect(archived.length).toBe(1);
+      expect(internal.session).toBeNull();
+      expect(internal.initialize).toHaveBeenCalledOnce();
+
+      // Per-turn flag was cleared after consumption so a subsequent non-scheduled error
+      // turn doesn't trigger another reset.
+      expect(internal.hadScheduledTaskDeliveryThisTurn).toBe(false);
+    });
+
+    it('does not reset on error turn that had no scheduled-task delivery', () => {
+      // Chat error turns must not trigger session reset — only scheduled-task error turns
+      // do (narrator's reset is explicitly tied to per-cron-tick freshness).
+      const { internal } = makeHostWithSessionDir({ reset: true });
+
+      internal.hadScheduledTaskDeliveryThisTurn = false;
+      internal.lastTurnErrored = true;
+      internal.pendingDeliveries = [];
+
+      const sessionBefore = internal.session;
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      const archived = readdirSync(testDir).filter((f) => f.endsWith('.archived'));
+      expect(archived.length).toBe(0);
+      expect(internal.session).toBe(sessionBefore);
+      expect(internal.initialize).not.toHaveBeenCalled();
+    });
+
+    it('handlePotentialError flags hadScheduledTaskDeliveryThisTurn when scheduled-task delivery is pending', async () => {
+      // The agent_end reset-on-error path relies on this flag being set before the
+      // contamination guard empties pendingDeliveries. Verify the wiring.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        resetSessionAfterScheduledTask: true,
+      });
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          scheduledTask?: boolean;
+          resolve: () => void;
+          reject: (e: Error) => void;
+        }>;
+        currentTurnHasOutput: boolean;
+        hadScheduledTaskDeliveryThisTurn: boolean;
+        handlePotentialError: (event: Record<string, unknown>) => Promise<void>;
+      };
+
+      internal.currentTurnHasOutput = true;
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /x',
+          details: { sender: 1, receiver: 2, timestamp: Date.now() },
+          scheduledTask: true,
+          resolve: vi.fn(),
+          reject: vi.fn(),
+        },
+      ];
+
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: {
+          stopReason: 'error',
+          errorMessage:
+            '400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1231304 tokens > 1000000 maximum"}}',
+        },
+      });
+
+      expect(internal.hadScheduledTaskDeliveryThisTurn).toBe(true);
     });
 
     it('explicit caller-provided false beats frontmatter true (override-presence wins)', () => {
