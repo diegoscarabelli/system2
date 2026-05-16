@@ -1015,7 +1015,11 @@ export class AgentHost {
           nextProvider === this.currentProvider
             ? `${errorPrefix}, rotating to next key`
             : `${errorPrefix}, switched to ${nextProvider}`;
-        const reauthHint = this.oauthReauthHintFor(this.currentProvider, statusCode);
+        const reauthHint = this.oauthReauthHintFor(
+          this.currentProvider,
+          this.currentTier,
+          statusCode
+        );
         const detail =
           nextProvider === this.currentProvider
             ? `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}${reauthHint}`
@@ -1141,7 +1145,7 @@ export class AgentHost {
         if (nextProvider) {
           if (nextProvider === this.currentProvider) {
             const reason = `${errorPrefix}, rotating to next key`;
-            const detail = `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider, statusCode)}`;
+            const detail = `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider, this.currentTier, statusCode)}`;
             log.info(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
@@ -1151,15 +1155,17 @@ export class AgentHost {
               detail
             );
           } else {
-            // Capture before compactForProvider may mutate this.currentProvider
+            // Capture before compactForProvider may mutate this.currentProvider / currentTier
+            // (it may call handleContextOverflow which reinitializes the session).
             const fromProvider = this.currentProvider;
+            const fromTier = this.currentTier;
 
             // Proactive context check: compact before failover if the candidate
             // model's context window is smaller than the current token count.
             await this.compactForProvider(nextProvider);
 
             const reason = `${errorPrefix}, switched to ${nextProvider}`;
-            const detail = `on ${fromProvider}, switching to ${nextProvider}\n\n${errorMessage}${this.oauthReauthHintFor(fromProvider, statusCode)}`;
+            const detail = `on ${fromProvider}, switching to ${nextProvider}\n\n${errorMessage}${this.oauthReauthHintFor(fromProvider, fromTier, statusCode)}`;
             log.info(`[AgentHost] Failing over from ${fromProvider} to ${nextProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
@@ -1174,7 +1180,7 @@ export class AgentHost {
       }
 
       this.pushSystemMessage(
-        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider, statusCode)}`
+        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider, this.currentTier, statusCode)}`
       );
       log.info('[AgentHost] No fallback providers available, error will be surfaced to user');
 
@@ -1223,14 +1229,15 @@ export class AgentHost {
     // switch to it. This covers cases like being stuck on a dead fallback provider.
     const nextProvider = this.authResolver.getNextProvider();
     if (nextProvider && nextProvider !== this.currentProvider) {
-      // Capture before compactForProvider may mutate this.currentProvider
+      // Capture before compactForProvider may mutate this.currentProvider / currentTier
       const fromProvider = this.currentProvider;
+      const fromTier = this.currentTier;
 
       // Proactive context check before last-resort failover
       await this.compactForProvider(nextProvider);
 
       const reason = `${errorPrefix}, switched to ${nextProvider}`;
-      const detail = `on ${fromProvider}, switching to ${nextProvider}${this.oauthReauthHintFor(fromProvider, statusCode)}`;
+      const detail = `on ${fromProvider}, switching to ${nextProvider}${this.oauthReauthHintFor(fromProvider, fromTier, statusCode)}`;
       log.info(`[AgentHost] Recovery: switching from ${fromProvider} to ${nextProvider}`);
       await this.reinitializeWithProvider(
         nextProvider,
@@ -1433,15 +1440,24 @@ export class AgentHost {
     }
   }
 
-  /** Returns a user-facing re-auth hint when the given OAuth provider's
-   *  refresh-and-retry has already failed this delivery AND the current error
-   *  being surfaced is itself an auth 401. Two gates because the
-   *  `oauthRefreshAttemptedFor` set persists across handlePotentialError calls
-   *  within a delivery — without the statusCode check, a non-auth error (e.g.,
-   *  rate_limit) arriving after a successful refresh-retry would still see the
-   *  flag set and emit the hint, which would be misleading. */
-  private oauthReauthHintFor(provider: LlmProvider, statusCode: number | undefined): string {
-    return statusCode === 401 && this.oauthRefreshAttemptedFor.has(provider)
+  /** Returns a user-facing re-auth hint when an OAuth credential is the
+   *  one being surfaced as failing. Three gates:
+   *    - The failing tier is 'oauth' (so an API-key 401 for the same provider
+   *      does not inherit OAuth refresh state — cooldowns are tier-namespaced
+   *      in AuthResolver, and failover from OAuth to api_keys for the same
+   *      provider is a real scenario).
+   *    - The current error is a 401 (categorizeError maps both 401 and 403
+   *      to 'auth' but 403 typically signals permission/entitlement, where
+   *      re-authentication is not the fix).
+   *    - The provider's refresh-and-retry has already been attempted this
+   *      delivery (so we don't show the hint on the first 401, only after
+   *      the automatic recovery path has been used). */
+  private oauthReauthHintFor(
+    provider: LlmProvider,
+    tier: AuthTier,
+    statusCode: number | undefined
+  ): string {
+    return tier === 'oauth' && statusCode === 401 && this.oauthRefreshAttemptedFor.has(provider)
       ? '\n\nRun `system2 config` and restart the server to re-authenticate.'
       : '';
   }

@@ -4365,6 +4365,35 @@ describe('AgentHost', () => {
       expect(cast.oauthRefreshAttemptedFor.size).toBe(0);
     });
 
+    it('does NOT append re-auth hint when current tier is api_keys (post-failover from OAuth)', async () => {
+      const { internal, authResolver, host } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentTier: string;
+        currentKeyIndex: number;
+      };
+      const hostInternal = host as unknown as { _chatCache: { push: ReturnType<typeof vi.fn> } };
+      hostInternal._chatCache = { push: vi.fn() };
+
+      // Simulate: OAuth refresh-retry failed earlier, AuthResolver failed over
+      // to an API key for the same provider, currentTier is now api_keys.
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      cast.currentTier = 'api_keys';
+      cast.currentKeyIndex = 0;
+      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue(undefined);
+
+      // 401 from the API key — same provider, different tier
+      await internal.handlePotentialError(auth401Event);
+
+      expect(hostInternal._chatCache.push).toHaveBeenCalled();
+      const pushed = hostInternal._chatCache.push.mock.calls[0][0] as { content: string };
+      // API-key 401 must not show the OAuth re-auth hint, even though the flag
+      // was set by the earlier OAuth failure.
+      expect(pushed.content).toContain('all providers unavailable');
+      expect(pushed.content).not.toContain('Run `system2 config`');
+    });
+
     it('does NOT append re-auth hint when refresh-retry flag is set but current error is non-auth', async () => {
       const { internal, authResolver, host } = await makeOAuthHost();
       const cast = internal as unknown as {
