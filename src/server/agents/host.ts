@@ -281,7 +281,11 @@ export class AgentHost {
   private resourceLoader: DefaultResourceLoader | null = null;
   private busy = false;
   private lastTurnErrored = false;
-  private oauthRefreshAttempted = false;
+  /** Providers whose OAuth refresh-and-retry has already been attempted this
+   *  delivery. Tracked per-provider so a refresh-retry on one OAuth provider
+   *  doesn't suppress a different provider's chance to refresh-retry on a
+   *  later 401. Cleared on successful delivery (see agent_end). */
+  private oauthRefreshAttemptedFor: Set<LlmProvider> = new Set();
   /** True when the active OAuth model was NOT explicitly user-pinned in
    *  [llm.oauth.<provider>].model — i.e., it came from resolveOAuthModel or
    *  from OAUTH_FALLBACKS after a prior 403/404 step-down. Gates the 403/404
@@ -737,7 +741,7 @@ export class AgentHost {
         this.deliverySendCount = 0;
         // Re-arm the OAuth refresh guard so a future 401 on a fresh token can
         // trigger another refresh attempt.
-        this.oauthRefreshAttempted = false;
+        this.oauthRefreshAttemptedFor.clear();
       }
       this.lastTurnErrored = false;
       // Clear the per-turn output flag at the run boundary, matching its
@@ -957,8 +961,18 @@ export class AgentHost {
     // revoked while still appearing fresh locally (expires far in the future). If the
     // refresh didn't actually happen (provider not in returned set), skip the retry and
     // fall through to standard failover instead of burning a round-trip with the same token.
-    if (category === 'auth' && this.currentTier === 'oauth' && !this.oauthRefreshAttempted) {
-      this.oauthRefreshAttempted = true;
+    // Gate on statusCode === 401 specifically rather than category === 'auth':
+    // categorizeError() maps both 401 and 403 to 'auth', but 403s typically signal
+    // permission/entitlement issues (e.g., model not available on the user's plan)
+    // and re-authentication is not the right fix. The 403/404 OAuth model-step-down
+    // path above handles auto-resolved 403s; any 403 that reaches here means
+    // either the model is user-pinned or the step-down has already been used.
+    if (
+      statusCode === 401 &&
+      this.currentTier === 'oauth' &&
+      !this.oauthRefreshAttemptedFor.has(this.currentProvider)
+    ) {
+      this.oauthRefreshAttemptedFor.add(this.currentProvider);
       try {
         const refreshed = await this.authResolver.ensureFresh({
           refresh: refreshOAuthToken,
@@ -1001,10 +1015,15 @@ export class AgentHost {
           nextProvider === this.currentProvider
             ? `${errorPrefix}, rotating to next key`
             : `${errorPrefix}, switched to ${nextProvider}`;
+        const reauthHint = this.oauthReauthHintFor(
+          this.currentProvider,
+          this.currentTier,
+          statusCode
+        );
         const detail =
           nextProvider === this.currentProvider
-            ? `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}`
-            : `on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}\n\n${errorMessage}`;
+            ? `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}${reauthHint}`
+            : `on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}\n\n${errorMessage}${reauthHint}`;
         log.info(
           `[AgentHost] Key ${this.currentProvider}:${this.currentKeyIndex} already in cooldown`
         );
@@ -1126,7 +1145,7 @@ export class AgentHost {
         if (nextProvider) {
           if (nextProvider === this.currentProvider) {
             const reason = `${errorPrefix}, rotating to next key`;
-            const detail = `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}`;
+            const detail = `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider, this.currentTier, statusCode)}`;
             log.info(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
@@ -1136,15 +1155,17 @@ export class AgentHost {
               detail
             );
           } else {
-            // Capture before compactForProvider may mutate this.currentProvider
+            // Capture before compactForProvider may mutate this.currentProvider / currentTier
+            // (it may call handleContextOverflow which reinitializes the session).
             const fromProvider = this.currentProvider;
+            const fromTier = this.currentTier;
 
             // Proactive context check: compact before failover if the candidate
             // model's context window is smaller than the current token count.
             await this.compactForProvider(nextProvider);
 
             const reason = `${errorPrefix}, switched to ${nextProvider}`;
-            const detail = `on ${fromProvider}, switching to ${nextProvider}\n\n${errorMessage}`;
+            const detail = `on ${fromProvider}, switching to ${nextProvider}\n\n${errorMessage}${this.oauthReauthHintFor(fromProvider, fromTier, statusCode)}`;
             log.info(`[AgentHost] Failing over from ${fromProvider} to ${nextProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
@@ -1159,7 +1180,7 @@ export class AgentHost {
       }
 
       this.pushSystemMessage(
-        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable\n\n${errorMessage}`
+        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider, this.currentTier, statusCode)}`
       );
       log.info('[AgentHost] No fallback providers available, error will be surfaced to user');
 
@@ -1208,14 +1229,15 @@ export class AgentHost {
     // switch to it. This covers cases like being stuck on a dead fallback provider.
     const nextProvider = this.authResolver.getNextProvider();
     if (nextProvider && nextProvider !== this.currentProvider) {
-      // Capture before compactForProvider may mutate this.currentProvider
+      // Capture before compactForProvider may mutate this.currentProvider / currentTier
       const fromProvider = this.currentProvider;
+      const fromTier = this.currentTier;
 
       // Proactive context check before last-resort failover
       await this.compactForProvider(nextProvider);
 
       const reason = `${errorPrefix}, switched to ${nextProvider}`;
-      const detail = `on ${fromProvider}, switching to ${nextProvider}`;
+      const detail = `on ${fromProvider}, switching to ${nextProvider}${this.oauthReauthHintFor(fromProvider, fromTier, statusCode)}`;
       log.info(`[AgentHost] Recovery: switching from ${fromProvider} to ${nextProvider}`);
       await this.reinitializeWithProvider(
         nextProvider,
@@ -1416,6 +1438,28 @@ export class AgentHost {
     } finally {
       this.isReinitializing = false;
     }
+  }
+
+  /** Returns a user-facing re-auth hint when an OAuth credential is the
+   *  one being surfaced as failing. Three gates:
+   *    - The failing tier is 'oauth' (so an API-key 401 for the same provider
+   *      does not inherit OAuth refresh state — cooldowns are tier-namespaced
+   *      in AuthResolver, and failover from OAuth to api_keys for the same
+   *      provider is a real scenario).
+   *    - The current error is a 401 (categorizeError maps both 401 and 403
+   *      to 'auth' but 403 typically signals permission/entitlement, where
+   *      re-authentication is not the fix).
+   *    - The provider's refresh-and-retry has already been attempted this
+   *      delivery (so we don't show the hint on the first 401, only after
+   *      the automatic recovery path has been used). */
+  private oauthReauthHintFor(
+    provider: LlmProvider,
+    tier: AuthTier,
+    statusCode: number | undefined
+  ): string {
+    return tier === 'oauth' && statusCode === 401 && this.oauthRefreshAttemptedFor.has(provider)
+      ? '\n\nRun `system2 config` and restart the server to re-authenticate.'
+      : '';
   }
 
   /** Push a system-role message into the chat cache (visible in UI history). */

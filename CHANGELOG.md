@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OAuth refresh-retry failures now surface an actionable hint ("Run `system2 config` and restart the server to re-authenticate.") in the user-visible chat error. A server-side revoked grant lets the refresh endpoint mint a new access token that the API then 401s; `AgentHost.handlePotentialError`'s one-shot refresh-and-retry caught the first 401 but fell over silently when the retry also 401'd, leaving the user with "all providers unavailable" and no indication of the fix. The 2026-05-15 incident left auth broken for ~4 days (masked by fallback to a second OAuth provider) before both providers happened to be revoked simultaneously and the catch-up backlog grew to 65h of summaries and 75h of memory updates. Implementation: `oauthRefreshAttempted` boolean → `oauthRefreshAttemptedFor: Set<LlmProvider>` so per-provider refresh-retry state is independent. New `oauthReauthHintFor(provider, tier, statusCode)` helper appends the hint at every user-visible chat-message path in `handlePotentialError` (cooldown-by-another rotate/switch, post-`markKeyFailed` rotate/switch, all-providers-unavailable, last-resort failover). Three gates on the hint — `tier === 'oauth'` (api-key 401s on the same provider don't inherit OAuth refresh state), `statusCode === 401` (403s are permission/entitlement, not revoked tokens; non-auth errors after a successful refresh-retry don't leak the hint before `agent_end` clears the flag), and per-provider flag membership. Set clears on successful `agent_end`. Out of scope: API-key 401 messaging and startup auth ping/banner UI. Fixes [#188](https://github.com/diegoscarabelli/system2/issues/188).
+
 ## [0.3.10] - 2026-05-12
 
 ### Fixed
