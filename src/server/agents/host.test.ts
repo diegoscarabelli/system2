@@ -4621,6 +4621,7 @@ describe('AgentHost', () => {
           reject: (e: Error) => void;
         }>;
         currentTurnHasOutput: boolean;
+        deliverySendCount: number;
         hadScheduledTaskDeliveryThisTurn: boolean;
         handlePotentialError: (event: Record<string, unknown>) => Promise<void>;
       };
@@ -4635,6 +4636,9 @@ describe('AgentHost', () => {
           reject: vi.fn(),
         },
       ];
+      // deliverySendCount=1 means the scheduled-task is "in flight" (dispatched to
+      // sendCustomMessage). The flag is set off in-flight deliveries only, not deferred ones.
+      internal.deliverySendCount = 1;
 
       await internal.handlePotentialError({
         type: 'message_end',
@@ -4646,6 +4650,59 @@ describe('AgentHost', () => {
       });
 
       expect(internal.hadScheduledTaskDeliveryThisTurn).toBe(true);
+    });
+
+    it('does not flag hadScheduledTaskDeliveryThisTurn when only DEFERRED scheduled tasks are in queue (Copilot review #1)', async () => {
+      // Scenario: a chat prompt() turn errors while scheduled-task deliveries are queued
+      // behind it (gate-deferred). The error belongs to the chat turn, not the scheduled
+      // tasks — the post-scheduled-task reset must NOT fire and reset the session.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        resetSessionAfterScheduledTask: true,
+      });
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          scheduledTask?: boolean;
+          deferred?: boolean;
+          resolve: () => void;
+          reject: (e: Error) => void;
+        }>;
+        currentTurnHasOutput: boolean;
+        deliverySendCount: number;
+        hadScheduledTaskDeliveryThisTurn: boolean;
+        handlePotentialError: (event: Record<string, unknown>) => Promise<void>;
+      };
+
+      internal.currentTurnHasOutput = true;
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /x',
+          details: { sender: 1, receiver: 2, timestamp: Date.now() },
+          scheduledTask: true,
+          deferred: true,
+          resolve: vi.fn(),
+          reject: vi.fn(),
+        },
+      ];
+      // deliverySendCount=0: the scheduled task is deferred, not in flight. The errored turn
+      // must be something else (e.g., a chat prompt()).
+      internal.deliverySendCount = 0;
+
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: {
+          stopReason: 'error',
+          errorMessage:
+            '400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1231304 tokens > 1000000 maximum"}}',
+        },
+      });
+
+      expect(internal.hadScheduledTaskDeliveryThisTurn).toBe(false);
     });
 
     it('explicit caller-provided false beats frontmatter true (override-presence wins)', () => {

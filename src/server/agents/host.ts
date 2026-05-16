@@ -894,13 +894,22 @@ export class AgentHost {
     // because agent_end fires synchronously after message_end.
     this.lastTurnErrored = true;
 
-    // Snapshot whether any pending delivery was a scheduled task BEFORE the
+    // Snapshot whether any IN-FLIGHT delivery was a scheduled task BEFORE the
     // contamination guard or any other rejection path empties pendingDeliveries.
     // agent_end uses this to extend the post-scheduled-task session reset to
     // error turns, breaking the self-reinforcing context-overflow loop where a
     // failed cron tick leaves the session bloated and the next tick fails the
     // same way. See GitHub issue #189.
-    if (this.pendingDeliveries.some((d) => d.scheduledTask)) {
+    //
+    // Only items at pendingDeliveries[0..deliverySendCount-1] are actually dispatched to
+    // sendCustomMessage. Deferred items at the tail (scheduled-task deliveries gated behind
+    // an in-flight delivery, marked `deferred: true`) are NOT in flight and must not trigger
+    // a reset for an unrelated error (e.g., a chat prompt() failing while a scheduled task
+    // waits its turn). This precision was raised by Copilot on the first commit.
+    const inFlightHadScheduled = this.pendingDeliveries
+      .slice(0, this.deliverySendCount)
+      .some((d) => d.scheduledTask);
+    if (inFlightHadScheduled) {
       this.hadScheduledTaskDeliveryThisTurn = true;
     }
 
