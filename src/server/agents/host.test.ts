@@ -4749,6 +4749,7 @@ describe('AgentHost', () => {
       unsubscribeSession: (() => void) | null;
       compactionCount: number;
       lastTurnErrored: boolean;
+      hadScheduledTaskDeliveryThisTurn: boolean;
       handleSessionEvent: (event: Record<string, unknown>) => void;
       handlePotentialError: ReturnType<typeof vi.fn>;
       handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -4886,6 +4887,156 @@ describe('AgentHost', () => {
       expect(archived.length).toBe(0);
       expect(internal.session).toBe(sessionBefore);
       expect(internal.initialize).not.toHaveBeenCalled();
+    });
+
+    it('resets session on error turn that attempted a scheduled-task delivery (issue #189)', () => {
+      // Repro for the self-reinforcing context-overflow loop: when a daily-summary tick
+      // fails mid-turn (model emitted output, then API returned `prompt is too long`),
+      // the contamination guard rejects pending deliveries before agent_end fires.
+      // Without this reset path, the bloated session never shrinks (handleContextOverflow
+      // can't find a safe split point at that size) and every subsequent tick grows it
+      // further. Resetting after the failed tick breaks the loop — narrator memory lives
+      // in files, so the session is throwaway.
+      const { internal } = makeHostWithSessionDir({ reset: true });
+
+      // Simulate handlePotentialError having seen a scheduled-task delivery in flight
+      // before the contamination guard rejected and cleared the array.
+      internal.hadScheduledTaskDeliveryThisTurn = true;
+      internal.lastTurnErrored = true;
+      internal.pendingDeliveries = [];
+
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      // Session was reset: file archived, in-memory session cleared, reinit kicked off
+      const archived = readdirSync(testDir).filter((f) => f.endsWith('.jsonl.archived'));
+      expect(archived.length).toBe(1);
+      expect(internal.session).toBeNull();
+      expect(internal.initialize).toHaveBeenCalledOnce();
+
+      // Per-turn flag was cleared after consumption so a subsequent non-scheduled error
+      // turn doesn't trigger another reset.
+      expect(internal.hadScheduledTaskDeliveryThisTurn).toBe(false);
+    });
+
+    it('does not reset on error turn that had no scheduled-task delivery', () => {
+      // Chat error turns must not trigger session reset — only scheduled-task error turns
+      // do (narrator's reset is explicitly tied to per-cron-tick freshness).
+      const { internal } = makeHostWithSessionDir({ reset: true });
+
+      internal.hadScheduledTaskDeliveryThisTurn = false;
+      internal.lastTurnErrored = true;
+      internal.pendingDeliveries = [];
+
+      const sessionBefore = internal.session;
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      const archived = readdirSync(testDir).filter((f) => f.endsWith('.archived'));
+      expect(archived.length).toBe(0);
+      expect(internal.session).toBe(sessionBefore);
+      expect(internal.initialize).not.toHaveBeenCalled();
+    });
+
+    it('handlePotentialError flags hadScheduledTaskDeliveryThisTurn when scheduled-task delivery is pending', async () => {
+      // The agent_end reset-on-error path relies on this flag being set before the
+      // contamination guard empties pendingDeliveries. Verify the wiring.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        resetSessionAfterScheduledTask: true,
+      });
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          scheduledTask?: boolean;
+          resolve: () => void;
+          reject: (e: Error) => void;
+        }>;
+        currentTurnHasOutput: boolean;
+        deliverySendCount: number;
+        hadScheduledTaskDeliveryThisTurn: boolean;
+        handlePotentialError: (event: Record<string, unknown>) => Promise<void>;
+      };
+
+      internal.currentTurnHasOutput = true;
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /x',
+          details: { sender: 1, receiver: 2, timestamp: Date.now() },
+          scheduledTask: true,
+          resolve: vi.fn(),
+          reject: vi.fn(),
+        },
+      ];
+      // deliverySendCount=1 means the scheduled-task is "in flight" (dispatched to
+      // sendCustomMessage). The flag is set off in-flight deliveries only, not deferred ones.
+      internal.deliverySendCount = 1;
+
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: {
+          stopReason: 'error',
+          errorMessage:
+            '400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1231304 tokens > 1000000 maximum"}}',
+        },
+      });
+
+      expect(internal.hadScheduledTaskDeliveryThisTurn).toBe(true);
+    });
+
+    it('does not flag hadScheduledTaskDeliveryThisTurn when only DEFERRED scheduled tasks are in queue (Copilot review #1)', async () => {
+      // Scenario: a chat prompt() turn errors while scheduled-task deliveries are queued
+      // behind it (gate-deferred). The error belongs to the chat turn, not the scheduled
+      // tasks — the post-scheduled-task reset must NOT fire and reset the session.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+        resetSessionAfterScheduledTask: true,
+      });
+      const internal = host as unknown as {
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          scheduledTask?: boolean;
+          deferred?: boolean;
+          resolve: () => void;
+          reject: (e: Error) => void;
+        }>;
+        currentTurnHasOutput: boolean;
+        deliverySendCount: number;
+        hadScheduledTaskDeliveryThisTurn: boolean;
+        handlePotentialError: (event: Record<string, unknown>) => Promise<void>;
+      };
+
+      internal.currentTurnHasOutput = true;
+      internal.pendingDeliveries = [
+        {
+          content: '[Scheduled task: daily-summary]\n\nfile: /x',
+          details: { sender: 1, receiver: 2, timestamp: Date.now() },
+          scheduledTask: true,
+          deferred: true,
+          resolve: vi.fn(),
+          reject: vi.fn(),
+        },
+      ];
+      // deliverySendCount=0: the scheduled task is deferred, not in flight. The errored turn
+      // must be something else (e.g., a chat prompt()).
+      internal.deliverySendCount = 0;
+
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: {
+          stopReason: 'error',
+          errorMessage:
+            '400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1231304 tokens > 1000000 maximum"}}',
+        },
+      });
+
+      expect(internal.hadScheduledTaskDeliveryThisTurn).toBe(false);
     });
 
     it('explicit caller-provided false beats frontmatter true (override-presence wins)', () => {
@@ -5286,6 +5437,298 @@ describe('AgentHost', () => {
       expect(internal.pendingDeliveries).toHaveLength(2);
       expect(internal.pendingDeliveries[0].scheduledTask).toBe(true);
       expect(internal.pendingDeliveries[1].scheduledTask).toBe(false);
+    });
+
+    it('defers second scheduled-task delivery while the first is in flight (issue #189)', async () => {
+      // Repro for the within-tick context-overflow trigger: the daily-summary scheduler queues
+      // 3 scheduled-task deliveries in rapid succession. Without this gate, all 3 are sent to
+      // the Pi SDK as `followUp` turns within ONE run — each delivery's API call carries the
+      // prior turns as conversation history, blowing the model's 1M-token context window by
+      // the 3rd delivery. The gate keeps each scheduled-task delivery in its own run so the
+      // post-scheduled-task session reset can fire between them.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+      };
+      internal.session = { sendCustomMessage };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 2', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 3', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Scheduled task: daily-summary]\n\nfile: /x', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      // Flush the reload-then-send microtask so the assertion sees the actual send.
+      await Promise.resolve();
+
+      // All 3 queued, but only the first was actually sent to the SDK.
+      expect(internal.pendingDeliveries).toHaveLength(3);
+      expect(sendCustomMessage).toHaveBeenCalledTimes(1);
+      expect(internal.deliverySendCount).toBe(1);
+
+      // The two later ones are marked deferred so agent_end's gated dispatch picks them up.
+      expect(internal.pendingDeliveries[0].deferred).toBeFalsy();
+      expect(internal.pendingDeliveries[1].deferred).toBe(true);
+      expect(internal.pendingDeliveries[2].deferred).toBe(true);
+    });
+
+    it('agent_end dispatches the next deferred scheduled-task delivery (issue #189)', async () => {
+      // Verifies the gate releases on agent_end: after the in-flight delivery resolves, the
+      // next deferred one is sent. Without this, deferred deliveries would sit in the queue
+      // forever and the scheduler's Promise.allSettled would never resolve.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+        handleSessionEvent: (event: Record<string, unknown>) => void;
+        handlePotentialError: ReturnType<typeof vi.fn>;
+        handleCompactionTracking: ReturnType<typeof vi.fn>;
+      };
+      internal.session = { sendCustomMessage };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+      internal.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+      internal.handleCompactionTracking = vi.fn();
+
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 2', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 3', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      // Flush the reload-then-send microtask for the first delivery.
+      await Promise.resolve();
+      expect(sendCustomMessage).toHaveBeenCalledTimes(1);
+
+      // Simulate the first delivery's run completing.
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      // First delivery shifted; second (deferred) sent against the now-idle session.
+      expect(internal.pendingDeliveries).toHaveLength(1);
+      expect(internal.pendingDeliveries[0].content).toContain('project_id: 3');
+      expect(internal.pendingDeliveries[0].deferred).toBe(false);
+      expect(sendCustomMessage).toHaveBeenCalledTimes(2);
+      expect(internal.deliverySendCount).toBe(1);
+    });
+
+    it('marks deliveries deferred when queued during reinit (Copilot reviews #2 and #3)', () => {
+      // Without this marking, agent_end's `.some(deferred)` guard would skip dispatch and the
+      // queued items could stay stuck until the next scheduled-task-triggered reset (which
+      // might never come if no other scheduled-task runs). All deliveries — scheduled or
+      // chat — that arrive during a reinit window are deferred, both so the agent_end gated
+      // dispatch picks them up AND so the queue stays a strict "sent prefix + deferred suffix"
+      // (the invariant agent_end's shift and hadScheduledTaskDeliveryThisTurn's slice rely on).
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const internal = host as unknown as {
+        session: unknown;
+        isReinitializing: boolean;
+        _chatCache: null;
+        _sessionDir: string | null;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+      };
+      internal.session = null;
+      internal.isReinitializing = true;
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      host.deliverMessage('[Scheduled task: memory-update]\n\nfile: /y', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Message from guide agent (id=1)]\n\nhi', {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      expect(internal.pendingDeliveries).toHaveLength(2);
+      expect(internal.pendingDeliveries[0].deferred).toBe(true);
+      expect(internal.pendingDeliveries[1].deferred).toBe(true);
+    });
+
+    it('defers non-scheduled delivery when an earlier deferred item exists (Copilot review #3)', async () => {
+      // FIFO invariant: pendingDeliveries[0..deliverySendCount-1] must be exactly the
+      // in-flight prefix. Without this gate, the queue could end up as [A_sent, B_deferred,
+      // C_sent], breaking agent_end's shift (it would resolve B's promise on A's run end).
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+      };
+      internal.session = { sendCustomMessage };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      // A: scheduled-task, sent first
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 2', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      // B: scheduled-task, deferred by the scheduled-task gate
+      host.deliverMessage('[Scheduled task: daily-summary]\n\nfile: /x', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      // C: NON-scheduled chat arriving after a deferred item exists — must be deferred too.
+      host.deliverMessage('[Message from guide agent (id=1)]\n\nhi', {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      await Promise.resolve();
+
+      expect(internal.pendingDeliveries).toHaveLength(3);
+      expect(sendCustomMessage).toHaveBeenCalledTimes(1); // only A was sent
+      expect(internal.deliverySendCount).toBe(1);
+      expect(internal.pendingDeliveries[0].deferred).toBeFalsy(); // A: sent
+      expect(internal.pendingDeliveries[1].deferred).toBe(true); // B: gate-deferred
+      expect(internal.pendingDeliveries[2].deferred).toBe(true); // C: FIFO-deferred
+    });
+
+    it('send failure dispatches deferred items (self-review #2/3 on PR #191)', async () => {
+      // If sendCustomMessage rejects synchronously, no agent_end fires for that turn —
+      // without the .catch's dispatch trigger, any deferred scheduled-task behind the
+      // failed send would sit in the queue forever, never resolving.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      // First call (A) rejects; second call (B's dispatch) succeeds.
+      const sendCustomMessage = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('send failed'))
+        .mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+      };
+      internal.session = { sendCustomMessage };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      const aPromise = host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 2', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      // B is deferred behind A (scheduled-task gate).
+      host.deliverMessage('[Scheduled task: daily-summary]\n\nfile: /x', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      // Flush A's send (which rejects), then B's dispatch from the .catch.
+      await aPromise.catch(() => undefined);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // A was rejected and removed; B was sent against the live session.
+      expect(internal.pendingDeliveries).toHaveLength(1);
+      expect(internal.pendingDeliveries[0].content).toContain('daily-summary');
+      expect(internal.pendingDeliveries[0].deferred).toBe(false);
+      expect(sendCustomMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('defers chat when a scheduled-task is in flight (Copilot review #5 on PR #191)', async () => {
+      // "Scheduled tasks run alone" invariant: a non-scheduled delivery arriving while a
+      // scheduled-task is in flight must be deferred, not piled on as a Pi SDK followUp.
+      // Otherwise chat shares the scheduled-task's run and the per-run session reset would
+      // no longer reflect a pure scheduled-task turn.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+      };
+      internal.session = { sendCustomMessage };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      host.deliverMessage('[Scheduled task: daily-summary]\n\nfile: /x', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Message from guide agent (id=1)]\n\nhi', {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      await Promise.resolve();
+
+      expect(internal.pendingDeliveries).toHaveLength(2);
+      expect(sendCustomMessage).toHaveBeenCalledTimes(1); // only scheduled-task sent
+      expect(internal.deliverySendCount).toBe(1);
+      expect(internal.pendingDeliveries[0].deferred).toBeFalsy(); // scheduled: sent
+      expect(internal.pendingDeliveries[1].deferred).toBe(true); // chat: deferred
     });
   });
 });
