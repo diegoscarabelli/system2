@@ -1443,7 +1443,11 @@ export class AgentHost {
         let scheduledTaskSent = false;
         let anyDeferred = false;
         for (const d of toReplay) {
-          if (anyDeferred || (d.scheduledTask && scheduledTaskSent)) {
+          // Respect pre-existing deferred flag: items that were gate-blocked before failover
+          // (e.g., a scheduled task deferred behind an in-flight chat) must remain deferred
+          // here, otherwise they'd be sent inline as a followUp on the new session and the
+          // gate semantics would be lost. Self-review #1 on PR #191.
+          if (d.deferred || anyDeferred || (d.scheduledTask && scheduledTaskSent)) {
             d.deferred = true;
             anyDeferred = true;
             // toReplay may contain items that have been removed from pendingDeliveries (e.g.,
@@ -1874,9 +1878,11 @@ export class AgentHost {
 
     // Reload resource loader to pick up knowledge file changes, then deliver.
     // Reload errors are swallowed so a filesystem hiccup never drops a message.
-    // The gate above (`reinitInFlight`) guarantees this.session is non-null at this point.
-    const session = this.session;
-    if (!session) return promise; // narrow type for TS — unreachable in practice
+    // The `reinitInFlight` gate above guarantees this.session is non-null here; using a
+    // non-null assertion (rather than a silent guard) so that any future regression that
+    // breaks the gate logic surfaces loudly via runtime crash instead of silently dropping
+    // the delivery. Self-review #4 on PR #191.
+    const session = this.session as NonNullable<typeof this.session>;
     const reload = this.resourceLoader
       ? this.resourceLoader
           .reload()

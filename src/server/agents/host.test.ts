@@ -5303,6 +5303,56 @@ describe('AgentHost', () => {
       expect(internal.pendingDeliveries[1].deferred).toBe(true); // B: gate-deferred
       expect(internal.pendingDeliveries[2].deferred).toBe(true); // C: FIFO-deferred
     });
+
+    it('send failure dispatches deferred items (self-review #2/3 on PR #191)', async () => {
+      // If sendCustomMessage rejects synchronously, no agent_end fires for that turn —
+      // without the .catch's dispatch trigger, any deferred scheduled-task behind the
+      // failed send would sit in the queue forever, never resolving.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      // First call (A) rejects; second call (B's dispatch) succeeds.
+      const sendCustomMessage = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('send failed'))
+        .mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+      };
+      internal.session = { sendCustomMessage };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      const aPromise = host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 2', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      // B is deferred behind A (scheduled-task gate).
+      host.deliverMessage('[Scheduled task: daily-summary]\n\nfile: /x', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      // Flush A's send (which rejects), then B's dispatch from the .catch.
+      await aPromise.catch(() => undefined);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // A was rejected and removed; B was sent against the live session.
+      expect(internal.pendingDeliveries).toHaveLength(1);
+      expect(internal.pendingDeliveries[0].content).toContain('daily-summary');
+      expect(internal.pendingDeliveries[0].deferred).toBe(false);
+      expect(sendCustomMessage).toHaveBeenCalledTimes(2);
+    });
   });
 });
 
