@@ -5047,6 +5047,113 @@ describe('AgentHost', () => {
       expect(internal.pendingDeliveries[0].scheduledTask).toBe(true);
       expect(internal.pendingDeliveries[1].scheduledTask).toBe(false);
     });
+
+    it('defers second scheduled-task delivery while the first is in flight (issue #189)', async () => {
+      // Repro for the within-tick context-overflow trigger: the daily-summary scheduler queues
+      // 3 scheduled-task deliveries in rapid succession. Without this gate, all 3 are sent to
+      // the Pi SDK as `followUp` turns within ONE run — each delivery's API call carries the
+      // prior turns as conversation history, blowing the model's 1M-token context window by
+      // the 3rd delivery. The gate keeps each scheduled-task delivery in its own run so the
+      // post-scheduled-task session reset can fire between them.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+      };
+      internal.session = { sendCustomMessage };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 2', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 3', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Scheduled task: daily-summary]\n\nfile: /x', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      // Flush the reload-then-send microtask so the assertion sees the actual send.
+      await Promise.resolve();
+
+      // All 3 queued, but only the first was actually sent to the SDK.
+      expect(internal.pendingDeliveries).toHaveLength(3);
+      expect(sendCustomMessage).toHaveBeenCalledTimes(1);
+      expect(internal.deliverySendCount).toBe(1);
+
+      // The two later ones are marked deferred so agent_end's gated dispatch picks them up.
+      expect(internal.pendingDeliveries[0].deferred).toBeFalsy();
+      expect(internal.pendingDeliveries[1].deferred).toBe(true);
+      expect(internal.pendingDeliveries[2].deferred).toBe(true);
+    });
+
+    it('agent_end dispatches the next deferred scheduled-task delivery (issue #189)', async () => {
+      // Verifies the gate releases on agent_end: after the in-flight delivery resolves, the
+      // next deferred one is sent. Without this, deferred deliveries would sit in the queue
+      // forever and the scheduler's Promise.allSettled would never resolve.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+        handleSessionEvent: (event: Record<string, unknown>) => void;
+        handlePotentialError: ReturnType<typeof vi.fn>;
+        handleCompactionTracking: ReturnType<typeof vi.fn>;
+      };
+      internal.session = { sendCustomMessage };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+      internal.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+      internal.handleCompactionTracking = vi.fn();
+
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 2', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 3', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      // Flush the reload-then-send microtask for the first delivery.
+      await Promise.resolve();
+      expect(sendCustomMessage).toHaveBeenCalledTimes(1);
+
+      // Simulate the first delivery's run completing.
+      internal.handleSessionEvent({ type: 'agent_end' });
+
+      // First delivery shifted; second (deferred) sent against the now-idle session.
+      expect(internal.pendingDeliveries).toHaveLength(1);
+      expect(internal.pendingDeliveries[0].content).toContain('project_id: 3');
+      expect(internal.pendingDeliveries[0].deferred).toBe(false);
+      expect(sendCustomMessage).toHaveBeenCalledTimes(2);
+      expect(internal.deliverySendCount).toBe(1);
+    });
   });
 });
 

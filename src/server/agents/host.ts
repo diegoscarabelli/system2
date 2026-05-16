@@ -269,6 +269,12 @@ export class AgentHost {
     /** True when `content` starts with `[Scheduled task:`. Set at deliverMessage() time and
      *  read in handleSessionEvent() on `agent_end` to decide whether to reset session JSONL. */
     scheduledTask?: boolean;
+    /** True when the delivery is queued but `sendCustomMessage` has NOT been called yet —
+     *  set by the scheduled-task gate in deliverMessage when another delivery is already
+     *  in flight. Cleared by replayPendingDeliveries when the deferred item is finally
+     *  sent. Lets the dispatcher distinguish "needs sending" from "sent, waiting for
+     *  agent_end to shift". See GitHub issue #189. */
+    deferred?: boolean;
     resolve: () => void;
     reject: (reason: Error) => void;
   }> = [];
@@ -822,6 +828,17 @@ export class AgentHost {
           .finally(() => {
             this.isReinitializing = false;
           });
+      }
+
+      // Dispatch the next deferred delivery, if any. Scheduled-task deliveries are
+      // gated by deliverMessage to serialize one-per-run; this call picks up the next
+      // one once the in-flight delivery's turn has ended. Guarded on the presence of
+      // a deferred item so test fixtures and unrelated agent_end paths (e.g., a chat
+      // turn that left no deferred work) don't accidentally re-send already-sent items.
+      // No-op when the reset path above fired (session is null → replay early-returns;
+      // the reset's initialize().then chain handles dispatch). See GitHub issue #189.
+      if (this.pendingDeliveries.some((d) => d.deferred)) {
+        this.replayPendingDeliveries('after agent_end');
       }
 
       // Track compaction for pruning. May synchronously schedule pruning,
@@ -1800,6 +1817,22 @@ export class AgentHost {
       return promise;
     }
 
+    // Scheduled-task gate: don't pile a scheduled-task delivery onto an in-flight delivery.
+    // The Pi SDK treats sendCustomMessage(followUp) on a busy session as a follow-up turn in
+    // the current run, so multiple scheduled-task deliveries would otherwise pile up as
+    // follow-ups within one run. Each delivery's API call then carries the prior turns as
+    // conversation history; with a ~512 KB per-delivery activity budget and 3 deliveries per
+    // daily-summary tick, the 3rd call's input blows the 1M-token context window. Serializing
+    // scheduled tasks one per run also lets the post-scheduled-task session reset (around
+    // host.ts:763) fire between them. The agent_end handler dispatches deferred deliveries
+    // via replayPendingDeliveries once the in-flight one's turn ends. See GitHub issue #189.
+    if (scheduledTask && this.deliverySendCount > 0) {
+      // Mark deferred so replayPendingDeliveries knows this item needs sending.
+      // The just-pushed entry is at the end of pendingDeliveries.
+      this.pendingDeliveries[this.pendingDeliveries.length - 1].deferred = true;
+      return promise;
+    }
+
     // Reload resource loader to pick up knowledge file changes, then deliver.
     // Reload errors are swallowed so a filesystem hiccup never drops a message.
     const session = this.session;
@@ -2234,22 +2267,50 @@ export class AgentHost {
   }
 
   /**
-   * Replay pending deliveries against the current session via sendCustomMessage.
+   * Dispatch pending deliveries against the current session via sendCustomMessage.
    *
-   * Used by recovery paths (context overflow, scheduled-task session reset) that swap or
-   * rebuild the underlying SDK session: deliveries that were queued during the disruption
-   * need to be re-sent so the fresh session actually sees them. Don't clear
-   * `pendingDeliveries` here — `agent_end` will shift each one as turns succeed.
+   * Walks `pendingDeliveries` from `deliverySendCount` onward (i.e., skipping already-sent
+   * items at the head of the queue). Sends each via the SDK with `followUp` semantics,
+   * respecting the scheduled-task gate: a scheduled-task delivery is NOT sent while any
+   * other delivery is in flight, and only one scheduled-task delivery is sent per call.
    *
-   * Caller is responsible for clearing `pendingPrompt` / `deliverySendCount` first if the
-   * recovery path requires it.
+   * Why the gate: the Pi SDK treats `sendCustomMessage(followUp)` on a busy session as a
+   * follow-up turn in the current run, so without this gate multiple scheduled-task
+   * deliveries pile up as follow-ups within one run. Each delivery's API call then carries
+   * the prior turns as conversation history. With a ~512 KB per-delivery activity budget
+   * (catch_up_budget_bytes) and 3 deliveries per daily-summary tick, by the 3rd delivery
+   * the request blows the model's 1M-token context window. Serializing scheduled tasks one
+   * per run lets the post-scheduled-task session reset (host.ts:763) fire between them, so
+   * each delivery starts on a fresh, lean session. See GitHub issue #189.
+   *
+   * Called from three places: (1) `deliverMessage` after pushing a new delivery, (2)
+   * `agent_end` handler after delivery-cleanup, and (3) the reset path's `initialize().then`
+   * after a fresh session is ready. Recovery callers (context overflow) are responsible
+   * for clearing `pendingPrompt` / `deliverySendCount` first. Don't clear
+   * `pendingDeliveries` here — `agent_end` shifts each one as turns succeed.
    */
   private replayPendingDeliveries(context: string): void {
-    if (this.pendingDeliveries.length === 0 || !this.session) return;
-    for (const delivery of this.pendingDeliveries) {
+    // session=null is the right guard: resetSessionToHeader nulls session synchronously, so
+    // agent_end's call here returns early when reset just fired. The reset path's
+    // initialize().then(...) installs a fresh session before calling this helper, at which
+    // point isReinitializing may still be true (cleared in .finally) but session is live —
+    // we must not bail then, or the deferred deliveries would never get sent.
+    if (!this.session) return;
+    while (this.deliverySendCount < this.pendingDeliveries.length) {
+      const delivery = this.pendingDeliveries[this.deliverySendCount];
+      // Scheduled-task gate: don't pile a scheduled-task delivery onto an in-flight delivery.
+      // The next dispatch (triggered by agent_end after the in-flight delivery's turn ends)
+      // will send this one.
+      if (delivery.scheduledTask && this.deliverySendCount > 0) break;
       this.deliverySendCount++;
-      this.session
-        .sendCustomMessage(
+      // Clear deferred flag now that the item is being sent — agent_end's gate uses this
+      // to decide whether to call this helper, and we don't want to re-dispatch.
+      delivery.deferred = false;
+      const session = this.session;
+      // Wrap in Promise.resolve so synchronous returns from sendCustomMessage (some test
+      // doubles return undefined directly) don't blow up the .catch chain.
+      Promise.resolve(
+        session.sendCustomMessage(
           {
             customType: 'agent_message',
             content: delivery.content,
@@ -2261,13 +2322,20 @@ export class AgentHost {
             triggerTurn: true,
           }
         )
-        .catch((error) => {
-          this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
-          log.error(`[AgentHost] Failed to replay delivery ${context}:`, error);
-          const idx = this.pendingDeliveries.indexOf(delivery);
-          if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
-          delivery.reject(error instanceof Error ? error : new Error(String(error)));
-        });
+      ).catch((error) => {
+        // If session changed mid-flight (failover/reinit), this catch belongs to a stale
+        // send; the new session has its own dispatch path. Mutating state here would
+        // corrupt the live session's counters.
+        if (this.session !== session) return;
+        this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
+        log.error(`[AgentHost] Failed to dispatch delivery ${context}:`, error);
+        const idx = this.pendingDeliveries.indexOf(delivery);
+        if (idx !== -1) this.pendingDeliveries.splice(idx, 1);
+        delivery.reject(error instanceof Error ? error : new Error(String(error)));
+      });
+      // Scheduled-task gate (after-send half): only one scheduled-task delivery per dispatch.
+      // After this delivery's agent_end fires, the next dispatch will pick up where we left off.
+      if (delivery.scheduledTask) break;
     }
   }
 
