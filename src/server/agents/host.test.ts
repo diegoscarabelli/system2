@@ -4234,6 +4234,105 @@ describe('AgentHost', () => {
       expect(markKeyFailedSpy).toHaveBeenCalledOnce();
     });
 
+    it('appends re-auth hint to cooldown-by-another-agent rotating chat message', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentKeyIndex: number;
+      };
+
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      cast.currentKeyIndex = 0;
+      // Simulate another agent has just put our credential in cooldown
+      vi.spyOn(authResolver, 'isKeyInCooldown').mockReturnValue(true);
+      // getNextProvider returns same provider → rotate-to-next-key branch
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue('anthropic');
+
+      await internal.handlePotentialError(auth401Event);
+
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
+        .calls[0][4];
+      expect(detail).toContain('rotating to next key');
+      expect(detail).toContain('Run `system2 config` and restart the server to re-authenticate.');
+    });
+
+    it('appends re-auth hint to cooldown-by-another-agent switching chat message', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentKeyIndex: number;
+      };
+
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      cast.currentKeyIndex = 0;
+      vi.spyOn(authResolver, 'isKeyInCooldown').mockReturnValue(true);
+      // getNextProvider returns a DIFFERENT provider → switching branch
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue('cerebras');
+
+      await internal.handlePotentialError(auth401Event);
+
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
+        .calls[0][4];
+      expect(detail).toContain('key already in cooldown');
+      expect(detail).toContain('Run `system2 config` and restart the server to re-authenticate.');
+    });
+
+    it('appends re-auth hint to post-markKeyFailed rotating-to-next-key chat message', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentKeyIndex: number;
+      };
+
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      cast.currentKeyIndex = 0;
+      // Skip the cooldown-by-another-agent branch so we reach markKeyFailed
+      vi.spyOn(authResolver, 'isKeyInCooldown').mockReturnValue(false);
+      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(true);
+      // getNextProvider returns SAME provider → rotating-to-next-key branch
+      // (real-world OAuth → keys-tier same-provider transition)
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue('anthropic');
+
+      await internal.handlePotentialError(auth401Event);
+
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
+        .calls[0][4];
+      expect(detail).toContain('rotating to next key');
+      expect(detail).toContain('Run `system2 config` and restart the server to re-authenticate.');
+    });
+
+    it('appends re-auth hint to last-resort failover chat message', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentKeyIndex: number;
+      };
+
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      cast.currentKeyIndex = 0;
+      vi.spyOn(authResolver, 'isKeyInCooldown').mockReturnValue(false);
+      // markKeyFailed returns false → fall through past the immediate failover
+      // block to the all-unavailable pushSystemMessage, then continue to the
+      // last-resort failover check at line 1228+
+      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+      // getNextProvider returns a different provider for the last-resort check
+      // (simulates a cooldown expiring or transient cooldowns being cleared
+      // between markKeyFailed and the last-resort path)
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue('cerebras');
+
+      await internal.handlePotentialError(auth401Event);
+
+      // Last-resort path fires reinitializeWithProvider with its own detail
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
+        .calls[0][4];
+      expect(detail).toContain('switching to cerebras');
+      expect(detail).toContain('Run `system2 config` and restart the server to re-authenticate.');
+    });
+
     it('appends re-auth hint to switching-provider chat message after refresh-retry failed', async () => {
       const { internal, authResolver } = await makeOAuthHost();
       const cast = internal as unknown as {
