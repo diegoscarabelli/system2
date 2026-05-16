@@ -4225,7 +4225,7 @@ describe('AgentHost', () => {
       expect(internal.oauthRefreshAttemptedFor.has('anthropic')).toBe(true);
 
       // Second 401 arrives (simulates the retried request also failing with 401).
-      // oauthRefreshAttempted is already true → no second refresh, fall through to markKeyFailed.
+      // oauthRefreshAttemptedFor already has anthropic → no second refresh, fall through to markKeyFailed.
       await internal.handlePotentialError(auth401Event);
 
       // ensureFresh must NOT have been called a second time
@@ -4363,6 +4363,49 @@ describe('AgentHost', () => {
       expect(ensureFreshSpy).not.toHaveBeenCalled();
       // 403 must NOT set the flag
       expect(cast.oauthRefreshAttemptedFor.size).toBe(0);
+    });
+
+    it('clears oauthRefreshAttemptedFor on successful agent_end', async () => {
+      const { internal, host } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        lastTurnErrored: boolean;
+      };
+      const hostInternal = host as unknown as {
+        handleSessionEvent: (event: { type: string }) => void;
+      };
+
+      // Pre-populate the set as if a refresh-retry had been attempted
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      cast.oauthRefreshAttemptedFor.add('openai-codex');
+      cast.lastTurnErrored = false;
+
+      // Drive a successful agent_end (the reset only happens when lastTurnErrored is false)
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
+
+      expect(cast.oauthRefreshAttemptedFor.size).toBe(0);
+    });
+
+    it('does NOT clear oauthRefreshAttemptedFor on errored agent_end', async () => {
+      const { internal, host } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        lastTurnErrored: boolean;
+      };
+      const hostInternal = host as unknown as {
+        handleSessionEvent: (event: { type: string }) => void;
+      };
+
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      // Errored turn — the cleanup branch is skipped so retry/failover keeps state
+      cast.lastTurnErrored = true;
+
+      hostInternal.handleSessionEvent({ type: 'agent_end' });
+
+      // The set must NOT be cleared on errored turns, otherwise a subsequent
+      // 401 in the same delivery would re-enter refresh-retry instead of
+      // proceeding to standard failover with the re-auth hint.
+      expect(cast.oauthRefreshAttemptedFor.has('anthropic')).toBe(true);
     });
 
     it('does NOT append re-auth hint when current tier is api_keys (post-failover from OAuth)', async () => {
