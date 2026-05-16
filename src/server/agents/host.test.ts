@@ -4336,6 +4336,66 @@ describe('AgentHost', () => {
       // openai-codex remains in the set (unchanged)
       expect(cast.oauthRefreshAttemptedFor.has('openai-codex')).toBe(true);
     });
+
+    it('does NOT trigger refresh-retry on a 403 (permission/entitlement, not revoked token)', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        oauthAutoResolved: boolean;
+        oauthFallbackUsedFor: Set<string>;
+      };
+      // Disable the auto-resolved 403/404 step-down path so the 403 falls through
+      // to the (former) refresh-retry branch
+      cast.oauthAutoResolved = false;
+      const ensureFreshSpy = vi.spyOn(authResolver, 'ensureFresh');
+      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue(undefined);
+
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: {
+          stopReason: 'error',
+          errorMessage: 'Error 403: Forbidden - model not available on this plan',
+        },
+      });
+
+      // 403 must NOT enter the refresh-retry branch
+      expect(ensureFreshSpy).not.toHaveBeenCalled();
+      // 403 must NOT set the flag
+      expect(cast.oauthRefreshAttemptedFor.size).toBe(0);
+    });
+
+    it('does NOT append re-auth hint when refresh-retry flag is set but current error is non-auth', async () => {
+      const { internal, authResolver, host } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentKeyIndex: number;
+      };
+      const hostInternal = host as unknown as { _chatCache: { push: ReturnType<typeof vi.fn> } };
+      hostInternal._chatCache = { push: vi.fn() };
+
+      // Simulate: an earlier 401 attempted refresh-retry (flag set), then a later
+      // rate-limit error arrives in the same delivery before agent_end clears it.
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      cast.currentKeyIndex = 0;
+      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue(undefined);
+
+      const retryAttempts = (internal as unknown as { retryAttempts: Map<string, number> })
+        .retryAttempts;
+      retryAttempts.set('anthropic:rate_limit', 7);
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
+      });
+
+      expect(hostInternal._chatCache.push).toHaveBeenCalled();
+      const pushed = hostInternal._chatCache.push.mock.calls[0][0] as { content: string };
+      // The all-unavailable message fires, but no re-auth hint because this 429
+      // is not an auth failure even though the flag is set from a prior 401.
+      expect(pushed.content).toContain('all providers unavailable');
+      expect(pushed.content).not.toContain('Run `system2 config`');
+    });
   });
 
   describe('readActivityLogWithBudget', () => {
