@@ -5212,10 +5212,13 @@ describe('AgentHost', () => {
       expect(internal.deliverySendCount).toBe(1);
     });
 
-    it('marks scheduled-task deliveries deferred when queued during reinit (Copilot review #2)', () => {
+    it('marks deliveries deferred when queued during reinit (Copilot reviews #2 and #3)', () => {
       // Without this marking, agent_end's `.some(deferred)` guard would skip dispatch and the
-      // scheduled task could stay stuck in the queue until the next scheduled-task-triggered
-      // reset (which might never come if no other scheduled-task runs).
+      // queued items could stay stuck until the next scheduled-task-triggered reset (which
+      // might never come if no other scheduled-task runs). All deliveries — scheduled or
+      // chat — that arrive during a reinit window are deferred, both so the agent_end gated
+      // dispatch picks them up AND so the queue stays a strict "sent prefix + deferred suffix"
+      // (the invariant agent_end's shift and hadScheduledTaskDeliveryThisTurn's slice rely on).
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -5246,11 +5249,59 @@ describe('AgentHost', () => {
       });
 
       expect(internal.pendingDeliveries).toHaveLength(2);
-      // Scheduled-task is marked deferred so agent_end will pick it up later.
       expect(internal.pendingDeliveries[0].deferred).toBe(true);
-      // Chat is not marked deferred — it relies on the reinit-replay path (which sends
-      // everything regardless of deferred flag).
-      expect(internal.pendingDeliveries[1].deferred).toBeFalsy();
+      expect(internal.pendingDeliveries[1].deferred).toBe(true);
+    });
+
+    it('defers non-scheduled delivery when an earlier deferred item exists (Copilot review #3)', async () => {
+      // FIFO invariant: pendingDeliveries[0..deliverySendCount-1] must be exactly the
+      // in-flight prefix. Without this gate, the queue could end up as [A_sent, B_deferred,
+      // C_sent], breaking agent_end's shift (it would resolve B's promise on A's run end).
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+      };
+      internal.session = { sendCustomMessage };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      // A: scheduled-task, sent first
+      host.deliverMessage('[Scheduled task: project-log]\n\nproject_id: 2', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      // B: scheduled-task, deferred by the scheduled-task gate
+      host.deliverMessage('[Scheduled task: daily-summary]\n\nfile: /x', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      // C: NON-scheduled chat arriving after a deferred item exists — must be deferred too.
+      host.deliverMessage('[Message from guide agent (id=1)]\n\nhi', {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      await Promise.resolve();
+
+      expect(internal.pendingDeliveries).toHaveLength(3);
+      expect(sendCustomMessage).toHaveBeenCalledTimes(1); // only A was sent
+      expect(internal.deliverySendCount).toBe(1);
+      expect(internal.pendingDeliveries[0].deferred).toBeFalsy(); // A: sent
+      expect(internal.pendingDeliveries[1].deferred).toBe(true); // B: gate-deferred
+      expect(internal.pendingDeliveries[2].deferred).toBe(true); // C: FIFO-deferred
     });
   });
 });

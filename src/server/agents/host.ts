@@ -1435,11 +1435,17 @@ export class AgentHost {
         // batch them as Pi SDK followUp turns in one run on the new session, reintroducing
         // the within-tick prompt bloat that the gate in deliverMessage is designed to prevent.
         // Subsequent scheduled-tasks get marked `deferred` so agent_end's dispatch picks them
-        // up after the in-flight one's turn ends. Copilot review #2 raised this on PR #191.
+        // up after the in-flight one's turn ends. And once anything is deferred, ALL
+        // subsequent items must be deferred too (chat or not) to keep the invariant that
+        // pendingDeliveries[0..deliverySendCount-1] is exactly the in-flight prefix —
+        // agent_end's shift and hadScheduledTaskDeliveryThisTurn's slice both depend on it.
+        // Copilot reviews #2 and #3 raised these on PR #191.
         let scheduledTaskSent = false;
+        let anyDeferred = false;
         for (const d of toReplay) {
-          if (d.scheduledTask && scheduledTaskSent) {
+          if (anyDeferred || (d.scheduledTask && scheduledTaskSent)) {
             d.deferred = true;
+            anyDeferred = true;
             // toReplay may contain items that have been removed from pendingDeliveries (e.g.,
             // a rejected stale send); re-add so the agent_end dispatch path can find them.
             if (!this.pendingDeliveries.includes(d)) {
@@ -1838,45 +1844,39 @@ export class AgentHost {
       });
     }
 
-    // If a reinit is in flight (scheduled-task reset path nulls this.session synchronously, or
-    // failover keeps the old session live but `isReinitializing` is set), defer the actual send.
-    // The replay paths run after init completes:
-    //   - reset path: handleSessionEvent → void initialize().then(replayPendingDeliveries)
-    //   - failover:   reinitializeWithProvider replays the merged pendingDeliveries against the
-    //                 new session
-    // Both iterate this.pendingDeliveries (which now includes our entry), so the message reaches
-    // the new session without us touching the dying one here.
-    if (!this.session || this.isReinitializing) {
-      // Mark scheduled-task items as deferred so agent_end's gated dispatch picks them up
-      // if the reset/failover path's own replay doesn't run them first. Without this, a
-      // scheduled task queued during a brief reinit window could sit forever if the next
-      // agent_end (e.g., for a chat delivery) found nothing marked deferred and skipped
-      // dispatch. Copilot review #2 raised this on PR #191. See GitHub issue #189.
-      if (scheduledTask) {
-        this.pendingDeliveries[this.pendingDeliveries.length - 1].deferred = true;
-      }
-      return promise;
-    }
-
-    // Scheduled-task gate: don't pile a scheduled-task delivery onto an in-flight delivery.
-    // The Pi SDK treats sendCustomMessage(followUp) on a busy session as a follow-up turn in
-    // the current run, so multiple scheduled-task deliveries would otherwise pile up as
-    // follow-ups within one run. Each delivery's API call then carries the prior turns as
-    // conversation history; with a ~512 KB per-delivery activity budget and 3 deliveries per
-    // daily-summary tick, the 3rd call's input blows the 1M-token context window. Serializing
-    // scheduled tasks one per run also lets the post-scheduled-task session reset (around
-    // host.ts:763) fire between them. The agent_end handler dispatches deferred deliveries
-    // via replayPendingDeliveries once the in-flight one's turn ends. See GitHub issue #189.
-    if (scheduledTask && this.deliverySendCount > 0) {
-      // Mark deferred so replayPendingDeliveries knows this item needs sending.
-      // The just-pushed entry is at the end of pendingDeliveries.
+    // Gate logic. Three reasons to defer instead of sending now:
+    //
+    //  (a) Session is being rebuilt (`!this.session || this.isReinitializing`). The
+    //      reset/failover replay paths will pick this up against the fresh session.
+    //  (b) Scheduled-task gate: don't pile a scheduled-task delivery onto an in-flight
+    //      delivery. The Pi SDK treats sendCustomMessage(followUp) on a busy session as a
+    //      follow-up turn in the current run, so multiple scheduled-task deliveries would
+    //      pile up as follow-ups within one run and each call's input would carry the
+    //      prior turns as conversation history. With a ~512 KB per-delivery activity
+    //      budget and 3 deliveries per daily-summary tick, by the 3rd call the input
+    //      blows the model's 1M-token context window. See GitHub issue #189.
+    //  (c) FIFO preservation: if any unsent (deferred) item is already in the queue,
+    //      sending a later arrival immediately would leave the queue with sent items
+    //      interleaved between unsent ones, breaking the invariant that the first
+    //      `deliverySendCount` items are exactly the ones in flight. agent_end's shift
+    //      and `hadScheduledTaskDeliveryThisTurn`'s slice both depend on that invariant.
+    //      Copilot review #3 raised this on PR #191.
+    //
+    // The just-pushed entry is at the end of pendingDeliveries; "unsent items already
+    // present" means `length - 1 > deliverySendCount` (the new entry doesn't count itself).
+    const reinitInFlight = !this.session || this.isReinitializing;
+    const scheduledOnBusy = scheduledTask && this.deliverySendCount > 0;
+    const hadUnsentBefore = this.pendingDeliveries.length - 1 > this.deliverySendCount;
+    if (reinitInFlight || scheduledOnBusy || hadUnsentBefore) {
       this.pendingDeliveries[this.pendingDeliveries.length - 1].deferred = true;
       return promise;
     }
 
     // Reload resource loader to pick up knowledge file changes, then deliver.
     // Reload errors are swallowed so a filesystem hiccup never drops a message.
+    // The gate above (`reinitInFlight`) guarantees this.session is non-null at this point.
     const session = this.session;
+    if (!session) return promise; // narrow type for TS — unreachable in practice
     const reload = this.resourceLoader
       ? this.resourceLoader
           .reload()
