@@ -4070,7 +4070,7 @@ describe('AgentHost', () => {
         currentProvider: string;
         currentKeyIndex: number;
         currentTier: string;
-        oauthRefreshAttempted: boolean;
+        oauthRefreshAttemptedFor: Set<string>;
         authResolver: import('./auth-resolver.js').AuthResolver;
         reinitializeWithProvider: ReturnType<typeof vi.fn>;
         session: unknown;
@@ -4079,7 +4079,7 @@ describe('AgentHost', () => {
       internal.session = { prompt: vi.fn() };
       internal.reinitializeWithProvider = vi.fn().mockResolvedValue(undefined);
       // Skip the refresh-and-retry branch so we test the markKeyFailed path directly.
-      internal.oauthRefreshAttempted = true;
+      internal.oauthRefreshAttemptedFor.add('anthropic');
 
       // Confirm tier is oauth before the error
       expect(internal.currentTier).toBe('oauth');
@@ -4131,7 +4131,7 @@ describe('AgentHost', () => {
         handlePotentialError: (event: unknown) => Promise<void>;
         currentProvider: string;
         currentTier: string;
-        oauthRefreshAttempted: boolean;
+        oauthRefreshAttemptedFor: Set<string>;
         authResolver: import('./auth-resolver.js').AuthResolver;
         reinitializeWithProvider: ReturnType<typeof vi.fn>;
         session: unknown;
@@ -4221,8 +4221,8 @@ describe('AgentHost', () => {
       expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
       expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
       expect(markKeyFailedSpy).not.toHaveBeenCalled();
-      // Guard flag is now set
-      expect(internal.oauthRefreshAttempted).toBe(true);
+      // Guard flag is now set for this provider
+      expect(internal.oauthRefreshAttemptedFor.has('anthropic')).toBe(true);
 
       // Second 401 arrives (simulates the retried request also failing with 401).
       // oauthRefreshAttempted is already true → no second refresh, fall through to markKeyFailed.
@@ -4232,6 +4232,109 @@ describe('AgentHost', () => {
       expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
       // markKeyFailed must be called — standard failover path
       expect(markKeyFailedSpy).toHaveBeenCalledOnce();
+    });
+
+    it('appends re-auth hint to switching-provider chat message after refresh-retry failed', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentKeyIndex: number;
+      };
+
+      // Simulate refresh-retry already failed for anthropic this delivery
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      cast.currentKeyIndex = 0;
+      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(true);
+      // hasMore returns true, getNextProvider returns a different provider → switching path
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue('cerebras');
+
+      await internal.handlePotentialError(auth401Event);
+
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
+        .calls[0][4];
+      expect(detail).toContain('Run `system2 config` and restart the server to re-authenticate.');
+    });
+
+    it('appends re-auth hint to all-providers-unavailable chat message after refresh-retry failed', async () => {
+      const { internal, authResolver, host } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentKeyIndex: number;
+      };
+      const hostInternal = host as unknown as { _chatCache: { push: ReturnType<typeof vi.fn> } };
+      hostInternal._chatCache = { push: vi.fn() };
+
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      cast.currentKeyIndex = 0;
+      // markKeyFailed returns false → no more providers → all-unavailable branch
+      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+      // Ensure last-resort failover at line 1209+ doesn't find a different provider
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue(undefined);
+
+      await internal.handlePotentialError(auth401Event);
+
+      expect(hostInternal._chatCache.push).toHaveBeenCalled();
+      const pushed = hostInternal._chatCache.push.mock.calls[0][0] as { content: string };
+      expect(pushed.content).toContain('all providers unavailable');
+      expect(pushed.content).toContain(
+        'Run `system2 config` and restart the server to re-authenticate.'
+      );
+    });
+
+    it('does NOT append re-auth hint for non-auth errors (e.g. rate_limit failover)', async () => {
+      const { internal, authResolver, host } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentKeyIndex: number;
+      };
+      const hostInternal = host as unknown as { _chatCache: { push: ReturnType<typeof vi.fn> } };
+      hostInternal._chatCache = { push: vi.fn() };
+
+      // Set has not been touched — no prior auth-401 happened in this delivery
+      expect(cast.oauthRefreshAttemptedFor.size).toBe(0);
+      cast.currentKeyIndex = 0;
+      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue(undefined);
+
+      // 429 rate-limit error: shouldRetry exhausts and triggers failover at attempt 7
+      const retryAttempts = (internal as unknown as { retryAttempts: Map<string, number> })
+        .retryAttempts;
+      retryAttempts.set('anthropic:rate_limit', 7);
+      await internal.handlePotentialError({
+        type: 'message_end',
+        message: { stopReason: 'error', errorMessage: 'Error 429: rate limit exceeded' },
+      });
+
+      expect(hostInternal._chatCache.push).toHaveBeenCalled();
+      const pushed = hostInternal._chatCache.push.mock.calls[0][0] as { content: string };
+      expect(pushed.content).toContain('all providers unavailable');
+      expect(pushed.content).not.toContain('Run `system2 config`');
+    });
+
+    it('per-provider isolation: a flagged provider does NOT suppress refresh-retry on a different provider', async () => {
+      const { internal, authResolver } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentProvider: string;
+      };
+
+      // Pre-flag a DIFFERENT provider as already-refreshed
+      cast.oauthRefreshAttemptedFor.add('openai-codex');
+      // currentProvider is still 'anthropic' from makeOAuthHost
+      expect(cast.currentProvider).toBe('anthropic');
+
+      vi.spyOn(authResolver, 'ensureFresh').mockResolvedValue(new Set(['anthropic']));
+
+      await internal.handlePotentialError(auth401Event);
+
+      // anthropic refresh-retry must have fired even though openai-codex was already flagged
+      expect(authResolver.ensureFresh).toHaveBeenCalledOnce();
+      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
+      // anthropic is now also in the set
+      expect(cast.oauthRefreshAttemptedFor.has('anthropic')).toBe(true);
+      // openai-codex remains in the set (unchanged)
+      expect(cast.oauthRefreshAttemptedFor.has('openai-codex')).toBe(true);
     });
   });
 

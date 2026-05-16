@@ -281,7 +281,11 @@ export class AgentHost {
   private resourceLoader: DefaultResourceLoader | null = null;
   private busy = false;
   private lastTurnErrored = false;
-  private oauthRefreshAttempted = false;
+  /** Providers whose OAuth refresh-and-retry has already been attempted this
+   *  delivery. Tracked per-provider so a refresh-retry on one OAuth provider
+   *  doesn't suppress a different provider's chance to refresh-retry on a
+   *  later 401. Cleared on successful delivery (see agent_end). */
+  private oauthRefreshAttemptedFor: Set<LlmProvider> = new Set();
   /** True when the active OAuth model was NOT explicitly user-pinned in
    *  [llm.oauth.<provider>].model — i.e., it came from resolveOAuthModel or
    *  from OAUTH_FALLBACKS after a prior 403/404 step-down. Gates the 403/404
@@ -737,7 +741,7 @@ export class AgentHost {
         this.deliverySendCount = 0;
         // Re-arm the OAuth refresh guard so a future 401 on a fresh token can
         // trigger another refresh attempt.
-        this.oauthRefreshAttempted = false;
+        this.oauthRefreshAttemptedFor.clear();
       }
       this.lastTurnErrored = false;
       // Clear the per-turn output flag at the run boundary, matching its
@@ -957,8 +961,12 @@ export class AgentHost {
     // revoked while still appearing fresh locally (expires far in the future). If the
     // refresh didn't actually happen (provider not in returned set), skip the retry and
     // fall through to standard failover instead of burning a round-trip with the same token.
-    if (category === 'auth' && this.currentTier === 'oauth' && !this.oauthRefreshAttempted) {
-      this.oauthRefreshAttempted = true;
+    if (
+      category === 'auth' &&
+      this.currentTier === 'oauth' &&
+      !this.oauthRefreshAttemptedFor.has(this.currentProvider)
+    ) {
+      this.oauthRefreshAttemptedFor.add(this.currentProvider);
       try {
         const refreshed = await this.authResolver.ensureFresh({
           refresh: refreshOAuthToken,
@@ -1003,8 +1011,8 @@ export class AgentHost {
             : `${errorPrefix}, switched to ${nextProvider}`;
         const detail =
           nextProvider === this.currentProvider
-            ? `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}`
-            : `on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}\n\n${errorMessage}`;
+            ? `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider)}`
+            : `on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider)}`;
         log.info(
           `[AgentHost] Key ${this.currentProvider}:${this.currentKeyIndex} already in cooldown`
         );
@@ -1144,7 +1152,7 @@ export class AgentHost {
             await this.compactForProvider(nextProvider);
 
             const reason = `${errorPrefix}, switched to ${nextProvider}`;
-            const detail = `on ${fromProvider}, switching to ${nextProvider}\n\n${errorMessage}`;
+            const detail = `on ${fromProvider}, switching to ${nextProvider}\n\n${errorMessage}${this.oauthReauthHintFor(fromProvider)}`;
             log.info(`[AgentHost] Failing over from ${fromProvider} to ${nextProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
@@ -1159,7 +1167,7 @@ export class AgentHost {
       }
 
       this.pushSystemMessage(
-        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable\n\n${errorMessage}`
+        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider)}`
       );
       log.info('[AgentHost] No fallback providers available, error will be surfaced to user');
 
@@ -1215,7 +1223,7 @@ export class AgentHost {
       await this.compactForProvider(nextProvider);
 
       const reason = `${errorPrefix}, switched to ${nextProvider}`;
-      const detail = `on ${fromProvider}, switching to ${nextProvider}`;
+      const detail = `on ${fromProvider}, switching to ${nextProvider}${this.oauthReauthHintFor(fromProvider)}`;
       log.info(`[AgentHost] Recovery: switching from ${fromProvider} to ${nextProvider}`);
       await this.reinitializeWithProvider(
         nextProvider,
@@ -1416,6 +1424,17 @@ export class AgentHost {
     } finally {
       this.isReinitializing = false;
     }
+  }
+
+  /** Returns a user-facing re-auth hint when the given OAuth provider's
+   *  refresh-and-retry has already failed this delivery, empty otherwise.
+   *  The membership of `oauthRefreshAttemptedFor` is only ever set inside
+   *  the OAuth-tier 401 branch, so non-empty membership already implies the
+   *  provider's automatic recovery has been used. */
+  private oauthReauthHintFor(provider: LlmProvider): string {
+    return this.oauthRefreshAttemptedFor.has(provider)
+      ? '\n\nRun `system2 config` and restart the server to re-authenticate.'
+      : '';
   }
 
   /** Push a system-role message into the chat cache (visible in UI history). */
