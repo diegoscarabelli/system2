@@ -832,12 +832,24 @@ export class AgentHost {
 
       // Dispatch the next deferred delivery, if any. Scheduled-task deliveries are
       // gated by deliverMessage to serialize one-per-run; this call picks up the next
-      // one once the in-flight delivery's turn has ended. Guarded on the presence of
-      // a deferred item so test fixtures and unrelated agent_end paths (e.g., a chat
-      // turn that left no deferred work) don't accidentally re-send already-sent items.
-      // No-op when the reset path above fired (session is null → replay early-returns;
-      // the reset's initialize().then chain handles dispatch). See GitHub issue #189.
-      if (this.pendingDeliveries.some((d) => d.deferred)) {
+      // one once the in-flight delivery's turn has ended.
+      //
+      // Three guards:
+      //  - `!wasErroredTurn`: on error turns the failover/reset paths own the queue —
+      //    dispatching here would race with reinitializeWithProvider's replay loop or
+      //    send to the about-to-be-disposed session.
+      //  - `!this.isReinitializing`: failover keeps the old session non-null while
+      //    reinitializing, so a non-null session check alone isn't sufficient.
+      //  - `pendingDeliveries.some(d => d.deferred)`: prevents test fixtures and chat
+      //    turns with no deferred work from accidentally re-sending already-sent items.
+      //
+      // Copilot raised the first two guards on the 5th review of PR #191; the third
+      // came from review #2. See GitHub issue #189.
+      if (
+        !wasErroredTurn &&
+        !this.isReinitializing &&
+        this.pendingDeliveries.some((d) => d.deferred)
+      ) {
         this.replayPendingDeliveries('after agent_end');
       }
 
@@ -1848,7 +1860,7 @@ export class AgentHost {
       });
     }
 
-    // Gate logic. Three reasons to defer instead of sending now:
+    // Gate logic. Four reasons to defer instead of sending now:
     //
     //  (a) Session is being rebuilt (`!this.session || this.isReinitializing`). The
     //      reset/failover replay paths will pick this up against the fresh session.
@@ -1859,7 +1871,11 @@ export class AgentHost {
     //      prior turns as conversation history. With a ~512 KB per-delivery activity
     //      budget and 3 deliveries per daily-summary tick, by the 3rd call the input
     //      blows the model's 1M-token context window. See GitHub issue #189.
-    //  (c) FIFO preservation: if any unsent (deferred) item is already in the queue,
+    //  (c) "Scheduled task runs alone" — don't pile a non-scheduled delivery onto a
+    //      scheduled-task that's in flight either. Otherwise the chat would share the
+    //      scheduled-task's run and the per-run session reset would no longer reflect a
+    //      pure scheduled-task turn. Copilot raised this on the 5th review of PR #191.
+    //  (d) FIFO preservation: if any unsent (deferred) item is already in the queue,
     //      sending a later arrival immediately would leave the queue with sent items
     //      interleaved between unsent ones, breaking the invariant that the first
     //      `deliverySendCount` items are exactly the ones in flight. agent_end's shift
@@ -1870,8 +1886,11 @@ export class AgentHost {
     // present" means `length - 1 > deliverySendCount` (the new entry doesn't count itself).
     const reinitInFlight = !this.session || this.isReinitializing;
     const scheduledOnBusy = scheduledTask && this.deliverySendCount > 0;
+    const inFlightHasScheduled = this.pendingDeliveries
+      .slice(0, this.deliverySendCount)
+      .some((d) => d.scheduledTask);
     const hadUnsentBefore = this.pendingDeliveries.length - 1 > this.deliverySendCount;
-    if (reinitInFlight || scheduledOnBusy || hadUnsentBefore) {
+    if (reinitInFlight || scheduledOnBusy || inFlightHasScheduled || hadUnsentBefore) {
       this.pendingDeliveries[this.pendingDeliveries.length - 1].deferred = true;
       return promise;
     }

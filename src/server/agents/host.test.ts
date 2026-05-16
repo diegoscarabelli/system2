@@ -5353,6 +5353,49 @@ describe('AgentHost', () => {
       expect(internal.pendingDeliveries[0].deferred).toBe(false);
       expect(sendCustomMessage).toHaveBeenCalledTimes(2);
     });
+
+    it('defers chat when a scheduled-task is in flight (Copilot review #5 on PR #191)', async () => {
+      // "Scheduled tasks run alone" invariant: a non-scheduled delivery arriving while a
+      // scheduled-task is in flight must be deferred, not piled on as a Pi SDK followUp.
+      // Otherwise chat shares the scheduled-task's run and the per-run session reset would
+      // no longer reflect a pure scheduled-task turn.
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const sendCustomMessage = vi.fn().mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> };
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        pendingDeliveries: Array<{ content: string; scheduledTask?: boolean; deferred?: boolean }>;
+      };
+      internal.session = { sendCustomMessage };
+      internal._chatCache = null;
+      internal._sessionDir = null;
+
+      host.deliverMessage('[Scheduled task: daily-summary]\n\nfile: /x', {
+        sender: 0,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+      host.deliverMessage('[Message from guide agent (id=1)]\n\nhi', {
+        sender: 1,
+        receiver: 2,
+        timestamp: Date.now(),
+      });
+
+      await Promise.resolve();
+
+      expect(internal.pendingDeliveries).toHaveLength(2);
+      expect(sendCustomMessage).toHaveBeenCalledTimes(1); // only scheduled-task sent
+      expect(internal.deliverySendCount).toBe(1);
+      expect(internal.pendingDeliveries[0].deferred).toBeFalsy(); // scheduled: sent
+      expect(internal.pendingDeliveries[1].deferred).toBe(true); // chat: deferred
+    });
   });
 });
 
