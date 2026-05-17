@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-05-16
+
+### Fixed
+
+- OAuth re-auth hint (#188) now actually reaches the chat on Anthropic 401s, and names the provider. Two issues with the v0.3.11 behavior. (1) The contamination guard at `host.ts:903` flipped on `message_start` — but that event fires whenever a message scaffold is created, including for assistant streams that abort with an auth failure before any token arrives. Anthropic's streaming endpoint opens the stream, fires `message_start`, then closes with 401, so the guard incorrectly classified the turn as contaminated and dropped pending deliveries before the failover path could write a user-visible system message. Narrowing the flag to flip only on `message_update` (real token streaming) or `tool_execution_start` (real side effects) preserves the #175 protection while letting `message_start`-then-401 flow through the normal failover path. (2) The hint string didn't name the provider; with multiple OAuth providers configured, "re-authenticate" was ambiguous. Now reads "Run `system2 config` to refresh `<provider>` authentication and restart the server" — e.g. `"switching from anthropic to openai-codex. Run system2 config to refresh anthropic authentication and restart the server."` Fixes [#192](https://github.com/diegoscarabelli/system2/issues/192).
+
 ## [0.3.11] - 2026-05-16
 
 ### Fixed

@@ -302,12 +302,20 @@ export class AgentHost {
    *  re-tries the family flagship. */
   private oauthFallbackUsedFor: Set<LlmProvider> = new Set();
   private deliverySendCount = 0;
-  /** True once the model has emitted any output (message_start, message_update,
-   *  or tool_execution_start) during the current turn. Reset on turn_start and
-   *  agent_end. Read in handlePotentialError to decide whether resending the
-   *  in-flight delivery is safe — a contaminated turn may have already triggered
-   *  tool side effects (e.g. file edits), so re-feeding it to the model would
-   *  duplicate work. See GitHub issue #175. */
+  /** True once the model has emitted real output during the current turn —
+   *  token streaming (`message_update`) or tool execution (`tool_execution_start`).
+   *  Reset on turn_start and agent_end. Read in handlePotentialError to decide
+   *  whether resending the in-flight delivery is safe: a contaminated turn may
+   *  have already triggered tool side effects (e.g. file edits), so re-feeding it
+   *  to the model would duplicate work. See GitHub issue #175.
+   *
+   *  Notably does NOT flip on `message_start` (#192). That event fires when a
+   *  message scaffold is created, including for user messages and for assistant
+   *  streams that close with an auth failure before any tokens arrive. Treating
+   *  it as "output emitted" caused Anthropic streaming 401s to be dropped by the
+   *  contamination guard before the failover path could surface a user-visible
+   *  re-auth hint. Real side-effect risk only exists once content streams or a
+   *  tool starts executing. */
   private currentTurnHasOutput = false;
   /** True once handlePotentialError has observed a scheduled-task delivery in
    *  pendingDeliveries during the current turn. Read at agent_end to extend the
@@ -714,17 +722,19 @@ export class AgentHost {
 
     // Track whether the current turn has emitted any model output. Used by
     // handlePotentialError to detect contaminated turns (issue #175).
+    //
+    // Excludes `message_start`: that fires on scaffold creation (user messages
+    // included, and assistant streams that abort before any token arrives), and
+    // including it caused Anthropic streaming 401s to be incorrectly classified
+    // as contaminated, dropping the failover path's user-visible re-auth hint
+    // (GitHub issue #192).
     if (event.type === 'turn_start') {
       this.currentTurnHasOutput = false;
       // Reset the per-turn scheduled-task flag too; handlePotentialError will
       // set it again if the turn errors with a scheduled-task delivery pending.
       // See GitHub issue #189.
       this.hadScheduledTaskDeliveryThisTurn = false;
-    } else if (
-      event.type === 'message_start' ||
-      event.type === 'message_update' ||
-      event.type === 'tool_execution_start'
-    ) {
+    } else if (event.type === 'message_update' || event.type === 'tool_execution_start') {
       this.currentTurnHasOutput = true;
     }
 
@@ -1572,7 +1582,7 @@ export class AgentHost {
     statusCode: number | undefined
   ): string {
     return tier === 'oauth' && statusCode === 401 && this.oauthRefreshAttemptedFor.has(provider)
-      ? '\n\nRun `system2 config` and restart the server to re-authenticate.'
+      ? `\n\nRun \`system2 config\` to refresh ${provider} authentication and restart the server.`
       : '';
   }
 
