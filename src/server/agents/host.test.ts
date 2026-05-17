@@ -4344,14 +4344,19 @@ describe('AgentHost', () => {
       );
     });
 
-    it('message_start then 401 surfaces the named hint via the switching-provider path (end-to-end repro for #192)', async () => {
-      // Full repro for #192: drive the exact SDK event sequence Anthropic emits on a
-      // streaming-auth failure (turn_start → message_start → message_end with 401), and
-      // assert the failover path runs to completion with the provider-named re-auth hint
-      // in the chat message. Before the fix, message_start flipped currentTurnHasOutput
-      // and the contamination guard at host.ts:903 rejected the pending delivery before
-      // any hint message could be written. After the fix, message_start is a soft
-      // signal, the guard stays quiet, and the hint reaches the chat.
+    it('message_start then 401 surfaces the named hint to chat via the all-providers-unavailable path (end-to-end repro for #192)', async () => {
+      // Full repro for #192. Before the fix: Anthropic streaming auth failures
+      // (turn_start → message_start → message_end with 401) flipped currentTurnHasOutput
+      // via message_start, the contamination guard rejected the pending delivery, and
+      // the failover path never reached pushSystemMessage — so the chat stayed silent
+      // and the user had no idea Anthropic needed re-auth. After the fix: message_start
+      // is a soft signal, the guard stays quiet, and pushSystemMessage writes the
+      // provider-named hint into the chat cache.
+      //
+      // Routes through the all-providers-unavailable path (markKeyFailed=false,
+      // getNextProvider=undefined) so the real pushSystemMessage runs and we can assert
+      // on the chat-cache push directly, not on a mocked reinitializeWithProvider's
+      // call args. Copilot review #3 raised this fidelity concern.
       const { host, internal, authResolver } = await makeOAuthHost();
       const cast = internal as unknown as {
         oauthRefreshAttemptedFor: Set<string>;
@@ -4365,13 +4370,17 @@ describe('AgentHost', () => {
         deliverySendCount: number;
         handleSessionEvent: (event: unknown) => void;
       };
+      const hostInternal = host as unknown as {
+        _chatCache: { push: ReturnType<typeof vi.fn> };
+      };
+      hostInternal._chatCache = { push: vi.fn() };
 
       // Simulate refresh-retry already failed for anthropic this delivery (so this 401
       // is the second one and lands in the failover path with hint).
       cast.oauthRefreshAttemptedFor.add('anthropic');
       cast.currentKeyIndex = 0;
-      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(true);
-      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue('cerebras');
+      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue(undefined);
 
       // Queue a pending delivery that would have been clobbered by the contamination
       // guard before the fix.
@@ -4391,21 +4400,20 @@ describe('AgentHost', () => {
       cast.handleSessionEvent({ type: 'message_start', message: {} });
       await internal.handlePotentialError(auth401Event);
 
-      // Contamination guard did NOT fire — delivery survives.
+      // Contamination guard did NOT fire — delivery survives without the
+      // "API error after model output" rejection.
       expect(rejectDelivery).not.toHaveBeenCalledWith(
         expect.objectContaining({
           message: expect.stringContaining('API error after model output'),
         })
       );
-      // Failover ran with the provider-named hint baked in.
-      expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
-      const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
-        .calls[0][4];
-      expect(detail).toContain(
+      // Real pushSystemMessage ran, hitting the chat cache with the provider-named hint.
+      expect(hostInternal._chatCache.push).toHaveBeenCalled();
+      const pushed = hostInternal._chatCache.push.mock.calls[0][0] as { content: string };
+      expect(pushed.content).toContain('all providers unavailable');
+      expect(pushed.content).toContain(
         'Run `system2 config` to refresh anthropic authentication and restart the server.'
       );
-      // Silence unused-var warning — assert host instance was used.
-      expect(host).toBeDefined();
     });
 
     it('appends re-auth hint to switching-provider chat message after refresh-retry failed', async () => {
