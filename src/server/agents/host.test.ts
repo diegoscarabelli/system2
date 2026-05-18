@@ -1111,7 +1111,7 @@ describe('AgentHost', () => {
       );
     });
 
-    it('handleSessionEvent flips currentTurnHasOutput on output events and resets on turn_start (#175)', () => {
+    it('handleSessionEvent flips currentTurnHasOutput on output events and resets on turn_start (#175, #192)', () => {
       const host = new AgentHost({
         db: makeDbStub(),
         agentId: 1,
@@ -1132,11 +1132,14 @@ describe('AgentHost', () => {
       hostInternal.handleSessionEvent({ type: 'turn_start' });
       expect(hostInternal.currentTurnHasOutput).toBe(false);
 
+      // message_start alone must NOT flip the flag (#192). The Pi SDK fires this when a
+      // message scaffold is created (which happens for user messages too, and for assistant
+      // streams that close with an auth failure before any tokens arrive). Treating it as
+      // "model emitted output" caused the contamination guard to drop Anthropic streaming
+      // 401s before the failover path could write a user-visible chat message with the
+      // OAuth re-auth hint. The flag is meant to track real side-effect risk, which only
+      // exists once content streams (`message_update`) or a tool starts executing.
       hostInternal.handleSessionEvent({ type: 'message_start', message: {} });
-      expect(hostInternal.currentTurnHasOutput).toBe(true);
-
-      // turn_start resets the flag for the next turn
-      hostInternal.handleSessionEvent({ type: 'turn_start' });
       expect(hostInternal.currentTurnHasOutput).toBe(false);
 
       hostInternal.handleSessionEvent({
@@ -4254,7 +4257,9 @@ describe('AgentHost', () => {
       const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
         .calls[0][4];
       expect(detail).toContain('rotating to next key');
-      expect(detail).toContain('Run `system2 config` and restart the server to re-authenticate.');
+      expect(detail).toContain(
+        'Run `system2 config` to refresh anthropic authentication and restart the server.'
+      );
     });
 
     it('appends re-auth hint to cooldown-by-another-agent switching chat message', async () => {
@@ -4276,7 +4281,9 @@ describe('AgentHost', () => {
       const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
         .calls[0][4];
       expect(detail).toContain('key already in cooldown');
-      expect(detail).toContain('Run `system2 config` and restart the server to re-authenticate.');
+      expect(detail).toContain(
+        'Run `system2 config` to refresh anthropic authentication and restart the server.'
+      );
     });
 
     it('appends re-auth hint to post-markKeyFailed rotating-to-next-key chat message', async () => {
@@ -4301,7 +4308,9 @@ describe('AgentHost', () => {
       const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
         .calls[0][4];
       expect(detail).toContain('rotating to next key');
-      expect(detail).toContain('Run `system2 config` and restart the server to re-authenticate.');
+      expect(detail).toContain(
+        'Run `system2 config` to refresh anthropic authentication and restart the server.'
+      );
     });
 
     it('appends re-auth hint to last-resort failover chat message', async () => {
@@ -4330,7 +4339,81 @@ describe('AgentHost', () => {
       const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
         .calls[0][4];
       expect(detail).toContain('switching to cerebras');
-      expect(detail).toContain('Run `system2 config` and restart the server to re-authenticate.');
+      expect(detail).toContain(
+        'Run `system2 config` to refresh anthropic authentication and restart the server.'
+      );
+    });
+
+    it('message_start then 401 surfaces the named hint to chat via the all-providers-unavailable path (end-to-end repro for #192)', async () => {
+      // Full repro for #192. Before the fix: Anthropic streaming auth failures
+      // (turn_start → message_start → message_end with 401) flipped currentTurnHasOutput
+      // via message_start, the contamination guard rejected the pending delivery, and
+      // the failover path never reached pushSystemMessage — so the chat stayed silent
+      // and the user had no idea Anthropic needed re-auth. After the fix: message_start
+      // is a soft signal, the guard stays quiet, and pushSystemMessage writes the
+      // provider-named hint into the chat cache.
+      //
+      // Routes through the all-providers-unavailable path (markKeyFailed=false,
+      // getNextProvider=undefined) so the real pushSystemMessage runs and we can assert
+      // on the chat-cache push directly, not on a mocked reinitializeWithProvider's
+      // call args. Copilot review #3 raised this fidelity concern.
+      const { host, internal, authResolver } = await makeOAuthHost();
+      const cast = internal as unknown as {
+        oauthRefreshAttemptedFor: Set<string>;
+        currentKeyIndex: number;
+        pendingDeliveries: Array<{
+          content: string;
+          details: { sender: number; receiver: number; timestamp: number };
+          resolve: () => void;
+          reject: (e: Error) => void;
+        }>;
+        deliverySendCount: number;
+        handleSessionEvent: (event: unknown) => void;
+      };
+      const hostInternal = host as unknown as {
+        _chatCache: { push: ReturnType<typeof vi.fn> };
+      };
+      hostInternal._chatCache = { push: vi.fn() };
+
+      // Simulate refresh-retry already failed for anthropic this delivery (so this 401
+      // is the second one and lands in the failover path with hint).
+      cast.oauthRefreshAttemptedFor.add('anthropic');
+      cast.currentKeyIndex = 0;
+      vi.spyOn(authResolver, 'markKeyFailed').mockReturnValue(false);
+      vi.spyOn(authResolver, 'getNextProvider').mockReturnValue(undefined);
+
+      // Queue a pending delivery that would have been clobbered by the contamination
+      // guard before the fix.
+      const rejectDelivery = vi.fn();
+      cast.pendingDeliveries = [
+        {
+          content: 'delivery in flight when stream opened',
+          details: { sender: 1, receiver: 2, timestamp: Date.now() },
+          resolve: vi.fn(),
+          reject: rejectDelivery,
+        },
+      ];
+      cast.deliverySendCount = 1;
+
+      // Drive Anthropic's streaming-auth event sequence.
+      cast.handleSessionEvent({ type: 'turn_start' });
+      cast.handleSessionEvent({ type: 'message_start', message: {} });
+      await internal.handlePotentialError(auth401Event);
+
+      // Contamination guard did NOT fire — delivery survives without the
+      // "API error after model output" rejection.
+      expect(rejectDelivery).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('API error after model output'),
+        })
+      );
+      // Real pushSystemMessage ran, hitting the chat cache with the provider-named hint.
+      expect(hostInternal._chatCache.push).toHaveBeenCalled();
+      const pushed = hostInternal._chatCache.push.mock.calls[0][0] as { content: string };
+      expect(pushed.content).toContain('all providers unavailable');
+      expect(pushed.content).toContain(
+        'Run `system2 config` to refresh anthropic authentication and restart the server.'
+      );
     });
 
     it('appends re-auth hint to switching-provider chat message after refresh-retry failed', async () => {
@@ -4352,7 +4435,9 @@ describe('AgentHost', () => {
       expect(internal.reinitializeWithProvider).toHaveBeenCalledOnce();
       const detail = (internal.reinitializeWithProvider as ReturnType<typeof vi.fn>).mock
         .calls[0][4];
-      expect(detail).toContain('Run `system2 config` and restart the server to re-authenticate.');
+      expect(detail).toContain(
+        'Run `system2 config` to refresh anthropic authentication and restart the server.'
+      );
     });
 
     it('appends re-auth hint to all-providers-unavailable chat message after refresh-retry failed', async () => {
@@ -4377,7 +4462,7 @@ describe('AgentHost', () => {
       const pushed = hostInternal._chatCache.push.mock.calls[0][0] as { content: string };
       expect(pushed.content).toContain('all providers unavailable');
       expect(pushed.content).toContain(
-        'Run `system2 config` and restart the server to re-authenticate.'
+        'Run `system2 config` to refresh anthropic authentication and restart the server.'
       );
     });
 
