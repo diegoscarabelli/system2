@@ -1309,15 +1309,42 @@ export class JobSkipped extends Error {
 }
 
 /**
+ * Default upper bound for any single job handler invocation. Healthy daily-summary
+ * and memory-update runs complete in well under a minute; anything pushing past 10
+ * minutes is presumed wedged (see issue #194 for the silent-hang failure mode this
+ * backstops). Overridable per call via the `timeoutMs` parameter.
+ */
+export const DEFAULT_HANDLER_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Thrown by trackJobExecution when a handler exceeds its timeout. The handler's
+ * own promise is left to settle on its own (we cannot cancel arbitrary user code),
+ * but the execution row is marked `failed` immediately so the scheduler is no
+ * longer blocked.
+ */
+export class HandlerTimeoutError extends Error {
+  constructor(public timeoutMs: number) {
+    super(`handler timed out after ${Math.round(timeoutMs / 1000)}s`);
+    this.name = 'HandlerTimeoutError';
+  }
+}
+
+/**
  * Execute a job with execution tracking: inserts a 'running' record,
  * calls the handler, then marks it 'completed', 'skipped', or 'failed'.
+ *
+ * `timeoutMs` bounds how long the handler may run before the row is force-failed.
+ * The handler promise itself is detached on timeout (its eventual settlement is
+ * swallowed so it cannot surface as an unhandled rejection); this is intentional,
+ * since the failure mode the timeout exists for is a handler that never resolves.
  */
 export async function trackJobExecution(
   db: DatabaseClient,
   jobName: string,
   triggerType: JobExecution['trigger_type'],
   handler: () => void | Promise<void>,
-  onJobChange?: () => void
+  onJobChange?: () => void,
+  timeoutMs: number = DEFAULT_HANDLER_TIMEOUT_MS
 ): Promise<void> {
   const execution = db.createJobExecution(jobName, triggerType);
   const notifyChange = () => {
@@ -1328,11 +1355,34 @@ export async function trackJobExecution(
     }
   };
   notifyChange();
+
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const handlerPromise = Promise.resolve().then(handler);
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new HandlerTimeoutError(timeoutMs)), timeoutMs);
+  });
+
   try {
-    await handler();
+    await Promise.race([handlerPromise, timeoutPromise]);
     db.completeJobExecution(execution.id);
     notifyChange();
   } catch (error) {
+    if (error instanceof HandlerTimeoutError) {
+      // Detach the still-pending handler so a later rejection from it does not become
+      // an unhandled-rejection process crash. A late completion is harmless — we have
+      // already recorded the row as failed.
+      handlerPromise.catch((late) => {
+        log.warn(
+          `[Jobs] ${jobName} handler eventually rejected after timeout: ${
+            late instanceof Error ? late.message : String(late)
+          }`
+        );
+      });
+      log.error(`[Jobs] ${jobName} ${error.message} (trigger=${triggerType}); marking failed`);
+      db.failJobExecution(execution.id, error.message);
+      notifyChange();
+      throw error;
+    }
     if (error instanceof JobSkipped) {
       db.skipJobExecution(execution.id, error.reason);
       notifyChange();
@@ -1342,6 +1392,8 @@ export async function trackJobExecution(
     db.failJobExecution(execution.id, message);
     notifyChange();
     throw error;
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
   }
 }
 

@@ -12,7 +12,9 @@ import {
   collectAgentActivity,
   collectAgentActivityWithTimestamps,
   type DbChangeTable,
+  DEFAULT_HANDLER_TIMEOUT_MS,
   formatMarkdownTable,
+  HandlerTimeoutError,
   JobSkipped,
   NARRATOR_MESSAGE_EXCERPT_BYTES,
   readFrontmatterField,
@@ -2461,5 +2463,102 @@ describe('trackJobExecution', () => {
     );
 
     expect(db.failJobExecution).toHaveBeenCalledWith(42, expect.stringContaining('handler failed'));
+  });
+
+  describe('handler timeout', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('marks the row failed and throws HandlerTimeoutError when handler exceeds timeoutMs', async () => {
+      const db = mockDbForTracking();
+      const handler = vi.fn(() => new Promise<void>(() => {})); // never resolves
+
+      const promise = trackJobExecution(db, 'test-job', 'cron', handler, undefined, 1_000);
+      // Surface the rejection synchronously so the unhandled-rejection guard does not fire
+      // while we are still advancing fake timers.
+      const settled = expect(promise).rejects.toBeInstanceOf(HandlerTimeoutError);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await settled;
+
+      expect(handler).toHaveBeenCalled();
+      expect(db.failJobExecution).toHaveBeenCalledWith(
+        42,
+        expect.stringContaining('handler timed out after 1s')
+      );
+      expect(db.completeJobExecution).not.toHaveBeenCalled();
+    });
+
+    it('clears the timer when handler resolves before timeout (no false-positive failure)', async () => {
+      const db = mockDbForTracking();
+      const handler = vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      });
+
+      const promise = trackJobExecution(db, 'test-job', 'cron', handler, undefined, 5_000);
+      await vi.advanceTimersByTimeAsync(500);
+      await promise;
+
+      // Advance well past the timeout — if the timer were still pending it would fire now.
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(db.completeJobExecution).toHaveBeenCalledWith(42);
+      expect(db.failJobExecution).not.toHaveBeenCalled();
+    });
+
+    it('does not produce an unhandled rejection if the handler eventually rejects after timeout', async () => {
+      const db = mockDbForTracking();
+      const handlerLog = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      let rejectHandler!: (err: Error) => void;
+      const handler = vi.fn(
+        () =>
+          new Promise<void>((_, reject) => {
+            rejectHandler = reject;
+          })
+      );
+
+      const promise = trackJobExecution(db, 'test-job', 'cron', handler, undefined, 1_000);
+      const settled = expect(promise).rejects.toBeInstanceOf(HandlerTimeoutError);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await settled;
+
+      // Now let the handler's own promise reject — this would crash the process if
+      // trackJobExecution did not attach a .catch() to it after timing out.
+      rejectHandler(new Error('late SDK failure'));
+      await vi.runAllTimersAsync();
+      // Allow microtasks for the swallow handler to run.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(handlerLog).toHaveBeenCalledWith(expect.stringContaining('late SDK failure'));
+      handlerLog.mockRestore();
+    });
+
+    it('uses DEFAULT_HANDLER_TIMEOUT_MS when timeoutMs is omitted', async () => {
+      const db = mockDbForTracking();
+      const handler = vi.fn(() => new Promise<void>(() => {}));
+
+      const promise = trackJobExecution(db, 'test-job', 'cron', handler);
+      const settled = expect(promise).rejects.toBeInstanceOf(HandlerTimeoutError);
+
+      // Just under the default — should still be running.
+      await vi.advanceTimersByTimeAsync(DEFAULT_HANDLER_TIMEOUT_MS - 1);
+      expect(db.failJobExecution).not.toHaveBeenCalled();
+
+      // Cross the default.
+      await vi.advanceTimersByTimeAsync(1);
+      await settled;
+
+      expect(db.failJobExecution).toHaveBeenCalledWith(
+        42,
+        expect.stringContaining(`handler timed out after ${DEFAULT_HANDLER_TIMEOUT_MS / 1000}s`)
+      );
+    });
   });
 });

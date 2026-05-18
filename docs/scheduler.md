@@ -120,6 +120,8 @@ The `trigger_type` column distinguishes how the execution was initiated:
 
 **Startup recovery:** before Croner starts, the server marks any stale `running` rows as `failed` with error `'server shutdown'`. At that point no new jobs have fired, so every `running` row is definitively from the previous (crashed) process.
 
+**Handler timeout backstop:** every handler invoked via `trackJobExecution` is bounded by `DEFAULT_HANDLER_TIMEOUT_MS` (10 minutes, overridable per call). If the handler does not settle within that window, the execution row is marked `failed` with error `'handler timed out after Xs'` and the function rejects with a `HandlerTimeoutError` so the scheduler is not blocked. The handler promise itself is detached: its later settlement is logged at `warn` if it rejects, but cannot crash the daemon or alter the already-recorded row. This is a universal safety net for the silent-hang failure mode where a delivery silently queues into a wedged narrator session and never resolves (issue #194); narrower fixes for the underlying delivery path live in `AgentHost`.
+
 **Skip reasons** are stored in the `error` column when status is `skipped`. Common reasons: `no network connectivity`, `no activity since last run`, `no daily summaries to incorporate`.
 
 **Missing timestamps:** if daily summary files exist but none contain `last_narrator_update_ts` (and memory.md also lacks it), the job fails rather than silently falling back. This catches initialization errors where no cursor has been set yet.
