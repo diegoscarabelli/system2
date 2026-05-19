@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-05-19
+
 ### Fixed
 
-- Cron handlers can no longer hang the scheduler indefinitely. `trackJobExecution` now bounds every handler invocation by a `timeoutMs` (default 10 minutes, overridable per call). On expiry the execution row is marked `failed` with reason `'handler timed out after Xs'` and a `HandlerTimeoutError` is thrown so the scheduler unblocks. The handler's own promise is detached: a late rejection is logged at `warn` rather than crashing the daemon, and a late resolution is silently ignored. This is the universal backstop layer of issue [#194](https://github.com/diegoscarabelli/system2/issues/194), where a wedged narrator session caused 44 daily-summary rows to accumulate as `running` over 21 hours; targeted fixes for the underlying delivery path will follow.
+- Cron handlers can no longer hang the scheduler indefinitely. `trackJobExecution` now bounds every handler invocation by a `timeoutMs` (default 10 minutes, overridable per call via a `TrackJobExecutionOptions` object). On expiry the execution row is marked `failed` with reason `'handler timed out after Xs'` and a `HandlerTimeoutError` is thrown so the scheduler unblocks. The handler's own promise is detached: a late rejection is logged at `warn` rather than crashing the daemon (the rejection observer is attached at handler-promise creation time so post-timeout rejections cannot escape the function), and a late resolution is silently ignored. This is the universal backstop layer of issue [#194](https://github.com/diegoscarabelli/system2/issues/194), where a wedged narrator session caused 44 daily-summary rows to accumulate as `running` over 21 hours; targeted fixes for the underlying delivery path will follow.
 
 ## [0.3.12] - 2026-05-16
 
