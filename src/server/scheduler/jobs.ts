@@ -1321,12 +1321,29 @@ export const DEFAULT_HANDLER_TIMEOUT_MS = 10 * 60 * 1000;
  * own promise is left to settle on its own (we cannot cancel arbitrary user code),
  * but the execution row is marked `failed` immediately so the scheduler is no
  * longer blocked.
+ *
+ * The message uses `Math.ceil` on the seconds conversion so sub-second timeouts
+ * never render as `0s`.
  */
 export class HandlerTimeoutError extends Error {
   constructor(public timeoutMs: number) {
-    super(`handler timed out after ${Math.round(timeoutMs / 1000)}s`);
+    super(`handler timed out after ${Math.ceil(timeoutMs / 1000)}s`);
     this.name = 'HandlerTimeoutError';
   }
+}
+
+/**
+ * Options accepted by trackJobExecution.
+ *
+ * Kept as an object so callers that want a custom `timeoutMs` do not have to
+ * pass an `undefined` placeholder for `onJobChange`, and so new options can be
+ * added without re-ordering positional arguments.
+ */
+export interface TrackJobExecutionOptions {
+  /** Fired whenever the execution row transitions to a new status. */
+  onJobChange?: () => void;
+  /** Override the default handler timeout. */
+  timeoutMs?: number;
 }
 
 /**
@@ -1343,9 +1360,9 @@ export async function trackJobExecution(
   jobName: string,
   triggerType: JobExecution['trigger_type'],
   handler: () => void | Promise<void>,
-  onJobChange?: () => void,
-  timeoutMs: number = DEFAULT_HANDLER_TIMEOUT_MS
+  opts: TrackJobExecutionOptions = {}
 ): Promise<void> {
+  const { onJobChange, timeoutMs = DEFAULT_HANDLER_TIMEOUT_MS } = opts;
   const execution = db.createJobExecution(jobName, triggerType);
   const notifyChange = () => {
     try {
@@ -1370,13 +1387,10 @@ export async function trackJobExecution(
     if (error instanceof HandlerTimeoutError) {
       // Detach the still-pending handler so a later rejection from it does not become
       // an unhandled-rejection process crash. A late completion is harmless — we have
-      // already recorded the row as failed.
+      // already recorded the row as failed. Pass the late error as a separate logger
+      // argument so console.warn preserves stack/context rather than dropping it.
       handlerPromise.catch((late) => {
-        log.warn(
-          `[Jobs] ${jobName} handler eventually rejected after timeout: ${
-            late instanceof Error ? late.message : String(late)
-          }`
-        );
+        log.warn(`[Jobs] ${jobName} handler eventually rejected after timeout:`, late);
       });
       log.error(`[Jobs] ${jobName} ${error.message} (trigger=${triggerType}); marking failed`);
       db.failJobExecution(execution.id, error.message);
@@ -1435,7 +1449,7 @@ export function registerNarratorJobs(
           narratorMessageExcerptBytes
         );
       },
-      onJobChange
+      { onJobChange }
     );
   });
 
@@ -1459,7 +1473,7 @@ export function registerNarratorJobs(
           narratorMessageExcerptBytes
         );
       },
-      onJobChange
+      { onJobChange }
     );
   });
 }

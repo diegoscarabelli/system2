@@ -2442,7 +2442,7 @@ describe('trackJobExecution', () => {
       throw new Error('broadcast failed');
     });
 
-    await trackJobExecution(db, 'test-job', 'cron', handler, onJobChange);
+    await trackJobExecution(db, 'test-job', 'cron', handler, { onJobChange });
 
     expect(handler).toHaveBeenCalled();
     expect(db.completeJobExecution).toHaveBeenCalledWith(42);
@@ -2458,9 +2458,9 @@ describe('trackJobExecution', () => {
       throw new Error('broadcast failed');
     });
 
-    await expect(trackJobExecution(db, 'test-job', 'cron', handler, onJobChange)).rejects.toThrow(
-      'handler failed'
-    );
+    await expect(
+      trackJobExecution(db, 'test-job', 'cron', handler, { onJobChange })
+    ).rejects.toThrow('handler failed');
 
     expect(db.failJobExecution).toHaveBeenCalledWith(42, expect.stringContaining('handler failed'));
   });
@@ -2478,7 +2478,7 @@ describe('trackJobExecution', () => {
       const db = mockDbForTracking();
       const handler = vi.fn(() => new Promise<void>(() => {})); // never resolves
 
-      const promise = trackJobExecution(db, 'test-job', 'cron', handler, undefined, 1_000);
+      const promise = trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 1_000 });
       // Surface the rejection synchronously so the unhandled-rejection guard does not fire
       // while we are still advancing fake timers.
       const settled = expect(promise).rejects.toBeInstanceOf(HandlerTimeoutError);
@@ -2494,13 +2494,29 @@ describe('trackJobExecution', () => {
       expect(db.completeJobExecution).not.toHaveBeenCalled();
     });
 
+    it('renders sub-second timeouts as at least 1s (no "0s" message)', async () => {
+      const db = mockDbForTracking();
+      const handler = vi.fn(() => new Promise<void>(() => {}));
+
+      const promise = trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 250 });
+      const settled = expect(promise).rejects.toBeInstanceOf(HandlerTimeoutError);
+
+      await vi.advanceTimersByTimeAsync(250);
+      await settled;
+
+      expect(db.failJobExecution).toHaveBeenCalledWith(
+        42,
+        expect.stringContaining('handler timed out after 1s')
+      );
+    });
+
     it('clears the timer when handler resolves before timeout (no false-positive failure)', async () => {
       const db = mockDbForTracking();
       const handler = vi.fn(async () => {
         await new Promise((resolve) => setTimeout(resolve, 500));
       });
 
-      const promise = trackJobExecution(db, 'test-job', 'cron', handler, undefined, 5_000);
+      const promise = trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 5_000 });
       await vi.advanceTimersByTimeAsync(500);
       await promise;
 
@@ -2522,7 +2538,7 @@ describe('trackJobExecution', () => {
           })
       );
 
-      const promise = trackJobExecution(db, 'test-job', 'cron', handler, undefined, 1_000);
+      const promise = trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 1_000 });
       const settled = expect(promise).rejects.toBeInstanceOf(HandlerTimeoutError);
 
       await vi.advanceTimersByTimeAsync(1_000);
@@ -2530,13 +2546,19 @@ describe('trackJobExecution', () => {
 
       // Now let the handler's own promise reject — this would crash the process if
       // trackJobExecution did not attach a .catch() to it after timing out.
-      rejectHandler(new Error('late SDK failure'));
+      const lateError = new Error('late SDK failure');
+      rejectHandler(lateError);
       await vi.runAllTimersAsync();
       // Allow microtasks for the swallow handler to run.
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(handlerLog).toHaveBeenCalledWith(expect.stringContaining('late SDK failure'));
+      // The error object is passed as a separate logger argument so stack/context is
+      // preserved (we don't interpolate `late.message` into the template).
+      expect(handlerLog).toHaveBeenCalledWith(
+        expect.stringContaining('handler eventually rejected after timeout'),
+        lateError
+      );
       handlerLog.mockRestore();
     });
 
