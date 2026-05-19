@@ -701,7 +701,7 @@ export class Server {
                 this.config.deliveryConfig?.narrator_message_excerpt_bytes ??
                   NARRATOR_MESSAGE_EXCERPT_BYTES
               ),
-            onJobChange
+            { onJobChange }
           );
         } catch (error) {
           log.error('[Server] Daily summary catch-up failed:', error);
@@ -735,7 +735,7 @@ export class Server {
                 this.config.deliveryConfig?.narrator_message_excerpt_bytes ??
                   NARRATOR_MESSAGE_EXCERPT_BYTES
               ),
-            onJobChange
+            { onJobChange }
           );
         } catch (error) {
           log.error('[Server] Memory update catch-up failed:', error);

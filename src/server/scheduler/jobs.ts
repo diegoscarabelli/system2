@@ -1309,16 +1309,60 @@ export class JobSkipped extends Error {
 }
 
 /**
+ * Default upper bound for any single job handler invocation. Healthy daily-summary
+ * and memory-update runs complete in well under a minute; anything pushing past 10
+ * minutes is presumed wedged (see issue #194 for the silent-hang failure mode this
+ * backstops). Overridable per call via the `timeoutMs` parameter.
+ */
+export const DEFAULT_HANDLER_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Thrown by trackJobExecution when a handler exceeds its timeout. The handler's
+ * own promise is left to settle on its own (we cannot cancel arbitrary user code),
+ * but the execution row is marked `failed` immediately so the scheduler is no
+ * longer blocked.
+ *
+ * The message uses `Math.ceil` on the seconds conversion so sub-second timeouts
+ * never render as `0s`.
+ */
+export class HandlerTimeoutError extends Error {
+  constructor(public timeoutMs: number) {
+    super(`handler timed out after ${Math.ceil(timeoutMs / 1000)}s`);
+    this.name = 'HandlerTimeoutError';
+  }
+}
+
+/**
+ * Options accepted by trackJobExecution.
+ *
+ * Kept as an object so callers that want a custom `timeoutMs` do not have to
+ * pass an `undefined` placeholder for `onJobChange`, and so new options can be
+ * added without re-ordering positional arguments.
+ */
+export interface TrackJobExecutionOptions {
+  /** Fired whenever the execution row transitions to a new status. */
+  onJobChange?: () => void;
+  /** Override the default handler timeout. */
+  timeoutMs?: number;
+}
+
+/**
  * Execute a job with execution tracking: inserts a 'running' record,
  * calls the handler, then marks it 'completed', 'skipped', or 'failed'.
+ *
+ * `timeoutMs` bounds how long the handler may run before the row is force-failed.
+ * The handler promise itself is detached on timeout (its eventual settlement is
+ * swallowed so it cannot surface as an unhandled rejection); this is intentional,
+ * since the failure mode the timeout exists for is a handler that never resolves.
  */
 export async function trackJobExecution(
   db: DatabaseClient,
   jobName: string,
   triggerType: JobExecution['trigger_type'],
   handler: () => void | Promise<void>,
-  onJobChange?: () => void
+  opts: TrackJobExecutionOptions = {}
 ): Promise<void> {
+  const { onJobChange, timeoutMs = DEFAULT_HANDLER_TIMEOUT_MS } = opts;
   const execution = db.createJobExecution(jobName, triggerType);
   const notifyChange = () => {
     try {
@@ -1328,11 +1372,41 @@ export async function trackJobExecution(
     }
   };
   notifyChange();
+
+  let timedOut = false;
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const handlerPromise = Promise.resolve().then(handler);
+  // Attach a rejection handler at creation time rather than waiting until after
+  // the timeout is observed. Promise.race already attaches a rejection observer
+  // synchronously, so a rejection between now and the post-timeout branch is
+  // already "handled" per spec — but a defensive catch here removes the
+  // dependency on that internal detail and gives us a clear place to surface
+  // post-timeout rejections by their own kind. The `timedOut` flag lets us tell
+  // the two cases apart: pre-timeout rejections are routed through the
+  // Promise.race below and handled in the catch block, post-timeout rejections
+  // land here and are logged with full Error context.
+  handlerPromise.catch((late) => {
+    if (timedOut) {
+      log.warn(`[Jobs] ${jobName} handler eventually rejected after timeout:`, late);
+    }
+  });
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      reject(new HandlerTimeoutError(timeoutMs));
+    }, timeoutMs);
+  });
+
   try {
-    await handler();
+    await Promise.race([handlerPromise, timeoutPromise]);
     db.completeJobExecution(execution.id);
     notifyChange();
   } catch (error) {
+    if (error instanceof HandlerTimeoutError) {
+      db.failJobExecution(execution.id, error.message);
+      notifyChange();
+      throw error;
+    }
     if (error instanceof JobSkipped) {
       db.skipJobExecution(execution.id, error.reason);
       notifyChange();
@@ -1342,6 +1416,8 @@ export async function trackJobExecution(
     db.failJobExecution(execution.id, message);
     notifyChange();
     throw error;
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
   }
 }
 
@@ -1383,7 +1459,7 @@ export function registerNarratorJobs(
           narratorMessageExcerptBytes
         );
       },
-      onJobChange
+      { onJobChange }
     );
   });
 
@@ -1407,7 +1483,7 @@ export function registerNarratorJobs(
           narratorMessageExcerptBytes
         );
       },
-      onJobChange
+      { onJobChange }
     );
   });
 }
