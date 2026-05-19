@@ -1373,10 +1373,28 @@ export async function trackJobExecution(
   };
   notifyChange();
 
+  let timedOut = false;
   let timeoutHandle: NodeJS.Timeout | undefined;
   const handlerPromise = Promise.resolve().then(handler);
+  // Attach a rejection handler at creation time rather than waiting until after
+  // the timeout is observed. Promise.race already attaches a rejection observer
+  // synchronously, so a rejection between now and the post-timeout branch is
+  // already "handled" per spec — but a defensive catch here removes the
+  // dependency on that internal detail and gives us a clear place to surface
+  // post-timeout rejections by their own kind. The `timedOut` flag lets us tell
+  // the two cases apart: pre-timeout rejections are routed through the
+  // Promise.race below and handled in the catch block, post-timeout rejections
+  // land here and are logged with full Error context.
+  handlerPromise.catch((late) => {
+    if (timedOut) {
+      log.warn(`[Jobs] ${jobName} handler eventually rejected after timeout:`, late);
+    }
+  });
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutHandle = setTimeout(() => reject(new HandlerTimeoutError(timeoutMs)), timeoutMs);
+    timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      reject(new HandlerTimeoutError(timeoutMs));
+    }, timeoutMs);
   });
 
   try {
@@ -1385,14 +1403,6 @@ export async function trackJobExecution(
     notifyChange();
   } catch (error) {
     if (error instanceof HandlerTimeoutError) {
-      // Detach the still-pending handler so a later rejection from it does not become
-      // an unhandled-rejection process crash. A late completion is harmless — we have
-      // already recorded the row as failed. Pass the late error as a separate logger
-      // argument so console.warn preserves stack/context rather than dropping it.
-      handlerPromise.catch((late) => {
-        log.warn(`[Jobs] ${jobName} handler eventually rejected after timeout:`, late);
-      });
-      log.error(`[Jobs] ${jobName} ${error.message} (trigger=${triggerType}); marking failed`);
       db.failJobExecution(execution.id, error.message);
       notifyChange();
       throw error;
