@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-05-19
+
 ### Added
 
 - The UI now ships a browser favicon, matching the icon used on `diegoscarabelli.github.io`. Provides `favicon.ico` plus 16x16 and 32x32 PNGs via Vite's `public/` directory; mobile/PWA variants are intentionally omitted since System2 is a localhost desktop UI.
