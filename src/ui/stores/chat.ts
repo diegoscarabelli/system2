@@ -159,10 +159,11 @@ export const useChatStore = create<ChatState>()(
 
       addUserMessage: (content: string, agentId?: number) => {
         const targetId = agentId ?? get().activeAgentId;
-        // Generate a stable id even when no target exists so the caller can pass
-        // it to the server; the server will use it as the ChatMessage.id, so the
-        // echoed chat_message_added dedups against this optimistic insert.
-        const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        // crypto.randomUUID(): dedup-by-id makes id uniqueness load-bearing
+        // (collisions silently drop rows). Available in every browser since
+        // ~2021 and in Node test environments. The `msg-` prefix is purely
+        // cosmetic for log-grepping.
+        const id = `msg-${crypto.randomUUID()}`;
         if (targetId === null) return id;
 
         const agentState = get().agentStates.get(targetId);

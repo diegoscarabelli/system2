@@ -329,6 +329,35 @@ describe('WebSocketHandler chat_message_added forwarding', () => {
     expect(pushed).toMatchObject({ id: 'client-id-1', role: 'user', content: 'hi' });
   });
 
+  it('replaces invalid client-provided ids with a server-generated UUID', () => {
+    // A buggy/malicious client could send a multi-megabyte id, control chars,
+    // or deliberately collide ids to trigger silent drops via dedup-by-id.
+    // Validation: <=128 chars, charset [A-Za-z0-9_-].
+    new WebSocketHandler(
+      ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
+      registry,
+      1
+    );
+
+    const cases: Array<{ label: string; id: unknown }> = [
+      { label: 'empty string', id: '' },
+      { label: 'too long', id: 'x'.repeat(200) },
+      { label: 'control char', id: 'msg-\n-evil' },
+      { label: 'unicode', id: 'msg-évil' },
+      { label: 'non-string', id: 12345 },
+    ];
+
+    for (const { id } of cases) {
+      (guideHost.chatCache.push as ReturnType<typeof vi.fn>).mockClear();
+      ws.__listeners.message?.(
+        Buffer.from(JSON.stringify({ type: 'user_message', content: 'hi', agentId: 1, id }))
+      );
+      const pushed = (guideHost.chatCache.push as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(pushed.id).not.toBe(id);
+      expect(pushed.id).toMatch(/^msg-[0-9a-f-]{36}$/);
+    }
+  });
+
   it('provider_change carries no reason (chat row arrives via chat_message_added)', () => {
     new WebSocketHandler(
       ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],

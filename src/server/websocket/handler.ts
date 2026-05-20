@@ -21,6 +21,25 @@ import type { AgentRegistry } from '../agents/registry.js';
 import type { ConversationSummarizer } from '../chat/summarizer.js';
 import { log } from '../utils/logger.js';
 
+/**
+ * Validate a client-provided ChatMessage id before persisting + rebroadcasting.
+ * Caps length and restricts to a safe charset so a malicious or buggy client
+ * can't (a) bloat chatCache with multi-MB ids, (b) inject control chars into
+ * persisted JSON or log lines, or (c) deliberately collide ids and trigger
+ * silent drops via the UI's dedup-by-id. Anything that fails this check is
+ * replaced with a server-generated UUID.
+ */
+const MAX_CLIENT_ID_LENGTH = 128;
+const CLIENT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+function isValidClientMessageId(id: unknown): id is string {
+  return (
+    typeof id === 'string' &&
+    id.length > 0 &&
+    id.length <= MAX_CLIENT_ID_LENGTH &&
+    CLIENT_ID_PATTERN.test(id)
+  );
+}
+
 export class WebSocketHandler {
   private ws: WebSocket;
   private agentRegistry: AgentRegistry;
@@ -140,10 +159,12 @@ export class WebSocketHandler {
         // Capture user message in agent's chat cache. The push fires
         // chat_message_added to every subscribed client (including this one),
         // so the originating tab's optimistic insert dedups against the same id.
-        // Fall back to randomUUID() (not msg-${Date.now()}) so two rapid pushes
-        // within the same millisecond can't collide and silently drop a row.
+        // Validate the client-provided id: a too-long or off-charset id would
+        // persist as-is and rebroadcast to every other tab. Fall back to a
+        // server-generated UUID on anything invalid.
+        const id = isValidClientMessageId(message.id) ? message.id : `msg-${randomUUID()}`;
         host.chatCache.push({
-          id: message.id ?? `msg-${randomUUID()}`,
+          id,
           role: 'user',
           content: message.content,
           timestamp: Date.now(),
