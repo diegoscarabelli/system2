@@ -1949,10 +1949,12 @@ describe('AgentHost', () => {
         pendingDeliveries: InternalEntry[];
       };
 
+      type SendStub = ReturnType<typeof vi.fn> & ((...args: unknown[]) => unknown);
+
       function makeHostWithStubSession(): {
         host: AgentHost;
         internal: HostInternal;
-        sendStub: ReturnType<typeof vi.fn>;
+        sendStub: SendStub;
       } {
         const host = new AgentHost({
           db: makeDbStub(),
@@ -1961,7 +1963,7 @@ describe('AgentHost', () => {
           llmConfig: makeLlmConfig(),
         });
         const internal = host as unknown as HostInternal;
-        const sendStub = vi.fn().mockReturnValue(new Promise(() => {}));
+        const sendStub = vi.fn().mockReturnValue(new Promise(() => {})) as SendStub;
         internal.session = { sendCustomMessage: sendStub };
         internal._chatCache = null;
         internal._sessionDir = null;
@@ -2179,10 +2181,7 @@ describe('AgentHost', () => {
           hostInternal.clearDeliveryTimers(d as unknown as InternalEntry);
           hostInternal.armDispatchTimer(d as unknown as InternalEntry, session);
           // Real retry loop also calls sendCustomMessage; mirror that for completeness.
-          (session as { sendCustomMessage: ReturnType<typeof vi.fn> }).sendCustomMessage(
-            { content: d.content },
-            {}
-          );
+          sendStub({ content: d.content }, {});
         }
 
         // In-flight entry: dispatch watchdog armed, sendCustomMessage invoked once.
