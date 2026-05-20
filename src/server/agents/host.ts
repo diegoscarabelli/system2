@@ -1199,6 +1199,10 @@ export class AgentHost {
         const session = this.session;
         for (const d of deliveriesToRetry) {
           this.deliverySendCount++;
+          // Old timers (from the previous send that just failed) are stale — clear,
+          // then arm a fresh dispatch watchdog for this resend.
+          this.clearDeliveryTimers(d);
+          this.armDispatchTimer(d, session);
           session
             .sendCustomMessage(
               {
@@ -1512,6 +1516,10 @@ export class AgentHost {
             if (!this.pendingDeliveries.includes(d)) {
               this.pendingDeliveries.push(d);
             }
+            // Old timers (if any) belong to the pre-failover session; re-arm the wedge
+            // watchdog against the new session's reinit/replay timeline.
+            this.clearDeliveryTimers(d);
+            this.armDeferTimer(d);
             continue;
           }
           // Increment count synchronously so agent_end (which fires before
@@ -1519,6 +1527,8 @@ export class AgentHost {
           this.deliverySendCount++;
           d.deferred = false;
           if (d.scheduledTask) scheduledTaskSent = true;
+          this.clearDeliveryTimers(d);
+          this.armDispatchTimer(d, session);
           session
             .sendCustomMessage(
               {
@@ -2460,9 +2470,13 @@ export class AgentHost {
 
   private armDeferTimer(entry: (typeof this.pendingDeliveries)[number]): void {
     if (entry.deferTimerHandle) clearTimeout(entry.deferTimerHandle);
-    entry.deferTimerHandle = setTimeout(() => {
+    const handle = setTimeout(() => {
       this.handleDeferTimeout(entry);
     }, PENDING_DELIVERY_TIMEOUT_MS);
+    // unref so an armed watchdog never blocks process shutdown — matches the pattern
+    // used by ReminderManager (src/server/reminders/manager.ts).
+    handle.unref?.();
+    entry.deferTimerHandle = handle;
   }
 
   private armDispatchTimer(
@@ -2470,9 +2484,11 @@ export class AgentHost {
     session: AgentSession
   ): void {
     if (entry.dispatchTimerHandle) clearTimeout(entry.dispatchTimerHandle);
-    entry.dispatchTimerHandle = setTimeout(() => {
+    const handle = setTimeout(() => {
       this.handleDispatchTimeout(entry, session);
     }, DELIVERY_DISPATCH_TIMEOUT_MS);
+    handle.unref?.();
+    entry.dispatchTimerHandle = handle;
   }
 
   private handleDeferTimeout(entry: (typeof this.pendingDeliveries)[number]): void {
