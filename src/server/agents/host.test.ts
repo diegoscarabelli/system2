@@ -1976,7 +1976,7 @@ describe('AgentHost', () => {
           receiver: 2,
           timestamp: Date.now(),
         });
-        const settled = expect(promise).rejects.toThrow(/SDK appears to have lost the stream/);
+        const settled = expect(promise).rejects.toThrow(/no agent_end received/);
 
         // Microtask flush so the .then() in deliverMessage runs and sendCustomMessage is called.
         await Promise.resolve();

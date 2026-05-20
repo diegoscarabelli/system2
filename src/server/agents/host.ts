@@ -2526,16 +2526,22 @@ export class AgentHost {
     // A stalled partial-stream turn would otherwise leave currentTurnHasOutput=true
     // and mis-classify the next dispatch as contaminated in handlePotentialError.
     this.currentTurnHasOutput = false;
+    // Message is intentionally general: the timer is armed across the full window from
+    // when we commit to dispatching (deliverySendCount++) through agent_end. A timeout
+    // here means no agent_end ever fired, but the root cause could be a hung
+    // pre-send step (resourceLoader.reload) as well as a lost SDK stream. Keeping the
+    // timer armed across the whole window is the safer choice (no unguarded window);
+    // the broader message accurately covers both possibilities.
     log.error(
-      `[AgentHost] Delivery dispatched but no agent_end in ${
+      `[AgentHost] Delivery did not produce agent_end within ${
         DELIVERY_DISPATCH_TIMEOUT_MS / 1000
-      }s; rejecting (SDK stream lost)`
+      }s; rejecting`
     );
     entry.reject(
       new Error(
         `Delivery did not complete within ${
           DELIVERY_DISPATCH_TIMEOUT_MS / 1000
-        }s (SDK appears to have lost the stream)`
+        }s (no agent_end received; SDK stream may be lost or a pre-send step stalled)`
       )
     );
     if (!this.isReinitializing && this.pendingDeliveries.some((d) => d.deferred)) {
