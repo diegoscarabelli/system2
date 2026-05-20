@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The UI now ships a browser favicon, matching the icon used on `diegoscarabelli.github.io`. Provides `favicon.ico` plus 16x16 and 32x32 PNGs via Vite's `public/` directory; mobile/PWA variants are intentionally omitted since System2 is a localhost desktop UI.
+
+### Fixed
+
+- `AgentHost.deliverMessage` now wraps each delivery in two watchdog timers so the wedged-session failure mode from issue [#194](https://github.com/diegoscarabelli/system2/issues/194) cannot hang the daemon. (1) `PENDING_DELIVERY_TIMEOUT_MS` (3 minutes) rejects deliveries that sit in `pendingDeliveries` deferred without ever reaching `sendCustomMessage` — the gate branch defers a delivery whenever `this.session` is null or `isReinitializing` is true (also for FIFO and scheduled-task gating), and if the expected reinit / replay never runs the entry would otherwise hang indefinitely. (2) `DELIVERY_DISPATCH_TIMEOUT_MS` (6 minutes) rejects deliveries whose `sendCustomMessage` was invoked but for which `agent_end` never fired — guards against silent SDK stream loss (no error event, no end event, dead socket). On dispatch timeout the timer also decrements `deliverySendCount`, clears `currentTurnHasOutput`, and dispatches the next deferred entry via `replayPendingDeliveries`, so a single hung dispatch cannot permanently block the FIFO. Both timeouts are compile-time constants exported for tests, not runtime-configurable. Both timer handles are stored on the pendingDeliveries entry; the entry's `resolve`/`reject` are wrapped at push time to clear them on settlement, so every existing cleanup path (agent_end shift, failover replay, contamination guard, wire-size overflow, etc.) tears down the timers without per-site changes. Pairs with the universal scheduler backstop from v0.3.13.
+
 ## [0.3.13] - 2026-05-19
 
 ### Fixed

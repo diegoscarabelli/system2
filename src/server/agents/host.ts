@@ -124,6 +124,14 @@ const ORCHESTRATOR_ROLES = new Set(['guide', 'conductor']);
  *  prompt, history, and knowledge files. Configurable via [delivery] max_bytes in config.toml. */
 export const MAX_DELIVERY_BYTES = 1024 * 1024;
 
+/** Backstop for an in-flight delivery whose `sendCustomMessage` was invoked but never produced
+ *  `agent_end` — guards against silent SDK stream loss. See issue #194. */
+export const DELIVERY_DISPATCH_TIMEOUT_MS = 6 * 60 * 1000;
+
+/** Backstop for a delivery sitting deferred in `pendingDeliveries` (never dispatched) — guards
+ *  against the wedged-session state where reinit/replay paths never run. See issue #194. */
+export const PENDING_DELIVERY_TIMEOUT_MS = 3 * 60 * 1000;
+
 interface AgentDefinition {
   name: string;
   description: string;
@@ -275,6 +283,11 @@ export class AgentHost {
      *  sent. Lets the dispatcher distinguish "needs sending" from "sent, waiting for
      *  agent_end to shift". See GitHub issue #189. */
     deferred?: boolean;
+    /** Wedge-state watchdog (PR-C layer of issue #194). Cleared when the entry is
+     *  dispatched or when resolve/reject fire (those are wrapped at push time). */
+    deferTimerHandle?: NodeJS.Timeout;
+    /** SDK-stream-loss watchdog (PR-B layer of issue #194). Cleared on settlement. */
+    dispatchTimerHandle?: NodeJS.Timeout;
     resolve: () => void;
     reject: (reason: Error) => void;
   }> = [];
@@ -1185,7 +1198,21 @@ export class AgentHost {
         }
         const session = this.session;
         for (const d of deliveriesToRetry) {
+          // Preserve the deferral gate across retries: an entry that was deferred at
+          // error time (scheduled-task gate, FIFO preservation, or reinit-in-flight)
+          // must stay deferred. Resending it as in-flight here would dispatch multiple
+          // scheduled-task deliveries in a single SDK run — the exact context-window
+          // blow-up that #189 was designed to prevent. Once the (legitimately in-flight)
+          // resent entries complete their turn, agent_end's replayPendingDeliveries
+          // call picks up the still-deferred entries.
+          if (d.deferred) {
+            this.clearDeliveryTimers(d);
+            this.armDeferTimer(d);
+            continue;
+          }
           this.deliverySendCount++;
+          this.clearDeliveryTimers(d);
+          this.armDispatchTimer(d, session);
           session
             .sendCustomMessage(
               {
@@ -1499,6 +1526,10 @@ export class AgentHost {
             if (!this.pendingDeliveries.includes(d)) {
               this.pendingDeliveries.push(d);
             }
+            // Old timers (if any) belong to the pre-failover session; re-arm the wedge
+            // watchdog against the new session's reinit/replay timeline.
+            this.clearDeliveryTimers(d);
+            this.armDeferTimer(d);
             continue;
           }
           // Increment count synchronously so agent_end (which fires before
@@ -1506,6 +1537,8 @@ export class AgentHost {
           this.deliverySendCount++;
           d.deferred = false;
           if (d.scheduledTask) scheduledTaskSent = true;
+          this.clearDeliveryTimers(d);
+          this.armDispatchTimer(d, session);
           session
             .sendCustomMessage(
               {
@@ -1846,7 +1879,11 @@ export class AgentHost {
     // replay paths in handleSessionEvent / reinitializeWithProvider will deliver this message
     // against the new session once init completes.
     if (!this.session && !this.isReinitializing) {
-      return Promise.reject(new Error('AgentHost not initialized. Call initialize() first.'));
+      return Promise.reject(
+        new Error(
+          'AgentHost has no session available (either initialize() has not been called, or a reinit attempt failed)'
+        )
+      );
     }
 
     // Check wire-size budget before queuing
@@ -1862,18 +1899,35 @@ export class AgentHost {
     // Create deferred promise for completion notification. Resolves when
     // agent_end confirms the delivery was processed, rejects on permanent
     // failure (all providers exhausted, abort, or send failure).
-    let resolve!: () => void;
-    let reject!: (reason: Error) => void;
+    //
+    // resolve/reject are wrapped so every existing settlement path tears down
+    // the watchdog timers automatically; no per-site changes needed (issue #194).
+    let baseResolve!: () => void;
+    let baseReject!: (reason: Error) => void;
     const promise = new Promise<void>((res, rej) => {
-      resolve = res;
-      reject = rej;
+      baseResolve = res;
+      baseReject = rej;
     });
+    const entry: (typeof this.pendingDeliveries)[number] = {
+      content,
+      details,
+      urgent,
+      scheduledTask: content.startsWith('[Scheduled task:'),
+      resolve: () => {
+        this.clearDeliveryTimers(entry);
+        baseResolve();
+      },
+      reject: (reason: Error) => {
+        this.clearDeliveryTimers(entry);
+        baseReject(reason);
+      },
+    };
 
     // Track for failover retry. If the session is destroyed during reinitialization,
     // queued sendCustomMessage calls are lost. This queue lets handlePotentialError
     // replay them on the new session. Cleared per-turn by agent_end (shift).
-    const scheduledTask = content.startsWith('[Scheduled task:');
-    this.pendingDeliveries.push({ content, details, urgent, scheduledTask, resolve, reject });
+    const scheduledTask = entry.scheduledTask;
+    this.pendingDeliveries.push(entry);
 
     // Capture delivered message in chat cache for UI history.
     // Inter-agent messages and summaries store full content (tag + body).
@@ -1945,7 +1999,8 @@ export class AgentHost {
       .some((d) => d.scheduledTask);
     const hadUnsentBefore = this.pendingDeliveries.length - 1 > this.deliverySendCount;
     if (reinitInFlight || scheduledOnBusy || inFlightHasScheduled || hadUnsentBefore) {
-      this.pendingDeliveries[this.pendingDeliveries.length - 1].deferred = true;
+      entry.deferred = true;
+      this.armDeferTimer(entry);
       return promise;
     }
 
@@ -1965,6 +2020,7 @@ export class AgentHost {
     // Increment count synchronously so agent_end (which fires before
     // sendCustomMessage resolves for idle agents) sees the correct tally.
     this.deliverySendCount++;
+    this.armDispatchTimer(entry, session);
     reload
       .then(() =>
         session.sendCustomMessage(
@@ -1990,10 +2046,10 @@ export class AgentHost {
         log.error('[AgentHost] deliverMessage error:', err);
         // Send itself failed (session destroyed, etc.). The message never
         // reached the agent, so remove from queue and reject immediately.
-        const idx = this.pendingDeliveries.findIndex((d) => d.resolve === resolve);
+        const idx = this.pendingDeliveries.indexOf(entry);
         if (idx !== -1) {
           this.pendingDeliveries.splice(idx, 1);
-          reject(
+          entry.reject(
             new Error(`Delivery send failed: ${err instanceof Error ? err.message : String(err)}`)
           );
         }
@@ -2415,6 +2471,98 @@ export class AgentHost {
    * for clearing `pendingPrompt` / `deliverySendCount` first. Don't clear
    * `pendingDeliveries` here — `agent_end` shifts each one as turns succeed.
    */
+  private clearDeliveryTimers(entry: (typeof this.pendingDeliveries)[number]): void {
+    if (entry.deferTimerHandle) {
+      clearTimeout(entry.deferTimerHandle);
+      entry.deferTimerHandle = undefined;
+    }
+    if (entry.dispatchTimerHandle) {
+      clearTimeout(entry.dispatchTimerHandle);
+      entry.dispatchTimerHandle = undefined;
+    }
+  }
+
+  private armDeferTimer(entry: (typeof this.pendingDeliveries)[number]): void {
+    if (entry.deferTimerHandle) clearTimeout(entry.deferTimerHandle);
+    const handle = setTimeout(() => {
+      this.handleDeferTimeout(entry);
+    }, PENDING_DELIVERY_TIMEOUT_MS);
+    // unref so an armed watchdog never blocks process shutdown — matches the pattern
+    // used by ReminderManager (src/server/reminders/manager.ts).
+    handle.unref?.();
+    entry.deferTimerHandle = handle;
+  }
+
+  private armDispatchTimer(
+    entry: (typeof this.pendingDeliveries)[number],
+    session: AgentSession
+  ): void {
+    if (entry.dispatchTimerHandle) clearTimeout(entry.dispatchTimerHandle);
+    const handle = setTimeout(() => {
+      this.handleDispatchTimeout(entry, session);
+    }, DELIVERY_DISPATCH_TIMEOUT_MS);
+    handle.unref?.();
+    entry.dispatchTimerHandle = handle;
+  }
+
+  private handleDeferTimeout(entry: (typeof this.pendingDeliveries)[number]): void {
+    const idx = this.pendingDeliveries.indexOf(entry);
+    if (idx === -1) return;
+    // Race-window guard: if replayPendingDeliveries dispatched the entry between the
+    // timer firing and this callback running, the deferred flag is already cleared
+    // and stealing the entry now would break the in-flight queue invariants.
+    if (!entry.deferred) return;
+    this.pendingDeliveries.splice(idx, 1);
+    log.error(
+      `[AgentHost] Delivery wedged in pendingDeliveries for ${
+        PENDING_DELIVERY_TIMEOUT_MS / 1000
+      }s; rejecting (session never recovered)`
+    );
+    entry.reject(
+      new Error(
+        `Delivery never reached SDK after ${
+          PENDING_DELIVERY_TIMEOUT_MS / 1000
+        }s; session appears wedged`
+      )
+    );
+  }
+
+  private handleDispatchTimeout(
+    entry: (typeof this.pendingDeliveries)[number],
+    session: AgentSession
+  ): void {
+    // Failover swapped the session — counters belong to the new session now.
+    if (this.session !== session) return;
+    const idx = this.pendingDeliveries.indexOf(entry);
+    if (idx === -1) return;
+    this.pendingDeliveries.splice(idx, 1);
+    this.deliverySendCount = Math.max(0, this.deliverySendCount - 1);
+    // A stalled partial-stream turn would otherwise leave currentTurnHasOutput=true
+    // and mis-classify the next dispatch as contaminated in handlePotentialError.
+    this.currentTurnHasOutput = false;
+    // Message is intentionally general: the timer is armed across the full window from
+    // when we commit to dispatching (deliverySendCount++) through agent_end. A timeout
+    // here means no agent_end ever fired, but the root cause could be a hung
+    // pre-send step (resourceLoader.reload) as well as a lost SDK stream. Keeping the
+    // timer armed across the whole window is the safer choice (no unguarded window);
+    // the broader message accurately covers both possibilities.
+    log.error(
+      `[AgentHost] Delivery did not produce agent_end within ${
+        DELIVERY_DISPATCH_TIMEOUT_MS / 1000
+      }s; rejecting`
+    );
+    entry.reject(
+      new Error(
+        `Delivery did not complete within ${
+          DELIVERY_DISPATCH_TIMEOUT_MS / 1000
+        }s (no agent_end received; SDK stream may be lost or a pre-send step stalled)`
+      )
+    );
+    if (!this.isReinitializing && this.pendingDeliveries.some((d) => d.deferred)) {
+      this.replayPendingDeliveries('after dispatch timeout');
+    }
+  }
+
   private replayPendingDeliveries(context: string): void {
     // session=null is the right guard: resetSessionToHeader nulls session synchronously, so
     // agent_end's call here returns early when reset just fired. The reset path's
@@ -2433,6 +2581,11 @@ export class AgentHost {
       // to decide whether to call this helper, and we don't want to re-dispatch.
       delivery.deferred = false;
       const session = this.session;
+      if (delivery.deferTimerHandle) {
+        clearTimeout(delivery.deferTimerHandle);
+        delivery.deferTimerHandle = undefined;
+      }
+      this.armDispatchTimer(delivery, session);
       // Wrap in Promise.resolve so synchronous returns from sendCustomMessage (some test
       // doubles return undefined directly) don't blow up the .catch chain.
       Promise.resolve(
