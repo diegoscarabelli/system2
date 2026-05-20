@@ -1198,9 +1198,19 @@ export class AgentHost {
         }
         const session = this.session;
         for (const d of deliveriesToRetry) {
+          // Preserve the deferral gate across retries: an entry that was deferred at
+          // error time (scheduled-task gate, FIFO preservation, or reinit-in-flight)
+          // must stay deferred. Resending it as in-flight here would dispatch multiple
+          // scheduled-task deliveries in a single SDK run — the exact context-window
+          // blow-up that #189 was designed to prevent. Once the (legitimately in-flight)
+          // resent entries complete their turn, agent_end's replayPendingDeliveries
+          // call picks up the still-deferred entries.
+          if (d.deferred) {
+            this.clearDeliveryTimers(d);
+            this.armDeferTimer(d);
+            continue;
+          }
           this.deliverySendCount++;
-          // Old timers (from the previous send that just failed) are stale — clear,
-          // then arm a fresh dispatch watchdog for this resend.
           this.clearDeliveryTimers(d);
           this.armDispatchTimer(d, session);
           session
