@@ -20,7 +20,13 @@ import { basename, join } from 'node:path';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LlmConfig } from '../../shared/index.js';
-import { AgentHost, MAX_DELIVERY_BYTES, pickModelForTier } from './host.js';
+import {
+  AgentHost,
+  DELIVERY_DISPATCH_TIMEOUT_MS,
+  MAX_DELIVERY_BYTES,
+  PENDING_DELIVERY_TIMEOUT_MS,
+  pickModelForTier,
+} from './host.js';
 import type { AgentRegistry } from './registry.js';
 
 // Stub retry.ts's `sleep` so the retry-path tests don't actually wait the
@@ -1915,6 +1921,245 @@ describe('AgentHost', () => {
 
       expect(promise).toBeInstanceOf(Promise);
       expect(internal.pendingDeliveries).toHaveLength(1);
+    });
+
+    describe('watchdog timers (issue #194)', () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      type InternalEntry = {
+        content: string;
+        deferred?: boolean;
+        deferTimerHandle?: NodeJS.Timeout;
+        dispatchTimerHandle?: NodeJS.Timeout;
+      };
+
+      type HostInternal = {
+        session: { sendCustomMessage: ReturnType<typeof vi.fn> } | null;
+        _chatCache: null;
+        _sessionDir: string | null;
+        deliverySendCount: number;
+        currentTurnHasOutput: boolean;
+        isReinitializing: boolean;
+        pendingDeliveries: InternalEntry[];
+      };
+
+      function makeHostWithStubSession(): {
+        host: AgentHost;
+        internal: HostInternal;
+        sendStub: ReturnType<typeof vi.fn>;
+      } {
+        const host = new AgentHost({
+          db: makeDbStub(),
+          agentId: 1,
+          registry: makeRegistryStub(),
+          llmConfig: makeLlmConfig(),
+        });
+        const internal = host as unknown as HostInternal;
+        const sendStub = vi.fn().mockReturnValue(new Promise(() => {}));
+        internal.session = { sendCustomMessage: sendStub };
+        internal._chatCache = null;
+        internal._sessionDir = null;
+        return { host, internal, sendStub };
+      }
+
+      it('PR-B: dispatch timeout rejects in-flight delivery and cleans up counters', async () => {
+        const { host, internal } = makeHostWithStubSession();
+
+        const promise = host.deliverMessage('m1', {
+          sender: 1,
+          receiver: 2,
+          timestamp: Date.now(),
+        });
+        const settled = expect(promise).rejects.toThrow(/SDK appears to have lost the stream/);
+
+        // Microtask flush so the .then() in deliverMessage runs and sendCustomMessage is called.
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(internal.deliverySendCount).toBe(1);
+        expect(internal.pendingDeliveries).toHaveLength(1);
+
+        await vi.advanceTimersByTimeAsync(DELIVERY_DISPATCH_TIMEOUT_MS);
+        await settled;
+
+        expect(internal.deliverySendCount).toBe(0);
+        expect(internal.currentTurnHasOutput).toBe(false);
+        expect(internal.pendingDeliveries).toHaveLength(0);
+      });
+
+      it('PR-B: timer is cleared when sendCustomMessage rejects (no double rejection)', async () => {
+        const { host, internal, sendStub } = makeHostWithStubSession();
+        const sendErr = new Error('socket closed');
+        sendStub.mockReset().mockRejectedValue(sendErr);
+
+        const promise = host.deliverMessage('m1', {
+          sender: 1,
+          receiver: 2,
+          timestamp: Date.now(),
+        });
+        // sendCustomMessage's catch path runs as microtasks — drain them before advancing time.
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        await expect(promise).rejects.toThrow(/Delivery send failed: socket closed/);
+
+        // If the dispatch timer were still armed, advancing past it would attempt to reject again
+        // and either change the rejection reason or throw on a settled promise. Verify neither.
+        await vi.advanceTimersByTimeAsync(DELIVERY_DISPATCH_TIMEOUT_MS + 1000);
+        expect(internal.pendingDeliveries).toHaveLength(0);
+      });
+
+      it('PR-B: dispatch timeout dispatches the next deferred entry', async () => {
+        // Direct unit test of handleDispatchTimeout's replay-release behavior. The
+        // end-to-end cascade is hard to observe via deliverMessage because the deferred
+        // entry's wedge timer (3 min) fires before the in-flight entry's dispatch timer
+        // (6 min) — so we drive handleDispatchTimeout directly here.
+        const { host, internal, sendStub } = makeHostWithStubSession();
+
+        let firstReject!: (e: Error) => void;
+        const firstPromise = new Promise<void>((_, rej) => {
+          firstReject = rej;
+        });
+        const firstSettled = expect(firstPromise).rejects.toThrow();
+
+        let secondReject!: (e: Error) => void;
+        const secondPromise = new Promise<void>((_, rej) => {
+          secondReject = rej;
+        });
+        const secondSettled = expect(secondPromise).rejects.toThrow();
+
+        const firstEntry: InternalEntry & {
+          details: { sender: number; receiver: number; timestamp: number };
+          scheduledTask?: boolean;
+          resolve: () => void;
+          reject: (e: Error) => void;
+        } = {
+          content: '[Scheduled task: foo]\nbody',
+          details: { sender: 1, receiver: 2, timestamp: Date.now() },
+          scheduledTask: true,
+          deferred: false,
+          resolve: () => {},
+          reject: firstReject,
+        };
+        const secondEntry: typeof firstEntry = {
+          content: 'm2',
+          details: { sender: 1, receiver: 2, timestamp: Date.now() },
+          deferred: true,
+          resolve: () => {},
+          reject: secondReject,
+        };
+        internal.pendingDeliveries.push(
+          firstEntry as unknown as InternalEntry,
+          secondEntry as unknown as InternalEntry
+        );
+        internal.deliverySendCount = 1;
+        const session = internal.session;
+        (
+          host as unknown as {
+            handleDispatchTimeout: (entry: InternalEntry, s: unknown) => void;
+          }
+        ).handleDispatchTimeout(internal.pendingDeliveries[0], session);
+        await firstSettled;
+
+        // First entry removed, deliverySendCount decremented, second entry dispatched.
+        expect(internal.pendingDeliveries).toHaveLength(1);
+        expect(internal.pendingDeliveries[0].content).toBe('m2');
+        expect(internal.pendingDeliveries[0].deferred).toBe(false);
+        expect(internal.deliverySendCount).toBe(1);
+        expect(sendStub).toHaveBeenCalledTimes(1);
+        expect(sendStub.mock.calls[0][0]).toMatchObject({ content: 'm2' });
+
+        // Cleanup: let the now-dispatched second entry's timer fire so the rejection is observed
+        // before useRealTimers.
+        await vi.advanceTimersByTimeAsync(DELIVERY_DISPATCH_TIMEOUT_MS);
+        await secondSettled;
+      });
+
+      it('PR-C: wedge timeout rejects a delivery that never reaches the SDK', async () => {
+        const { host, internal, sendStub } = makeHostWithStubSession();
+        // Simulate wedge: session set so the not-initialized guard passes, but isReinitializing
+        // marked true so the gate in deliverMessage routes to deferred without dispatching.
+        internal.isReinitializing = true;
+
+        const promise = host.deliverMessage('m1', {
+          sender: 1,
+          receiver: 2,
+          timestamp: Date.now(),
+        });
+        const settled = expect(promise).rejects.toThrow(/session appears wedged/);
+
+        expect(sendStub).not.toHaveBeenCalled();
+        expect(internal.pendingDeliveries).toHaveLength(1);
+        expect(internal.pendingDeliveries[0].deferred).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(PENDING_DELIVERY_TIMEOUT_MS);
+        await settled;
+
+        expect(internal.pendingDeliveries).toHaveLength(0);
+      });
+
+      it('PR-C: defer timer is cleared when the entry transitions to dispatched', async () => {
+        const { host, internal } = makeHostWithStubSession();
+        internal.isReinitializing = true;
+
+        const promise = host.deliverMessage('m1', {
+          sender: 1,
+          receiver: 2,
+          timestamp: Date.now(),
+        });
+        expect(internal.pendingDeliveries[0].deferred).toBe(true);
+        expect(internal.pendingDeliveries[0].deferTimerHandle).toBeDefined();
+
+        // Simulate the reinit completing: clear the flag and replay deferred deliveries.
+        internal.isReinitializing = false;
+        (
+          host as unknown as { replayPendingDeliveries: (ctx: string) => void }
+        ).replayPendingDeliveries('test-replay');
+
+        expect(internal.pendingDeliveries[0].deferred).toBe(false);
+        expect(internal.pendingDeliveries[0].deferTimerHandle).toBeUndefined();
+        expect(internal.pendingDeliveries[0].dispatchTimerHandle).toBeDefined();
+
+        // Cleanup: let the dispatch timer fire so the promise settles before useRealTimers.
+        const settled = expect(promise).rejects.toThrow();
+        await vi.advanceTimersByTimeAsync(DELIVERY_DISPATCH_TIMEOUT_MS);
+        await settled;
+      });
+
+      it('agent_end clears the dispatch timer (no false-positive rejection)', async () => {
+        const { host, internal } = makeHostWithStubSession();
+        const hostFull = host as unknown as HostInternal & {
+          handleSessionEvent: (event: { type: string }) => void;
+          handlePotentialError: ReturnType<typeof vi.fn>;
+          handleCompactionTracking: ReturnType<typeof vi.fn>;
+        };
+        hostFull.handlePotentialError = vi.fn().mockResolvedValue(undefined);
+        hostFull.handleCompactionTracking = vi.fn();
+
+        const promise = host.deliverMessage('m1', {
+          sender: 1,
+          receiver: 2,
+          timestamp: Date.now(),
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(internal.pendingDeliveries[0].dispatchTimerHandle).toBeDefined();
+
+        hostFull.handleSessionEvent({ type: 'agent_end' });
+        await expect(promise).resolves.toBeUndefined();
+
+        expect(internal.pendingDeliveries).toHaveLength(0);
+
+        // Past the timeout — the timer must have been cleared on resolve. If it hadn't been,
+        // its callback would now try to operate on the already-removed entry.
+        await vi.advanceTimersByTimeAsync(DELIVERY_DISPATCH_TIMEOUT_MS + 1000);
+      });
     });
   });
 
