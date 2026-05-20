@@ -105,6 +105,45 @@ describe('useChatStore', () => {
       expect(state?.currentTurnEvents).toHaveLength(1);
       expect(state?.currentTurnEvents[0].type).toBe('tool_call');
     });
+
+    it('merges existing rows that arrived before the snapshot (no drop on subscribe-then-snapshot race)', () => {
+      // On switch_agent the server subscribes to chatCache BEFORE sending the
+      // snapshot; if a push lands in between, the UI sees chat_message_added
+      // first and then chat_history. Without a merge, loadHistory would
+      // overwrite messages and drop the row delivered via appendMessage.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore
+        .getState()
+        .appendMessage({ id: 'live-1', role: 'system', content: 'arrived live', timestamp: 2 }, 1);
+
+      useChatStore
+        .getState()
+        .loadHistory([{ id: 'snap-1', role: 'user', content: 'in snapshot', timestamp: 1 }], 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(2);
+      // Snapshot stays at the head (preserves persisted order); the live row
+      // that wasn't in the snapshot is appended at the tail.
+      expect(state?.messages[0].id).toBe('snap-1');
+      expect(state?.messages[1].id).toBe('live-1');
+    });
+
+    it('snapshot dedups against existing rows that ARE present in it', () => {
+      // The same push can land in BOTH the live event and the subsequent
+      // snapshot (id is the same). loadHistory must not duplicate.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore
+        .getState()
+        .appendMessage({ id: 'm1', role: 'user', content: 'hello', timestamp: 1 }, 1);
+
+      useChatStore
+        .getState()
+        .loadHistory([{ id: 'm1', role: 'user', content: 'hello', timestamp: 1 }], 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].id).toBe('m1');
+    });
   });
 
   describe('clearAllStreamingState', () => {

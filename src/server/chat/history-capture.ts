@@ -68,7 +68,11 @@ export function createHistoryCaptureSubscriber(getChatCache: () => MessageHistor
     }
     if (currentAssistantText || currentTurnEvents.length > 0) {
       const assistantMsg: ChatMessage = {
-        id: `msg-${Date.now()}`,
+        // randomUUID rather than msg-${Date.now()}: dedup-by-id in the UI's
+        // appendMessage makes id uniqueness load-bearing, and millisecond
+        // resolution can collide when message_end + flushPartial fire close
+        // together (e.g. steering immediately after a fast turn).
+        id: `msg-${randomUUID()}`,
         role: 'assistant',
         content: currentAssistantText,
         timestamp: Date.now(),
@@ -102,7 +106,7 @@ export function createHistoryCaptureSubscriber(getChatCache: () => MessageHistor
         ).message;
         if (messageData?.stopReason === 'error' && messageData.errorMessage) {
           getChatCache().push({
-            id: `msg-llm-error-${randomUUID()}`,
+            id: `msg-${randomUUID()}`,
             role: 'system',
             content: `LLM error\n\n${messageData.errorMessage}`,
             timestamp: Date.now(),

@@ -122,12 +122,21 @@ User types message
 User sends steering while agent is working
   -> UI optimistically adds the user row locally
   -> UI sends { type: 'steering_message', content, agentId, id }
-    -> WebSocketHandler pushes user to chatCache (echoes via chat_message_added)
-    -> Calls agentHost.prompt(content, { isSteering: true })
-      -> Pi SDK inserts message ASAP into agent loop, interrupting the current
-         turn. history-capture's message_end pushes the partial assistant
-         (which arrives via chat_message_added and clears the streaming draft),
-         then the steered turn begins.
+    -> WebSocketHandler:
+       1. host.flushPartialTurn() — commits whatever the in-flight assistant
+          turn has accumulated (thinking + tool calls + text) into chatCache
+          first, so the persisted order is [assistant_partial, user_steering]
+          rather than racing the SDK's eventual message_end against the
+          user-row push. No-op when nothing is in flight.
+       2. host.chatCache.push(user message) — echoes back via
+          chat_message_added; the optimistic row in the originating tab
+          dedups by id; other tabs see the row for the first time.
+       3. agentHost.prompt(content, { isSteering: true })
+          -> Pi SDK inserts message ASAP into agent loop, interrupting the
+             current turn. The SDK's eventual message_end finds the
+             history-capture accumulator empty (already flushed in step 1)
+             and is a no-op for the partial-commit branch; the steered turn
+             begins.
 ```
 
 ### Agent Switching

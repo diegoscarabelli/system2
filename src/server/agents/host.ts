@@ -5,6 +5,7 @@
  * Includes automatic failover when API errors occur.
  */
 
+import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
@@ -1629,7 +1630,10 @@ export class AgentHost {
   private pushSystemMessage(content: string): void {
     if (!this._chatCache) return;
     this._chatCache.push({
-      id: `msg-${Date.now()}`,
+      // randomUUID, not msg-${Date.now()}: dedup-by-id in the UI's appendMessage
+      // makes id uniqueness load-bearing — failover rows often fire close
+      // together (e.g. refresh-then-failover) and millisecond ids would collide.
+      id: `msg-${randomUUID()}`,
       role: 'system',
       content,
       timestamp: Date.now(),
@@ -1985,7 +1989,7 @@ export class AgentHost {
       }
 
       this._chatCache.push({
-        id: `msg-${Date.now()}`,
+        id: `msg-${randomUUID()}`,
         role: 'system',
         content: cacheContent,
         timestamp: details.timestamp,

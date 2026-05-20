@@ -226,19 +226,30 @@ export const useChatStore = create<ChatState>()(
               existing.currentTurnEvents.length > 0 ||
               existing.currentAssistantMessage);
 
+          // Merge the snapshot with any rows that already arrived via
+          // appendMessage (chat_message_added). Snapshot is the canonical
+          // base (preserves the persisted order); anything in current that
+          // isn't in the snapshot — by id — is appended at the tail. This
+          // makes the listener-then-snapshot window of the constructor /
+          // switch_agent flow robust: a push that lands between subscribe
+          // and snapshot won't be dropped by loadHistory overwriting messages.
+          const snapshotIds = new Set(messages.map((m) => m.id));
+          const tail = existing?.messages.filter((m) => !snapshotIds.has(m.id)) ?? [];
+          const merged = tail.length > 0 ? [...messages, ...tail] : messages;
+
           // If agent has in-progress work (e.g., switching back to a busy agent),
           // only update committed messages and preserve streaming state.
           if (hasInProgress) {
             return {
               agentStates: updateAgentState(state.agentStates, agentId, () => ({
-                messages,
+                messages: merged,
               })),
             };
           }
 
           return {
             agentStates: updateAgentState(state.agentStates, agentId, () => ({
-              messages,
+              messages: merged,
               currentAssistantMessage: null,
               currentTurnEvents: [],
               activeThinkingId: null,

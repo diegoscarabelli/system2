@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ChatMessage } from '../../shared/index.js';
+import { log } from '../utils/logger.js';
 
 export type MessageHistoryListener = (message: ChatMessage) => void;
 
@@ -40,8 +41,16 @@ export class MessageHistory {
       this.messages = this.messages.slice(-this.maxMessages);
     }
     this.save();
+    // Per-listener try/catch so a throwing subscriber (e.g. a WebSocket send
+    // racing a closed socket) cannot break persistence, prevent later
+    // subscribers from running, or bubble up into the caller. The message is
+    // already in memory + on disk by this point, so we just log and continue.
     for (const listener of this.listeners) {
-      listener(message);
+      try {
+        listener(message);
+      } catch (err) {
+        log.error('[MessageHistory] subscriber threw:', err);
+      }
     }
   }
 

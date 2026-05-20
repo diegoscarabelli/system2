@@ -12,6 +12,7 @@
  * messages list; they don't represent committed rows.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 import type { WebSocket } from 'ws';
 import type { ClientMessage, ServerMessage } from '../../shared/index.js';
@@ -49,6 +50,14 @@ export class WebSocketHandler {
       return;
     }
 
+    // Subscribe BEFORE sending the snapshot so the chatCache listener is
+    // installed first. This matches the switch_agent ordering and guarantees
+    // we never miss a push that lands after the snapshot is taken but before
+    // the subscription is wired up. The dedup-by-id in the UI's appendMessage
+    // handles any row that appears both in the snapshot and in a live
+    // chat_message_added event during the overlap window.
+    this.subscribeToAgent(guideAgentId, guideHost);
+
     // Send Guide's chat cache and provider info on connect
     this.send({
       type: 'chat_history',
@@ -60,9 +69,6 @@ export class WebSocketHandler {
     // Seed Guide's busy/context state into the client's push store so
     // MessageInput's contextPercent is populated before the first turn ends.
     this.sendAgentBusySnapshot(guideAgentId, guideHost);
-
-    // Subscribe to Guide's events for streaming to this client
-    this.subscribeToAgent(guideAgentId, guideHost);
 
     // Handle incoming messages from client
     ws.on('message', (data) => {
@@ -134,8 +140,10 @@ export class WebSocketHandler {
         // Capture user message in agent's chat cache. The push fires
         // chat_message_added to every subscribed client (including this one),
         // so the originating tab's optimistic insert dedups against the same id.
+        // Fall back to randomUUID() (not msg-${Date.now()}) so two rapid pushes
+        // within the same millisecond can't collide and silently drop a row.
         host.chatCache.push({
-          id: message.id ?? `msg-${Date.now()}`,
+          id: message.id ?? `msg-${randomUUID()}`,
           role: 'user',
           content: message.content,
           timestamp: Date.now(),
