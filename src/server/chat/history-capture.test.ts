@@ -28,8 +28,11 @@ function thinkingDelta(delta: string): AgentSessionEvent {
   } as unknown as AgentSessionEvent;
 }
 
-function messageEnd(): AgentSessionEvent {
-  return { type: 'message_end' } as unknown as AgentSessionEvent;
+function messageEnd(opts?: { stopReason?: string; errorMessage?: string }): AgentSessionEvent {
+  const message = opts
+    ? { stopReason: opts.stopReason, errorMessage: opts.errorMessage }
+    : undefined;
+  return { type: 'message_end', message } as unknown as AgentSessionEvent;
 }
 
 function toolStart(toolName: string, args?: unknown): AgentSessionEvent {
@@ -48,7 +51,9 @@ function toolEnd(toolName: string, result?: string, isError = false): AgentSessi
 describe('createHistoryCaptureSubscriber', () => {
   it('captures text-only assistant turn', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+    const { subscriber: sub } = createHistoryCaptureSubscriber(
+      () => cache as unknown as MessageHistory
+    );
 
     sub(textDelta('Hello '));
     sub(textDelta('world'));
@@ -63,7 +68,9 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('captures tool-only turn (no text)', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+    const { subscriber: sub } = createHistoryCaptureSubscriber(
+      () => cache as unknown as MessageHistory
+    );
 
     sub(thinkingDelta('Let me think...'));
     sub(toolStart('read_file', { path: '/tmp/foo' }));
@@ -85,7 +92,9 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('does not push when message_end fires with no content or events', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+    const { subscriber: sub } = createHistoryCaptureSubscriber(
+      () => cache as unknown as MessageHistory
+    );
 
     sub(messageEnd());
 
@@ -94,7 +103,9 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('captures compaction_start as a clean system message', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+    const { subscriber: sub } = createHistoryCaptureSubscriber(
+      () => cache as unknown as MessageHistory
+    );
 
     sub({ type: 'compaction_start', reason: 'threshold' } as unknown as AgentSessionEvent);
 
@@ -106,7 +117,9 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('captures successful compaction_end as a clean system message', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+    const { subscriber: sub } = createHistoryCaptureSubscriber(
+      () => cache as unknown as MessageHistory
+    );
 
     sub({
       type: 'compaction_end',
@@ -124,7 +137,9 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('surfaces errorMessage on failed compaction_end', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+    const { subscriber: sub } = createHistoryCaptureSubscriber(
+      () => cache as unknown as MessageHistory
+    );
 
     sub({
       type: 'compaction_end',
@@ -143,7 +158,9 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('surfaces aborted compaction_end distinctly from failure', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+    const { subscriber: sub } = createHistoryCaptureSubscriber(
+      () => cache as unknown as MessageHistory
+    );
 
     sub({
       type: 'compaction_end',
@@ -159,7 +176,9 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('surfaces silent no-op (result undefined, no flags) as a failure', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+    const { subscriber: sub } = createHistoryCaptureSubscriber(
+      () => cache as unknown as MessageHistory
+    );
 
     sub({
       type: 'compaction_end',
@@ -176,7 +195,9 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('captures text + tool calls in the same turn', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+    const { subscriber: sub } = createHistoryCaptureSubscriber(
+      () => cache as unknown as MessageHistory
+    );
 
     sub(thinkingDelta('Thinking...'));
     sub(toolStart('bash', 'ls'));
@@ -200,7 +221,9 @@ describe('createHistoryCaptureSubscriber', () => {
 
   it('marks tool error results with Error prefix', () => {
     const cache = mockCache();
-    const sub = createHistoryCaptureSubscriber(() => cache as unknown as MessageHistory);
+    const { subscriber: sub } = createHistoryCaptureSubscriber(
+      () => cache as unknown as MessageHistory
+    );
 
     sub(toolStart('bash', 'bad-cmd'));
     sub(toolEnd('bash', 'command not found', true));
@@ -210,5 +233,112 @@ describe('createHistoryCaptureSubscriber', () => {
       turnEvents: Array<{ data: { result: string } }>;
     };
     expect(msg.turnEvents[0].data.result).toBe('Error: command not found');
+  });
+
+  describe('error turns', () => {
+    it('captures the partial assistant AND an LLM-error system row on stopReason=error', () => {
+      const cache = mockCache();
+      const { subscriber: sub } = createHistoryCaptureSubscriber(
+        () => cache as unknown as MessageHistory
+      );
+
+      sub(textDelta('I was almost done'));
+      sub(
+        messageEnd({ stopReason: 'error', errorMessage: '401 Invalid authentication credentials' })
+      );
+
+      // Two pushes: assistant partial first (chronological), then system error row.
+      expect(cache.push).toHaveBeenCalledTimes(2);
+      const assistant = cache.messages[0] as { role: string; content: string };
+      const system = cache.messages[1] as { role: string; content: string };
+      expect(assistant.role).toBe('assistant');
+      expect(assistant.content).toBe('I was almost done');
+      expect(system.role).toBe('system');
+      expect(system.content).toBe('LLM error\n\n401 Invalid authentication credentials');
+    });
+
+    it('still pushes the LLM-error row when the partial is empty', () => {
+      const cache = mockCache();
+      const { subscriber: sub } = createHistoryCaptureSubscriber(
+        () => cache as unknown as MessageHistory
+      );
+
+      sub(messageEnd({ stopReason: 'error', errorMessage: '503 service unavailable' }));
+
+      expect(cache.push).toHaveBeenCalledOnce();
+      const system = cache.messages[0] as { role: string; content: string };
+      expect(system.role).toBe('system');
+      expect(system.content).toBe('LLM error\n\n503 service unavailable');
+    });
+
+    it('does not push an LLM-error row when stopReason is not error', () => {
+      const cache = mockCache();
+      const { subscriber: sub } = createHistoryCaptureSubscriber(
+        () => cache as unknown as MessageHistory
+      );
+
+      sub(textDelta('done'));
+      sub(messageEnd({ stopReason: 'end_turn' }));
+
+      expect(cache.push).toHaveBeenCalledOnce();
+      const msg = cache.messages[0] as { role: string };
+      expect(msg.role).toBe('assistant');
+    });
+  });
+
+  describe('flushPartial (steering ordering fix)', () => {
+    it('commits the in-flight partial as an assistant message, then resets state', () => {
+      const cache = mockCache();
+      const { subscriber: sub, flushPartial } = createHistoryCaptureSubscriber(
+        () => cache as unknown as MessageHistory
+      );
+
+      sub(textDelta('half-finished response'));
+      flushPartial();
+
+      expect(cache.push).toHaveBeenCalledOnce();
+      const msg = cache.messages[0] as { role: string; content: string };
+      expect(msg.role).toBe('assistant');
+      expect(msg.content).toBe('half-finished response');
+
+      // A subsequent message_end for the interrupted turn must NOT double-push:
+      // the accumulator was reset by flushPartial.
+      sub(messageEnd());
+      expect(cache.push).toHaveBeenCalledOnce();
+    });
+
+    it('flushes accumulated thinking + tool calls as turn events', () => {
+      const cache = mockCache();
+      const { subscriber: sub, flushPartial } = createHistoryCaptureSubscriber(
+        () => cache as unknown as MessageHistory
+      );
+
+      sub(thinkingDelta('analyzing...'));
+      sub(toolStart('read_file', { path: '/tmp/foo' }));
+      sub(toolEnd('read_file', 'contents'));
+      sub(textDelta('here is my response so far'));
+      flushPartial();
+
+      const msg = cache.messages[0] as {
+        role: string;
+        content: string;
+        turnEvents: Array<{ type: string }>;
+      };
+      expect(msg.role).toBe('assistant');
+      expect(msg.content).toBe('here is my response so far');
+      expect(msg.turnEvents).toHaveLength(2);
+      expect(msg.turnEvents[0].type).toBe('thinking');
+      expect(msg.turnEvents[1].type).toBe('tool_call');
+    });
+
+    it('is a no-op when nothing is in flight', () => {
+      const cache = mockCache();
+      const { flushPartial } = createHistoryCaptureSubscriber(
+        () => cache as unknown as MessageHistory
+      );
+
+      flushPartial();
+      expect(cache.push).not.toHaveBeenCalled();
+    });
   });
 });

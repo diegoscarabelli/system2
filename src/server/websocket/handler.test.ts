@@ -28,16 +28,28 @@ function makeMockHost(opts: {
   role?: string;
 }): AgentHost & {
   __subscribers: Array<(event: unknown) => void>;
+  __cacheSubscribers: Array<(message: unknown) => void>;
   __setBusy: (b: boolean) => void;
   __setContext: (p: number | null) => void;
 } {
   let busy = opts.busy ?? false;
   let contextPercent: number | null = opts.contextPercent ?? null;
   const subscribers: Array<(event: unknown) => void> = [];
+  const cacheSubscribers: Array<(message: unknown) => void> = [];
 
   const host = {
     role: opts.role ?? 'guide',
-    chatCache: { getMessages: () => [], push: vi.fn() },
+    chatCache: {
+      getMessages: () => [],
+      push: vi.fn(),
+      subscribe: (cb: (message: unknown) => void) => {
+        cacheSubscribers.push(cb);
+        return () => {
+          const i = cacheSubscribers.indexOf(cb);
+          if (i >= 0) cacheSubscribers.splice(i, 1);
+        };
+      },
+    },
     getProvider: () => opts.provider ?? 'anthropic',
     isBusy: () => busy,
     getContextUsage: () =>
@@ -54,7 +66,9 @@ function makeMockHost(opts: {
     prompt: vi.fn(),
     abort: vi.fn(),
     state: { stopReason: 'end_turn' },
+    flushPartialTurn: vi.fn(),
     __subscribers: subscribers,
+    __cacheSubscribers: cacheSubscribers,
     __setBusy: (b: boolean) => {
       busy = b;
     },
@@ -65,6 +79,7 @@ function makeMockHost(opts: {
 
   return host as unknown as AgentHost & {
     __subscribers: Array<(event: unknown) => void>;
+    __cacheSubscribers: Array<(message: unknown) => void>;
     __setBusy: (b: boolean) => void;
     __setContext: (p: number | null) => void;
   };
@@ -93,10 +108,6 @@ function makeMockWs(): MockWs {
   };
 }
 
-function makeMockWss() {
-  return { clients: new Set<MockWs>() };
-}
-
 function sentMessages(ws: MockWs): ServerMessage[] {
   return ws.send.mock.calls.map((call) => JSON.parse(call[0] as string) as ServerMessage);
 }
@@ -106,7 +117,6 @@ describe('WebSocketHandler agent_busy_state delivery', () => {
   let conductorHost: ReturnType<typeof makeMockHost>;
   let registry: AgentRegistry;
   let ws: MockWs;
-  let wss: ReturnType<typeof makeMockWss>;
 
   beforeEach(() => {
     guideHost = makeMockHost({
@@ -127,15 +137,13 @@ describe('WebSocketHandler agent_busy_state delivery', () => {
     ]);
     registry = { get: (id: number) => hosts.get(id) } as unknown as AgentRegistry;
     ws = makeMockWs();
-    wss = makeMockWss();
   });
 
   it('sends Guide agent_busy_state snapshot on connect', () => {
     new WebSocketHandler(
       ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
       registry,
-      1,
-      wss as unknown as ConstructorParameters<typeof WebSocketHandler>[3]
+      1
     );
 
     const msgs = sentMessages(ws);
@@ -153,8 +161,7 @@ describe('WebSocketHandler agent_busy_state delivery', () => {
     new WebSocketHandler(
       ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
       registry,
-      1,
-      wss as unknown as ConstructorParameters<typeof WebSocketHandler>[3]
+      1
     );
 
     const snapshot = sentMessages(ws).find((m) => m.type === 'agent_busy_state');
@@ -165,8 +172,7 @@ describe('WebSocketHandler agent_busy_state delivery', () => {
     new WebSocketHandler(
       ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
       registry,
-      1,
-      wss as unknown as ConstructorParameters<typeof WebSocketHandler>[3]
+      1
     );
 
     // Reset to ignore constructor-time sends; only inspect what switch_agent emits.
@@ -195,8 +201,7 @@ describe('WebSocketHandler agent_busy_state delivery', () => {
     new WebSocketHandler(
       ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
       registry,
-      1,
-      wss as unknown as ConstructorParameters<typeof WebSocketHandler>[3]
+      1
     );
 
     ws.send.mockClear();
@@ -216,8 +221,7 @@ describe('WebSocketHandler agent_busy_state delivery', () => {
     new WebSocketHandler(
       ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
       registry,
-      1,
-      wss as unknown as ConstructorParameters<typeof WebSocketHandler>[3]
+      1
     );
 
     ws.send.mockClear();
@@ -226,5 +230,189 @@ describe('WebSocketHandler agent_busy_state delivery', () => {
     const msgs = sentMessages(ws);
     expect(msgs.find((m) => m.type === 'error')).toBeTruthy();
     expect(msgs.find((m) => m.type === 'agent_busy_state')).toBeUndefined();
+  });
+});
+
+describe('WebSocketHandler chat_message_added forwarding', () => {
+  let guideHost: ReturnType<typeof makeMockHost>;
+  let conductorHost: ReturnType<typeof makeMockHost>;
+  let registry: AgentRegistry;
+  let ws: MockWs;
+
+  beforeEach(() => {
+    guideHost = makeMockHost({ role: 'guide' });
+    conductorHost = makeMockHost({ role: 'conductor' });
+    const hosts = new Map<number, AgentHost>([
+      [1, guideHost as unknown as AgentHost],
+      [5, conductorHost as unknown as AgentHost],
+    ]);
+    registry = { get: (id: number) => hosts.get(id) } as unknown as AgentRegistry;
+    ws = makeMockWs();
+  });
+
+  it('forwards a chatCache push as chat_message_added for the source agent', () => {
+    new WebSocketHandler(
+      ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
+      registry,
+      1
+    );
+    ws.send.mockClear();
+
+    const message = {
+      id: 'sys-1',
+      role: 'system' as const,
+      content:
+        '401 auth error, switched to google\n\non anthropic, switching to google\n\n401 {}\n\nRun `system2 config` to refresh anthropic authentication and restart the server.',
+      timestamp: 100,
+    };
+    // Simulate a server-side push into the guide's chatCache.
+    for (const cb of guideHost.__cacheSubscribers) cb(message);
+
+    const sent = sentMessages(ws).filter((m) => m.type === 'chat_message_added');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ type: 'chat_message_added', message, agentId: 1 });
+  });
+
+  it('forwards pushes for the second agent only after switch_agent subscribes to it', () => {
+    new WebSocketHandler(
+      ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
+      registry,
+      1
+    );
+
+    // Before subscribe: a push to the conductor must NOT reach this client.
+    for (const cb of conductorHost.__cacheSubscribers) {
+      cb({ id: 'a', role: 'system', content: 'noise', timestamp: 1 });
+    }
+    expect(sentMessages(ws).some((m) => m.type === 'chat_message_added')).toBe(false);
+
+    // Switch (subscribes to conductor's chatCache), then push: it should arrive.
+    ws.__listeners.message?.(Buffer.from(JSON.stringify({ type: 'switch_agent', agentId: 5 })));
+    ws.send.mockClear();
+
+    const message = {
+      id: 'b',
+      role: 'assistant' as const,
+      content: 'hello',
+      timestamp: 2,
+    };
+    for (const cb of conductorHost.__cacheSubscribers) cb(message);
+
+    const sent = sentMessages(ws).filter((m) => m.type === 'chat_message_added');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ type: 'chat_message_added', message, agentId: 5 });
+  });
+
+  it('reuses the client-provided id when echoing a user_message via chat_message_added', () => {
+    // Two clients on the same agent — when client A sends with id "client-id-1",
+    // client B should receive a chat_message_added with the same id so its
+    // dedup-by-id works against any local optimistic insert.
+    new WebSocketHandler(
+      ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
+      registry,
+      1
+    );
+    ws.send.mockClear();
+
+    ws.__listeners.message?.(
+      Buffer.from(
+        JSON.stringify({
+          type: 'user_message',
+          content: 'hi',
+          agentId: 1,
+          id: 'client-id-1',
+        })
+      )
+    );
+
+    const pushed = (guideHost.chatCache.push as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(pushed).toMatchObject({ id: 'client-id-1', role: 'user', content: 'hi' });
+  });
+
+  it('provider_change carries no reason (chat row arrives via chat_message_added)', () => {
+    new WebSocketHandler(
+      ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
+      registry,
+      1
+    );
+    ws.send.mockClear();
+
+    // Synthetic status event from reinitializeWithProvider.
+    guideHost.__subscribers[0]({
+      type: 'status',
+      provider: 'google',
+      reason: 'should-be-stripped',
+    });
+
+    const sent = sentMessages(ws).find((m) => m.type === 'provider_change');
+    expect(sent).toEqual({ type: 'provider_change', provider: 'google', agentId: 1 });
+    expect((sent as Record<string, unknown> | undefined)?.reason).toBeUndefined();
+  });
+
+  it('cleans up the chatCache subscription on disconnect', () => {
+    new WebSocketHandler(
+      ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
+      registry,
+      1
+    );
+    expect(guideHost.__cacheSubscribers).toHaveLength(1);
+
+    ws.__listeners.close?.(Buffer.alloc(0));
+    expect(guideHost.__cacheSubscribers).toHaveLength(0);
+  });
+
+  it('steering_message flushes the in-flight partial BEFORE pushing the user row', () => {
+    // Preserves chronological order in chatCache: assistant_partial then
+    // user_steering. Without the flush, the user row gets pushed first and
+    // the SDK's eventual message_end pushes the partial after, giving the
+    // reverse (wrong) order on persisted history.
+    new WebSocketHandler(
+      ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
+      registry,
+      1
+    );
+
+    const callOrder: string[] = [];
+    (guideHost.flushPartialTurn as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      callOrder.push('flushPartialTurn');
+    });
+    (guideHost.chatCache.push as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      callOrder.push('chatCache.push');
+    });
+
+    ws.__listeners.message?.(
+      Buffer.from(
+        JSON.stringify({
+          type: 'steering_message',
+          content: 'change direction',
+          agentId: 1,
+          id: 'steer-1',
+        })
+      )
+    );
+
+    expect(callOrder).toEqual(['flushPartialTurn', 'chatCache.push']);
+  });
+
+  it('user_message does NOT flush partial (no in-flight turn to commit)', () => {
+    new WebSocketHandler(
+      ws as unknown as ConstructorParameters<typeof WebSocketHandler>[0],
+      registry,
+      1
+    );
+    (guideHost.flushPartialTurn as ReturnType<typeof vi.fn>).mockClear();
+
+    ws.__listeners.message?.(
+      Buffer.from(
+        JSON.stringify({
+          type: 'user_message',
+          content: 'hi',
+          agentId: 1,
+          id: 'u-1',
+        })
+      )
+    );
+
+    expect(guideHost.flushPartialTurn).not.toHaveBeenCalled();
   });
 });

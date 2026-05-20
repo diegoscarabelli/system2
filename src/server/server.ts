@@ -473,13 +473,7 @@ export class Server {
     // Handle WebSocket connections
     this.wss.on('connection', (ws) => {
       log.info('Client connected');
-      new WebSocketHandler(
-        ws,
-        this.agentRegistry,
-        this.guideAgentId,
-        this.wss,
-        this.conversationSummarizer
-      );
+      new WebSocketHandler(ws, this.agentRegistry, this.guideAgentId, this.conversationSummarizer);
     });
   }
 
@@ -578,7 +572,12 @@ export class Server {
    * then persists the complete assistant message on message_end.
    */
   private subscribeForHistoryCapture(agentHost: AgentHost): void {
-    agentHost.subscribe(createHistoryCaptureSubscriber(() => agentHost.chatCache));
+    const { subscriber, flushPartial } = createHistoryCaptureSubscriber(() => agentHost.chatCache);
+    agentHost.subscribe(subscriber);
+    // Expose flushPartial on the host so WebSocketHandler can commit the
+    // in-flight assistant draft into chatCache BEFORE pushing a steering
+    // user message — preserves chronological order in the persisted chat.
+    agentHost.setHistoryFlushHook(flushPartial);
   }
 
   async start(): Promise<void> {

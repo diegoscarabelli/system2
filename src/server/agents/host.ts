@@ -264,6 +264,9 @@ export class AgentHost {
   private authResolver: AuthResolver;
   private modelRegistry: ModelRegistry;
   private listeners: Set<(event: AgentSessionEvent) => void> = new Set();
+  /** Set by Server via setHistoryFlushHook so WebSocketHandler can commit the
+   *  in-flight assistant draft to chatCache before pushing a steering user row. */
+  private historyFlushHook: (() => void) | null = null;
   private currentProvider: LlmProvider;
   private currentKeyIndex = 0;
   private currentTier: AuthTier = 'api_keys';
@@ -1123,10 +1126,13 @@ export class AgentHost {
           this.currentTier,
           statusCode
         );
+        // No errorMessage interpolation: the full error text already lives in
+        // the "LLM error" system row pushed by history-capture on the same
+        // message_end. Embedding it again here would duplicate it in the chat.
         const detail =
           nextProvider === this.currentProvider
-            ? `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}${reauthHint}`
-            : `on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}\n\n${errorMessage}${reauthHint}`;
+            ? `on ${this.currentProvider}, rotating to next key${reauthHint}`
+            : `on ${this.currentProvider} (key already in cooldown), switching to ${nextProvider}${reauthHint}`;
         log.info(
           `[AgentHost] Key ${this.currentProvider}:${this.currentKeyIndex} already in cooldown`
         );
@@ -1262,7 +1268,7 @@ export class AgentHost {
         if (nextProvider) {
           if (nextProvider === this.currentProvider) {
             const reason = `${errorPrefix}, rotating to next key`;
-            const detail = `on ${this.currentProvider}, rotating to next key\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider, this.currentTier, statusCode)}`;
+            const detail = `on ${this.currentProvider}, rotating to next key${this.oauthReauthHintFor(this.currentProvider, this.currentTier, statusCode)}`;
             log.info(`[AgentHost] Rotating to next key for ${this.currentProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
@@ -1282,7 +1288,7 @@ export class AgentHost {
             await this.compactForProvider(nextProvider);
 
             const reason = `${errorPrefix}, switched to ${nextProvider}`;
-            const detail = `on ${fromProvider}, switching to ${nextProvider}\n\n${errorMessage}${this.oauthReauthHintFor(fromProvider, fromTier, statusCode)}`;
+            const detail = `on ${fromProvider}, switching to ${nextProvider}${this.oauthReauthHintFor(fromProvider, fromTier, statusCode)}`;
             log.info(`[AgentHost] Failing over from ${fromProvider} to ${nextProvider}`);
             await this.reinitializeWithProvider(
               nextProvider,
@@ -1297,7 +1303,7 @@ export class AgentHost {
       }
 
       this.pushSystemMessage(
-        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable\n\n${errorMessage}${this.oauthReauthHintFor(this.currentProvider, this.currentTier, statusCode)}`
+        `${errorPrefix}, all providers unavailable\n\non ${this.currentProvider}, all providers unavailable${this.oauthReauthHintFor(this.currentProvider, this.currentTier, statusCode)}`
       );
       log.info('[AgentHost] No fallback providers available, error will be surfaced to user');
 
@@ -1821,6 +1827,24 @@ export class AgentHost {
   subscribe(listener: (event: AgentSessionEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * Server installs the history-capture's flushPartial here. Called from
+   * WebSocketHandler before pushing a steering user message: commits the
+   * in-flight assistant draft into chatCache so the persisted order is
+   * [assistant_partial, user_steering] instead of the race-prone reverse.
+   * After this fires, the SDK's eventual message_end for the interrupted
+   * turn finds the history-capture buffers empty and is a no-op for the
+   * partial-commit branch.
+   */
+  setHistoryFlushHook(fn: () => void): void {
+    this.historyFlushHook = fn;
+  }
+
+  /** Invoke the installed history-capture flush hook (no-op if not wired). */
+  flushPartialTurn(): void {
+    this.historyFlushHook?.();
   }
 
   /**

@@ -3,17 +3,24 @@
  *
  * Server-side ring buffer of recent chat messages displayed in the UI.
  * Persists to a JSON file so history survives server restarts.
- * The server is the single source of truth — the UI does not cache messages.
+ * The server is the single source of truth — the UI mirrors this store.
+ *
+ * Observable: subscribers are notified on every push. WebSocketHandler uses
+ * this to broadcast new messages live, so a freshly-pushed system/user/
+ * assistant message reaches connected clients without waiting for a reload.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ChatMessage } from '../../shared/index.js';
 
+export type MessageHistoryListener = (message: ChatMessage) => void;
+
 export class MessageHistory {
   private messages: ChatMessage[] = [];
   private filePath: string;
   private maxMessages: number;
+  private listeners: Set<MessageHistoryListener> = new Set();
 
   constructor(filePath: string, maxMessages = 100) {
     this.filePath = filePath;
@@ -26,13 +33,22 @@ export class MessageHistory {
     return [...this.messages];
   }
 
-  /** Add a message and persist. */
+  /** Add a message, persist, and notify subscribers. */
   push(message: ChatMessage): void {
     this.messages.push(message);
     if (this.messages.length > this.maxMessages) {
       this.messages = this.messages.slice(-this.maxMessages);
     }
     this.save();
+    for (const listener of this.listeners) {
+      listener(message);
+    }
+  }
+
+  /** Subscribe to push events. Returns an unsubscribe function. */
+  subscribe(listener: MessageHistoryListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   /** Load history from disk. */
