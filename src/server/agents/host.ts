@@ -1879,7 +1879,11 @@ export class AgentHost {
     // replay paths in handleSessionEvent / reinitializeWithProvider will deliver this message
     // against the new session once init completes.
     if (!this.session && !this.isReinitializing) {
-      return Promise.reject(new Error('AgentHost not initialized. Call initialize() first.'));
+      return Promise.reject(
+        new Error(
+          'AgentHost has no session available (either initialize() has not been called, or a reinit attempt failed)'
+        )
+      );
     }
 
     // Check wire-size budget before queuing

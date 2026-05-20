@@ -1510,7 +1510,7 @@ describe('AgentHost', () => {
 
       await expect(
         host.deliverMessage('hello', { sender: 2, receiver: 1, timestamp: Date.now() })
-      ).rejects.toThrow('AgentHost not initialized');
+      ).rejects.toThrow('AgentHost has no session available');
     });
 
     it('stores full content for inter-agent messages', () => {
