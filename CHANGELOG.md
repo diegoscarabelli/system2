@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Removed** `assistant_end.errorMessage` (LLM-error row arrives via `chat_message_added` from history-capture).
   - **Added** optional `id` on `user_message` / `steering_message` client events; server reuses it as the `ChatMessage.id`, so the originating tab's optimistic insert dedups against its own echo by id.
 
-
+## [0.3.14] - 2026-05-19
 
 ### Added
 
