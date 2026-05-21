@@ -7,10 +7,14 @@
 import type { ChatMessage } from './chat.js';
 
 // Client -> Server messages
-// agentId is optional on user/steering/abort: when absent, defaults to the Guide agent.
+// agentId is optional on user/steering/abort: when absent, defaults to the
+// connection's active agent (initially the Guide, updated by switch_agent).
+// id is an optional client-generated id for user/steering messages; when present the
+// server reuses it as the ChatMessage id, so the chat_message_added round-trip dedups
+// against the originating client's optimistic insert.
 export type ClientMessage =
-  | { type: 'user_message'; content: string; agentId?: number }
-  | { type: 'steering_message'; content: string; agentId?: number } // Steering messages are inserted ASAP into the agent loop
+  | { type: 'user_message'; content: string; agentId?: number; id?: string }
+  | { type: 'steering_message'; content: string; agentId?: number; id?: string } // Steering messages are inserted ASAP into the agent loop
   | { type: 'abort'; agentId?: number }
   | { type: 'switch_agent'; agentId: number }; // Switch the active chat to a different agent
 
@@ -18,7 +22,7 @@ export type ClientMessage =
 // agentId is optional on streaming messages: when absent, implies the Guide agent.
 export type ServerMessage =
   | { type: 'assistant_chunk'; content: string; agentId?: number }
-  | { type: 'assistant_end'; agentId?: number; errorMessage?: string }
+  | { type: 'assistant_end'; agentId?: number }
   | { type: 'thinking_chunk'; content: string; agentId?: number }
   | { type: 'thinking_end'; agentId?: number }
   | { type: 'tool_call_start'; name: string; input?: string; agentId?: number }
@@ -28,15 +32,9 @@ export type ServerMessage =
   | { type: 'error'; message: string; agentId?: number }
   | { type: 'ready_for_input'; agentId?: number } // Signals that the agent is ready for the next message
   | { type: 'chat_history'; messages: ChatMessage[]; agentId: number } // Sent on connect and agent switch
-  | {
-      type: 'user_message_broadcast';
-      id: string;
-      content: string;
-      timestamp: number;
-      agentId?: number;
-    }
+  | { type: 'chat_message_added'; message: ChatMessage; agentId: number } // Fired on every chatCache push (mirrors the server's source of truth)
   | { type: 'provider_info'; provider: string; agentId: number } // Sent on connect/switch — current LLM provider for an agent
-  | { type: 'provider_change'; provider: string; reason?: string; agentId: number } // Sent on failover — provider switched
+  | { type: 'provider_change'; provider: string; agentId: number } // Sent on failover — provider switched (chat row arrives via chat_message_added)
   | { type: 'compaction_start'; agentId?: number } // Sent when auto-compaction begins
   | { type: 'compaction_end'; agentId?: number } // Sent when auto-compaction completes
   // Push notifications: tell UI panels to refetch data

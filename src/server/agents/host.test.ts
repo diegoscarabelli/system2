@@ -2367,7 +2367,7 @@ describe('AgentHost', () => {
         null,
         [],
         '429 rate limited, switched to anthropic',
-        'on google, switching to anthropic\n\nError 429: rate limit exceeded'
+        'on google, switching to anthropic'
       );
     });
 
@@ -2413,7 +2413,7 @@ describe('AgentHost', () => {
         null,
         [],
         '429 rate limited, rotating to next key',
-        'on google, rotating to next key\n\nError 429: rate limit exceeded'
+        'on google, rotating to next key'
       );
     });
 
@@ -2457,7 +2457,7 @@ describe('AgentHost', () => {
       const pushed = internal._chatCache.push.mock.calls[0][0];
       expect(pushed.role).toBe('system');
       expect(pushed.content).toBe(
-        '401 auth error, all providers unavailable\n\non cerebras, all providers unavailable\n\nError 401: Unauthorized'
+        '401 auth error, all providers unavailable\n\non cerebras, all providers unavailable'
       );
     });
   });
@@ -2586,7 +2586,7 @@ describe('AgentHost', () => {
         null,
         [],
         '400 client error, switched to google',
-        'on anthropic, switching to google\n\nError 400: credit balance too low'
+        'on anthropic, switching to google'
       );
     });
 
@@ -2635,10 +2635,11 @@ describe('AgentHost', () => {
       expect(internal.reinitializeWithProvider).not.toHaveBeenCalled();
       // Busy should be cleared
       expect(internal.busy).toBe(false);
-      // Should show error details in the exhausted message
+      // Error detail isn't duplicated here — the "LLM error" system row
+      // pushed by history-capture on the same message_end already carries it.
       const pushed = internal._chatCache.push.mock.calls[0][0];
       expect(pushed.content).toBe(
-        '400 client error, all providers unavailable\n\non anthropic, all providers unavailable\n\nError 400: credit balance too low'
+        '400 client error, all providers unavailable\n\non anthropic, all providers unavailable'
       );
     });
 

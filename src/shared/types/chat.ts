@@ -32,4 +32,14 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   turnEvents?: ChatTurnEvent[];
+  /**
+   * True for assistant rows that did NOT finalize a streaming turn. Currently
+   * set by `history-capture` on the tool-completion follow-up row pushed when
+   * a tool that was running at `flushPartial` time fires its
+   * `tool_execution_end` later. By the time that row arrives in the UI, the
+   * next (steered) turn may already be streaming; the UI uses this flag to
+   * append the row WITHOUT clearing the in-flight streaming draft. Real
+   * turn-end rows leave this undefined/false so the draft is cleared as usual.
+   */
+  isFollowUp?: boolean;
 }

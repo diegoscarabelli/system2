@@ -105,6 +105,64 @@ describe('useChatStore', () => {
       expect(state?.currentTurnEvents).toHaveLength(1);
       expect(state?.currentTurnEvents[0].type).toBe('tool_call');
     });
+
+    it('merges existing rows that arrived before the snapshot (no drop on subscribe-then-snapshot race)', () => {
+      // On switch_agent the server subscribes to chatCache BEFORE sending the
+      // snapshot; if a push lands in between, the UI sees chat_message_added
+      // first and then chat_history. Without a merge, loadHistory would
+      // overwrite messages and drop the row delivered via appendMessage.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore
+        .getState()
+        .appendMessage({ id: 'live-1', role: 'system', content: 'arrived live', timestamp: 2 }, 1);
+
+      useChatStore
+        .getState()
+        .loadHistory([{ id: 'snap-1', role: 'user', content: 'in snapshot', timestamp: 1 }], 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(2);
+      // Snapshot stays at the head (preserves persisted order); the live row
+      // that wasn't in the snapshot is appended at the tail.
+      expect(state?.messages[0].id).toBe('snap-1');
+      expect(state?.messages[1].id).toBe('live-1');
+    });
+
+    it('preserves isWaitingForResponse on snapshot reload (pre-stream waiting state)', () => {
+      // Scenario: user just sent a message (isWaitingForResponse=true), but
+      // the agent hasn't started streaming yet. A new chat_history snapshot
+      // arrives (e.g. tab switches agents and back). If we cleared the flag
+      // here, the next submit would be classified as a fresh user_message
+      // instead of a steering_message, and the spinner would disappear.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().setWaitingForResponse(true, 1);
+
+      useChatStore
+        .getState()
+        .loadHistory([{ id: 'snap-1', role: 'user', content: 'hi', timestamp: 1 }], 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.isWaitingForResponse).toBe(true);
+      expect(state?.messages).toHaveLength(1);
+    });
+
+    it('snapshot dedups against existing rows that ARE present in it', () => {
+      // The same push can land in BOTH the live event and the subsequent
+      // snapshot (id is the same). loadHistory must not duplicate.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore
+        .getState()
+        .appendMessage({ id: 'm1', role: 'user', content: 'hello', timestamp: 1 }, 1);
+
+      useChatStore
+        .getState()
+        .loadHistory([{ id: 'm1', role: 'user', content: 'hello', timestamp: 1 }], 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].id).toBe('m1');
+    });
   });
 
   describe('clearAllStreamingState', () => {
@@ -130,149 +188,229 @@ describe('useChatStore', () => {
     });
   });
 
-  describe('addUserMessage during steering', () => {
-    it('snapshots in-progress turn events into a partial assistant message', () => {
+  describe('addUserMessage (optimistic local insert)', () => {
+    it('inserts the user message and returns its id', () => {
       useChatStore.setState({ activeAgentId: 1 });
       useChatStore.getState().loadHistory([], 1);
 
-      // Simulate agent mid-stream with a tool call
-      useChatStore.getState().startToolCall('bash', '{"command":"ls"}', 1);
-      useChatStore.getState().setStreaming(true, 1);
-
-      // Steer: send a user message while streaming
-      useChatStore.getState().addUserMessage('change direction', undefined, undefined, 1);
-
-      const state = useChatStore.getState().agentStates.get(1);
-      // Should have 2 messages: the snapshot (partial assistant) + user message
-      expect(state?.messages).toHaveLength(2);
-      expect(state?.messages[0].role).toBe('assistant');
-      expect(state?.messages[0].turnEvents).toHaveLength(1);
-      expect(state?.messages[0].turnEvents?.[0].type).toBe('tool_call');
-      expect(state?.messages[1].role).toBe('user');
-      expect(state?.messages[1].content).toBe('change direction');
-      // Streaming state should be cleared, and isWaitingForResponse stays false
-      expect(state?.currentTurnEvents).toHaveLength(0);
-      expect(state?.currentAssistantMessage).toBeNull();
-      expect(state?.isWaitingForResponse).toBe(false);
-    });
-
-    it('does not snapshot when agent is idle (normal send)', () => {
-      useChatStore.setState({ activeAgentId: 1 });
-      useChatStore.getState().loadHistory([], 1);
-
-      // Agent is idle (not streaming)
-      useChatStore.getState().addUserMessage('hello', undefined, undefined, 1);
+      const id = useChatStore.getState().addUserMessage('hello', 1);
 
       const state = useChatStore.getState().agentStates.get(1);
       expect(state?.messages).toHaveLength(1);
-      expect(state?.messages[0].role).toBe('user');
+      expect(state?.messages[0]).toMatchObject({ role: 'user', content: 'hello', id });
       expect(state?.isWaitingForResponse).toBe(true);
     });
 
-    it('snapshots partial assistant text along with turn events', () => {
+    it('skips the optimistic insert when steering mid-stream', () => {
+      // Server flushPartialTurn() pushes the assistant partial to chatCache
+      // BEFORE the steering user row, so the persisted order is
+      // [assistant_partial, user_steering]. If we inserted the user row
+      // locally first, chat_message_added's tail-append would put the
+      // assistant partial AFTER the user row in the UI — disagreeing with the
+      // persisted view. Skipping the optimistic insert lets both rows arrive
+      // via chat_message_added in correct order.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().setStreaming(true, 1);
+
+      const id = useChatStore.getState().addUserMessage('change direction', 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(0);
+      // The id is still returned so Chat.tsx can pass it to the server.
+      expect(typeof id).toBe('string');
+      expect(id.length).toBeGreaterThan(0);
+      expect(state?.isWaitingForResponse).toBe(false);
+    });
+
+    it('returns an id even when no agent is selected', () => {
+      // Ensures Chat.tsx can pass an id to the WS send regardless of target state.
+      useChatStore.setState({ activeAgentId: null });
+      const id = useChatStore.getState().addUserMessage('hi');
+      expect(typeof id).toBe('string');
+      expect(id.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('appendMessage (server-driven canonical insert)', () => {
+    it('appends a system message from chat_message_added', () => {
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.setState({ activeAgentId: 1 });
+
+      const fullContent =
+        '401 auth error, switched to google\n\non anthropic, switching to google\n\n401 {...}\n\nRun `system2 config` to refresh anthropic authentication and restart the server.';
+      useChatStore
+        .getState()
+        .appendMessage({ id: 'sys-1', role: 'system', content: fullContent, timestamp: 1 }, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].content).toBe(fullContent);
+      // Tag/body split (rendered by SystemMessageBlock) lives below the first
+      // double-newline — the hint must be reachable that way.
+      expect(state?.messages[0].content).toContain('Run `system2 config`');
+    });
+
+    it('sets isWaitingForResponse when a user row arrives from the wire and the agent is idle', () => {
+      // Covers (a) the steering case on the originating tab — local insert
+      // skipped, the user row arrives via chat_message_added — and (b) other
+      // tabs receiving a user message sent from a sibling tab.
       useChatStore.setState({ activeAgentId: 1 });
       useChatStore.getState().loadHistory([], 1);
 
-      // Simulate agent mid-stream with thinking + partial text
+      useChatStore
+        .getState()
+        .appendMessage({ id: 'u-1', role: 'user', content: 'hi', timestamp: 1 }, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.isWaitingForResponse).toBe(true);
+    });
+
+    it('does NOT flip isWaitingForResponse when a user row arrives while already streaming (steering case)', () => {
+      // Mid-stream the spinner is driven by isStreaming, not isWaitingForResponse.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().setStreaming(true, 1);
+
+      useChatStore
+        .getState()
+        .appendMessage({ id: 'u-1', role: 'user', content: 'steer', timestamp: 1 }, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.isWaitingForResponse).toBe(false);
+    });
+
+    it('replaces in place on id match (originating-tab echo adopts server canonical fields)', () => {
+      // Local optimistic insert stamps timestamp with the browser clock; the
+      // server's chat_message_added carries the server clock. Other tabs see
+      // the server version. To keep all tabs identical, the originating tab
+      // must overwrite its local row with the server's canonical version on
+      // id match — not just dedup and keep the local copy.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      const id = useChatStore.getState().addUserMessage('hello', 1);
+      const before = useChatStore.getState().agentStates.get(1);
+      const localTimestamp = before?.messages[0].timestamp;
+      // Force a different server timestamp by passing an explicit one.
+      const serverTimestamp = (localTimestamp ?? 0) + 50;
+      useChatStore
+        .getState()
+        .appendMessage({ id, role: 'user', content: 'hello', timestamp: serverTimestamp }, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].timestamp).toBe(serverTimestamp);
+    });
+
+    it('does not flip isWaitingForResponse when the same id is echoed back', () => {
+      // The originating tab's addUserMessage already set the indicator;
+      // appendMessage replacing the row should not re-touch it. Otherwise a
+      // ready_for_input arriving in the (very small) window between the
+      // local insert and the server echo would be re-clobbered.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      const id = useChatStore.getState().addUserMessage('hi', 1);
+      // Pretend the turn already ended (ready_for_input cleared the flag).
+      useChatStore.getState().setWaitingForResponse(false, 1);
+
+      useChatStore.getState().appendMessage({ id, role: 'user', content: 'hi', timestamp: 1 }, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.isWaitingForResponse).toBe(false);
+    });
+
+    it('does NOT clear the streaming draft when a follow-up assistant row arrives', () => {
+      // Steering during tool use: turn 1 was flushed with a running tool;
+      // turn 2 is now streaming. When the flushed tool finishes,
+      // history-capture pushes a follow-up assistant row. Clearing the draft
+      // here would drop turn 2's in-flight chunks/turnEvents.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().startAssistantMessage(1);
+      useChatStore.getState().appendAssistantChunk('turn 2 streaming...', 1);
+
+      useChatStore.getState().appendMessage(
+        {
+          id: 'follow-up-1',
+          role: 'assistant',
+          content: '',
+          timestamp: 1,
+          isFollowUp: true,
+          turnEvents: [
+            {
+              type: 'tool_call',
+              data: {
+                id: 't',
+                name: 'bash',
+                status: 'completed' as const,
+                input: 'ls',
+                result: 'a.txt',
+                timestamp: 1,
+              },
+            },
+          ],
+        },
+        1
+      );
+
+      const state = useChatStore.getState().agentStates.get(1);
+      // Row appended, but the turn 2 draft is intact.
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].id).toBe('follow-up-1');
+      expect(state?.currentAssistantMessage).toBe('turn 2 streaming...');
+    });
+
+    it('clears the streaming draft when a canonical assistant row arrives', () => {
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
       useChatStore.getState().startThinking(1);
       useChatStore.getState().appendThinkingChunk('analyzing...', 1);
       useChatStore.getState().finishThinking(1);
       useChatStore.getState().startAssistantMessage(1);
-      useChatStore.getState().appendAssistantChunk('Here is my partial', 1);
+      useChatStore.getState().appendAssistantChunk('Here is the answer', 1);
 
-      useChatStore.getState().addUserMessage('actually do X', undefined, undefined, 1);
-
-      const state = useChatStore.getState().agentStates.get(1);
-      expect(state?.messages).toHaveLength(2);
-      expect(state?.messages[0].role).toBe('assistant');
-      expect(state?.messages[0].content).toBe('Here is my partial');
-      expect(state?.messages[0].turnEvents).toHaveLength(1);
-      expect(state?.messages[0].turnEvents?.[0].type).toBe('thinking');
-      expect(state?.messages[1].role).toBe('user');
-    });
-  });
-
-  describe('addSystemMessage', () => {
-    it('routes to specified agentId instead of activeAgentId', () => {
-      useChatStore.getState().loadHistory([], 1);
-      useChatStore.getState().loadHistory([], 2);
-      useChatStore.setState({ activeAgentId: 1 });
-
-      // System message targets agent 2 (background agent failover)
-      useChatStore
-        .getState()
-        .addSystemMessage('429 rate_limit on google, switching to anthropic', 2);
-
-      // Agent 2 should have the message
-      const state2 = useChatStore.getState().agentStates.get(2);
-      expect(state2?.messages).toHaveLength(1);
-      expect(state2?.messages[0].role).toBe('system');
-      expect(state2?.messages[0].content).toContain('rate_limit');
-
-      // Agent 1 (active) should not
-      const state1 = useChatStore.getState().agentStates.get(1);
-      expect(state1?.messages).toHaveLength(0);
-    });
-
-    it('defaults to activeAgentId when agentId is omitted', () => {
-      useChatStore.getState().loadHistory([], 1);
-      useChatStore.setState({ activeAgentId: 1 });
-
-      useChatStore.getState().addSystemMessage('something happened');
+      useChatStore.getState().appendMessage(
+        {
+          id: 'asst-1',
+          role: 'assistant',
+          content: 'Here is the answer',
+          timestamp: 1,
+          turnEvents: [
+            {
+              type: 'thinking',
+              data: { id: 't', content: 'analyzing...', isStreaming: false, timestamp: 1 },
+            },
+          ],
+        },
+        1
+      );
 
       const state = useChatStore.getState().agentStates.get(1);
       expect(state?.messages).toHaveLength(1);
-      expect(state?.messages[0].role).toBe('system');
-    });
-  });
-
-  describe('finishAssistantMessage', () => {
-    it('preserves orphaned turn events when content is empty', () => {
-      useChatStore.setState({ activeAgentId: 1 });
-      useChatStore.getState().loadHistory([], 1);
-
-      // Simulate a tool call with no follow-up text (model returned empty content)
-      useChatStore.getState().startToolCall('read_system2_db', '{"sql":"SELECT 1"}', 1);
-      useChatStore.getState().finishToolCall('read_system2_db', '[{"id":1}]', 1);
-
-      // Finish with no assistant text
-      useChatStore.getState().finishAssistantMessage(1);
-
-      const state = useChatStore.getState().agentStates.get(1);
-      // Should have committed a message with turn events even though content is empty
-      expect(state?.messages).toHaveLength(1);
       expect(state?.messages[0].role).toBe('assistant');
-      expect(state?.messages[0].content).toBe('');
-      expect(state?.messages[0].turnEvents).toHaveLength(1);
-      expect(state?.messages[0].turnEvents?.[0].type).toBe('tool_call');
-      // Turn events should be cleared from current state
+      expect(state?.currentAssistantMessage).toBeNull();
       expect(state?.currentTurnEvents).toHaveLength(0);
+      expect(state?.activeThinkingId).toBeNull();
     });
+  });
 
-    it('does nothing when both content and turn events are empty', () => {
-      useChatStore.setState({ activeAgentId: 1 });
-      useChatStore.getState().loadHistory([], 1);
-
-      useChatStore.getState().finishAssistantMessage(1);
-
-      const state = useChatStore.getState().agentStates.get(1);
-      expect(state?.messages).toHaveLength(0);
-    });
-
-    it('commits normally when content exists', () => {
+  describe('clearAssistantDraft', () => {
+    it('clears a no-content turn safely', () => {
       useChatStore.setState({ activeAgentId: 1 });
       useChatStore.getState().loadHistory([], 1);
 
       useChatStore.getState().startAssistantMessage(1);
-      useChatStore.getState().appendAssistantChunk('Hello', 1);
-      useChatStore.getState().startToolCall('bash', '{}', 1);
-      useChatStore.getState().finishToolCall('bash', 'ok', 1);
-      useChatStore.getState().finishAssistantMessage(1);
+      useChatStore.getState().appendAssistantChunk('partial', 1);
+      useChatStore.getState().clearAssistantDraft(1);
 
       const state = useChatStore.getState().agentStates.get(1);
-      expect(state?.messages).toHaveLength(1);
-      expect(state?.messages[0].content).toBe('Hello');
-      expect(state?.messages[0].turnEvents).toHaveLength(1);
+      expect(state?.messages).toHaveLength(0);
+      expect(state?.currentAssistantMessage).toBeNull();
+      expect(state?.currentTurnEvents).toHaveLength(0);
     });
   });
 

@@ -139,11 +139,10 @@ export function useWebSocket() {
             const aid = message.agentId ?? state.guideAgentId;
             if (aid !== null) {
               state.finishThinking(aid);
-              state.finishAssistantMessage(aid);
-              // Show LLM errors in the chat timeline as collapsible system messages
-              if (message.errorMessage) {
-                state.addSystemMessage(`LLM error\n\n${message.errorMessage}`, aid);
-              }
+              // Stream is over; the canonical assistant row (and any LLM-error
+              // system row) arrives via chat_message_added. Clear the draft as
+              // a safety net in case the turn produced no committed message.
+              state.clearAssistantDraft(aid);
             }
             break;
           }
@@ -198,11 +197,11 @@ export function useWebSocket() {
             break;
           }
 
-          case 'user_message_broadcast': {
-            const aid = message.agentId ?? state.guideAgentId;
-            if (aid !== null) {
-              state.addUserMessage(message.content, message.id, message.timestamp, aid);
-            }
+          case 'chat_message_added': {
+            // Canonical committed row from the server's chatCache. Idempotent
+            // by id so the originating tab's optimistic addUserMessage dedups
+            // against the server's echo.
+            state.appendMessage(message.message, message.agentId);
             break;
           }
 
@@ -230,11 +229,9 @@ export function useWebSocket() {
             break;
 
           case 'provider_change':
+            // Indicator-only: the chat row describing the switch arrives via
+            // chat_message_added (pushed by reinitializeWithProvider).
             state.setProvider(message.provider, message.agentId);
-            state.addSystemMessage(
-              message.reason ?? `Switched to ${message.provider}`,
-              message.agentId
-            );
             break;
 
           case 'compaction_start': {
@@ -345,25 +342,27 @@ export function useWebSocket() {
     };
   }, []);
 
-  const sendMessage = useCallback((content: string) => {
+  const sendMessage = useCallback((content: string, id?: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       const agentId = useChatStore.getState().activeAgentId;
       const msg: ClientMessage = {
         type: 'user_message',
         content,
         agentId: agentId ?? undefined,
+        id,
       };
       wsRef.current.send(JSON.stringify(msg));
     }
   }, []);
 
-  const sendSteeringMessage = useCallback((content: string) => {
+  const sendSteeringMessage = useCallback((content: string, id?: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       const agentId = useChatStore.getState().activeAgentId;
       const msg: ClientMessage = {
         type: 'steering_message',
         content,
         agentId: agentId ?? undefined,
+        id,
       };
       wsRef.current.send(JSON.stringify(msg));
     }

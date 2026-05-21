@@ -17,14 +17,16 @@ export function Chat() {
   const addUserMessage = useChatStore((s) => s.addUserMessage);
   const activeAgentLabel = useChatStore((s) => s.activeAgentLabel);
 
+  // The optimistic insert and the WS send share an id; the server reuses it
+  // when pushing to chatCache, so the echoed chat_message_added dedups.
   const handleSend = (content: string) => {
-    addUserMessage(content);
-    sendMessage(content);
+    const id = addUserMessage(content);
+    sendMessage(content, id);
   };
 
   const handleSteer = (content: string) => {
-    addUserMessage(content);
-    sendSteeringMessage(content);
+    const id = addUserMessage(content);
+    sendSteeringMessage(content, id);
   };
 
   return (

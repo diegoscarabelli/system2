@@ -3,11 +3,21 @@
  *
  * Zustand store for managing chat messages and connection state.
  * Supports per-agent state: each agent has its own message history
- * and streaming state. The active agent determines
- * which state is displayed in the UI.
+ * and streaming state. The active agent determines which state is displayed.
  *
- * The server is the source of truth for message history.
- * On WebSocket connect, the server sends chat_history with recent messages.
+ * The server's chatCache is the single source of truth for committed messages.
+ * Two paths populate `messages[]`:
+ *   - `loadHistory(...)`: full snapshot on connect / agent switch.
+ *   - `appendMessage(msg, agentId)`: incremental row from `chat_message_added`.
+ * Both are dedup-by-id. Streaming events (assistant chunks, tool calls) build a
+ * TRANSIENT draft (`currentAssistantMessage`, `currentTurnEvents`) above the
+ * committed list; when the canonical assistant message arrives via
+ * `appendMessage`, the draft is cleared atomically with the append.
+ *
+ * `addUserMessage` is an optimistic insert used by the originating tab for
+ * instant feedback; the server reuses the client-provided id so the echoed
+ * `chat_message_added` dedups cleanly.
+ *
  * Active agent selection is persisted to localStorage so it survives refreshes.
  */
 
@@ -77,12 +87,12 @@ interface ChatState {
   getActiveState: () => PerAgentState;
 
   // Actions (agentId optional, defaults to active agent)
-  addUserMessage: (content: string, id?: string, timestamp?: number, agentId?: number) => void;
-  addSystemMessage: (content: string, agentId?: number) => void;
+  addUserMessage: (content: string, agentId?: number) => string; // Returns the generated id (for server reuse)
+  appendMessage: (message: Message, agentId?: number) => void; // Server-driven canonical insert
   loadHistory: (messages: Message[], agentId: number) => void;
   startAssistantMessage: (agentId?: number) => void;
   appendAssistantChunk: (chunk: string, agentId?: number) => void;
-  finishAssistantMessage: (agentId?: number) => void;
+  clearAssistantDraft: (agentId?: number) => void; // Called on assistant_end; canonical row arrives via appendMessage
   startThinking: (agentId?: number) => void;
   appendThinkingChunk: (chunk: string, agentId?: number) => void;
   finishThinking: (agentId?: number) => void;
@@ -147,86 +157,129 @@ export const useChatStore = create<ChatState>()(
         return agentStates.get(activeAgentId) ?? EMPTY_AGENT_STATE;
       },
 
-      addUserMessage: (content: string, id?: string, timestamp?: number, agentId?: number) => {
+      addUserMessage: (content: string, agentId?: number) => {
         const targetId = agentId ?? get().activeAgentId;
-        if (targetId === null) return;
+        // crypto.randomUUID(): dedup-by-id makes id uniqueness load-bearing
+        // (collisions silently drop rows). Available in every browser since
+        // ~2021 and in Node test environments. The `msg-` prefix is purely
+        // cosmetic for log-grepping.
+        const id = `msg-${crypto.randomUUID()}`;
+        if (targetId === null) return id;
 
         const agentState = get().agentStates.get(targetId);
         const isSteering = agentState?.isStreaming ?? false;
 
-        // When steering mid-stream, commit any in-progress content so the
-        // existing thinking/tool blocks stay visible above the user's message
-        const partialMessages: Message[] = [];
-        if (isSteering && agentState) {
-          const hasTurnEvents = agentState.currentTurnEvents.length > 0;
-          const hasPartialText = !!agentState.currentAssistantMessage;
-          if (hasTurnEvents || hasPartialText) {
-            partialMessages.push({
-              id: `msg-${Date.now()}-partial`,
-              role: 'assistant',
-              content: agentState.currentAssistantMessage ?? '',
-              timestamp: Date.now(),
-              turnEvents: hasTurnEvents ? [...agentState.currentTurnEvents] : undefined,
-            });
-          }
+        // Steering: skip the optimistic local insert. The server runs
+        // flushPartialTurn() BEFORE pushing the user row, so the canonical
+        // chatCache order is [assistant_partial, user_steering]. If we
+        // inserted the user row locally first, chat_message_added's append
+        // (which only ever appends at the tail) would land the assistant
+        // partial AFTER the user row, contradicting the persisted view.
+        // Letting both rows arrive via chat_message_added preserves order.
+        // Cost: a single WS round-trip before the user's text appears in the
+        // chat (~tens of ms on localhost) — acceptable for the rare steer.
+        if (!isSteering) {
+          const message: Message = { id, role: 'user', content, timestamp: Date.now() };
+          set((state) => ({
+            agentStates: updateAgentState(state.agentStates, targetId, (s) => ({
+              messages: [...s.messages, message],
+              isWaitingForResponse: true,
+            })),
+          }));
         }
-
-        const message: Message = {
-          id: id ?? `msg-${Date.now()}`,
-          role: 'user',
-          content,
-          timestamp: timestamp ?? Date.now(),
-        };
-        set((state) => ({
-          agentStates: updateAgentState(state.agentStates, targetId, (s) => ({
-            messages: [...s.messages, ...partialMessages, message],
-            currentAssistantMessage: null,
-            currentTurnEvents: [],
-            activeThinkingId: null,
-            isWaitingForResponse: !isSteering,
-          })),
-        }));
+        return id;
       },
 
-      addSystemMessage: (content: string, agentId?: number) => {
+      appendMessage: (message: Message, agentId?: number) => {
         const targetId = agentId ?? get().activeAgentId;
         if (targetId === null) return;
 
-        const message: Message = {
-          id: `msg-${Date.now()}`,
-          role: 'system',
-          content,
-          timestamp: Date.now(),
-        };
-        set((state) => ({
-          agentStates: updateAgentState(state.agentStates, targetId, (s) => ({
-            messages: [...s.messages, message],
-          })),
-        }));
+        set((state) => {
+          const current = state.agentStates.get(targetId) ?? createDefaultAgentState();
+          // Match-by-id covers (a) the originating tab's optimistic insert
+          // echoed back by chat_message_added, and (b) any race between the
+          // initial chat_history snapshot and live pushes during the
+          // subscribe-then-snapshot window. On match we REPLACE in place
+          // rather than ignore: the server is the source of truth for
+          // canonical fields (notably `timestamp`, which the local optimistic
+          // insert stamped with the browser clock), so all tabs end up
+          // rendering the same row. Order is preserved by index-based replace.
+          const existingIdx = current.messages.findIndex((m) => m.id === message.id);
+          const isUpdate = existingIdx >= 0;
+          const newMessages = isUpdate
+            ? current.messages.map((m, i) => (i === existingIdx ? message : m))
+            : [...current.messages, message];
+
+          // Clear the streaming draft only on assistant rows that finalize an
+          // in-flight turn. The follow-up rows pushed by history-capture for
+          // post-flush tool completions are marked isFollowUp because by the
+          // time they arrive, the user has steered and the next turn may
+          // already be streaming — clearing the draft would drop chunks /
+          // turnEvents that belong to that new turn.
+          const isCanonicalAssistant = message.role === 'assistant' && !message.isFollowUp;
+          // A user row arriving via the wire (steering on the originating tab,
+          // or any user message from another tab) means the agent is about to
+          // start a turn — flip the indicator on, unless we're already
+          // streaming or this is the echo of a row the originating tab already
+          // inserted (its addUserMessage call already set the indicator).
+          const startsTurn = !isUpdate && message.role === 'user' && !current.isStreaming;
+          return {
+            agentStates: updateAgentState(state.agentStates, targetId, () => ({
+              messages: newMessages,
+              // The canonical assistant row arrives with text + turnEvents
+              // baked in; the streaming draft becomes redundant.
+              ...(isCanonicalAssistant
+                ? {
+                    currentAssistantMessage: null,
+                    currentTurnEvents: [],
+                    activeThinkingId: null,
+                  }
+                : {}),
+              ...(startsTurn ? { isWaitingForResponse: true } : {}),
+            })),
+          };
+        });
       },
 
       loadHistory: (messages: Message[], agentId: number) => {
         set((state) => {
           const existing = state.agentStates.get(agentId);
+          // isWaitingForResponse is set when a user row arrives without an
+          // assistant turn yet having started; if we cleared it here a
+          // snapshot landing mid-wait would make the UI look idle and a
+          // subsequent submit would be classified as a fresh user_message
+          // instead of a steering_message.
           const hasInProgress =
             existing &&
             (existing.isStreaming ||
+              existing.isWaitingForResponse ||
               existing.currentTurnEvents.length > 0 ||
               existing.currentAssistantMessage);
+
+          // Merge the snapshot with any rows that already arrived via
+          // appendMessage (chat_message_added). Snapshot is the canonical
+          // base (preserves the persisted order); anything in current that
+          // isn't in the snapshot — by id — is appended at the tail. This
+          // makes the listener-then-snapshot window of the constructor /
+          // switch_agent flow robust: a push that lands between subscribe
+          // and snapshot won't be dropped by loadHistory overwriting messages.
+          const snapshotIds = new Set(messages.map((m) => m.id));
+          const tail = existing?.messages.filter((m) => !snapshotIds.has(m.id)) ?? [];
+          const merged = tail.length > 0 ? [...messages, ...tail] : messages;
 
           // If agent has in-progress work (e.g., switching back to a busy agent),
           // only update committed messages and preserve streaming state.
           if (hasInProgress) {
             return {
               agentStates: updateAgentState(state.agentStates, agentId, () => ({
-                messages,
+                messages: merged,
               })),
             };
           }
 
           return {
             agentStates: updateAgentState(state.agentStates, agentId, () => ({
-              messages,
+              messages: merged,
               currentAssistantMessage: null,
               currentTurnEvents: [],
               activeThinkingId: null,
@@ -259,36 +312,19 @@ export const useChatStore = create<ChatState>()(
         }));
       },
 
-      finishAssistantMessage: (agentId?: number) => {
+      clearAssistantDraft: (agentId?: number) => {
         const targetId = agentId ?? get().activeAgentId;
         if (targetId === null) return;
-
-        const agentState = get().agentStates.get(targetId);
-        if (!agentState) return;
-
-        const content = agentState.currentAssistantMessage;
-        const hasTurnEvents = agentState.currentTurnEvents.length > 0;
-
-        // Commit a message when there is text content OR orphaned turn events
-        // (e.g. model returned empty content after a tool call). Without this,
-        // turn events would be silently dropped on the next user message.
-        if (content || hasTurnEvents) {
-          const message: Message = {
-            id: `msg-${Date.now()}`,
-            role: 'assistant',
-            content: content ?? '',
-            timestamp: Date.now(),
-            turnEvents: hasTurnEvents ? [...agentState.currentTurnEvents] : undefined,
-          };
-          set((state) => ({
-            agentStates: updateAgentState(state.agentStates, targetId, (s) => ({
-              messages: [...s.messages, message],
-              currentAssistantMessage: null,
-              currentTurnEvents: [],
-              activeThinkingId: null,
-            })),
-          }));
-        }
+        // Safety net for turns that produced no committed message (e.g. an
+        // immediately-aborted stream): if appendMessage already cleared the
+        // draft via the canonical assistant row, this is a no-op.
+        set((state) => ({
+          agentStates: updateAgentState(state.agentStates, targetId, () => ({
+            currentAssistantMessage: null,
+            currentTurnEvents: [],
+            activeThinkingId: null,
+          })),
+        }));
       },
 
       startThinking: (agentId?: number) => {

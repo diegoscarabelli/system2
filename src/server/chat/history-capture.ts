@@ -4,6 +4,12 @@
  * Creates an event subscriber that captures agent session events into a
  * MessageHistory (chat cache). Extracted from Server so the logic is testable
  * independently.
+ *
+ * Everything visible as a chat row lives in chatCache — including the partial
+ * assistant turn that errored, the LLM-error system row, and compaction
+ * notices. The UI receives these live via the chatCache's push listener
+ * (WebSocketHandler forwards each push as chat_message_added), so there is no
+ * UI-side synthesis of these rows.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -23,15 +29,77 @@ import type { MessageHistory } from './history.js';
  * the complete assistant message on message_end. Tool-only turns (thinking +
  * tool calls without text) are also persisted. Compaction events are recorded
  * as system messages.
+ *
+ * Returns `{ subscriber, flushPartial }`. The subscriber goes to AgentHost.
+ * `flushPartial` is a server-side hook used by WebSocketHandler during a
+ * steering message: it captures whatever the in-flight turn has accumulated
+ * so far and pushes it into chatCache BEFORE the user's steering row is
+ * pushed. Without this, the steer's interrupt and the user-message push race,
+ * leaving chatCache in [user_steering, partial_assistant] order — chronologically
+ * wrong. After flushPartial fires, the SDK's eventual message_end finds the
+ * internal buffers empty and is a no-op for the partial branch (the error /
+ * compaction branches still apply if relevant).
  */
-export function createHistoryCaptureSubscriber(
-  getChatCache: () => MessageHistory
-): (event: AgentSessionEvent) => void {
+export interface HistoryCapture {
+  subscriber: (event: AgentSessionEvent) => void;
+  flushPartial: () => void;
+}
+
+export function createHistoryCaptureSubscriber(getChatCache: () => MessageHistory): HistoryCapture {
   let currentAssistantText = '';
   let activeThinkingContent = '';
   let currentTurnEvents: ChatTurnEvent[] = [];
+  // FIFO queue of tools that were still running when commitAccumulatedTurn
+  // pushed them into chatCache. A later tool_execution_end whose toolName
+  // matches the head of this queue belongs to a flushed message — we push a
+  // follow-up assistant row carrying just the completed tool_call so the
+  // result isn't dropped. Tracks {name, input} so the follow-up row preserves
+  // the original invocation. FIFO match by name handles concurrent same-name
+  // tools (e.g. two bash calls in flight at flush time).
+  const flushedRunningTools: Array<{ name: string; input: string | undefined }> = [];
 
-  return (event: AgentSessionEvent) => {
+  // Shared helper: finalize active thinking into currentTurnEvents, then
+  // push the accumulated turn (if any) and reset. Used by message_end AND
+  // flushPartial so both honor the same "what counts as a turn" rule.
+  function commitAccumulatedTurn(): void {
+    if (activeThinkingContent) {
+      currentTurnEvents.push({
+        type: 'thinking',
+        data: {
+          id: `thinking-${Date.now()}`,
+          content: activeThinkingContent,
+          isStreaming: false,
+          timestamp: Date.now(),
+        },
+      });
+      activeThinkingContent = '';
+    }
+    if (currentAssistantText || currentTurnEvents.length > 0) {
+      // Remember any tool calls still running at commit time so a later
+      // tool_execution_end can be matched and recorded as a follow-up row.
+      for (const ev of currentTurnEvents) {
+        if (ev.type === 'tool_call' && ev.data.status === 'running') {
+          flushedRunningTools.push({ name: ev.data.name, input: ev.data.input });
+        }
+      }
+      const assistantMsg: ChatMessage = {
+        // randomUUID rather than msg-${Date.now()}: dedup-by-id in the UI's
+        // appendMessage makes id uniqueness load-bearing, and millisecond
+        // resolution can collide when message_end + flushPartial fire close
+        // together (e.g. steering immediately after a fast turn).
+        id: `msg-${randomUUID()}`,
+        role: 'assistant',
+        content: currentAssistantText,
+        timestamp: Date.now(),
+        turnEvents: currentTurnEvents.length > 0 ? [...currentTurnEvents] : undefined,
+      };
+      getChatCache().push(assistantMsg);
+      currentAssistantText = '';
+      currentTurnEvents = [];
+    }
+  }
+
+  const subscriber = (event: AgentSessionEvent) => {
     switch (event.type) {
       case 'message_update':
         if (event.assistantMessageEvent.type === 'text_delta') {
@@ -42,33 +110,22 @@ export function createHistoryCaptureSubscriber(
         break;
 
       case 'message_end': {
-        // Finalize thinking if active
-        if (activeThinkingContent) {
-          currentTurnEvents.push({
-            type: 'thinking',
-            data: {
-              id: `thinking-${Date.now()}`,
-              content: activeThinkingContent,
-              isStreaming: false,
-              timestamp: Date.now(),
-            },
-          });
-          activeThinkingContent = '';
-        }
+        commitAccumulatedTurn();
 
-        // Capture completed assistant message in history.
-        // Push when there's text OR tool-only turns (thinking + tool calls without text).
-        if (currentAssistantText || currentTurnEvents.length > 0) {
-          const assistantMsg: ChatMessage = {
-            id: `msg-${Date.now()}`,
-            role: 'assistant',
-            content: currentAssistantText,
+        // Error turns surface as a system row right after the assistant's
+        // partial. The row carries the full errorMessage; failover system
+        // rows pushed by AgentHost.reinitializeWithProvider intentionally
+        // DON'T re-embed the same text, so the chat shows the error once.
+        const messageData = (
+          event as unknown as { message?: { stopReason?: string; errorMessage?: string } }
+        ).message;
+        if (messageData?.stopReason === 'error' && messageData.errorMessage) {
+          getChatCache().push({
+            id: `msg-${randomUUID()}`,
+            role: 'system',
+            content: `LLM error\n\n${messageData.errorMessage}`,
             timestamp: Date.now(),
-            turnEvents: currentTurnEvents.length > 0 ? [...currentTurnEvents] : undefined,
-          };
-          getChatCache().push(assistantMsg);
-          currentAssistantText = '';
-          currentTurnEvents = [];
+          });
         }
         break;
       }
@@ -87,6 +144,9 @@ export function createHistoryCaptureSubscriber(
           });
           activeThinkingContent = '';
         }
+        // (No commitAccumulatedTurn here: tool calls are still part of the
+        // in-flight turn and should accumulate into currentTurnEvents until
+        // message_end commits the whole turn.)
 
         // Format tool input for display
         let inputText = '';
@@ -139,6 +199,40 @@ export function createHistoryCaptureSubscriber(
           }
           return e;
         });
+
+        // No match in currentTurnEvents: the tool may have been flushed mid-
+        // execution (steering during tool use). If so, push a follow-up
+        // assistant row carrying just the completed tool_call so the result
+        // is preserved and chronologically lands AFTER the steering user row.
+        // Marked `isFollowUp: true` so the UI appends it WITHOUT clobbering
+        // the now-streaming next turn's draft.
+        if (!matched) {
+          const idx = flushedRunningTools.findIndex((t) => t.name === event.toolName);
+          if (idx >= 0) {
+            const orig = flushedRunningTools[idx];
+            flushedRunningTools.splice(idx, 1);
+            getChatCache().push({
+              id: `msg-${randomUUID()}`,
+              role: 'assistant',
+              content: '',
+              timestamp: Date.now(),
+              isFollowUp: true,
+              turnEvents: [
+                {
+                  type: 'tool_call',
+                  data: {
+                    id: `tool-${randomUUID()}`,
+                    name: event.toolName,
+                    status: 'completed' as const,
+                    input: orig.input,
+                    result: finalResult,
+                    timestamp: Date.now(),
+                  },
+                },
+              ],
+            });
+          }
+        }
         break;
       }
 
@@ -179,4 +273,6 @@ export function createHistoryCaptureSubscriber(
       }
     }
   };
+
+  return { subscriber, flushPartial: commitAccumulatedTurn };
 }

@@ -93,4 +93,61 @@ describe('MessageHistory', () => {
     history.push(makeMessage('1', 'deep'));
     expect(history.getMessages()).toHaveLength(1);
   });
+
+  describe('subscribe (observable)', () => {
+    it('notifies listeners on every push', () => {
+      const dir = trackTmpDir(makeTmpDir());
+      const history = new MessageHistory(join(dir, 'history.json'));
+      const received: ChatMessage[] = [];
+      history.subscribe((msg) => received.push(msg));
+
+      history.push(makeMessage('1', 'a'));
+      history.push(makeMessage('2', 'b'));
+
+      expect(received).toHaveLength(2);
+      expect(received[0].id).toBe('1');
+      expect(received[1].id).toBe('2');
+    });
+
+    it('returns an unsubscribe handle', () => {
+      const dir = trackTmpDir(makeTmpDir());
+      const history = new MessageHistory(join(dir, 'history.json'));
+      const received: ChatMessage[] = [];
+      const unsub = history.subscribe((msg) => received.push(msg));
+
+      history.push(makeMessage('1', 'a'));
+      unsub();
+      history.push(makeMessage('2', 'b'));
+
+      expect(received).toHaveLength(1);
+      expect(received[0].id).toBe('1');
+    });
+
+    it('supports multiple independent subscribers', () => {
+      const dir = trackTmpDir(makeTmpDir());
+      const history = new MessageHistory(join(dir, 'history.json'));
+      const a: ChatMessage[] = [];
+      const b: ChatMessage[] = [];
+      history.subscribe((msg) => a.push(msg));
+      history.subscribe((msg) => b.push(msg));
+
+      history.push(makeMessage('1', 'x'));
+
+      expect(a).toHaveLength(1);
+      expect(b).toHaveLength(1);
+    });
+
+    it('fires the listener after persistence (file already has the message)', () => {
+      // Guarantee: a subscriber observing a push can synchronously trust that
+      // chatCache.getMessages() will include the message.
+      const dir = trackTmpDir(makeTmpDir());
+      const history = new MessageHistory(join(dir, 'history.json'));
+      let observedCount = -1;
+      history.subscribe(() => {
+        observedCount = history.getMessages().length;
+      });
+      history.push(makeMessage('1', 'x'));
+      expect(observedCount).toBe(1);
+    });
+  });
 });

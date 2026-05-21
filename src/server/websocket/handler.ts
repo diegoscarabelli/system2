@@ -3,23 +3,47 @@
  *
  * Bridges Pi Agent events to WebSocket clients for real-time chat UI updates.
  * Supports multi-agent routing: the user can switch the active chat to any agent.
- * User messages are captured in the agent's chat cache and broadcast to other tabs.
- * Assistant message history capture is handled centrally by Server.
+ *
+ * Chat row delivery is unified via `chat_message_added`: any push to the agent's
+ * chatCache (user input, history-capture's finalized assistant turns, LLM-error
+ * system rows, failover system rows, compaction system rows) is forwarded live
+ * to all subscribed clients. The UI mirrors chatCache exactly. Streaming events
+ * (assistant_chunk, tool_call_*) drive the transient draft above the committed
+ * messages list; they don't represent committed rows.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
-import type { WebSocket, WebSocketServer } from 'ws';
+import type { WebSocket } from 'ws';
 import type { ClientMessage, ServerMessage } from '../../shared/index.js';
 import type { AgentHost } from '../agents/host.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { ConversationSummarizer } from '../chat/summarizer.js';
 import { log } from '../utils/logger.js';
 
+/**
+ * Validate a client-provided ChatMessage id before persisting + rebroadcasting.
+ * Caps length and restricts to a safe charset so a malicious or buggy client
+ * can't (a) bloat chatCache with multi-MB ids, (b) inject control chars into
+ * persisted JSON or log lines, or (c) deliberately collide ids and trigger
+ * silent drops via the UI's dedup-by-id. Anything that fails this check is
+ * replaced with a server-generated UUID.
+ */
+const MAX_CLIENT_ID_LENGTH = 128;
+const CLIENT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+function isValidClientMessageId(id: unknown): id is string {
+  return (
+    typeof id === 'string' &&
+    id.length > 0 &&
+    id.length <= MAX_CLIENT_ID_LENGTH &&
+    CLIENT_ID_PATTERN.test(id)
+  );
+}
+
 export class WebSocketHandler {
   private ws: WebSocket;
   private agentRegistry: AgentRegistry;
   private guideAgentId: number;
-  private wss: WebSocketServer;
   private activeAgentId: number;
   private subscriptions = new Map<number, () => void>();
   private thinkingAgents = new Set<number>();
@@ -29,13 +53,11 @@ export class WebSocketHandler {
     ws: WebSocket,
     agentRegistry: AgentRegistry,
     guideAgentId: number,
-    wss: WebSocketServer,
     summarizer?: ConversationSummarizer
   ) {
     this.ws = ws;
     this.agentRegistry = agentRegistry;
     this.guideAgentId = guideAgentId;
-    this.wss = wss;
     this.activeAgentId = guideAgentId;
     this.summarizer = summarizer;
 
@@ -46,6 +68,14 @@ export class WebSocketHandler {
       ws.close();
       return;
     }
+
+    // Subscribe BEFORE sending the snapshot so the chatCache listener is
+    // installed first. This matches the switch_agent ordering and guarantees
+    // we never miss a push that lands after the snapshot is taken but before
+    // the subscription is wired up. The dedup-by-id in the UI's appendMessage
+    // handles any row that appears both in the snapshot and in a live
+    // chat_message_added event during the overlap window.
+    this.subscribeToAgent(guideAgentId, guideHost);
 
     // Send Guide's chat cache and provider info on connect
     this.send({
@@ -58,9 +88,6 @@ export class WebSocketHandler {
     // Seed Guide's busy/context state into the client's push store so
     // MessageInput's contextPercent is populated before the first turn ends.
     this.sendAgentBusySnapshot(guideAgentId, guideHost);
-
-    // Subscribe to Guide's events for streaming to this client
-    this.subscribeToAgent(guideAgentId, guideHost);
 
     // Handle incoming messages from client
     ws.on('message', (data) => {
@@ -85,20 +112,25 @@ export class WebSocketHandler {
   }
 
   /**
-   * Subscribe to an agent's events for streaming to this WebSocket client.
-   * Subscriptions are kept alive across agent switches so events continue
-   * flowing for background agents (preserving in-progress tool calls, etc.).
+   * Subscribe to an agent's events AND chatCache pushes for streaming to this
+   * WebSocket client. Subscriptions are kept alive across agent switches so
+   * events continue flowing for background agents (preserving in-progress tool
+   * calls, etc.) and committed rows reach the UI without waiting for a reload.
    */
   private subscribeToAgent(agentId: number, host: AgentHost): void {
     // Already subscribed to this agent
     if (this.subscriptions.has(agentId)) return;
 
-    this.subscriptions.set(
-      agentId,
-      host.subscribe((event) => {
-        this.handleAgentEvent(event, agentId, host);
-      })
-    );
+    const unsubEvents = host.subscribe((event) => {
+      this.handleAgentEvent(event, agentId, host);
+    });
+    const unsubCache = host.chatCache.subscribe((message) => {
+      this.send({ type: 'chat_message_added', message, agentId });
+    });
+    this.subscriptions.set(agentId, () => {
+      unsubEvents();
+      unsubCache();
+    });
   }
 
   private handleClientMessage(message: ClientMessage): void {
@@ -113,22 +145,29 @@ export class WebSocketHandler {
           return;
         }
 
-        // Capture user message in agent's chat cache
-        const userMsg = {
-          id: `msg-${Date.now()}`,
-          role: 'user' as const,
+        const isSteering = message.type === 'steering_message';
+
+        // Steering interrupts an in-flight assistant turn. Commit whatever
+        // the SDK has accumulated so far into chatCache FIRST, so the
+        // persisted order is [assistant_partial, user_steering] rather than
+        // racing the SDK's eventual message_end against this user push.
+        // No-op when nothing is in flight.
+        if (isSteering) {
+          host.flushPartialTurn();
+        }
+
+        // Capture user message in agent's chat cache. The push fires
+        // chat_message_added to every subscribed client (including this one),
+        // so the originating tab's optimistic insert dedups against the same id.
+        // Validate the client-provided id: a too-long or off-charset id would
+        // persist as-is and rebroadcast to every other tab. Fall back to a
+        // server-generated UUID on anything invalid.
+        const id = isValidClientMessageId(message.id) ? message.id : `msg-${randomUUID()}`;
+        host.chatCache.push({
+          id,
+          role: 'user',
           content: message.content,
           timestamp: Date.now(),
-        };
-        host.chatCache.push(userMsg);
-
-        // Broadcast to other tabs
-        this.broadcast({
-          type: 'user_message_broadcast',
-          id: userMsg.id,
-          content: userMsg.content,
-          timestamp: userMsg.timestamp,
-          agentId: targetId,
         });
 
         // Record for summarization (non-Guide agents only)
@@ -137,7 +176,6 @@ export class WebSocketHandler {
         }
 
         // Send to agent
-        const isSteering = message.type === 'steering_message';
         host
           .prompt(message.content, isSteering ? { isSteering: true } : undefined)
           .catch((error) => {
@@ -199,12 +237,14 @@ export class WebSocketHandler {
     // Handle synthetic events (not part of AgentSessionEvent type)
     const eventType = event.type as string;
     if (eventType === 'status') {
-      const statusEvent = event as unknown as { provider?: string; reason?: string };
+      const statusEvent = event as unknown as { provider?: string };
       if (statusEvent.provider) {
+        // The chat row describing the switch is delivered separately via the
+        // chat_message_added stream (pushed by reinitializeWithProvider). This
+        // event exists solely to refresh the UI's provider indicator.
         this.send({
           type: 'provider_change',
           provider: statusEvent.provider,
-          reason: statusEvent.reason,
           agentId,
         });
       }
@@ -241,13 +281,10 @@ export class WebSocketHandler {
           this.send({ type: 'thinking_end', agentId });
           this.thinkingAgents.delete(agentId);
         }
-        // Forward error info so the UI can render it in the chat timeline
-        const messageData = (
-          event as unknown as { message?: { stopReason?: string; errorMessage?: string } }
-        ).message;
-        const errorMessage =
-          messageData?.stopReason === 'error' ? messageData.errorMessage : undefined;
-        this.send({ type: 'assistant_end', agentId, errorMessage });
+        // Stream-over signal for the UI's draft state. LLM error rows are
+        // pushed into chatCache by history-capture and arrive via
+        // chat_message_added — they don't ride along on assistant_end.
+        this.send({ type: 'assistant_end', agentId });
         break;
       }
 
@@ -364,16 +401,6 @@ export class WebSocketHandler {
   private send(message: ServerMessage): void {
     if (this.ws.readyState === this.ws.OPEN) {
       this.ws.send(JSON.stringify(message));
-    }
-  }
-
-  /** Send a message to all other connected clients (excluding this one). */
-  private broadcast(message: ServerMessage): void {
-    const data = JSON.stringify(message);
-    for (const client of this.wss.clients) {
-      if (client !== this.ws && client.readyState === this.ws.OPEN) {
-        client.send(data);
-      }
     }
   }
 

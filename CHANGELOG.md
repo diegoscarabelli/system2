@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.14] - 2026-05-19
+## [0.4.0] - 2026-05-20
+
+### Fixed
+
+- The "Run `system2 config` to refresh `<provider>` authentication and restart the server" hint now actually appears in the live chat after an Anthropic OAuth 401, without waiting for a page reload. The root cause was structural: the chat view was built by two parallel systems that drifted. The server-side `MessageHistory` (`chatCache`) is authoritative and complete — failover system rows pushed by `AgentHost.reinitializeWithProvider` include the hint inside their `detail` body. But the live wire path was `provider_change.reason → addSystemMessage(reason)`, which dropped the `detail` field entirely; the UI saw only "401 auth error, switched to google" and never received the body with the hint. Only a reload (which calls `chat_history` and rehydrates from `chatCache`) made the hint visible. Fixes [#197](https://github.com/diegoscarabelli/system2/issues/197).
+
+### Changed
+
+- `MessageHistory` is now observable: every `push()` notifies subscribers, and `WebSocketHandler` forwards each push as a new `chat_message_added` event carrying the full `ChatMessage`. The UI's committed-message list mirrors `chatCache` exactly via that single event — user messages, finalized assistant turns, failover system rows, LLM-error system rows, and compaction notices all flow through it. The parallel UI-side synthesis paths (`provider_change.reason → addSystemMessage`, `assistant_end.errorMessage → addSystemMessage`, `compaction_start/end → addSystemMessage`, `user_message_broadcast → addUserMessage`) are gone. Streaming events (`assistant_chunk`, `thinking_chunk`, `tool_call_*`) still drive a transient draft above the committed list; when the turn ends, the canonical assistant row arrives via `chat_message_added` and the draft is cleared atomically with the append. The new invariant: **anything visible as a row in the chat lives in `MessageHistory`**.
+- Steering ordering is now chronologically correct in `chatCache`. Pre-refactor the UI-side `addUserMessage` action committed any in-flight assistant content as a "partial" message ABOVE the user's steering text, so the active tab saw `[assistant_partial, user_steering]` — but `chatCache` itself had `[user_steering, assistant_partial]` because the server pushed the user row before the SDK's `streamingBehavior: 'steer'` interrupt fired `message_end`. Other tabs and post-reload renders saw the wrong order. `createHistoryCaptureSubscriber` now returns `{ subscriber, flushPartial }`; `Server` installs `flushPartial` on `AgentHost` via a new `setHistoryFlushHook` method, and `WebSocketHandler` calls `host.flushPartialTurn()` on `steering_message` BEFORE pushing the user row. The flush commits whatever thinking / tool calls / text the history-capture accumulator currently holds and resets it, so the SDK's eventual `message_end` for the interrupted turn finds empty buffers and is a no-op for the partial-commit branch. The persisted order is now `[assistant_partial, user_steering]` for every tab and every reload.
+- The LLM-error row is now the sole carrier of the raw error text. Pre-refactor every failover system row (`reinitializeWithProvider`'s `detail`) interpolated `${errorMessage}` into its body — once visible in the UI-only synthesized "LLM error" row, once embedded in the failover row, so the error appeared twice. The "LLM error" row used to be a client-only synthesis from `assistant_end.errorMessage`; now `history-capture` pushes a `LLM error\n\n${errorMessage}` system row into `chatCache` on `stopReason='error'` (so it persists across reload), and all five failover detail strings in `host.ts` (cooldown-by-another-agent rotate/switch, post-`markKeyFailed` rotate/switch, all-providers-unavailable) drop the embedded `errorMessage`. They now carry only the routing description (`"on anthropic, switching to google"`) and the re-auth hint when applicable.
+
+### Removed
+
+- WebSocket protocol cleanup. The server and UI ship together (single npm package), so these changes are not breaking for any external consumer:
+  - **Removed** `user_message_broadcast` (folded into `chat_message_added`).
+  - **Removed** `provider_change.reason` (chat row arrives via `chat_message_added`; event is now indicator-only).
+  - **Removed** `assistant_end.errorMessage` (LLM-error row arrives via `chat_message_added` from history-capture).
+  - **Added** optional `id` on `user_message` / `steering_message` client events; server reuses it as the `ChatMessage.id`, so the originating tab's optimistic insert dedups against its own echo by id.
+
+
 
 ### Added
 
