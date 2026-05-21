@@ -7,7 +7,8 @@
 import type { ChatMessage } from './chat.js';
 
 // Client -> Server messages
-// agentId is optional on user/steering/abort: when absent, defaults to the Guide agent.
+// agentId is optional on user/steering/abort: when absent, defaults to the
+// connection's active agent (initially the Guide, updated by switch_agent).
 // id is an optional client-generated id for user/steering messages; when present the
 // server reuses it as the ChatMessage id, so the chat_message_added round-trip dedups
 // against the originating client's optimistic insert.

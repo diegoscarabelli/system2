@@ -182,19 +182,25 @@ describe('useChatStore', () => {
       expect(state?.isWaitingForResponse).toBe(true);
     });
 
-    it('skips the waiting indicator when steering mid-stream', () => {
+    it('skips the optimistic insert when steering mid-stream', () => {
+      // Server flushPartialTurn() pushes the assistant partial to chatCache
+      // BEFORE the steering user row, so the persisted order is
+      // [assistant_partial, user_steering]. If we inserted the user row
+      // locally first, chat_message_added's tail-append would put the
+      // assistant partial AFTER the user row in the UI — disagreeing with the
+      // persisted view. Skipping the optimistic insert lets both rows arrive
+      // via chat_message_added in correct order.
       useChatStore.setState({ activeAgentId: 1 });
       useChatStore.getState().loadHistory([], 1);
       useChatStore.getState().setStreaming(true, 1);
 
-      useChatStore.getState().addUserMessage('change direction', 1);
+      const id = useChatStore.getState().addUserMessage('change direction', 1);
 
       const state = useChatStore.getState().agentStates.get(1);
-      // Local commit is just the user row; the partial assistant arrives via
-      // chat_message_added → appendMessage when the server's history-capture
-      // pushes it. We don't snapshot client-side any more.
-      expect(state?.messages).toHaveLength(1);
-      expect(state?.messages[0].role).toBe('user');
+      expect(state?.messages).toHaveLength(0);
+      // The id is still returned so Chat.tsx can pass it to the server.
+      expect(typeof id).toBe('string');
+      expect(id.length).toBeGreaterThan(0);
       expect(state?.isWaitingForResponse).toBe(false);
     });
 
@@ -224,6 +230,36 @@ describe('useChatStore', () => {
       // Tag/body split (rendered by SystemMessageBlock) lives below the first
       // double-newline — the hint must be reachable that way.
       expect(state?.messages[0].content).toContain('Run `system2 config`');
+    });
+
+    it('sets isWaitingForResponse when a user row arrives from the wire and the agent is idle', () => {
+      // Covers (a) the steering case on the originating tab — local insert
+      // skipped, the user row arrives via chat_message_added — and (b) other
+      // tabs receiving a user message sent from a sibling tab.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      useChatStore
+        .getState()
+        .appendMessage({ id: 'u-1', role: 'user', content: 'hi', timestamp: 1 }, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.isWaitingForResponse).toBe(true);
+    });
+
+    it('does NOT flip isWaitingForResponse when a user row arrives while already streaming (steering case)', () => {
+      // Mid-stream the spinner is driven by isStreaming, not isWaitingForResponse.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().setStreaming(true, 1);
+
+      useChatStore
+        .getState()
+        .appendMessage({ id: 'u-1', role: 'user', content: 'steer', timestamp: 1 }, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.isWaitingForResponse).toBe(false);
     });
 
     it('dedups by id (originating-tab echo)', () => {

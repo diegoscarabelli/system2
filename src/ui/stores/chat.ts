@@ -169,21 +169,24 @@ export const useChatStore = create<ChatState>()(
         const agentState = get().agentStates.get(targetId);
         const isSteering = agentState?.isStreaming ?? false;
 
-        const message: Message = {
-          id,
-          role: 'user',
-          content,
-          timestamp: Date.now(),
-        };
-        set((state) => ({
-          agentStates: updateAgentState(state.agentStates, targetId, (s) => ({
-            messages: [...s.messages, message],
-            // Steering: leave the draft alone; the server's history-capture
-            // will push the partial assistant row via chat_message_added.
-            // Non-steering: a brand-new turn — set waiting indicator.
-            isWaitingForResponse: !isSteering,
-          })),
-        }));
+        // Steering: skip the optimistic local insert. The server runs
+        // flushPartialTurn() BEFORE pushing the user row, so the canonical
+        // chatCache order is [assistant_partial, user_steering]. If we
+        // inserted the user row locally first, chat_message_added's append
+        // (which only ever appends at the tail) would land the assistant
+        // partial AFTER the user row, contradicting the persisted view.
+        // Letting both rows arrive via chat_message_added preserves order.
+        // Cost: a single WS round-trip before the user's text appears in the
+        // chat (~tens of ms on localhost) — acceptable for the rare steer.
+        if (!isSteering) {
+          const message: Message = { id, role: 'user', content, timestamp: Date.now() };
+          set((state) => ({
+            agentStates: updateAgentState(state.agentStates, targetId, (s) => ({
+              messages: [...s.messages, message],
+              isWaitingForResponse: true,
+            })),
+          }));
+        }
         return id;
       },
 
@@ -201,6 +204,13 @@ export const useChatStore = create<ChatState>()(
             return state;
           }
           const isCanonicalAssistant = message.role === 'assistant';
+          // A user row arriving via the wire (steering on the originating tab,
+          // or any user message from another tab) means the agent is about to
+          // start a turn — flip the indicator on, unless we're already
+          // streaming (steering during an in-flight turn keeps the existing
+          // streaming spinner). Mirrors the non-steering branch of
+          // addUserMessage so behavior is identical across tabs.
+          const startsTurn = message.role === 'user' && !current.isStreaming;
           return {
             agentStates: updateAgentState(state.agentStates, targetId, () => ({
               messages: [...current.messages, message],
@@ -213,6 +223,7 @@ export const useChatStore = create<ChatState>()(
                     activeThinkingId: null,
                   }
                 : {}),
+              ...(startsTurn ? { isWaitingForResponse: true } : {}),
             })),
           };
         });
