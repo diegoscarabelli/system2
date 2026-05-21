@@ -204,6 +204,8 @@ export function createHistoryCaptureSubscriber(getChatCache: () => MessageHistor
         // execution (steering during tool use). If so, push a follow-up
         // assistant row carrying just the completed tool_call so the result
         // is preserved and chronologically lands AFTER the steering user row.
+        // Marked `isFollowUp: true` so the UI appends it WITHOUT clobbering
+        // the now-streaming next turn's draft.
         if (!matched) {
           const idx = flushedRunningTools.findIndex((t) => t.name === event.toolName);
           if (idx >= 0) {
@@ -214,6 +216,7 @@ export function createHistoryCaptureSubscriber(getChatCache: () => MessageHistor
               role: 'assistant',
               content: '',
               timestamp: Date.now(),
+              isFollowUp: true,
               turnEvents: [
                 {
                   type: 'tool_call',

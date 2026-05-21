@@ -341,6 +341,20 @@ describe('createHistoryCaptureSubscriber', () => {
       expect(cache.push).not.toHaveBeenCalled();
     });
 
+    it('marks the tool follow-up row with isFollowUp=true so UI does not clobber a streaming new turn', () => {
+      const cache = mockCache();
+      const { subscriber: sub, flushPartial } = createHistoryCaptureSubscriber(
+        () => cache as unknown as MessageHistory
+      );
+
+      sub(toolStart('bash', 'ls'));
+      flushPartial();
+      sub(toolEnd('bash', 'a.txt'));
+
+      const followup = cache.messages[1] as { isFollowUp?: boolean };
+      expect(followup.isFollowUp).toBe(true);
+    });
+
     it('records tool_execution_end as a follow-up row when the tool was flushed mid-run', () => {
       // Steering during tool use: flushPartial pushes the assistant message
       // with the tool_call still in 'running' state. When tool_execution_end

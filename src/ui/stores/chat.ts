@@ -210,7 +210,13 @@ export const useChatStore = create<ChatState>()(
             ? current.messages.map((m, i) => (i === existingIdx ? message : m))
             : [...current.messages, message];
 
-          const isCanonicalAssistant = message.role === 'assistant';
+          // Clear the streaming draft only on assistant rows that finalize an
+          // in-flight turn. The follow-up rows pushed by history-capture for
+          // post-flush tool completions are marked isFollowUp because by the
+          // time they arrive, the user has steered and the next turn may
+          // already be streaming — clearing the draft would drop chunks /
+          // turnEvents that belong to that new turn.
+          const isCanonicalAssistant = message.role === 'assistant' && !message.isFollowUp;
           // A user row arriving via the wire (steering on the originating tab,
           // or any user message from another tab) means the agent is about to
           // start a turn — flip the indicator on, unless we're already

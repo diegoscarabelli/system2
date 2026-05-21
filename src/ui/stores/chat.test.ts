@@ -322,6 +322,47 @@ describe('useChatStore', () => {
       expect(state?.isWaitingForResponse).toBe(false);
     });
 
+    it('does NOT clear the streaming draft when a follow-up assistant row arrives', () => {
+      // Steering during tool use: turn 1 was flushed with a running tool;
+      // turn 2 is now streaming. When the flushed tool finishes,
+      // history-capture pushes a follow-up assistant row. Clearing the draft
+      // here would drop turn 2's in-flight chunks/turnEvents.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().startAssistantMessage(1);
+      useChatStore.getState().appendAssistantChunk('turn 2 streaming...', 1);
+
+      useChatStore.getState().appendMessage(
+        {
+          id: 'follow-up-1',
+          role: 'assistant',
+          content: '',
+          timestamp: 1,
+          isFollowUp: true,
+          turnEvents: [
+            {
+              type: 'tool_call',
+              data: {
+                id: 't',
+                name: 'bash',
+                status: 'completed' as const,
+                input: 'ls',
+                result: 'a.txt',
+                timestamp: 1,
+              },
+            },
+          ],
+        },
+        1
+      );
+
+      const state = useChatStore.getState().agentStates.get(1);
+      // Row appended, but the turn 2 draft is intact.
+      expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].id).toBe('follow-up-1');
+      expect(state?.currentAssistantMessage).toBe('turn 2 streaming...');
+    });
+
     it('clears the streaming draft when a canonical assistant row arrives', () => {
       useChatStore.setState({ activeAgentId: 1 });
       useChatStore.getState().loadHistory([], 1);
