@@ -165,7 +165,7 @@ User clicks agent in AgentPane
 
 ### Steering
 
-Messages sent while an agent is streaming are delivered immediately as `steering_message`, which uses `streamingBehavior: 'steer'` to interrupt the current turn. The interrupt causes the Pi SDK to fire `message_end` for the in-flight turn; `history-capture` finalizes that turn into a persisted assistant message (and, on error, an LLM-error system row), which the UI receives via `chat_message_added`. The new steered turn then begins.
+Messages sent while an agent is streaming are delivered as `steering_message`, which uses `streamingBehavior: 'steer'` to interrupt the current turn. Persistence order is driven server-side: `WebSocketHandler` first calls `host.flushPartialTurn()` (which commits whatever thinking / tool calls / text the in-flight turn has accumulated into chatCache via `history-capture`), then pushes the steering user row, then calls `agentHost.prompt(content, { isSteering: true })`. The SDK's eventual `message_end` for the interrupted turn finds the history-capture accumulator empty (already flushed) and is a no-op for the partial-commit branch. If any tool was still running at flush time, its later `tool_execution_end` produces a follow-up assistant row carrying the completed tool_call so the result isn't lost; the new steered turn proceeds after that.
 
 ## Artifact postMessage Bridge
 

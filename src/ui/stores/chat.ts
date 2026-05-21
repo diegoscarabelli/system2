@@ -196,24 +196,30 @@ export const useChatStore = create<ChatState>()(
 
         set((state) => {
           const current = state.agentStates.get(targetId) ?? createDefaultAgentState();
-          // Dedup-by-id: covers (a) the originating tab's optimistic insert
+          // Match-by-id covers (a) the originating tab's optimistic insert
           // echoed back by chat_message_added, and (b) any race between the
-          // initial chat_history snapshot and live pushes that arrived during
-          // the subscribe-then-snapshot window.
-          if (current.messages.some((m) => m.id === message.id)) {
-            return state;
-          }
+          // initial chat_history snapshot and live pushes during the
+          // subscribe-then-snapshot window. On match we REPLACE in place
+          // rather than ignore: the server is the source of truth for
+          // canonical fields (notably `timestamp`, which the local optimistic
+          // insert stamped with the browser clock), so all tabs end up
+          // rendering the same row. Order is preserved by index-based replace.
+          const existingIdx = current.messages.findIndex((m) => m.id === message.id);
+          const isUpdate = existingIdx >= 0;
+          const newMessages = isUpdate
+            ? current.messages.map((m, i) => (i === existingIdx ? message : m))
+            : [...current.messages, message];
+
           const isCanonicalAssistant = message.role === 'assistant';
           // A user row arriving via the wire (steering on the originating tab,
           // or any user message from another tab) means the agent is about to
           // start a turn — flip the indicator on, unless we're already
-          // streaming (steering during an in-flight turn keeps the existing
-          // streaming spinner). Mirrors the non-steering branch of
-          // addUserMessage so behavior is identical across tabs.
-          const startsTurn = message.role === 'user' && !current.isStreaming;
+          // streaming or this is the echo of a row the originating tab already
+          // inserted (its addUserMessage call already set the indicator).
+          const startsTurn = !isUpdate && message.role === 'user' && !current.isStreaming;
           return {
             agentStates: updateAgentState(state.agentStates, targetId, () => ({
-              messages: [...current.messages, message],
+              messages: newMessages,
               // The canonical assistant row arrives with text + turnEvents
               // baked in; the streaming draft becomes redundant.
               ...(isCanonicalAssistant

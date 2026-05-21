@@ -281,18 +281,45 @@ describe('useChatStore', () => {
       expect(state?.isWaitingForResponse).toBe(false);
     });
 
-    it('dedups by id (originating-tab echo)', () => {
+    it('replaces in place on id match (originating-tab echo adopts server canonical fields)', () => {
+      // Local optimistic insert stamps timestamp with the browser clock; the
+      // server's chat_message_added carries the server clock. Other tabs see
+      // the server version. To keep all tabs identical, the originating tab
+      // must overwrite its local row with the server's canonical version on
+      // id match — not just dedup and keep the local copy.
       useChatStore.setState({ activeAgentId: 1 });
       useChatStore.getState().loadHistory([], 1);
 
       const id = useChatStore.getState().addUserMessage('hello', 1);
-      // Server echoes the user message back with the same id.
+      const before = useChatStore.getState().agentStates.get(1);
+      const localTimestamp = before?.messages[0].timestamp;
+      // Force a different server timestamp by passing an explicit one.
+      const serverTimestamp = (localTimestamp ?? 0) + 50;
       useChatStore
         .getState()
-        .appendMessage({ id, role: 'user', content: 'hello', timestamp: 1 }, 1);
+        .appendMessage({ id, role: 'user', content: 'hello', timestamp: serverTimestamp }, 1);
 
       const state = useChatStore.getState().agentStates.get(1);
       expect(state?.messages).toHaveLength(1);
+      expect(state?.messages[0].timestamp).toBe(serverTimestamp);
+    });
+
+    it('does not flip isWaitingForResponse when the same id is echoed back', () => {
+      // The originating tab's addUserMessage already set the indicator;
+      // appendMessage replacing the row should not re-touch it. Otherwise a
+      // ready_for_input arriving in the (very small) window between the
+      // local insert and the server echo would be re-clobbered.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+
+      const id = useChatStore.getState().addUserMessage('hi', 1);
+      // Pretend the turn already ended (ready_for_input cleared the flag).
+      useChatStore.getState().setWaitingForResponse(false, 1);
+
+      useChatStore.getState().appendMessage({ id, role: 'user', content: 'hi', timestamp: 1 }, 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.isWaitingForResponse).toBe(false);
     });
 
     it('clears the streaming draft when a canonical assistant row arrives', () => {
