@@ -128,6 +128,25 @@ describe('useChatStore', () => {
       expect(state?.messages[1].id).toBe('live-1');
     });
 
+    it('preserves isWaitingForResponse on snapshot reload (pre-stream waiting state)', () => {
+      // Scenario: user just sent a message (isWaitingForResponse=true), but
+      // the agent hasn't started streaming yet. A new chat_history snapshot
+      // arrives (e.g. tab switches agents and back). If we cleared the flag
+      // here, the next submit would be classified as a fresh user_message
+      // instead of a steering_message, and the spinner would disappear.
+      useChatStore.setState({ activeAgentId: 1 });
+      useChatStore.getState().loadHistory([], 1);
+      useChatStore.getState().setWaitingForResponse(true, 1);
+
+      useChatStore
+        .getState()
+        .loadHistory([{ id: 'snap-1', role: 'user', content: 'hi', timestamp: 1 }], 1);
+
+      const state = useChatStore.getState().agentStates.get(1);
+      expect(state?.isWaitingForResponse).toBe(true);
+      expect(state?.messages).toHaveLength(1);
+    });
+
     it('snapshot dedups against existing rows that ARE present in it', () => {
       // The same push can land in BOTH the live event and the subsequent
       // snapshot (id is the same). loadHistory must not duplicate.

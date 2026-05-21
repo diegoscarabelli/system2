@@ -232,9 +232,15 @@ export const useChatStore = create<ChatState>()(
       loadHistory: (messages: Message[], agentId: number) => {
         set((state) => {
           const existing = state.agentStates.get(agentId);
+          // isWaitingForResponse is set when a user row arrives without an
+          // assistant turn yet having started; if we cleared it here a
+          // snapshot landing mid-wait would make the UI look idle and a
+          // subsequent submit would be classified as a fresh user_message
+          // instead of a steering_message.
           const hasInProgress =
             existing &&
             (existing.isStreaming ||
+              existing.isWaitingForResponse ||
               existing.currentTurnEvents.length > 0 ||
               existing.currentAssistantMessage);
 

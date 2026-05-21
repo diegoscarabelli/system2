@@ -94,6 +94,8 @@ All database writes by agents go through `write_system2_db`, which fires an `onW
 ```text
 User types message
   -> UI optimistically adds the user row locally (with a client-generated id)
+     when the agent is idle. For steering (mid-stream) the optimistic insert
+     is skipped — see "Steering Message" below.
   -> UI sends { type: 'user_message', content, agentId, id }
     -> WebSocketHandler resolves target agent via agentId (default: active)
       -> Pushes user message into agent's chatCache (using the client's id)
@@ -120,17 +122,23 @@ User types message
 
 ```text
 User sends steering while agent is working
-  -> UI optimistically adds the user row locally
+  -> UI does NOT optimistically insert the user row (skipped when streaming):
+     server flushes the in-flight assistant partial BEFORE pushing the user
+     row, so a local insert would land the user row before the partial in
+     the UI — contradicting the persisted order. Both rows arrive via
+     chat_message_added in correct order.
   -> UI sends { type: 'steering_message', content, agentId, id }
     -> WebSocketHandler:
        1. host.flushPartialTurn() — commits whatever the in-flight assistant
           turn has accumulated (thinking + tool calls + text) into chatCache
           first, so the persisted order is [assistant_partial, user_steering]
           rather than racing the SDK's eventual message_end against the
-          user-row push. No-op when nothing is in flight.
+          user-row push. No-op when nothing is in flight. If any tool_calls
+          were still running at flush time, their toolName+input is queued
+          in history-capture so the later tool_execution_end can be matched
+          and recorded as a follow-up assistant row (no data lost).
        2. host.chatCache.push(user message) — echoes back via
-          chat_message_added; the optimistic row in the originating tab
-          dedups by id; other tabs see the row for the first time.
+          chat_message_added; other tabs see the row for the first time.
        3. agentHost.prompt(content, { isSteering: true })
           -> Pi SDK inserts message ASAP into agent loop, interrupting the
              current turn. The SDK's eventual message_end finds the

@@ -340,5 +340,94 @@ describe('createHistoryCaptureSubscriber', () => {
       flushPartial();
       expect(cache.push).not.toHaveBeenCalled();
     });
+
+    it('records tool_execution_end as a follow-up row when the tool was flushed mid-run', () => {
+      // Steering during tool use: flushPartial pushes the assistant message
+      // with the tool_call still in 'running' state. When tool_execution_end
+      // fires later, history-capture must push a follow-up assistant row so
+      // the result isn't dropped.
+      const cache = mockCache();
+      const { subscriber: sub, flushPartial } = createHistoryCaptureSubscriber(
+        () => cache as unknown as MessageHistory
+      );
+
+      sub(toolStart('bash', 'ls'));
+      flushPartial();
+      // First push: assistant row with tool_call still 'running'.
+      expect(cache.push).toHaveBeenCalledOnce();
+      const flushedMsg = cache.messages[0] as {
+        role: string;
+        turnEvents: Array<{ data: { status: string } }>;
+      };
+      expect(flushedMsg.role).toBe('assistant');
+      expect(flushedMsg.turnEvents[0].data.status).toBe('running');
+
+      // Tool completes after the flush — follow-up row carries the result.
+      sub(toolEnd('bash', 'a.txt b.txt'));
+      expect(cache.push).toHaveBeenCalledTimes(2);
+      const followup = cache.messages[1] as {
+        role: string;
+        content: string;
+        turnEvents: Array<{
+          type: string;
+          data: { status: string; result: string; input: string };
+        }>;
+      };
+      expect(followup.role).toBe('assistant');
+      expect(followup.content).toBe('');
+      expect(followup.turnEvents).toHaveLength(1);
+      expect(followup.turnEvents[0].type).toBe('tool_call');
+      expect(followup.turnEvents[0].data.status).toBe('completed');
+      expect(followup.turnEvents[0].data.result).toBe('a.txt b.txt');
+      expect(followup.turnEvents[0].data.input).toBe('ls');
+    });
+
+    it('matches multiple concurrent flushed tools in FIFO order by name', () => {
+      const cache = mockCache();
+      const { subscriber: sub, flushPartial } = createHistoryCaptureSubscriber(
+        () => cache as unknown as MessageHistory
+      );
+
+      sub(toolStart('bash', 'ls'));
+      sub(toolStart('bash', 'pwd'));
+      flushPartial();
+      expect(cache.push).toHaveBeenCalledOnce();
+
+      sub(toolEnd('bash', 'a.txt'));
+      sub(toolEnd('bash', '/home'));
+
+      expect(cache.push).toHaveBeenCalledTimes(3);
+      const first = cache.messages[1] as {
+        turnEvents: Array<{ data: { input: string; result: string } }>;
+      };
+      const second = cache.messages[2] as {
+        turnEvents: Array<{ data: { input: string; result: string } }>;
+      };
+      // FIFO: first ls→a.txt, then pwd→/home.
+      expect(first.turnEvents[0].data.input).toBe('ls');
+      expect(first.turnEvents[0].data.result).toBe('a.txt');
+      expect(second.turnEvents[0].data.input).toBe('pwd');
+      expect(second.turnEvents[0].data.result).toBe('/home');
+    });
+
+    it('does NOT push a follow-up row when the tool completion matches the current in-flight turn', () => {
+      // Normal flow (no flush): tool_execution_end updates currentTurnEvents
+      // in place, message_end commits the whole turn. No follow-up.
+      const cache = mockCache();
+      const { subscriber: sub } = createHistoryCaptureSubscriber(
+        () => cache as unknown as MessageHistory
+      );
+
+      sub(toolStart('bash', 'ls'));
+      sub(toolEnd('bash', 'a.txt'));
+      sub(messageEnd());
+
+      expect(cache.push).toHaveBeenCalledOnce();
+      const msg = cache.messages[0] as {
+        turnEvents: Array<{ data: { status: string; result: string } }>;
+      };
+      expect(msg.turnEvents[0].data.status).toBe('completed');
+      expect(msg.turnEvents[0].data.result).toBe('a.txt');
+    });
   });
 });

@@ -49,6 +49,14 @@ export function createHistoryCaptureSubscriber(getChatCache: () => MessageHistor
   let currentAssistantText = '';
   let activeThinkingContent = '';
   let currentTurnEvents: ChatTurnEvent[] = [];
+  // FIFO queue of tools that were still running when commitAccumulatedTurn
+  // pushed them into chatCache. A later tool_execution_end whose toolName
+  // matches the head of this queue belongs to a flushed message — we push a
+  // follow-up assistant row carrying just the completed tool_call so the
+  // result isn't dropped. Tracks {name, input} so the follow-up row preserves
+  // the original invocation. FIFO match by name handles concurrent same-name
+  // tools (e.g. two bash calls in flight at flush time).
+  const flushedRunningTools: Array<{ name: string; input: string | undefined }> = [];
 
   // Shared helper: finalize active thinking into currentTurnEvents, then
   // push the accumulated turn (if any) and reset. Used by message_end AND
@@ -67,6 +75,13 @@ export function createHistoryCaptureSubscriber(getChatCache: () => MessageHistor
       activeThinkingContent = '';
     }
     if (currentAssistantText || currentTurnEvents.length > 0) {
+      // Remember any tool calls still running at commit time so a later
+      // tool_execution_end can be matched and recorded as a follow-up row.
+      for (const ev of currentTurnEvents) {
+        if (ev.type === 'tool_call' && ev.data.status === 'running') {
+          flushedRunningTools.push({ name: ev.data.name, input: ev.data.input });
+        }
+      }
       const assistantMsg: ChatMessage = {
         // randomUUID rather than msg-${Date.now()}: dedup-by-id in the UI's
         // appendMessage makes id uniqueness load-bearing, and millisecond
@@ -184,6 +199,37 @@ export function createHistoryCaptureSubscriber(getChatCache: () => MessageHistor
           }
           return e;
         });
+
+        // No match in currentTurnEvents: the tool may have been flushed mid-
+        // execution (steering during tool use). If so, push a follow-up
+        // assistant row carrying just the completed tool_call so the result
+        // is preserved and chronologically lands AFTER the steering user row.
+        if (!matched) {
+          const idx = flushedRunningTools.findIndex((t) => t.name === event.toolName);
+          if (idx >= 0) {
+            const orig = flushedRunningTools[idx];
+            flushedRunningTools.splice(idx, 1);
+            getChatCache().push({
+              id: `msg-${randomUUID()}`,
+              role: 'assistant',
+              content: '',
+              timestamp: Date.now(),
+              turnEvents: [
+                {
+                  type: 'tool_call',
+                  data: {
+                    id: `tool-${randomUUID()}`,
+                    name: event.toolName,
+                    status: 'completed' as const,
+                    input: orig.input,
+                    result: finalResult,
+                    timestamp: Date.now(),
+                  },
+                },
+              ],
+            });
+          }
+        }
         break;
       }
 
