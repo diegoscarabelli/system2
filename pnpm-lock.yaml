@@ -65,8 +65,8 @@ dependencies:
     specifier: ^4.0.3
     version: 4.0.3
   katex:
-    specifier: ^0.17.0
-    version: 0.17.0
+    specifier: ^0.16.0
+    version: 0.16.47
   linkedom:
     specifier: ^0.18.12
     version: 0.18.12
@@ -5151,13 +5151,6 @@ packages:
 
   /katex@0.16.47:
     resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
-    hasBin: true
-    dependencies:
-      commander: 8.3.0
-    dev: false
-
-  /katex@0.17.0:
-    resolution: {integrity: sha512-Vdw0ATsQ9V+LuegM/BTwQqV/6cTl5lbGcIrU+BCgLxyf6bo38ybOr372tuSIxir3CN720flu1meYR6XzNMwQnw==}
     hasBin: true
     dependencies:
       commander: 8.3.0
