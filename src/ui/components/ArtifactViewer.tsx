@@ -178,7 +178,7 @@ function MarkdownArtifact({ url }: { url: string }) {
         '& img': { maxWidth: '100%' },
       }}
     >
-      <Markdown>{content}</Markdown>
+      <Markdown enableHeadingIds>{content}</Markdown>
     </Box>
   );
 }

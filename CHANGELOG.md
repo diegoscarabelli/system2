@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- In-page anchor links in rendered Markdown now resolve in the viewer. `react-markdown` emits headings without `id` attributes, so fragment links like `[Section](#section)` had no target to scroll to and clicking them did nothing. The shared `Markdown` component now runs the `rehype-slug` plugin, which assigns GitHub-style slug `id`s to headings (matching the slugs authors already write for GitHub), so table-of-contents and section links work in the artifact viewer and everywhere else `Markdown` is used.
+- In-page anchor links in rendered Markdown now resolve in the artifact viewer. `react-markdown` emits headings without `id` attributes, so fragment links like `[Section](#section)` had no target to scroll to and clicking them did nothing. The `Markdown` component now accepts an opt-in `enableHeadingIds` prop that runs `rehype-slug` to assign GitHub-style slug `id`s to headings (matching the slugs authors already write for GitHub); the artifact viewer enables it, so table-of-contents and section links work there. It stays off for the chat message list and other multi-instance surfaces, where rendering many `Markdown` instances would otherwise produce duplicate DOM ids.
 
 ## [0.4.0] - 2026-05-20
 
