@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-06-05
+## [0.5.0] - 2026-06-05
+
+### Added
+
+- Markdown now renders LaTeX math. The shared `Markdown` component runs `remark-math` + `rehype-katex` (with KaTeX's stylesheet bundled), so inline math (`$E = mc^2$`) and block math (`$$ ... $$`) render as formatted equations in the artifact viewer, chat, and everywhere else `Markdown` is used.
 
 ### Fixed
 
@@ -335,8 +339,8 @@ First published release.
 - Unify knowledge file commits via `commitIfStateDir` ([#125](https://github.com/diegoscarabelli/system2/pull/125))
 - Fall back to Guide when persisted agent no longer exists ([#122](https://github.com/diegoscarabelli/system2/pull/122))
 
-[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.4.1...HEAD
-[0.4.1]: https://github.com/diegoscarabelli/system2/compare/v0.4.0...v0.4.1
+[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/diegoscarabelli/system2/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/diegoscarabelli/system2/compare/v0.3.14...v0.4.0
 [0.3.14]: https://github.com/diegoscarabelli/system2/compare/v0.3.13...v0.3.14
 [0.3.13]: https://github.com/diegoscarabelli/system2/compare/v0.3.12...v0.3.13
