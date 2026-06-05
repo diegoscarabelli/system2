@@ -25,4 +25,20 @@ describe('Markdown', () => {
     expect(link?.getAttribute('href')).toBe('#section');
     expect(heading?.id).toBe('section');
   });
+
+  it('disambiguates repeated headings within a document', () => {
+    const { container } = render(<Markdown>{'## Repeat\n\n## Repeat'}</Markdown>);
+    const ids = [...container.querySelectorAll('h2')].map((h) => h.id);
+    expect(ids).toEqual(['repeat', 'repeat-1']);
+  });
+
+  it('renders inline LaTeX math via KaTeX', () => {
+    const { container } = render(<Markdown>{'Mass-energy: $E = mc^2$.'}</Markdown>);
+    expect(container.querySelector('.katex')).not.toBeNull();
+  });
+
+  it('renders block LaTeX math via KaTeX', () => {
+    const { container } = render(<Markdown>{'$$\n\\int_0^1 x^2 \\, dx\n$$'}</Markdown>);
+    expect(container.querySelector('.katex-display')).not.toBeNull();
+  });
 });
