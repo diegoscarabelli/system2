@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-05
+
+### Added
+
+- Markdown now renders LaTeX math. The shared `Markdown` component runs `remark-math` + `rehype-katex` (with KaTeX's stylesheet bundled), so inline math (`$E = mc^2$`) and block math (`$$ ... $$`) render as formatted equations in the artifact viewer, chat, and everywhere else `Markdown` is used.
+
+### Fixed
+
+- In-page anchor links in rendered Markdown now resolve in the artifact viewer. `react-markdown` emits headings without `id` attributes, so fragment links like `[Section](#section)` had no target to scroll to and clicking them did nothing. The `Markdown` component now accepts an opt-in `enableHeadingIds` prop that runs `rehype-slug` to assign GitHub-style slug `id`s to headings (matching the slugs authors already write for GitHub); the artifact viewer enables it, so table-of-contents and section links work there. It stays off for the chat message list and other multi-instance surfaces, where rendering many `Markdown` instances would otherwise produce duplicate DOM ids.
+
 ## [0.4.0] - 2026-05-20
 
 ### Fixed
@@ -329,7 +339,21 @@ First published release.
 - Unify knowledge file commits via `commitIfStateDir` ([#125](https://github.com/diegoscarabelli/system2/pull/125))
 - Fall back to Guide when persisted agent no longer exists ([#122](https://github.com/diegoscarabelli/system2/pull/122))
 
-[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/diegoscarabelli/system2/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/diegoscarabelli/system2/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/diegoscarabelli/system2/compare/v0.3.14...v0.4.0
+[0.3.14]: https://github.com/diegoscarabelli/system2/compare/v0.3.13...v0.3.14
+[0.3.13]: https://github.com/diegoscarabelli/system2/compare/v0.3.12...v0.3.13
+[0.3.12]: https://github.com/diegoscarabelli/system2/compare/v0.3.11...v0.3.12
+[0.3.11]: https://github.com/diegoscarabelli/system2/compare/v0.3.10...v0.3.11
+[0.3.10]: https://github.com/diegoscarabelli/system2/compare/v0.3.9...v0.3.10
+[0.3.9]: https://github.com/diegoscarabelli/system2/compare/v0.3.8...v0.3.9
+[0.3.8]: https://github.com/diegoscarabelli/system2/compare/v0.3.7...v0.3.8
+[0.3.7]: https://github.com/diegoscarabelli/system2/compare/v0.3.6...v0.3.7
+[0.3.6]: https://github.com/diegoscarabelli/system2/compare/v0.3.5...v0.3.6
+[0.3.5]: https://github.com/diegoscarabelli/system2/compare/v0.3.4...v0.3.5
+[0.3.4]: https://github.com/diegoscarabelli/system2/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/diegoscarabelli/system2/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/diegoscarabelli/system2/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/diegoscarabelli/system2/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/diegoscarabelli/system2/compare/v0.2.2...v0.3.0
