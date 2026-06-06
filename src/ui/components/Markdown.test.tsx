@@ -40,13 +40,22 @@ describe('Markdown', () => {
     expect(ids).toEqual(['repeat', 'repeat-1']);
   });
 
-  it('renders inline LaTeX math via KaTeX', () => {
-    const { container } = render(<Markdown>{'Mass-energy: $E = mc^2$.'}</Markdown>);
+  it('renders inline LaTeX math delimited by double dollars', () => {
+    const { container } = render(<Markdown>{'Mass-energy: $$E = mc^2$$.'}</Markdown>);
     expect(container.querySelector('.katex')).not.toBeNull();
+    // Inline within text, not a centered display block.
+    expect(container.querySelector('.katex-display')).toBeNull();
   });
 
-  it('renders block LaTeX math via KaTeX', () => {
+  it('renders display LaTeX math fenced on its own lines', () => {
     const { container } = render(<Markdown>{'$$\n\\int_0^1 x^2 \\, dx\n$$'}</Markdown>);
     expect(container.querySelector('.katex-display')).not.toBeNull();
+  });
+
+  it('treats single dollars as literal text so currency does not render as math', () => {
+    const { container } = render(<Markdown>{'I paid $5 for lunch and $10 for dinner.'}</Markdown>);
+    expect(container.querySelector('.katex')).toBeNull();
+    expect(container.textContent).toContain('$5');
+    expect(container.textContent).toContain('$10');
   });
 });

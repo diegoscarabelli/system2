@@ -5,7 +5,12 @@ import rehypeSlug from 'rehype-slug';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 
-const REMARK_PLUGINS = [remarkGfm, remarkMath];
+// Disable single-`$` inline math: `$5 and $10` is currency, not an equation.
+// Math uses `$$…$$` (inline within text, or on its own lines for a display block).
+const REMARK_PLUGINS: Options['remarkPlugins'] = [
+  remarkGfm,
+  [remarkMath, { singleDollarTextMath: false }],
+];
 const REHYPE_PLUGINS = [rehypeKatex];
 const REHYPE_PLUGINS_WITH_HEADING_IDS = [rehypeSlug, rehypeKatex];
 
