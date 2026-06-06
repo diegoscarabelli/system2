@@ -2323,8 +2323,9 @@ export class AgentHost {
    */
   async reclaimBloatedSession(): Promise<boolean> {
     if (!this.resetSessionAfterScheduledTask) return false;
-    // Only reclaim between turns (skip during reinit or an in-flight delivery/prompt). Not `busy`:
-    // wedge timeouts clear deliverySendCount but not busy, so a stuck session stays reclaimable.
+    // Reclaim only between turns: skip while a delivery (deliverySendCount) or user prompt
+    // (pendingPrompt) is in flight, or during reinit. A wedged delivery's dispatch timeout clears
+    // deliverySendCount, so a stuck session becomes reclaimable on a later cycle.
     if (this.isReinitializing || this.deliverySendCount > 0 || this.pendingPrompt) return false;
     const sessionDir = this._sessionDir;
     if (!sessionDir) return false;
@@ -2344,27 +2345,29 @@ export class AgentHost {
         `Reclaiming to a fresh header.`
     );
 
-    // Settle deliveries stranded by the prior failed cycle so awaiting callers don't hang, then
-    // dispose + truncate to a header (resetSessionToHeader) and rebuild a live session (initialize).
-    const reclaimError = new Error(
-      `Delivery superseded: oversized ${this.agentRole ?? 'agent'} session reclaimed before next scheduled-task cycle.`
-    );
-    for (const delivery of this.pendingDeliveries) {
-      delivery.reject(reclaimError);
-    }
-    this.pendingDeliveries = [];
-    this.deliverySendCount = 0;
     if (this.busy) {
       this.busy = false;
       this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
     }
 
-    // Set isReinitializing before tearing the session down so a concurrent deliverMessage() queues
-    // (it checks isReinitializing) rather than hard-rejecting on the transient session=null.
+    // Mirror the agent_end reset path. Set isReinitializing before tearing the session down so a
+    // concurrent deliverMessage() queues (it checks isReinitializing) instead of dispatching against
+    // the disposed session or hard-rejecting on session=null. After initialize() resolves, replay any
+    // queued deliveries against the fresh session so none are stranded; on init failure, reject them
+    // so awaiting callers (e.g. trackJobExecution) don't hang.
     this.isReinitializing = true;
     this.resetSessionToHeader();
     try {
       await this.initialize();
+      this.replayPendingDeliveries('after oversized-session reclaim');
+    } catch (err) {
+      const rejectError = err instanceof Error ? err : new Error(String(err));
+      for (const delivery of this.pendingDeliveries) {
+        delivery.reject(rejectError);
+      }
+      this.pendingDeliveries = [];
+      this.deliverySendCount = 0;
+      throw rejectError;
     } finally {
       this.isReinitializing = false;
     }

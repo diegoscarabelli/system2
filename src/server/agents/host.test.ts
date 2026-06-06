@@ -5400,6 +5400,7 @@ describe('AgentHost', () => {
       handlePotentialError: ReturnType<typeof vi.fn>;
       handleCompactionTracking: ReturnType<typeof vi.fn>;
       initialize: ReturnType<typeof vi.fn>;
+      replayPendingDeliveries: ReturnType<typeof vi.fn>;
     };
 
     /** Build a host with stubbed lifecycle methods, ready for handleSessionEvent('agent_end'). */
@@ -5440,26 +5441,15 @@ describe('AgentHost', () => {
     }
 
     describe('reclaimBloatedSession', () => {
-      it('reclaims an oversized session to a fresh header and rejects stranded deliveries', async () => {
+      it('reclaims an oversized session to a fresh header and replays pending deliveries', async () => {
         const { host, internal } = makeHostWithSessionDir({ reset: true });
         // Lower the threshold below the ~200-byte seed so the guard treats it as oversized.
         internal.scheduledTaskSessionReclaimBytes = 50;
-        const reject = vi.fn();
-        internal.pendingDeliveries = [
-          {
-            content: '[Scheduled task: daily-summary]\n\nfile: /x',
-            details: { sender: 1, receiver: 2, timestamp: Date.now() },
-            scheduledTask: true,
-            resolve: vi.fn(),
-            reject,
-          },
-        ];
+        internal.replayPendingDeliveries = vi.fn();
 
         const reclaimed = await host.reclaimBloatedSession();
 
         expect(reclaimed).toBe(true);
-        expect(reject).toHaveBeenCalledOnce();
-        expect(internal.pendingDeliveries).toHaveLength(0);
         // Old file archived; a single fresh header-only JSONL remains.
         const files = readdirSync(testDir);
         expect(files.filter((f) => f.endsWith('.jsonl.archived'))).toHaveLength(1);
@@ -5471,6 +5461,29 @@ describe('AgentHost', () => {
         expect(lines).toHaveLength(1);
         expect(JSON.parse(lines[0]).type).toBe('session');
         expect(internal.initialize).toHaveBeenCalledOnce();
+        // Deliveries queued during reinit are replayed against the fresh session, not stranded.
+        expect(internal.replayPendingDeliveries).toHaveBeenCalledOnce();
+      });
+
+      it('rejects pending deliveries when reinit fails during reclaim', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: true });
+        internal.scheduledTaskSessionReclaimBytes = 50;
+        internal.initialize = vi.fn().mockRejectedValue(new Error('init boom'));
+        const reject = vi.fn();
+        internal.pendingDeliveries = [
+          {
+            content: '[Scheduled task: daily-summary]\n\nfile: /x',
+            details: { sender: 1, receiver: 2, timestamp: Date.now() },
+            scheduledTask: true,
+            resolve: vi.fn(),
+            reject,
+          },
+        ];
+
+        await expect(host.reclaimBloatedSession()).rejects.toThrow('init boom');
+        // A failed reinit settles queued deliveries so awaiting callers don't hang.
+        expect(reject).toHaveBeenCalledOnce();
+        expect(internal.pendingDeliveries).toHaveLength(0);
       });
 
       it('is a no-op when the session is below the reclaim threshold', async () => {
