@@ -74,7 +74,7 @@ The tool technically accepts any file path, not just registered artifacts. This 
 **Rendering by file type:**
 
 - `.html`, `.htm`: rendered in a sandboxed iframe (best experience for dashboards and interactive content)
-- `.md`, `.markdown`: rendered as styled markdown (via react-markdown)
+- `.md`, `.markdown`: rendered as styled markdown (via react-markdown). Supports GFM (tables, task lists, strikethrough), LaTeX math with `$$…$$` (inline within text, or a display block on its own lines; single `$` is literal so currency renders as-is), and in-page anchor links (`[text](#heading)`) that resolve to auto-generated heading ids in the viewer
 - `.toml`, `.yaml`, `.yml`, `.json`, `.jsonl`, `.xml`, `.csv`, `.txt`, `.log`, `.sql`, `.py`, `.sh`, `.css`, `.ts`, `.tsx`, `.js`, `.jsx`: rendered as monospaced text in a styled code block
 - `.pdf`: rendered in a native browser iframe (scrollable, no dark mode filter)
 - `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.bmp`: rendered as an inline image
