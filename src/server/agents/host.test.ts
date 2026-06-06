@@ -5341,6 +5341,19 @@ describe('AgentHost', () => {
         expect(readdirSync(testDir).filter((f) => f.endsWith('.archived'))).toHaveLength(0);
         expect(internal.initialize).not.toHaveBeenCalled();
       });
+
+      it('is a no-op while a delivery is in flight, even when oversized', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: true });
+        internal.scheduledTaskSessionReclaimBytes = 50;
+        // A dispatched-but-not-yet-completed delivery (e.g. a concurrent scheduled-task cycle).
+        internal.deliverySendCount = 1;
+
+        const reclaimed = await host.reclaimBloatedSession();
+
+        expect(reclaimed).toBe(false);
+        expect(readdirSync(testDir).filter((f) => f.endsWith('.archived'))).toHaveLength(0);
+        expect(internal.initialize).not.toHaveBeenCalled();
+      });
     });
 
     it('truncates JSONL to fresh header and clears session after scheduled-task delivery', () => {

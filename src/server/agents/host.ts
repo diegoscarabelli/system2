@@ -2317,6 +2317,9 @@ export class AgentHost {
    */
   async reclaimBloatedSession(): Promise<boolean> {
     if (!this.resetSessionAfterScheduledTask) return false;
+    // Only reclaim between turns, never mid-delivery or mid-reinit. (deliverySendCount, not busy:
+    // a wedged delivery's dispatch timeout returns it to 0, so a stuck session stays reclaimable.)
+    if (this.isReinitializing || this.deliverySendCount > 0) return false;
     const sessionDir = this._sessionDir;
     if (!sessionDir) return false;
     const activeFile = findMostRecentSession(sessionDir);
