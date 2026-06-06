@@ -32,10 +32,12 @@ export function remarkFrontmatterBlockquote() {
     const node = tree.children[0];
     if (!node || node.type !== 'yaml' || typeof node.value !== 'string') return;
 
-    // `node.value` is the frontmatter body without the `---` fences. Trim trailing
-    // whitespace so a trailing newline doesn't produce a blank final line.
-    const lines = node.value.replace(/\s+$/, '').split('\n');
-    if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) return;
+    // `node.value` is the frontmatter body without the `---` fences. Split on LF or CRLF so
+    // Windows line endings don't leave a stray `\r` on each line, then drop trailing blank
+    // lines (the block usually ends with a newline) so there's no empty final line.
+    const lines = node.value.split(/\r?\n/);
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+    if (lines.length === 0) return;
 
     // Plain text + hard breaks: render each line literally (no markdown interpretation of
     // values) on its own line, matching the single-spaced source layout.
