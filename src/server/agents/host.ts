@@ -125,6 +125,10 @@ const ORCHESTRATOR_ROLES = new Set(['guide', 'conductor']);
  *  prompt, history, and knowledge files. Configurable via [delivery] max_bytes in config.toml. */
 export const MAX_DELIVERY_BYTES = 1024 * 1024;
 
+/** Cycle-start size that triggers `AgentHost.reclaimBloatedSession`. Above a healthy session
+ *  (a header, after the per-tick reset) and below the multi-MB context-overflow point. */
+export const SCHEDULED_TASK_SESSION_RECLAIM_BYTES = 2 * 1024 * 1024;
+
 /** Backstop for an in-flight delivery whose `sendCustomMessage` was invoked but never produced
  *  `agent_end` — guards against silent SDK stream loss. See issue #194. */
 export const DELIVERY_DISPATCH_TIMEOUT_MS = 6 * 60 * 1000;
@@ -360,6 +364,8 @@ export class AgentHost {
   private onAgentTerminate?: () => void;
   private maxDeliveryBytes: number;
   private sessionRotationSizeBytes: number | undefined;
+  /** Reclaim threshold for `reclaimBloatedSession()`; instance-level so tests can lower it. */
+  private scheduledTaskSessionReclaimBytes: number = SCHEDULED_TASK_SESSION_RECLAIM_BYTES;
   private archiveKeepCount: number;
   private resetSessionAfterScheduledTask: boolean;
   /** True when the constructor caller passed `resetSessionAfterScheduledTask` explicitly (true OR
@@ -2298,6 +2304,60 @@ export class AgentHost {
     } catch (err) {
       log.error('[AgentHost] Failed to reset session JSONL after scheduled task:', err);
     }
+  }
+
+  /**
+   * Reclaim a reset-opted role's session if a prior scheduled-task cycle left it oversized, so the
+   * next cycle starts from a fresh header. The per-tick `resetSessionToHeader` is gated on a clean
+   * `agent_end`, which a wedged turn (issue #194) or a context-overflow recovery loop bypasses —
+   * letting the JSONL accumulate one payload per cron tick until it overflows the context window.
+   * Called by the scheduler before delivering. The Narrator's durable memory lives in files, so
+   * dropping session state is safe. No-op for non-opted-in roles or a still-small session. Returns
+   * true if it reclaimed.
+   */
+  async reclaimBloatedSession(): Promise<boolean> {
+    if (!this.resetSessionAfterScheduledTask) return false;
+    const sessionDir = this._sessionDir;
+    if (!sessionDir) return false;
+    const activeFile = findMostRecentSession(sessionDir);
+    if (!activeFile) return false;
+    let sizeBytes: number;
+    try {
+      sizeBytes = statSync(activeFile).size;
+    } catch {
+      return false;
+    }
+    if (sizeBytes < this.scheduledTaskSessionReclaimBytes) return false;
+
+    log.warn(
+      `[AgentHost] ${this.agentRole ?? 'agent'} session is ${(sizeBytes / 1024 / 1024).toFixed(2)} MB at ` +
+        `scheduled-task cycle start; a prior cycle left it un-reset (wedged turn or context-overflow loop). ` +
+        `Reclaiming to a fresh header.`
+    );
+
+    // Settle deliveries stranded by the prior failed cycle so awaiting callers don't hang, then
+    // dispose + truncate to a header (resetSessionToHeader) and rebuild a live session (initialize).
+    const reclaimError = new Error(
+      'Delivery superseded: oversized narrator session reclaimed before next scheduled-task cycle.'
+    );
+    for (const delivery of this.pendingDeliveries) {
+      delivery.reject(reclaimError);
+    }
+    this.pendingDeliveries = [];
+    this.deliverySendCount = 0;
+    if (this.busy) {
+      this.busy = false;
+      this.onBusyChange?.(this.agentId, false, null);
+    }
+
+    this.resetSessionToHeader();
+    this.isReinitializing = true;
+    try {
+      await this.initialize();
+    } finally {
+      this.isReinitializing = false;
+    }
+    return true;
   }
 
   /**

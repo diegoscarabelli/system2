@@ -5242,6 +5242,7 @@ describe('AgentHost', () => {
       compactionCount: number;
       lastTurnErrored: boolean;
       hadScheduledTaskDeliveryThisTurn: boolean;
+      scheduledTaskSessionReclaimBytes: number;
       handleSessionEvent: (event: Record<string, unknown>) => void;
       handlePotentialError: ReturnType<typeof vi.fn>;
       handleCompactionTracking: ReturnType<typeof vi.fn>;
@@ -5284,6 +5285,63 @@ describe('AgentHost', () => {
 
       return { host, internal };
     }
+
+    describe('reclaimBloatedSession', () => {
+      it('reclaims an oversized session to a fresh header and rejects stranded deliveries', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: true });
+        // Lower the threshold below the ~200-byte seed so the guard treats it as oversized.
+        internal.scheduledTaskSessionReclaimBytes = 50;
+        const reject = vi.fn();
+        internal.pendingDeliveries = [
+          {
+            content: '[Scheduled task: daily-summary]\n\nfile: /x',
+            details: { sender: 1, receiver: 2, timestamp: Date.now() },
+            scheduledTask: true,
+            resolve: vi.fn(),
+            reject,
+          },
+        ];
+
+        const reclaimed = await host.reclaimBloatedSession();
+
+        expect(reclaimed).toBe(true);
+        expect(reject).toHaveBeenCalledOnce();
+        expect(internal.pendingDeliveries).toHaveLength(0);
+        // Old file archived; a single fresh header-only JSONL remains.
+        const files = readdirSync(testDir);
+        expect(files.filter((f) => f.endsWith('.jsonl.archived'))).toHaveLength(1);
+        const active = files.filter((f) => f.endsWith('.jsonl'));
+        expect(active).toHaveLength(1);
+        const lines = readFileSync(join(testDir, active[0]), 'utf-8')
+          .split('\n')
+          .filter((l) => l.length > 0);
+        expect(lines).toHaveLength(1);
+        expect(JSON.parse(lines[0]).type).toBe('session');
+        expect(internal.initialize).toHaveBeenCalledOnce();
+      });
+
+      it('is a no-op when the session is below the reclaim threshold', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: true });
+        internal.scheduledTaskSessionReclaimBytes = 10 * 1024 * 1024;
+
+        const reclaimed = await host.reclaimBloatedSession();
+
+        expect(reclaimed).toBe(false);
+        expect(readdirSync(testDir).filter((f) => f.endsWith('.archived'))).toHaveLength(0);
+        expect(internal.initialize).not.toHaveBeenCalled();
+      });
+
+      it('is a no-op for roles that do not opt into reset', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: false });
+        internal.scheduledTaskSessionReclaimBytes = 50;
+
+        const reclaimed = await host.reclaimBloatedSession();
+
+        expect(reclaimed).toBe(false);
+        expect(readdirSync(testDir).filter((f) => f.endsWith('.archived'))).toHaveLength(0);
+        expect(internal.initialize).not.toHaveBeenCalled();
+      });
+    });
 
     it('truncates JSONL to fresh header and clears session after scheduled-task delivery', () => {
       const { internal } = makeHostWithSessionDir({ reset: true });
