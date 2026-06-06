@@ -4,7 +4,7 @@ React web interface providing a real-time chat experience with artifact display.
 
 **Source:** `src/ui/`
 **Build:** [Vite](https://vite.dev/) (part of `pnpm build`)
-**Dependencies:** [React 18](https://react.dev/), [Zustand](https://github.com/pmndrs/zustand), [Primer React](https://primer.style/react), [react-markdown](https://github.com/remarkjs/react-markdown). The shared `Markdown` wrapper always applies [remark-gfm](https://github.com/remarkjs/remark-gfm) (GFM tables, strikethrough, autolinks, task lists) and [remark-math](https://github.com/remarkjs/remark-math) + [rehype-katex](https://katex.org/) for LaTeX. Math uses `$$…$$` delimiters (single `$` is disabled so currency like `$5` stays literal); `$$…$$` renders inline within text, or as a display block on its own lines. Heading `id`s ([rehype-slug](https://github.com/rehypejs/rehype-slug)) are opt-in via the `enableHeadingIds` prop, enabled only in the artifact viewer so in-page `#anchor` links resolve there (off elsewhere to avoid duplicate ids across the many `Markdown` instances on a page).
+**Dependencies:** [React 18](https://react.dev/), [Zustand](https://github.com/pmndrs/zustand), [Primer React](https://primer.style/react), [react-markdown](https://github.com/remarkjs/react-markdown). The shared `Markdown` wrapper always applies [remark-gfm](https://github.com/remarkjs/remark-gfm) (GFM tables, strikethrough, autolinks, task lists), [remark-frontmatter](https://github.com/remarkjs/remark-frontmatter) plus a `remarkFrontmatterBlockquote` transform (a leading `---` block renders as a blockquote of its raw `key: value` lines rather than being mis-parsed as a giant setext heading), and [remark-math](https://github.com/remarkjs/remark-math) + [rehype-katex](https://katex.org/) for LaTeX. Math uses `$$…$$` delimiters (single `$` is disabled so currency like `$5` stays literal); `$$…$$` renders inline within text, or as a display block on its own lines. Heading `id`s ([rehype-slug](https://github.com/rehypejs/rehype-slug)) are opt-in via the `enableHeadingIds` prop, enabled only in the artifact viewer so in-page `#anchor` links resolve there (off elsewhere to avoid duplicate ids across the many `Markdown` instances on a page).
 
 ## Source Structure
 
@@ -26,7 +26,7 @@ src/
 │   ├── TaskDetailModal.tsx # Task detail overlay (comments, links, markdown)
 │   ├── ProjectDetailModal.tsx # Project detail overlay (status, labels, dates)
 │   ├── MultiSelectDropdown.tsx # Reusable multiselect dropdown with checkboxes
-│   ├── Markdown.tsx        # Shared wrapper: remark-gfm + remark-math/rehype-katex always on; rehype-slug heading ids opt-in (artifact viewer)
+│   ├── Markdown.tsx        # Shared wrapper: remark-gfm + remark-frontmatter (→ blockquote) + remark-math/rehype-katex always on; rehype-slug heading ids opt-in (artifact viewer)
 │   └── ParticlesBackground.tsx # Animated particle background (tsparticles)
 ├── hooks/
 │   ├── useWebSocket.ts    # WebSocket connection and message handling
