@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Markdown now renders LaTeX math. The shared `Markdown` component runs `remark-math` + `rehype-katex` (with KaTeX's stylesheet bundled), so inline math (`$E = mc^2$`) and block math (`$$ ... $$`) render as formatted equations in the artifact viewer, chat, and everywhere else `Markdown` is used.
+- Markdown now renders LaTeX math. The shared `Markdown` component runs `remark-math` + `rehype-katex` (with KaTeX's stylesheet bundled), so math renders as formatted equations in the artifact viewer, chat, and everywhere else `Markdown` is used. Math uses `$$…$$` delimiters: `$$…$$` within a sentence renders inline, and `$$…$$` on its own lines renders a display block. Single-dollar math (`$x$`) is intentionally disabled so currency amounts like `$5` and `$10` are not misinterpreted as equations.
 
 ### Fixed
 
