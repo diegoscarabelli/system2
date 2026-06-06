@@ -884,6 +884,9 @@ export async function buildAndDeliverDailySummary(
   catchUpBudgetBytes: number = CATCH_UP_BUDGET_BYTES,
   narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
 ): Promise<void> {
+  // Reclaim the session if a prior cycle left it oversized, before it grows past the context window.
+  await narratorHost.reclaimBloatedSession();
+
   const newRunTs = new Date().toISOString();
   const today = newRunTs.slice(0, 10);
   const summariesDir = join(system2Dir, 'knowledge', 'daily_summaries');
@@ -1500,6 +1503,9 @@ export async function buildAndDeliverMemoryUpdate(
   catchUpBudgetBytes: number = CATCH_UP_BUDGET_BYTES,
   narratorMessageExcerptBytes: number = NARRATOR_MESSAGE_EXCERPT_BYTES
 ): Promise<void> {
+  // Reclaim the session if a prior cycle left it oversized (see buildAndDeliverDailySummary).
+  await narratorHost.reclaimBloatedSession();
+
   knowledgeBudgetChars = Math.max(knowledgeBudgetChars, 5_000);
   const newRunTs = new Date().toISOString();
   const memoryFile = join(system2Dir, 'knowledge', 'memory.md');

@@ -5208,6 +5208,158 @@ describe('AgentHost', () => {
     });
   });
 
+  describe('wedge and context-overflow recovery', () => {
+    let testDir: string;
+
+    beforeEach(() => {
+      testDir = join(
+        tmpdir(),
+        `system2-test-recovery-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      );
+      mkdirSync(testDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    it('clears busy when a dispatched delivery times out (wedge)', () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const onBusyChange = vi.fn();
+      const session = { id: 'wedged' };
+      const internal = host as unknown as {
+        session: unknown;
+        busy: boolean;
+        deliverySendCount: number;
+        isReinitializing: boolean;
+        pendingDeliveries: unknown[];
+        onBusyChange: (id: number, busy: boolean, pct: number | null) => void;
+        getContextUsage: () => { percent: number } | null;
+        handleDispatchTimeout: (entry: unknown, session: unknown) => void;
+      };
+      internal.session = session;
+      internal.busy = true;
+      internal.deliverySendCount = 1;
+      internal.isReinitializing = false;
+      internal.onBusyChange = onBusyChange;
+      internal.getContextUsage = () => null;
+      const reject = vi.fn();
+      const entry = {
+        content: '[Scheduled task: daily-summary]',
+        details: { sender: 0, receiver: 2, timestamp: Date.now() },
+        scheduledTask: true,
+        deferred: false,
+        resolve: vi.fn(),
+        reject,
+      };
+      internal.pendingDeliveries = [entry];
+
+      internal.handleDispatchTimeout(entry, session);
+
+      expect(reject).toHaveBeenCalledOnce();
+      expect(internal.busy).toBe(false);
+      expect(onBusyChange).toHaveBeenCalledWith(1, false, null);
+    });
+
+    it('drops an oversized tail during context-overflow recovery', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      const compact = vi.fn().mockResolvedValue(undefined);
+      const reinit = vi.fn().mockResolvedValue(undefined);
+      const internal = host as unknown as {
+        _sessionDir: string;
+        contextWindow: number;
+        currentProvider: string;
+        compactionDepth: number;
+        session: { compact: typeof compact } | null;
+        reinitializeWithProvider: typeof reinit;
+        handleContextOverflow: () => Promise<boolean>;
+      };
+      internal._sessionDir = testDir;
+      internal.contextWindow = 1000; // threshold = 500 tokens → tail byte budget = 1500
+      internal.currentProvider = 'anthropic';
+      internal.compactionDepth = 0;
+      internal.session = { compact };
+      internal.reinitializeWithProvider = reinit;
+
+      const giant = 'X'.repeat(5000);
+      const lines = [
+        JSON.stringify({ type: 'session', version: 3, id: 'h', cwd: '/x' }),
+        JSON.stringify({
+          type: 'message',
+          id: 'm1',
+          message: { role: 'user', content: 'hi', usage: { input: 100 } },
+        }),
+        JSON.stringify({ type: 'custom_message', customType: 'agent_message', content: giant }),
+      ];
+      writeFileSync(join(testDir, 'sess.jsonl'), `${lines.join('\n')}\n`);
+
+      const recovered = await internal.handleContextOverflow();
+
+      expect(recovered).toBe(true);
+      expect(compact).toHaveBeenCalledOnce();
+      // The oversized custom_message tail was dropped, not restored after compaction.
+      const content = readFileSync(join(testDir, 'sess.jsonl'), 'utf-8');
+      expect(content).not.toContain(giant);
+      expect(content).toContain('"id":"m1"');
+    });
+
+    it('restores the oversized tail if recovery throws after truncation', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      // Reinit throws at Step 5 (after the file is truncated to head) → catch block must restore.
+      const reinit = vi.fn().mockRejectedValue(new Error('reinit boom'));
+      const internal = host as unknown as {
+        _sessionDir: string;
+        contextWindow: number;
+        currentProvider: string;
+        compactionDepth: number;
+        session: { compact: ReturnType<typeof vi.fn> } | null;
+        reinitializeWithProvider: typeof reinit;
+        handleContextOverflow: () => Promise<boolean>;
+      };
+      internal._sessionDir = testDir;
+      internal.contextWindow = 1000;
+      internal.currentProvider = 'anthropic';
+      internal.compactionDepth = 0;
+      internal.session = { compact: vi.fn().mockResolvedValue(undefined) };
+      internal.reinitializeWithProvider = reinit;
+
+      const giant = 'X'.repeat(5000);
+      const lines = [
+        JSON.stringify({ type: 'session', version: 3, id: 'h', cwd: '/x' }),
+        JSON.stringify({
+          type: 'message',
+          id: 'm1',
+          message: { role: 'user', content: 'hi', usage: { input: 100 } },
+        }),
+        JSON.stringify({ type: 'custom_message', customType: 'agent_message', content: giant }),
+      ];
+      writeFileSync(join(testDir, 'sess.jsonl'), `${lines.join('\n')}\n`);
+
+      const recovered = await internal.handleContextOverflow();
+
+      expect(recovered).toBe(false);
+      // Even though the over-budget tail is dropped on the success path, a mid-recovery failure
+      // restores it so the file is not left permanently truncated.
+      const content = readFileSync(join(testDir, 'sess.jsonl'), 'utf-8');
+      expect(content).toContain(giant);
+    });
+  });
+
   describe('reset session after scheduled task', () => {
     let testDir: string;
 
@@ -5242,10 +5394,13 @@ describe('AgentHost', () => {
       compactionCount: number;
       lastTurnErrored: boolean;
       hadScheduledTaskDeliveryThisTurn: boolean;
+      scheduledTaskSessionReclaimBytes: number;
+      pendingPrompt: string | null;
       handleSessionEvent: (event: Record<string, unknown>) => void;
       handlePotentialError: ReturnType<typeof vi.fn>;
       handleCompactionTracking: ReturnType<typeof vi.fn>;
       initialize: ReturnType<typeof vi.fn>;
+      replayPendingDeliveries: ReturnType<typeof vi.fn>;
     };
 
     /** Build a host with stubbed lifecycle methods, ready for handleSessionEvent('agent_end'). */
@@ -5284,6 +5439,101 @@ describe('AgentHost', () => {
 
       return { host, internal };
     }
+
+    describe('reclaimBloatedSession', () => {
+      it('reclaims an oversized session to a fresh header and replays pending deliveries', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: true });
+        // Lower the threshold below the ~200-byte seed so the guard treats it as oversized.
+        internal.scheduledTaskSessionReclaimBytes = 50;
+        internal.replayPendingDeliveries = vi.fn();
+
+        const reclaimed = await host.reclaimBloatedSession();
+
+        expect(reclaimed).toBe(true);
+        // Old file archived; a single fresh header-only JSONL remains.
+        const files = readdirSync(testDir);
+        expect(files.filter((f) => f.endsWith('.jsonl.archived'))).toHaveLength(1);
+        const active = files.filter((f) => f.endsWith('.jsonl'));
+        expect(active).toHaveLength(1);
+        const lines = readFileSync(join(testDir, active[0]), 'utf-8')
+          .split('\n')
+          .filter((l) => l.length > 0);
+        expect(lines).toHaveLength(1);
+        expect(JSON.parse(lines[0]).type).toBe('session');
+        expect(internal.initialize).toHaveBeenCalledOnce();
+        // Deliveries queued during reinit are replayed against the fresh session, not stranded.
+        expect(internal.replayPendingDeliveries).toHaveBeenCalledOnce();
+      });
+
+      it('rejects pending deliveries when reinit fails during reclaim', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: true });
+        internal.scheduledTaskSessionReclaimBytes = 50;
+        internal.initialize = vi.fn().mockRejectedValue(new Error('init boom'));
+        const reject = vi.fn();
+        internal.pendingDeliveries = [
+          {
+            content: '[Scheduled task: daily-summary]\n\nfile: /x',
+            details: { sender: 1, receiver: 2, timestamp: Date.now() },
+            scheduledTask: true,
+            resolve: vi.fn(),
+            reject,
+          },
+        ];
+
+        await expect(host.reclaimBloatedSession()).rejects.toThrow('init boom');
+        // A failed reinit settles queued deliveries so awaiting callers don't hang.
+        expect(reject).toHaveBeenCalledOnce();
+        expect(internal.pendingDeliveries).toHaveLength(0);
+      });
+
+      it('is a no-op when the session is below the reclaim threshold', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: true });
+        internal.scheduledTaskSessionReclaimBytes = 10 * 1024 * 1024;
+
+        const reclaimed = await host.reclaimBloatedSession();
+
+        expect(reclaimed).toBe(false);
+        expect(readdirSync(testDir).filter((f) => f.endsWith('.archived'))).toHaveLength(0);
+        expect(internal.initialize).not.toHaveBeenCalled();
+      });
+
+      it('is a no-op for roles that do not opt into reset', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: false });
+        internal.scheduledTaskSessionReclaimBytes = 50;
+
+        const reclaimed = await host.reclaimBloatedSession();
+
+        expect(reclaimed).toBe(false);
+        expect(readdirSync(testDir).filter((f) => f.endsWith('.archived'))).toHaveLength(0);
+        expect(internal.initialize).not.toHaveBeenCalled();
+      });
+
+      it('is a no-op while a delivery is in flight, even when oversized', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: true });
+        internal.scheduledTaskSessionReclaimBytes = 50;
+        // A dispatched-but-not-yet-completed delivery (e.g. a concurrent scheduled-task cycle).
+        internal.deliverySendCount = 1;
+
+        const reclaimed = await host.reclaimBloatedSession();
+
+        expect(reclaimed).toBe(false);
+        expect(readdirSync(testDir).filter((f) => f.endsWith('.archived'))).toHaveLength(0);
+        expect(internal.initialize).not.toHaveBeenCalled();
+      });
+
+      it('is a no-op while a user prompt is in flight, even when oversized', async () => {
+        const { host, internal } = makeHostWithSessionDir({ reset: true });
+        internal.scheduledTaskSessionReclaimBytes = 50;
+        // A dispatched prompt awaiting agent_end — disposing the session would strand it.
+        internal.pendingPrompt = 'a user question';
+
+        const reclaimed = await host.reclaimBloatedSession();
+
+        expect(reclaimed).toBe(false);
+        expect(readdirSync(testDir).filter((f) => f.endsWith('.archived'))).toHaveLength(0);
+        expect(internal.initialize).not.toHaveBeenCalled();
+      });
+    });
 
     it('truncates JSONL to fresh header and clears session after scheduled-task delivery', () => {
       const { internal } = makeHostWithSessionDir({ reset: true });

@@ -125,6 +125,16 @@ const ORCHESTRATOR_ROLES = new Set(['guide', 'conductor']);
  *  prompt, history, and knowledge files. Configurable via [delivery] max_bytes in config.toml. */
 export const MAX_DELIVERY_BYTES = 1024 * 1024;
 
+/** Cycle-start size that triggers `AgentHost.reclaimBloatedSession`. Above a healthy session
+ *  (a header, after the per-tick reset) and below the multi-MB context-overflow point. */
+export const SCHEDULED_TASK_SESSION_RECLAIM_BYTES = 2 * 1024 * 1024;
+
+/** Conservative bytes-per-token estimate for bounding the context-overflow recovery tail by size.
+ *  Injected `custom_message` deliveries carry no token `usage`, so the usage-based split can't see
+ *  them; the byte budget (split-threshold tokens × this) drops a tail that would re-overflow. Low
+ *  on purpose — under-counting bytes/token keeps more headroom under the window. */
+export const OVERFLOW_TAIL_BYTES_PER_TOKEN = 3;
+
 /** Backstop for an in-flight delivery whose `sendCustomMessage` was invoked but never produced
  *  `agent_end` — guards against silent SDK stream loss. See issue #194. */
 export const DELIVERY_DISPATCH_TIMEOUT_MS = 6 * 60 * 1000;
@@ -360,6 +370,8 @@ export class AgentHost {
   private onAgentTerminate?: () => void;
   private maxDeliveryBytes: number;
   private sessionRotationSizeBytes: number | undefined;
+  /** Reclaim threshold for `reclaimBloatedSession()`; instance-level so tests can lower it. */
+  private scheduledTaskSessionReclaimBytes: number = SCHEDULED_TASK_SESSION_RECLAIM_BYTES;
   private archiveKeepCount: number;
   private resetSessionAfterScheduledTask: boolean;
   /** True when the constructor caller passed `resetSessionAfterScheduledTask` explicitly (true OR
@@ -2301,6 +2313,68 @@ export class AgentHost {
   }
 
   /**
+   * Reclaim a reset-opted role's session if a prior scheduled-task cycle left it oversized, so the
+   * next cycle starts from a fresh header. The per-tick `resetSessionToHeader` is gated on a clean
+   * `agent_end`, which a wedged turn (issue #194) or a context-overflow recovery loop bypasses —
+   * letting the JSONL accumulate one payload per cron tick until it overflows the context window.
+   * Called by the scheduler before delivering. The Narrator's durable memory lives in files, so
+   * dropping session state is safe. No-op for non-opted-in roles or a still-small session. Returns
+   * true if it reclaimed.
+   */
+  async reclaimBloatedSession(): Promise<boolean> {
+    if (!this.resetSessionAfterScheduledTask) return false;
+    // Reclaim only between turns: skip while a delivery (deliverySendCount) or user prompt
+    // (pendingPrompt) is in flight, or during reinit. A wedged delivery's dispatch timeout clears
+    // deliverySendCount, so a stuck session becomes reclaimable on a later cycle.
+    if (this.isReinitializing || this.deliverySendCount > 0 || this.pendingPrompt) return false;
+    const sessionDir = this._sessionDir;
+    if (!sessionDir) return false;
+    const activeFile = findMostRecentSession(sessionDir);
+    if (!activeFile) return false;
+    let sizeBytes: number;
+    try {
+      sizeBytes = statSync(activeFile).size;
+    } catch {
+      return false;
+    }
+    if (sizeBytes < this.scheduledTaskSessionReclaimBytes) return false;
+
+    log.warn(
+      `[AgentHost] ${this.agentRole ?? 'agent'} session is ${(sizeBytes / 1024 / 1024).toFixed(2)} MB at ` +
+        `scheduled-task cycle start; a prior cycle left it un-reset (wedged turn or context-overflow loop). ` +
+        `Reclaiming to a fresh header.`
+    );
+
+    if (this.busy) {
+      this.busy = false;
+      this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
+    }
+
+    // Mirror the agent_end reset path. Set isReinitializing before tearing the session down so a
+    // concurrent deliverMessage() queues (it checks isReinitializing) instead of dispatching against
+    // the disposed session or hard-rejecting on session=null. After initialize() resolves, replay any
+    // queued deliveries against the fresh session so none are stranded; on init failure, reject them
+    // so awaiting callers (e.g. trackJobExecution) don't hang.
+    this.isReinitializing = true;
+    this.resetSessionToHeader();
+    try {
+      await this.initialize();
+      this.replayPendingDeliveries('after oversized-session reclaim');
+    } catch (err) {
+      const rejectError = err instanceof Error ? err : new Error(String(err));
+      for (const delivery of this.pendingDeliveries) {
+        delivery.reject(rejectError);
+      }
+      this.pendingDeliveries = [];
+      this.deliverySendCount = 0;
+      throw rejectError;
+    } finally {
+      this.isReinitializing = false;
+    }
+    return true;
+  }
+
+  /**
    * Read the persisted compaction count from the session directory.
    * Returns 0 if the file doesn't exist (first run or deleted).
    */
@@ -2586,6 +2660,12 @@ export class AgentHost {
         }s (no agent_end received; SDK stream may be lost or a pre-send step stalled)`
       )
     );
+    // The wedged turn is dead and no agent_end will fire, so clear `busy` here (its normal owner).
+    // Otherwise the agent appears busy forever; a late agent_end finds busy already false and no-ops.
+    if (this.busy) {
+      this.busy = false;
+      this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
+    }
     if (!this.isReinitializing && this.pendingDeliveries.some((d) => d.deferred)) {
       this.replayPendingDeliveries('after dispatch timeout');
     }
@@ -2734,6 +2814,24 @@ export class AgentHost {
         `[AgentHost] Context overflow: split at line ${splitIndex + 1}, tail has ${tailLines.length} entries`
       );
 
+      // Bound the tail by bytes. The split above keys off message-level `usage.input`, which
+      // injected `custom_message` deliveries don't carry — so a tail packed with oversized
+      // deliveries can stay over the window and re-overflow on every recovery (the loop that
+      // grew the Narrator session to tens of MB). When over budget, drop the tail from the
+      // recovered session and continue from the compacted head alone. `tailLines` is left intact
+      // (not zeroed) so the catch block can still restore the file if a later step throws; only
+      // the success-path append in Step 7 is skipped via `dropOversizedTail`.
+      const tailByteBudget = Math.floor(threshold * OVERFLOW_TAIL_BYTES_PER_TOKEN);
+      const tailBytes = tailLines.reduce((sum, l) => sum + Buffer.byteLength(l, 'utf8') + 1, 0);
+      const dropOversizedTail = tailLines.length > 0 && tailBytes > tailByteBudget;
+      if (dropOversizedTail) {
+        log.warn(
+          `[AgentHost] Context overflow: tail is ${(tailBytes / 1024 / 1024).toFixed(2)} MB (> ` +
+            `${(tailByteBudget / 1024 / 1024).toFixed(2)} MB budget) — likely oversized injected deliveries; ` +
+            `dropping the tail and recovering from the compacted head alone.`
+        );
+      }
+
       // Step 4: Truncate file to head
       writeFileSync(activeFile, `${headLines.join('\n')}\n`, 'utf-8');
       fileTruncated = true;
@@ -2759,8 +2857,9 @@ export class AgentHost {
         log.info('[AgentHost] Context overflow: compaction complete');
       }
 
-      // Step 7: Append tail and reinitialize — session loads compact summary + tail
-      if (tailLines.length > 0) {
+      // Step 7: Append tail and reinitialize — session loads compact summary + tail. Skipped when
+      // the tail was over budget (dropOversizedTail): recover from the compacted head alone.
+      if (tailLines.length > 0 && !dropOversizedTail) {
         appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
         tailAppended = true;
         log.info('[AgentHost] Context overflow: tail restored, reinitializing...');

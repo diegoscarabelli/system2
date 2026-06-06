@@ -55,6 +55,9 @@ function mockNarratorHost(): AgentHost & { calls: Array<{ content: string; detai
   const calls: Array<{ content: string; details: unknown }> = [];
   return {
     calls,
+    reclaimBloatedSession() {
+      return Promise.resolve(false);
+    },
     deliverMessage(content: string, details: unknown) {
       calls.push({ content, details });
       return Promise.resolve();
@@ -1562,15 +1565,33 @@ describe('buildAndDeliverDailySummary', () => {
     vi.useRealTimers();
   });
 
-  function mockHost(): AgentHost & { calls: Array<{ content: string; details: unknown }> } {
+  function mockHost(): AgentHost & {
+    calls: Array<{ content: string; details: unknown }>;
+    events: string[];
+    reclaimCount: number;
+  } {
     const calls: Array<{ content: string; details: unknown }> = [];
-    return {
+    const events: string[] = [];
+    const host = {
       calls,
+      events,
+      reclaimCount: 0,
+      reclaimBloatedSession() {
+        host.reclaimCount++;
+        events.push('reclaim');
+        return Promise.resolve(false);
+      },
       deliverMessage(content: string, details: unknown) {
         calls.push({ content, details });
+        events.push('deliver');
         return Promise.resolve();
       },
-    } as unknown as AgentHost & { calls: Array<{ content: string; details: unknown }> };
+    };
+    return host as unknown as AgentHost & {
+      calls: Array<{ content: string; details: unknown }>;
+      events: string[];
+      reclaimCount: number;
+    };
   }
 
   function mockDb(
@@ -1687,6 +1708,39 @@ describe('buildAndDeliverDailySummary', () => {
     expect(host.calls.length).toBeGreaterThanOrEqual(1);
     const messages = host.calls.map((c) => c.content);
     expect(messages.some((m) => m.includes('[Scheduled task: daily-summary]'))).toBe(true);
+  });
+
+  it('reclaims an oversized session before delivering', async () => {
+    const dir = trackTmpDir(makeTmpDir());
+
+    const host = mockHost();
+    const db = mockDb([{ id: 1, role: 'guide', project_name: null }], []);
+    // Give the non-project section some activity so a delivery actually fires.
+    const sessionDir = join(dir, 'sessions', 'guide_1');
+    const summariesDir = join(dir, 'knowledge', 'daily_summaries');
+    mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(summariesDir, { recursive: true });
+    const lastRunTs = new Date(Date.now() - 10 * 60_000).toISOString();
+    writeFileSync(
+      join(summariesDir, '2026-03-15.md'),
+      `---\nlast_narrator_update_ts: ${lastRunTs}\n---\n# Daily Summary — 2026-03-15\n`
+    );
+    writeFileSync(
+      join(sessionDir, 'session.jsonl'),
+      JSON.stringify({
+        type: 'message',
+        timestamp: new Date(Date.now() - 5 * 60_000).toISOString(),
+        message: { role: 'assistant', content: [{ type: 'text', text: 'guide activity' }] },
+      })
+    );
+
+    await buildAndDeliverDailySummary(db, host, 99, dir, 30);
+
+    expect(host.reclaimCount).toBe(1);
+    expect(host.calls.length).toBeGreaterThanOrEqual(1);
+    // Reclaim must run before any delivery so the cycle starts on a clean session.
+    expect(host.events[0]).toBe('reclaim');
+    expect(host.events.indexOf('reclaim')).toBeLessThan(host.events.indexOf('deliver'));
   });
 
   it('does not embed existing file content in the delivered message', async () => {
@@ -2266,6 +2320,9 @@ describe('buildAndDeliverDailySummary', () => {
     );
 
     const host = {
+      reclaimBloatedSession() {
+        return Promise.resolve(false);
+      },
       deliverMessage() {
         return Promise.reject(new Error('Delivery aborted: API error after model output (401)'));
       },

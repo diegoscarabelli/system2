@@ -79,6 +79,8 @@ The reset always fires on the trailing scheduled-task `agent_end`, even if other
 
 Controlled by the agent library frontmatter `reset_session_after_scheduled_task: true` (set on Narrator only). See `resetSessionToHeader()` in `src/server/agents/host.ts`.
 
+**Cycle-start backstop.** The per-delivery reset only fires on a clean `agent_end`. Two failure modes bypass it and let the session grow one scheduled-task payload per cron tick until it overflows the model's context window: a wedged turn that never emits `agent_end` (issue #194), and a context-overflow recovery loop whose split point is blind to the large injected `custom_message` deliveries it leaves in the restored tail. As a backstop, `buildAndDeliverDailySummary` and `buildAndDeliverMemoryUpdate` call `AgentHost.reclaimBloatedSession()` at the start of each cycle: if the carried-over session exceeds `SCHEDULED_TASK_SESSION_RECLAIM_BYTES`, it is archived and replaced with a fresh header before delivering. This bounds session growth independently of `agent_end`.
+
 ## Memory Update Pipeline
 
 `buildAndDeliverMemoryUpdate()` runs daily at 11 AM:
