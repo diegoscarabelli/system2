@@ -2356,7 +2356,7 @@ export class AgentHost {
     this.deliverySendCount = 0;
     if (this.busy) {
       this.busy = false;
-      this.onBusyChange?.(this.agentId, false, null);
+      this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
     }
 
     this.resetSessionToHeader();
@@ -2812,18 +2812,19 @@ export class AgentHost {
       // Bound the tail by bytes. The split above keys off message-level `usage.input`, which
       // injected `custom_message` deliveries don't carry — so a tail packed with oversized
       // deliveries can stay over the window and re-overflow on every recovery (the loop that
-      // grew the Narrator session to tens of MB). If the tail exceeds the budget, drop it and
-      // recover from the compacted head alone; a clean under-window recovery beats restoring a
-      // tail that re-overflows. (An empty tail is handled by Step 7.)
+      // grew the Narrator session to tens of MB). When over budget, drop the tail from the
+      // recovered session and continue from the compacted head alone. `tailLines` is left intact
+      // (not zeroed) so the catch block can still restore the file if a later step throws; only
+      // the success-path append in Step 7 is skipped via `dropOversizedTail`.
       const tailByteBudget = Math.floor(threshold * OVERFLOW_TAIL_BYTES_PER_TOKEN);
       const tailBytes = tailLines.reduce((sum, l) => sum + Buffer.byteLength(l, 'utf8') + 1, 0);
-      if (tailLines.length > 0 && tailBytes > tailByteBudget) {
+      const dropOversizedTail = tailLines.length > 0 && tailBytes > tailByteBudget;
+      if (dropOversizedTail) {
         log.warn(
           `[AgentHost] Context overflow: tail is ${(tailBytes / 1024 / 1024).toFixed(2)} MB (> ` +
             `${(tailByteBudget / 1024 / 1024).toFixed(2)} MB budget) — likely oversized injected deliveries; ` +
             `dropping the tail and recovering from the compacted head alone.`
         );
-        tailLines = [];
       }
 
       // Step 4: Truncate file to head
@@ -2851,8 +2852,9 @@ export class AgentHost {
         log.info('[AgentHost] Context overflow: compaction complete');
       }
 
-      // Step 7: Append tail and reinitialize — session loads compact summary + tail
-      if (tailLines.length > 0) {
+      // Step 7: Append tail and reinitialize — session loads compact summary + tail. Skipped when
+      // the tail was over budget (dropOversizedTail): recover from the compacted head alone.
+      if (tailLines.length > 0 && !dropOversizedTail) {
         appendFileSync(activeFile, `${tailLines.join('\n')}\n`, 'utf-8');
         tailAppended = true;
         log.info('[AgentHost] Context overflow: tail restored, reinitializing...');

@@ -5312,6 +5312,52 @@ describe('AgentHost', () => {
       expect(content).not.toContain(giant);
       expect(content).toContain('"id":"m1"');
     });
+
+    it('restores the oversized tail if recovery throws after truncation', async () => {
+      const host = new AgentHost({
+        db: makeDbStub(),
+        agentId: 1,
+        registry: makeRegistryStub(),
+        llmConfig: makeLlmConfig(),
+      });
+      // Reinit throws at Step 5 (after the file is truncated to head) → catch block must restore.
+      const reinit = vi.fn().mockRejectedValue(new Error('reinit boom'));
+      const internal = host as unknown as {
+        _sessionDir: string;
+        contextWindow: number;
+        currentProvider: string;
+        compactionDepth: number;
+        session: { compact: ReturnType<typeof vi.fn> } | null;
+        reinitializeWithProvider: typeof reinit;
+        handleContextOverflow: () => Promise<boolean>;
+      };
+      internal._sessionDir = testDir;
+      internal.contextWindow = 1000;
+      internal.currentProvider = 'anthropic';
+      internal.compactionDepth = 0;
+      internal.session = { compact: vi.fn().mockResolvedValue(undefined) };
+      internal.reinitializeWithProvider = reinit;
+
+      const giant = 'X'.repeat(5000);
+      const lines = [
+        JSON.stringify({ type: 'session', version: 3, id: 'h', cwd: '/x' }),
+        JSON.stringify({
+          type: 'message',
+          id: 'm1',
+          message: { role: 'user', content: 'hi', usage: { input: 100 } },
+        }),
+        JSON.stringify({ type: 'custom_message', customType: 'agent_message', content: giant }),
+      ];
+      writeFileSync(join(testDir, 'sess.jsonl'), `${lines.join('\n')}\n`);
+
+      const recovered = await internal.handleContextOverflow();
+
+      expect(recovered).toBe(false);
+      // Even though the over-budget tail is dropped on the success path, a mid-recovery failure
+      // restores it so the file is not left permanently truncated.
+      const content = readFileSync(join(testDir, 'sess.jsonl'), 'utf-8');
+      expect(content).toContain(giant);
+    });
   });
 
   describe('reset session after scheduled task', () => {
