@@ -2359,8 +2359,10 @@ export class AgentHost {
       this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
     }
 
-    this.resetSessionToHeader();
+    // Set isReinitializing before tearing the session down so a concurrent deliverMessage() queues
+    // (it checks isReinitializing) rather than hard-rejecting on the transient session=null.
     this.isReinitializing = true;
+    this.resetSessionToHeader();
     try {
       await this.initialize();
     } finally {
