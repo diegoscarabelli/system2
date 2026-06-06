@@ -129,6 +129,12 @@ export const MAX_DELIVERY_BYTES = 1024 * 1024;
  *  (a header, after the per-tick reset) and below the multi-MB context-overflow point. */
 export const SCHEDULED_TASK_SESSION_RECLAIM_BYTES = 2 * 1024 * 1024;
 
+/** Conservative bytes-per-token estimate for bounding the context-overflow recovery tail by size.
+ *  Injected `custom_message` deliveries carry no token `usage`, so the usage-based split can't see
+ *  them; the byte budget (split-threshold tokens × this) drops a tail that would re-overflow. Low
+ *  on purpose — under-counting bytes/token keeps more headroom under the window. */
+export const OVERFLOW_TAIL_BYTES_PER_TOKEN = 3;
+
 /** Backstop for an in-flight delivery whose `sendCustomMessage` was invoked but never produced
  *  `agent_end` — guards against silent SDK stream loss. See issue #194. */
 export const DELIVERY_DISPATCH_TIMEOUT_MS = 6 * 60 * 1000;
@@ -2317,9 +2323,9 @@ export class AgentHost {
    */
   async reclaimBloatedSession(): Promise<boolean> {
     if (!this.resetSessionAfterScheduledTask) return false;
-    // Only reclaim between turns, never mid-delivery or mid-reinit. (deliverySendCount, not busy:
-    // a wedged delivery's dispatch timeout returns it to 0, so a stuck session stays reclaimable.)
-    if (this.isReinitializing || this.deliverySendCount > 0) return false;
+    // Only reclaim between turns (skip during reinit or an in-flight delivery/prompt). Not `busy`:
+    // wedge timeouts clear deliverySendCount but not busy, so a stuck session stays reclaimable.
+    if (this.isReinitializing || this.deliverySendCount > 0 || this.pendingPrompt) return false;
     const sessionDir = this._sessionDir;
     if (!sessionDir) return false;
     const activeFile = findMostRecentSession(sessionDir);
@@ -2341,7 +2347,7 @@ export class AgentHost {
     // Settle deliveries stranded by the prior failed cycle so awaiting callers don't hang, then
     // dispose + truncate to a header (resetSessionToHeader) and rebuild a live session (initialize).
     const reclaimError = new Error(
-      'Delivery superseded: oversized narrator session reclaimed before next scheduled-task cycle.'
+      `Delivery superseded: oversized ${this.agentRole ?? 'agent'} session reclaimed before next scheduled-task cycle.`
     );
     for (const delivery of this.pendingDeliveries) {
       delivery.reject(reclaimError);
@@ -2649,6 +2655,12 @@ export class AgentHost {
         }s (no agent_end received; SDK stream may be lost or a pre-send step stalled)`
       )
     );
+    // The wedged turn is dead and no agent_end will fire, so clear `busy` here (its normal owner).
+    // Otherwise the agent appears busy forever; a late agent_end finds busy already false and no-ops.
+    if (this.busy) {
+      this.busy = false;
+      this.onBusyChange?.(this.agentId, false, this.getContextUsage()?.percent ?? null);
+    }
     if (!this.isReinitializing && this.pendingDeliveries.some((d) => d.deferred)) {
       this.replayPendingDeliveries('after dispatch timeout');
     }
@@ -2796,6 +2808,23 @@ export class AgentHost {
       log.info(
         `[AgentHost] Context overflow: split at line ${splitIndex + 1}, tail has ${tailLines.length} entries`
       );
+
+      // Bound the tail by bytes. The split above keys off message-level `usage.input`, which
+      // injected `custom_message` deliveries don't carry — so a tail packed with oversized
+      // deliveries can stay over the window and re-overflow on every recovery (the loop that
+      // grew the Narrator session to tens of MB). If the tail exceeds the budget, drop it and
+      // recover from the compacted head alone; a clean under-window recovery beats restoring a
+      // tail that re-overflows. (An empty tail is handled by Step 7.)
+      const tailByteBudget = Math.floor(threshold * OVERFLOW_TAIL_BYTES_PER_TOKEN);
+      const tailBytes = tailLines.reduce((sum, l) => sum + Buffer.byteLength(l, 'utf8') + 1, 0);
+      if (tailLines.length > 0 && tailBytes > tailByteBudget) {
+        log.warn(
+          `[AgentHost] Context overflow: tail is ${(tailBytes / 1024 / 1024).toFixed(2)} MB (> ` +
+            `${(tailByteBudget / 1024 / 1024).toFixed(2)} MB budget) — likely oversized injected deliveries; ` +
+            `dropping the tail and recovering from the compacted head alone.`
+        );
+        tailLines = [];
+      }
 
       // Step 4: Truncate file to head
       writeFileSync(activeFile, `${headLines.join('\n')}\n`, 'utf-8');
