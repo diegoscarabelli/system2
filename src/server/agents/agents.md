@@ -204,6 +204,8 @@ Tool availability varies by role. Orchestration tools (`spawn_agent`, `terminate
 
 **User and UI.** The UI communicates with agents over WebSocket. Events stream in real time: thinking blocks, text chunks, tool calls, context usage. Each message is tagged with `agentId` for multi-agent routing; the user can switch the active chat to any agent. The UI is stateless: the server sends full chat history on connect. Multiple browser tabs are supported.
 
+**Formatting user-facing chat.** The Guide's chat text is rendered as Markdown: GitHub-Flavored Markdown (tables, lists, task lists, code blocks) plus LaTeX math. Write math with **`$$…$$`** (inline within a sentence, or on its own lines for a centered display block). A single `$` is a literal dollar sign, so `$E=mc^2$` renders as plain text while `$$E=mc^2$$` renders as math, and currency like `$5` stays literal. In-page anchor links (`[text](#heading)`) resolve only in markdown artifacts shown in the viewer, not in chat. See [Artifacts](#artifacts) for the full markdown feature set.
+
 **Agent-to-agent messaging.** Agents communicate via the messaging tool. Two delivery modes:
 
 - **Urgent** (`urgent: true`): interrupts the recipient mid-turn between tool calls. Use for time-sensitive corrections or priority changes.
