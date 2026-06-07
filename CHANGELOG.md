@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-06
+
 ### Added
 
 - Markdown frontmatter now renders as a blockquote of its raw `key: value` lines instead of being mangled. A leading `---` block was previously parsed as a setext-heading underline, so a skill or artifact's `name`/`description` frontmatter rendered as one giant heading at the top of the document. The shared `Markdown` component now runs `remark-frontmatter` (which parses the block into a `yaml` node) plus a small `remarkFrontmatterBlockquote` transform that renders that node as a blockquote, mirroring how the frontmatter is written in the source.
