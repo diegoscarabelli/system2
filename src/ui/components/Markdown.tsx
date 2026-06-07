@@ -2,12 +2,19 @@ import 'katex/dist/katex.min.css';
 import ReactMarkdown, { type Options } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import rehypeSlug from 'rehype-slug';
+import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
+import { remarkFrontmatterBlockquote } from './remarkFrontmatterBlockquote';
 
+// `remark-frontmatter` parses a leading `---` block into a `yaml` node — otherwise the fence
+// is mis-parsed as a setext heading and the metadata renders as a giant title.
+// `remarkFrontmatterBlockquote` then renders that node as a blockquote of its raw lines.
 // Disable single-`$` inline math: `$5 and $10` is currency, not an equation.
 // Math uses `$$…$$` (inline within text, or on its own lines for a display block).
 const REMARK_PLUGINS: Options['remarkPlugins'] = [
+  remarkFrontmatter,
+  remarkFrontmatterBlockquote,
   remarkGfm,
   [remarkMath, { singleDollarTextMath: false }],
 ];

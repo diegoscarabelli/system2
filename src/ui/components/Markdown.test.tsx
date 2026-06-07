@@ -58,4 +58,24 @@ describe('Markdown', () => {
     expect(container.textContent).toContain('$5');
     expect(container.textContent).toContain('$10');
   });
+
+  it('renders leading frontmatter as a blockquote of its raw lines, not a heading', () => {
+    const md = '---\nname: my-skill\ndescription: Does a thing\n---\n\n# Body';
+    const { container } = render(<Markdown>{md}</Markdown>);
+
+    const quote = container.querySelector('blockquote');
+    expect(quote).not.toBeNull();
+    expect(quote?.textContent).toContain('name: my-skill');
+    expect(quote?.textContent).toContain('description: Does a thing');
+    // Lines are hard-broken so each `key: value` sits on its own line, mirroring the source.
+    expect(quote?.querySelector('br')).not.toBeNull();
+    // The fence must not become a setext heading: the only heading is the body's.
+    const headings = [...container.querySelectorAll('h1, h2')].map((h) => h.textContent);
+    expect(headings).toEqual(['Body']);
+  });
+
+  it('does not add a blockquote when there is no frontmatter', () => {
+    const { container } = render(<Markdown>{'# Title\n\nJust body text.'}</Markdown>);
+    expect(container.querySelector('blockquote')).toBeNull();
+  });
 });
