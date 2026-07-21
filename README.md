@@ -20,6 +20,22 @@ https://github.com/user-attachments/assets/d2f688d9-15fe-41a0-a4d0-46b2e87d2236
 
 ---
 
+## Key capabilities
+
+**Multi-agent system built for data work.** The Guide is your single point of contact with long-term memory of your interactions. Work is organized into projects, each with its own team: a Conductor that plans and orchestrates, a Reviewer that catches statistical fallacies, and optional Workers that execute in parallel. Multiple projects can run concurrently, each with dedicated agents. A Narrator curates memory on a schedule.
+
+**Structured collaboration.** Agents coordinate through real-time messages and manage work on a database-backed kanban board (visible to you) with task hierarchies, dependencies, and comment threads. Every project follows a plan-approve-execute cycle: the Conductor proposes, you review and approve before work begins.
+
+**Knowledge that accumulates.** Every conversation builds on the last. Agents refine git-tracked markdown files storing your preferences, infrastructure setup, lessons learned, and reusable skills. Daily summaries and project stories are written automatically so nothing is lost. Stop the server, restart it days later: the team picks up where it left off.
+
+**Interactive artifacts.** Agents can build and display anything in the UI on demand: live dashboards querying your databases (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite), research articles, Jupyter notebooks, reports. Artifacts appear alongside the conversation with live reload, so you see results the moment they're ready and iterate on them in place.
+
+**Built-in tools and domain skills.** Agents come equipped with shell access, file operations, database queries, web search, inter-agent messaging, and self-scheduling reminders, all with safety guards and role-based restrictions. Built-in skills cover data infrastructure (Airflow, Prefect, TimescaleDB, SQL modeling), live dashboard building, statistical analysis, code review, and reasoning fallacy detection. Agents can also create new skills at runtime.
+
+**Any LLM, automatic failover.** OpenRouter, Anthropic, Google, OpenAI, Cerebras, Mistral, Groq, xAI, and any OpenAI-compatible endpoint. Automatic key rotation, provider failover with backoff, and time-based cooldowns.
+
+---
+
 ## Quick start
 
 ### Prerequisites
@@ -94,22 +110,6 @@ system2 config           # interactive: manage OAuth, API keys, and services
 ```bash
 pnpm update -g @diegoscarabelli/system2
 ```
-
----
-
-## Key capabilities
-
-**Multi-agent system built for data work.** The Guide is your single point of contact with long-term memory of your interactions. Work is organized into projects, each with its own team: a Conductor that plans and orchestrates, a Reviewer that catches statistical fallacies, and optional Workers that execute in parallel. Multiple projects can run concurrently, each with dedicated agents. A Narrator curates memory on a schedule.
-
-**Structured collaboration.** Agents coordinate through real-time messages and manage work on a database-backed kanban board (visible to you) with task hierarchies, dependencies, and comment threads. Every project follows a plan-approve-execute cycle: the Conductor proposes, you review and approve before work begins.
-
-**Knowledge that accumulates.** Every conversation builds on the last. Agents refine git-tracked markdown files storing your preferences, infrastructure setup, lessons learned, and reusable skills. Daily summaries and project stories are written automatically so nothing is lost. Stop the server, restart it days later: the team picks up where it left off.
-
-**Interactive artifacts.** Agents can build and display anything in the UI on demand: live dashboards querying your databases (PostgreSQL, ClickHouse, DuckDB, Snowflake, BigQuery, MySQL, MSSQL, SQLite), research articles, Jupyter notebooks, reports. Artifacts appear alongside the conversation with live reload, so you see results the moment they're ready and iterate on them in place.
-
-**Built-in tools and domain skills.** Agents come equipped with shell access, file operations, database queries, web search, inter-agent messaging, and self-scheduling reminders, all with safety guards and role-based restrictions. Built-in skills cover data infrastructure (Airflow, Prefect, TimescaleDB, SQL modeling), live dashboard building, statistical analysis, code review, and reasoning fallacy detection. Agents can also create new skills at runtime.
-
-**Any LLM, automatic failover.** OpenRouter, Anthropic, Google, OpenAI, Cerebras, Mistral, Groq, xAI, and any OpenAI-compatible endpoint. Automatic key rotation, provider failover with backoff, and time-based cooldowns.
 
 ---
 
