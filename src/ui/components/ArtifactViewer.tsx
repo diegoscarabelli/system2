@@ -210,15 +210,17 @@ export function ArtifactViewer() {
   //     `Box` has `overflow: auto` and takes over scrolling so the CSS
   //     invert filter on the iframe doesn't invert the scrollbar in dark
   //     mode (1e9a4e4).
-  //  3. Loop guard: if scrollHeight grows again within one animation frame
-  //     of our last size-set, treat it as `vh`-feedback and ignore. Without
-  //     this, an artifact whose `vh`-based container grows as the iframe
-  //     grows (Plotly plot with `height: 68vh`) drives exponential growth
-  //     that ends in Chromium's silent `ResizeObserver loop limit exceeded`
-  //     freeze — colorbars stretched to fill the viewport, choropleths
-  //     squished off-screen. Legitimate growth (query results, images
-  //     loading, user interaction) happens between frames and passes.
-  //     See #204.
+  //  3. Loop guard: if scrollHeight grows again within LOOP_WINDOW_MS
+  //     (100 ms — a few frames of margin over the typical one-paint round
+  //     trip of a layout-driven feedback) of our last size-set, skip this
+  //     fire as `vh`-feedback. Without this, an artifact whose `vh`-based
+  //     container grows as the iframe grows (Plotly plot with
+  //     `height: 68vh`) drives exponential growth that ends in Chromium's
+  //     silent `ResizeObserver loop limit exceeded` freeze — colorbars
+  //     stretched to fill the viewport, choropleths squished off-screen.
+  //     Legitimate growth (query results, images loading, user
+  //     interaction) either happens outside the window or triggers a
+  //     later fire that passes. See #204.
   // biome-ignore lint/correctness/useExhaustiveDependencies: activeTab?.url triggers resize when artifact changes
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -256,8 +258,8 @@ export function ArtifactViewer() {
         }
 
         // Content exceeds the panel: grow the iframe so the parent scrolls.
-        // Loop guard: growth within one animation frame of our own set is
-        // almost certainly `vh` feedback, not real content growth.
+        // Loop guard: growth within LOOP_WINDOW_MS of our own set is almost
+        // certainly `vh` feedback, not real content growth.
         if (
           lastSetHeight !== null &&
           scrollHeight > lastSetHeight &&
@@ -266,7 +268,7 @@ export function ArtifactViewer() {
           if (!loopWarned) {
             loopWarned = true;
             console.warn(
-              `[ArtifactViewer] Iframe content grew from ${lastSetHeight}px to ${scrollHeight}px within ${LOOP_WINDOW_MS}ms of the last resize. Suspected vh/% feedback loop; freezing iframe height. Prefer fixed pixel heights for plot containers. See #204.`
+              `[ArtifactViewer] Iframe content grew from ${lastSetHeight}px to ${scrollHeight}px within ${LOOP_WINDOW_MS}ms of the last resize. Suspected vh/% feedback loop; skipping this resize. Prefer fixed pixel heights for plot containers. See #204.`
             );
           }
           return;
