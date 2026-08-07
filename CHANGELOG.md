@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `ArtifactViewer`'s iframe no longer runs away when an artifact uses viewport-relative units (`vh`, `%`) on a plot container. Previously the `ResizeObserver` that synced iframe height to content would grow the iframe → grow `vh` inside → grow scrollHeight → fire the observer again, ending in Chromium's silent `ResizeObserver loop limit exceeded` guard freezing the iframe at some absurd height (Plotly colorbars stretched to fill the viewport, choropleths squished off-screen). The iframe now defaults to filling its panel (`height: 100%`) so `vh` resolves to the panel's stable height, and the observer only grows past the panel when scrollHeight genuinely exceeds it (long reports, database viewer after query results arrive) — the parent panel scrolls, preserving the routing that keeps the CSS invert filter off the scrollbar. A one-frame throttle catches remaining feedback (scrollHeight growth within 100 ms of a size-set is ignored) and a one-shot `console.warn` fires when the guard trips so the failure stops being silent. See #204.
+
 ## [0.6.0] - 2026-06-06
 
 ### Added
