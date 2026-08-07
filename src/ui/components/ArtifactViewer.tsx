@@ -284,12 +284,23 @@ export function ArtifactViewer() {
 
     function setup() {
       try {
-        if (!iframe) return;
+        if (!iframe || !parent) return;
         const doc = iframe.contentDocument;
         if (!doc?.body) return;
+        // Disconnect any prior observer: setup runs both immediately in
+        // this effect and via the iframe `load` event, and the load event
+        // can also fire again if the artifact reloads itself. Without this
+        // we'd leak observers on every subsequent load.
+        observer?.disconnect();
         resizeToContent();
         observer = new ResizeObserver(resizeToContent);
+        // Observe both body and the parent panel: body changes drive the
+        // usual grow-with-content path, and parent changes let us revert
+        // to `height: 100%` when the panel resizes larger than the
+        // currently-imposed pixel height (body wouldn't change, so a
+        // body-only observer would leave the iframe stuck).
         observer.observe(doc.body);
+        observer.observe(parent);
       } catch {
         // Cross-origin — ignore
       }
