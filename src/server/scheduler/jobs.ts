@@ -1315,7 +1315,14 @@ export class JobSkipped extends Error {
  * Default upper bound for any single job handler invocation. Healthy daily-summary
  * and memory-update runs complete in well under a minute; anything pushing past 10
  * minutes is presumed wedged (see issue #194 for the silent-hang failure mode this
- * backstops). Overridable per call via the `timeoutMs` parameter.
+ * flags). Overridable per call via the `timeoutMs` parameter.
+ *
+ * Not preemptive: this is a *reporting* bound, not a cancellation mechanism. The
+ * timer runs on the same event loop as the handler, so a wedge that starves the
+ * loop starves the timer too (issue #203). trackJobExecution enforces the bound
+ * as a wall-clock check at settlement time, so the failure signature is honest
+ * even when the setTimeout could not fire on schedule. Preemption would require
+ * a Worker thread or wiring AbortSignal down to the wedge-prone code path.
  */
 export const DEFAULT_HANDLER_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -1325,12 +1332,38 @@ export const DEFAULT_HANDLER_TIMEOUT_MS = 10 * 60 * 1000;
  * but the execution row is marked `failed` immediately so the scheduler is no
  * longer blocked.
  *
+ * Two paths produce this error:
+ *   1. The `setTimeout` in trackJobExecution fires and wins the `Promise.race`.
+ *      `elapsedMs` ≈ `deadlineMs`.
+ *   2. The event loop was starved past the deadline (issue #203). The `setTimeout`
+ *      fires late or after the handler settles, so the handler's own rejection
+ *      wins the race. trackJobExecution then re-checks wall-clock at completion,
+ *      and if the deadline was breached, coerces the error to this type with
+ *      `elapsedMs > deadlineMs` and (optionally) the handler's own error stored
+ *      as `underlyingError`. This preserves the "handler timed out after Xs"
+ *      failure signature in the DB even though the timeout was not preemptive.
+ *
  * The message uses `Math.ceil` on the seconds conversion so sub-second timeouts
  * never render as `0s`.
  */
 export class HandlerTimeoutError extends Error {
-  constructor(public timeoutMs: number) {
-    super(`handler timed out after ${Math.ceil(timeoutMs / 1000)}s`);
+  constructor(
+    public readonly elapsedMs: number,
+    public readonly deadlineMs: number = elapsedMs,
+    public readonly underlyingError?: unknown
+  ) {
+    const elapsedSec = Math.ceil(elapsedMs / 1000);
+    const deadlineSec = Math.ceil(deadlineMs / 1000);
+    let msg = `handler timed out after ${elapsedSec}s`;
+    if (elapsedMs > deadlineMs) {
+      msg += ` (deadline ${deadlineSec}s; event loop was starved past the timer)`;
+    }
+    if (underlyingError !== undefined) {
+      const under =
+        underlyingError instanceof Error ? underlyingError.message : String(underlyingError);
+      msg += `; handler eventually rejected: ${under}`;
+    }
+    super(msg);
     this.name = 'HandlerTimeoutError';
   }
 }
@@ -1376,6 +1409,10 @@ export async function trackJobExecution(
   };
   notifyChange();
 
+  // Wall-clock anchor for the deadline check below. Date.now() rather than
+  // performance.now() because we're comparing against a coarse-grained SQLite
+  // timestamp; sub-ms precision doesn't help us.
+  const startedAtMs = Date.now();
   let timedOut = false;
   let timeoutHandle: NodeJS.Timeout | undefined;
   const handlerPromise = Promise.resolve().then(handler);
@@ -1396,12 +1433,26 @@ export async function trackJobExecution(
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutHandle = setTimeout(() => {
       timedOut = true;
-      reject(new HandlerTimeoutError(timeoutMs));
+      const elapsedMs = Date.now() - startedAtMs;
+      reject(new HandlerTimeoutError(elapsedMs, timeoutMs));
     }, timeoutMs);
   });
 
   try {
     await Promise.race([handlerPromise, timeoutPromise]);
+    // Wall-clock deadline check (issue #203). When the event loop is starved
+    // (e.g. wedged SDK stream holds the poll phase), the setTimeout above may
+    // not fire before the handler eventually settles, so Promise.race is won
+    // by the handler and the "timeout" is silently lost. Detect after-the-fact
+    // and coerce to a HandlerTimeoutError so the DB row and log line honestly
+    // report a deadline breach.
+    const elapsedMs = Date.now() - startedAtMs;
+    if (elapsedMs > timeoutMs) {
+      const err = new HandlerTimeoutError(elapsedMs, timeoutMs);
+      db.failJobExecution(execution.id, err.message);
+      notifyChange();
+      throw err;
+    }
     db.completeJobExecution(execution.id);
     notifyChange();
   } catch (error) {
@@ -1414,6 +1465,18 @@ export async function trackJobExecution(
       db.skipJobExecution(execution.id, error.reason);
       notifyChange();
       return;
+    }
+    // Wall-clock deadline check on the error path (issue #203). Symmetric with
+    // the success path above: if the handler rejected with its own error but
+    // did so past the deadline, that rejection is only visible because the
+    // event loop was starved past the setTimeout. Report as timeout and stash
+    // the original error so the underlying reason is not lost.
+    const elapsedMs = Date.now() - startedAtMs;
+    if (elapsedMs > timeoutMs) {
+      const err = new HandlerTimeoutError(elapsedMs, timeoutMs, error);
+      db.failJobExecution(execution.id, err.message);
+      notifyChange();
+      throw err;
     }
     const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
     db.failJobExecution(execution.id, message);
