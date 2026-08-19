@@ -199,21 +199,86 @@ export function ArtifactViewer() {
   // Poll for file changes on the active artifact tab
   useArtifactMtimePoll(activeTab?.type === 'iframe' ? activeTab.filePath : null);
 
-  // Resize iframe to its content height so the parent container handles scrolling.
-  // Uses ResizeObserver on the iframe body to track dynamic content changes
-  // (e.g. database viewer rendering query results after initial load).
+  // Iframe height policy:
+  //
+  //  1. Default: fill the parent panel (`height: 100%`). Artifacts using
+  //     viewport-relative units (`height: NNvh`) then resolve `vh` against
+  //     the panel's stable height instead of the iframe's own runtime
+  //     height, which would be self-referential.
+  //  2. Grow past the panel only when content genuinely exceeds it (a long
+  //     report, a database viewer after query results arrive). The parent
+  //     `Box` has `overflow: auto` and takes over scrolling so the CSS
+  //     invert filter on the iframe doesn't invert the scrollbar in dark
+  //     mode (1e9a4e4).
+  //  3. Loop guard: if scrollHeight grows again within LOOP_WINDOW_MS
+  //     (100 ms — a few frames of margin over the typical one-paint round
+  //     trip of a layout-driven feedback) of our last size-set, skip this
+  //     fire as `vh`-feedback. Without this, an artifact whose `vh`-based
+  //     container grows as the iframe grows (Plotly plot with
+  //     `height: 68vh`) drives exponential growth that ends in Chromium's
+  //     silent `ResizeObserver loop limit exceeded` freeze — colorbars
+  //     stretched to fill the viewport, choropleths squished off-screen.
+  //     Legitimate growth (query results, images loading, user
+  //     interaction) either happens outside the window or triggers a
+  //     later fire that passes. See #204.
   // biome-ignore lint/correctness/useExhaustiveDependencies: activeTab?.url triggers resize when artifact changes
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
+    const parent = iframe.parentElement;
+    if (!parent) return;
     let observer: ResizeObserver | null = null;
+    // `lastSetHeight === null` means iframe is at its default "fill parent"
+    // height and we have not yet imposed a pixel value.
+    let lastSetHeight: number | null = null;
+    let lastSetAt = 0;
+    let loopWarned = false;
+    const LOOP_WINDOW_MS = 100;
+
+    // Start at parent height so `vh` inside the iframe resolves to the
+    // panel size on first paint, before the observer runs.
+    iframe.style.height = '100%';
 
     function resizeToContent() {
       try {
-        if (!iframe) return;
+        if (!iframe || !parent) return;
         const doc = iframe.contentDocument;
         if (!doc?.body) return;
-        iframe.style.height = `${doc.documentElement.scrollHeight}px`;
+        const scrollHeight = doc.documentElement.scrollHeight;
+        const parentHeight = parent.clientHeight;
+
+        // Content fits inside the panel: keep the iframe filling the panel.
+        // Only reassign if we previously imposed an explicit pixel height.
+        if (scrollHeight <= parentHeight) {
+          if (lastSetHeight !== null) {
+            iframe.style.height = '100%';
+            lastSetHeight = null;
+          }
+          return;
+        }
+
+        // Content exceeds the panel: grow the iframe so the parent scrolls.
+        // Loop guard: growth within LOOP_WINDOW_MS of our own set is almost
+        // certainly `vh` feedback, not real content growth.
+        if (
+          lastSetHeight !== null &&
+          scrollHeight > lastSetHeight &&
+          performance.now() - lastSetAt < LOOP_WINDOW_MS
+        ) {
+          if (!loopWarned) {
+            loopWarned = true;
+            console.warn(
+              `[ArtifactViewer] Iframe content grew from ${lastSetHeight}px to ${scrollHeight}px within ${LOOP_WINDOW_MS}ms of the last resize. Suspected vh/% feedback loop; skipping this resize. Prefer fixed pixel heights for plot containers. See #204.`
+            );
+          }
+          return;
+        }
+
+        if (scrollHeight !== lastSetHeight) {
+          iframe.style.height = `${scrollHeight}px`;
+          lastSetHeight = scrollHeight;
+          lastSetAt = performance.now();
+        }
       } catch {
         // Cross-origin — ignore
       }
@@ -221,12 +286,23 @@ export function ArtifactViewer() {
 
     function setup() {
       try {
-        if (!iframe) return;
+        if (!iframe || !parent) return;
         const doc = iframe.contentDocument;
         if (!doc?.body) return;
+        // Disconnect any prior observer: setup runs both immediately in
+        // this effect and via the iframe `load` event, and the load event
+        // can also fire again if the artifact reloads itself. Without this
+        // we'd leak observers on every subsequent load.
+        observer?.disconnect();
         resizeToContent();
         observer = new ResizeObserver(resizeToContent);
+        // Observe both body and the parent panel: body changes drive the
+        // usual grow-with-content path, and parent changes let us revert
+        // to `height: 100%` when the panel resizes larger than the
+        // currently-imposed pixel height (body wouldn't change, so a
+        // body-only observer would leave the iframe stuck).
         observer.observe(doc.body);
+        observer.observe(parent);
       } catch {
         // Cross-origin — ignore
       }
