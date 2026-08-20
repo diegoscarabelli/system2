@@ -10,6 +10,7 @@
 
 import { Cron } from 'croner';
 import { log } from '../utils/logger.js';
+import { HandlerTimeoutError } from './jobs.js';
 
 interface ScheduledJob {
   name: string;
@@ -36,7 +37,16 @@ export class Scheduler {
       try {
         await handler();
       } catch (error) {
-        log.error(`[Scheduler] Job "${name}" handler error (uncaught):`, error);
+        // Handler timeouts are already recorded on the DB row by
+        // trackJobExecution — log them at `warn` with a distinct phrasing so
+        // log-based alerting on genuine `handler error (uncaught)` (an actual
+        // scheduler-level crash) is not diluted by expected-but-noisy timeout
+        // events (issue #203).
+        if (error instanceof HandlerTimeoutError) {
+          log.warn(`[Scheduler] Job "${name}" timed out:`, error);
+        } else {
+          log.error(`[Scheduler] Job "${name}" handler error (uncaught):`, error);
+        }
       }
     };
     const cron = new Cron(pattern, safeHandler);

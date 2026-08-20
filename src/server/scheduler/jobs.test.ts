@@ -2544,9 +2544,17 @@ describe('trackJobExecution', () => {
       await settled;
 
       expect(handler).toHaveBeenCalled();
+      expect(db.failJobExecution).toHaveBeenCalledTimes(1);
       expect(db.failJobExecution).toHaveBeenCalledWith(
         42,
         expect.stringContaining('handler timed out after 1s')
+      );
+      // Regression guard for #206: healthy timer-fire (elapsed within
+      // STARVATION_TOLERANCE_MS of the deadline) must NOT be labelled as
+      // event-loop starvation.
+      expect(db.failJobExecution).not.toHaveBeenCalledWith(
+        42,
+        expect.stringContaining('event loop was starved past the timer')
       );
       expect(db.completeJobExecution).not.toHaveBeenCalled();
     });
@@ -2612,8 +2620,10 @@ describe('trackJobExecution', () => {
 
       // The error object is passed as a separate logger argument so stack/context is
       // preserved (we don't interpolate `late.message` into the template).
+      // Log line was renamed from "after timeout" to "past deadline" in #206 to
+      // cover both the timer-fired and starved-loop coerce paths uniformly.
       expect(handlerLog).toHaveBeenCalledWith(
-        expect.stringContaining('handler eventually rejected after timeout'),
+        expect.stringContaining('handler eventually rejected past deadline'),
         lateError
       );
       handlerLog.mockRestore();
@@ -2638,6 +2648,211 @@ describe('trackJobExecution', () => {
         42,
         expect.stringContaining(`handler timed out after ${DEFAULT_HANDLER_TIMEOUT_MS / 1000}s`)
       );
+      // Regression guard for #206: on-time timer-fire (default deadline exactly
+      // matches elapsed) must not be tagged as starvation.
+      expect(db.failJobExecution).not.toHaveBeenCalledWith(
+        42,
+        expect.stringContaining('event loop was starved past the timer')
+      );
+    });
+
+    // Wall-clock deadline detection for the event-loop-starvation case (issue #203).
+    // These tests simulate a starved loop by advancing the fake system clock past
+    // the deadline WITHOUT advancing the timer queue — the timer stays pending, the
+    // handler settles, and trackJobExecution's post-hoc check must attribute the
+    // outcome correctly so the failure is not silently mis-attributed.
+
+    it('marks completed but warns when handler succeeded past the deadline (starved loop)', async () => {
+      // Under post-#206 semantics: side effects (advanceFrontmatterCursors etc.)
+      // have already committed before the handler resolves, so coercing to `failed`
+      // would desync the row from disk state. The overrun is surfaced via a warn
+      // log; the row stays `completed`.
+      const db = mockDbForTracking();
+      const warnLog = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const started = Date.now();
+      const handler = vi.fn(async () => {
+        // Simulate the event loop unsticking well after the deadline. setSystemTime
+        // moves the virtual clock (and therefore performance.now()) without ticking
+        // the timer queue, so the setTimeout scheduled at timeoutMs=1000 stays pending.
+        vi.setSystemTime(started + 3_000);
+      });
+
+      await trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 1_000 });
+
+      expect(db.completeJobExecution).toHaveBeenCalledTimes(1);
+      expect(db.completeJobExecution).toHaveBeenCalledWith(42);
+      expect(db.failJobExecution).not.toHaveBeenCalled();
+      expect(warnLog).toHaveBeenCalledWith(
+        expect.stringMatching(/handler completed after 3s.*deadline 1s.*row recorded as completed/)
+      );
+      warnLog.mockRestore();
+    });
+
+    it('coerces to HandlerTimeoutError and preserves underlying AggregateError when handler rejected past the deadline', async () => {
+      const db = mockDbForTracking();
+      const started = Date.now();
+      const handler = vi.fn(async () => {
+        vi.setSystemTime(started + 3_000);
+        throw new AggregateError(
+          [new Error('d1'), new Error('d2'), new Error('d3')],
+          '3/3 deliveries failed'
+        );
+      });
+
+      const promise = trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 1_000 });
+      const err = await promise.catch((e) => e);
+
+      expect(err).toBeInstanceOf(HandlerTimeoutError);
+      // ES2022 cause chain: underlying error reachable via both `.cause` (idiomatic)
+      // and `.underlyingError` (backward-compat getter for pre-#206 readers).
+      expect((err as HandlerTimeoutError).cause).toBeInstanceOf(AggregateError);
+      expect((err as HandlerTimeoutError).underlyingError).toBe((err as HandlerTimeoutError).cause);
+      expect((err as HandlerTimeoutError).starved).toBe(true);
+
+      // Regression guard for #206 double-write: DB row is written exactly once
+      // (previously the success-path coerce path wrote + threw, and the catch's
+      // HandlerTimeoutError branch wrote again).
+      expect(db.failJobExecution).toHaveBeenCalledTimes(1);
+      expect(db.failJobExecution).toHaveBeenCalledWith(
+        42,
+        expect.stringContaining('handler timed out after 3s (deadline 1s')
+      );
+      // AggregateError.errors flattened into the message so per-delivery reasons
+      // survive on the DB row (previously only the outer message was preserved).
+      expect(db.failJobExecution).toHaveBeenCalledWith(
+        42,
+        expect.stringMatching(/handler eventually rejected: 3\/3 deliveries failed \[d1; d2; d3\]/)
+      );
+      // Underlying stack appended so post-mortems keep the wedge trail even without
+      // util.inspect / Node error-chain rendering.
+      expect(db.failJobExecution).toHaveBeenCalledWith(42, expect.stringContaining('Caused by:'));
+    });
+
+    it('coerces JobSkipped to HandlerTimeoutError when handler skipped past the deadline', async () => {
+      // A 15-minute "skip" is by definition a wedge, not a healthy skip; the
+      // wall-clock check must gate the JobSkipped branch too (previously JobSkipped
+      // preempted the coerce, so a wedged isNetworkAvailable() looked like a
+      // clean "no network connectivity" skip).
+      const db = mockDbForTracking();
+      const started = Date.now();
+      const handler = vi.fn(async () => {
+        vi.setSystemTime(started + 3_000);
+        throw new JobSkipped('no network connectivity');
+      });
+
+      const promise = trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 1_000 });
+      await expect(promise).rejects.toBeInstanceOf(HandlerTimeoutError);
+
+      expect(db.skipJobExecution).not.toHaveBeenCalled();
+      expect(db.failJobExecution).toHaveBeenCalledTimes(1);
+      expect(db.failJobExecution).toHaveBeenCalledWith(
+        42,
+        expect.stringContaining('handler timed out after 3s (deadline 1s')
+      );
+    });
+
+    it('honors JobSkipped within the deadline (regression guard for finding above)', async () => {
+      const db = mockDbForTracking();
+      const handler = vi.fn(async () => {
+        vi.setSystemTime(Date.now() + 100);
+        throw new JobSkipped('no activity since last run');
+      });
+
+      await trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 1_000 });
+
+      expect(db.skipJobExecution).toHaveBeenCalledTimes(1);
+      expect(db.skipJobExecution).toHaveBeenCalledWith(42, 'no activity since last run');
+      expect(db.failJobExecution).not.toHaveBeenCalled();
+      expect(db.completeJobExecution).not.toHaveBeenCalled();
+    });
+
+    it('does not coerce healthy runs when handler settled before the deadline', async () => {
+      const db = mockDbForTracking();
+      const handler = vi.fn(async () => {
+        vi.setSystemTime(Date.now() + 100);
+      });
+
+      await trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 1_000 });
+
+      expect(db.completeJobExecution).toHaveBeenCalledTimes(1);
+      expect(db.completeJobExecution).toHaveBeenCalledWith(42);
+      expect(db.failJobExecution).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid timeoutMs (NaN, zero, negative, Infinity)', async () => {
+      const db = mockDbForTracking();
+      const handler = vi.fn();
+
+      for (const bad of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
+        await expect(
+          trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: bad })
+        ).rejects.toThrow(TypeError);
+      }
+      expect(handler).not.toHaveBeenCalled();
+      expect(db.createJobExecution).not.toHaveBeenCalled();
+    });
+  });
+
+  // Diagnostic tests for issue #203: production runs on 2026-07-21/22 ran ~1050 s
+  // despite the 600 s handler timeout, and no row ever recorded a
+  // HandlerTimeoutError. Fake-timer tests can't catch a real event-loop
+  // scheduling gap, so these use real timers with a short bound.
+  describe('handler timeout (real timers) [#203]', () => {
+    it('fires HandlerTimeoutError when handler never resolves', async () => {
+      const db = mockDbForTracking();
+      const handler = vi.fn(() => new Promise<void>(() => {}));
+
+      await expect(
+        trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 100 })
+      ).rejects.toBeInstanceOf(HandlerTimeoutError);
+
+      expect(db.failJobExecution).toHaveBeenCalledTimes(1);
+      expect(db.failJobExecution).toHaveBeenCalledWith(
+        42,
+        expect.stringContaining('handler timed out after')
+      );
+    });
+
+    it('fires timeout even when handler awaits allSettled over serialized never-resolving deliveries', async () => {
+      // Mimics buildAndDeliverDailySummary: a handler that awaits Promise.allSettled
+      // over multiple deliveries, then throws AggregateError once they all settle.
+      // Under the production failure mode, deliveries resolve their timeout errors
+      // serially (via the Narrator's internal queue), so all three land ~360 s apart.
+      // We compress the timeline: 3 × 40 ms "deliveries" that reject at different times,
+      // handler timeout is 100 ms — the outer timeout MUST win regardless of what
+      // the deliveries do afterward.
+      const warnLog = vi.spyOn(log, 'warn').mockImplementation(() => {});
+      const db = mockDbForTracking();
+      const handler = vi.fn(async () => {
+        const deliveries = [
+          new Promise((_, reject) => setTimeout(() => reject(new Error('d1')), 40)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('d2')), 80)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('d3')), 120)),
+        ];
+        const results = await Promise.allSettled(deliveries);
+        const failures = results.filter((r) => r.status === 'rejected');
+        throw new AggregateError(
+          failures.map((f) => (f as PromiseRejectedResult).reason),
+          `${failures.length}/${results.length} deliveries failed`
+        );
+      });
+
+      const start = Date.now();
+      await expect(
+        trackJobExecution(db, 'test-job', 'cron', handler, { timeoutMs: 100 })
+      ).rejects.toBeInstanceOf(HandlerTimeoutError);
+      const elapsed = Date.now() - start;
+
+      // Ceiling raised from 115 to 200 in #206 to survive CI jitter on shared
+      // runners: the outer timeout must win at ~100 ms (the last delivery would
+      // reject at ~120 ms), but Node's real setTimeout on a loaded runner can
+      // fire 20–60 ms late and single-digit-ms margins were flaking the suite.
+      expect(elapsed).toBeLessThan(200);
+      expect(db.failJobExecution).toHaveBeenCalledWith(
+        42,
+        expect.stringContaining('handler timed out after')
+      );
+      warnLog.mockRestore();
     });
   });
 });
