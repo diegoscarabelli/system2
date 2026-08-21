@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-20
+
+### Changed
+
+- The release workflow (`.github/workflows/release.yml`) now publishes to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) instead of a stored `NPM_TOKEN` secret. GitHub Actions mints a short-lived OIDC token per run and npm verifies it against the publisher registered on the package (repo `diegoscarabelli/system2`, workflow `release.yml`, action `npm publish`). No token to rotate, no 2FA prompt to satisfy, no manual `npm publish` fallback like the v0.6.1 release needed (the classic-token flow forced an interactive passkey web-auth even with a granular access token that claimed to bypass 2FA). The workflow also adds `--provenance` so each npm tarball ships with a signed SLSA-style attestation linking it back to the exact repo + commit + workflow run; npmjs.com renders a "verified" badge on published versions. No user-visible package changes.
+
 ## [0.6.1] - 2026-08-19
 
 ### Fixed
