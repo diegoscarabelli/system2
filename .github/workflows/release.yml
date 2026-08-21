@@ -21,9 +21,18 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
+
+      # npm Trusted Publishing (OIDC-to-registry token exchange) requires
+      # npm CLI >= 11.5.1. Node 22 ships with npm 10.x and Node 24's runner
+      # image currently has npm 11.4, so we install the latest npm explicitly
+      # to guarantee the exchange path is available. This is why the first
+      # v0.6.2 attempt failed: npm 11.4 emitted a signed provenance but then
+      # PUT to the registry without an auth token and got the E404
+      # (permission-denied-as-not-found) that npm returns for anon PUTs.
+      - run: npm install -g npm@latest
 
       - run: pnpm install --frozen-lockfile
 
@@ -33,9 +42,12 @@ jobs:
 
       - run: pnpm test
 
-      # `--provenance` publishes a signed SLSA-style attestation linking the
-      # npm tarball to this exact repo + commit + workflow run. Requires the
-      # `id-token: write` permission above and npm Trusted Publishing to be
-      # configured on the package (npm settings → Publishing access). No
-      # NODE_AUTH_TOKEN needed: the OIDC token is the credential.
-      - run: pnpm publish --no-git-checks --provenance
+      # Use the top-level npm CLI (not `pnpm publish`) for the publish itself:
+      # only npm >= 11.5.1 knows to exchange the GitHub OIDC token for a
+      # short-lived npm registry token before the PUT. `--provenance`
+      # additionally signs a SLSA-style attestation and posts it to the
+      # sigstore transparency log so npmjs.com renders a "verified" badge.
+      # Requires `id-token: write` above and Trusted Publishing configured
+      # on the package (npm settings → Publishing access). No NODE_AUTH_TOKEN
+      # needed — the OIDC exchange is the credential.
+      - run: npm publish --provenance --access public
