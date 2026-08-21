@@ -7,8 +7,13 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # `id-token: write` lets GitHub mint the OIDC token that npm's Trusted
+    # Publisher check verifies against the publisher registered on the package
+    # (repo diegoscarabelli/system2, workflow release.yml, action npm publish).
+    # `contents: read` stays for actions/checkout.
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +33,9 @@ jobs:
 
       - run: pnpm test
 
-      - run: pnpm publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # `--provenance` publishes a signed SLSA-style attestation linking the
+      # npm tarball to this exact repo + commit + workflow run. Requires the
+      # `id-token: write` permission above and npm Trusted Publishing to be
+      # configured on the package (npm settings → Publishing access). No
+      # NODE_AUTH_TOKEN needed: the OIDC token is the credential.
+      - run: pnpm publish --no-git-checks --provenance
